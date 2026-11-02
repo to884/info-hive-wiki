@@ -1,0 +1,582 @@
+#!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "pyyaml==6.0.3",
+# ]
+# ///
+"""
+wiki_graph_extract.py — Markdown の wiki を、クエリできるグラフにコンパイルする。
+
+正本は Markdown のままである。このスクリプトは wiki のすべてのページを読み、ノードとエッジ
+（`graph.relationships` から作る型付きの意味のエッジと、暗黙の `mentions`、`sourced_from`、
+`summarizes_raw` のエッジ）を導き、`<wiki>/graph/` の下に成果物を出力する。成果物はいつでも削除して作り直せる。
+
+PyYAML の固定した依存を持つので、`uv run --script` で実行する。
+
+使い方:
+    uv run --script wiki_graph_extract.py <wiki-dir> [options]
+
+オプション:
+    --out <dir>                  出力ディレクトリ（既定: <wiki-dir>/graph）
+    --formats jsonl,sqlite,...   出力する形式のカンマ区切りのリスト
+                                 （jsonl、sqlite、graphml。既定: 3つすべて）
+    --ontology <path>            オントロジーのパスを上書きする
+                                 （既定: <wiki-dir>/graph/ontology.yaml）
+
+例:
+    uv run --script wiki_graph_extract.py wiki/
+    uv run --script wiki_graph_extract.py wiki/ --out wiki/graph --formats jsonl,sqlite
+"""
+
+import argparse
+import hashlib
+import json
+import re
+import sqlite3
+import sys
+import xml.etree.ElementTree as ET
+from collections import defaultdict
+from pathlib import Path
+
+try:
+    import yaml
+except ImportError:
+    print(
+        "wiki_graph_extract.py requires PyYAML. "
+        "Run it with `uv run --script wiki_graph_extract.py ...`.",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
+
+WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
+FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
+
+
+def clean_link_target(link: str) -> str:
+    """wikilink から別名、アンカー、.md を取り除き、パスだけにする。"""
+    target = link.split("|", 1)[0]      # 表示用の別名があれば取り除く
+    target = target.split("#", 1)[0]    # 見出しのアンカーを取り除く
+    target = target.replace("\\", "/").strip().strip("/")
+    if target.lower().endswith(".md"):
+        target = target[:-3]
+    return target.strip()
+
+
+def resolve_link_slug(link: str, by_path: dict, by_slug) -> "str | None":
+    """wikilink を、それが指すページのスラッグに解決する。解決できなければ None を返す。
+
+    ノード ID はファイル名のステムをキーにしているので、リンクの生のテキストで比べると、
+    パスを付けたリンク（[[entities/kalman-filter]]）がすべて落ち、その mentions エッジは
+    出力されない。ディレクトリの接頭辞は「制約」として扱う。パスを付けたリンクは、
+    そのパスがちょうど存在する場合にだけ解決する。そのため [[raw/foo]] が sources/foo.md に
+    黙って結び付き、たまたまステムが同じ別々の文書の間にエッジをでっち上げることはない。
+    """
+    target = clean_link_target(link)
+    if not target:
+        return None
+    if "/" in target:
+        return by_path.get(target)
+    return target if target in by_slug else None
+
+
+SKIP_TOP_LEVEL_FILES = {"SCHEMA.md", "index.md", "log.md", "README.md"}
+SKIP_TOP_LEVEL_DIRS = {"indexes", "graph", "raw", ".evolution"}
+
+DEFAULT_FORMATS = ["jsonl", "sqlite", "graphml"]
+
+
+# ---------------------------------------------------------------------------
+# ページの収集
+# ---------------------------------------------------------------------------
+
+
+def parse_frontmatter(text: str) -> tuple[dict, str]:
+    """PyYAML で YAML の frontmatter を取り出す。(meta, body) を返す。"""
+    m = FRONTMATTER_RE.match(text)
+    if not m:
+        return {}, text
+    fm_text = m.group(1)
+    body = text[m.end():]
+    try:
+        meta = yaml.safe_load(fm_text) or {}
+    except yaml.YAMLError:
+        meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+    return meta, body
+
+
+def collect_pages(wiki_root: Path) -> list[dict]:
+    pages = []
+    for md_path in sorted(wiki_root.rglob("*.md")):
+        rel = md_path.relative_to(wiki_root)
+        if rel.parts[0] in SKIP_TOP_LEVEL_FILES or rel.parts[0] in SKIP_TOP_LEVEL_DIRS:
+            continue
+        if rel.name.startswith("."):
+            continue
+        try:
+            text = md_path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        meta, body = parse_frontmatter(text)
+        links = [m.group(1).strip() for m in WIKILINK_RE.finditer(body)]
+        pages.append({
+            "path": str(md_path),
+            "rel_path": str(rel).replace("\\", "/"),
+            "slug": md_path.stem,
+            "meta": meta,
+            "body": body,
+            "links": links,
+        })
+    return pages
+
+
+# ---------------------------------------------------------------------------
+# オントロジー
+# ---------------------------------------------------------------------------
+
+
+def load_ontology(path: Path) -> dict:
+    if not path.exists():
+        return {"node_types": {}, "predicates": {}}
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as e:
+        print(f"Ontology parse error ({path}): {e}", file=sys.stderr)
+        sys.exit(2)
+    data.setdefault("node_types", {})
+    data.setdefault("predicates", {})
+    return data
+
+
+def derive_node_type(meta: dict, ontology: dict) -> str | None:
+    """ontology[node_types][*].maps_from を使い、ページの frontmatter を node_type に対応付ける。"""
+    page_type = meta.get("type")
+    page_kind = meta.get("kind")
+    explicit = (meta.get("graph") or {}).get("node_type") if isinstance(meta.get("graph"), dict) else None
+    if explicit:
+        return explicit
+    # まず (type, kind) で照合し、次に type だけで照合する。
+    type_kind_match = None
+    type_only_match = None
+    for nt_name, nt_def in ontology["node_types"].items():
+        maps = (nt_def or {}).get("maps_from") or {}
+        m_type = maps.get("type")
+        m_kind = maps.get("kind")
+        if m_type and m_type == page_type:
+            if m_kind and m_kind == page_kind:
+                type_kind_match = nt_name
+                break
+            if not m_kind and type_only_match is None:
+                type_only_match = nt_name
+    return type_kind_match or type_only_match
+
+
+# ---------------------------------------------------------------------------
+# ノードとエッジの構築
+# ---------------------------------------------------------------------------
+
+
+def build_nodes(pages: list[dict], ontology: dict) -> tuple[list[dict], dict, list[dict]]:
+    """ノードのリスト、スラッグから node_id を引くインデックス、別名の行を作る。(nodes, slug_to_id, aliases) を返す。"""
+    nodes: list[dict] = []
+    slug_to_id: dict[str, str] = {}
+    aliases: list[dict] = []
+    seen_ids: set[str] = set()
+
+    for p in pages:
+        meta = p["meta"]
+        graph_meta = meta.get("graph") if isinstance(meta.get("graph"), dict) else {}
+        node_type = derive_node_type(meta, ontology) or "concept"
+        explicit_id = graph_meta.get("node_id")
+        node_id = explicit_id or f"{node_type}:{p['slug']}"
+
+        # 重複はスキップする。最初のものを使い、lint がこれを指摘する。
+        if node_id in seen_ids:
+            continue
+        seen_ids.add(node_id)
+
+        node = {
+            "id": node_id,
+            "slug": p["slug"],
+            "title": meta.get("title") or p["slug"],
+            "page_type": meta.get("type") or "",
+            "node_type": node_type,
+            "kind": meta.get("kind") or "",
+            "tags": list(meta.get("tags") or []),
+            "aliases": list(graph_meta.get("aliases") or []),
+            "path": p["rel_path"],
+            "created": meta.get("created") or "",
+            "updated": meta.get("updated") or "",
+            "canonical": bool(graph_meta.get("canonical", False)),
+        }
+        nodes.append(node)
+        slug_to_id[p["slug"]] = node_id
+        for alias in node["aliases"]:
+            aliases.append({"alias": str(alias), "node_id": node_id})
+
+    return nodes, slug_to_id, aliases
+
+
+def edge_id(subject: str, predicate: str, obj: str, source: str | None, evidence: str | None) -> str:
+    # 96 ビットに切り詰める。現実的な wiki の規模なら衝突のおそれは無視でき、
+    # ID が短いほうが JSONL、sqlite、graphml の出力が読みやすい。
+    h = hashlib.sha256()
+    parts = [subject or "", predicate or "", obj or "", source or "", evidence or ""]
+    h.update("\x1f".join(parts).encode("utf-8"))
+    return h.hexdigest()[:24]
+
+
+def make_edge(*, subject, predicate, obj, source, evidence, confidence, status,
+              extraction_method, page, extras: dict | None = None) -> dict:
+    return {
+        "id": edge_id(subject, predicate, obj, source, evidence),
+        "subject": subject,
+        "predicate": predicate,
+        "object": obj,
+        "source": source or "",
+        "evidence": evidence or "",
+        "confidence": confidence or "",
+        "status": status or "",
+        "extraction_method": extraction_method,
+        "page": page,
+        "extras": extras or {},
+    }
+
+
+def build_edges(pages: list[dict], slug_to_id: dict[str, str]) -> list[dict]:
+    edges: list[dict] = []
+    seen_ids: set[str] = set()
+
+    # パスを付けた wikilink を解決するためのインデックス。大文字と小文字を区別する、
+    # .md を除いた wiki からの相対パスからスラッグを引く。
+    path_to_slug: dict[str, str] = {}
+    for p in pages:
+        rel = p["rel_path"].replace("\\", "/")
+        if rel.lower().endswith(".md"):
+            rel = rel[:-3]
+        path_to_slug[rel] = p["slug"]
+    known_slugs = set(slug_to_id.keys())
+
+    def push(edge: dict) -> None:
+        if edge["id"] in seen_ids:
+            return
+        seen_ids.add(edge["id"])
+        edges.append(edge)
+
+    for p in pages:
+        slug = p["slug"]
+        subject_id = slug_to_id.get(slug)
+        if not subject_id:
+            continue
+        meta = p["meta"]
+        graph_meta = meta.get("graph") if isinstance(meta.get("graph"), dict) else {}
+
+        # 1. graph.relationships[] から作る型付きの意味のエッジ。
+        for rel in graph_meta.get("relationships") or []:
+            if not isinstance(rel, dict):
+                continue
+            obj = rel.get("object")
+            predicate = rel.get("predicate")
+            if not (obj and predicate):
+                continue
+            extras = {
+                k: rel[k] for k in ("valid_from", "valid_to", "notes", "raw_ref",
+                                    "contradicts", "supersedes")
+                if k in rel and rel[k] is not None
+            }
+            push(make_edge(
+                subject=subject_id,
+                predicate=str(predicate),
+                obj=str(obj),
+                source=rel.get("source"),
+                evidence=rel.get("evidence"),
+                confidence=rel.get("confidence"),
+                status=rel.get("status"),
+                extraction_method="explicit_graph_frontmatter",
+                page=p["rel_path"],
+                extras=extras,
+            ))
+
+        # 2. 本文の wikilink から作る mentions エッジ。
+        seen_targets: set[str] = set()
+        for link in p["links"]:
+            target_slug = resolve_link_slug(link, path_to_slug, known_slugs)
+            if not target_slug or target_slug == slug:
+                continue
+            target_id = slug_to_id.get(target_slug)
+            if not target_id or target_id in seen_targets:
+                continue
+            seen_targets.add(target_id)
+            push(make_edge(
+                subject=subject_id,
+                predicate="mentions",
+                obj=target_id,
+                source=None,
+                evidence=None,
+                confidence="low",
+                status="current",
+                extraction_method="body_wikilink",
+                page=p["rel_path"],
+            ))
+
+        # 3. frontmatter の `sources:` から作る sourced_from エッジ（ソースページ自身ではスキップする）。
+        if meta.get("type") != "source":
+            for src_slug in meta.get("sources") or []:
+                src_id = slug_to_id.get(str(src_slug))
+                if not src_id:
+                    continue
+                push(make_edge(
+                    subject=subject_id,
+                    predicate="sourced_from",
+                    obj=src_id,
+                    source=str(src_slug),
+                    evidence=None,
+                    confidence="high",
+                    status="current",
+                    extraction_method="frontmatter_sources",
+                    page=p["rel_path"],
+                ))
+
+        # 4. ソースページの raw: フィールドから作る summarizes_raw エッジ。
+        if meta.get("type") == "source":
+            raw_path = meta.get("raw")
+            if raw_path:
+                push(make_edge(
+                    subject=subject_id,
+                    predicate="summarizes_raw",
+                    obj=f"raw:{raw_path}",
+                    source=None,
+                    evidence=None,
+                    confidence="high",
+                    status="current",
+                    extraction_method="frontmatter_raw",
+                    page=p["rel_path"],
+                ))
+
+    return edges
+
+
+# ---------------------------------------------------------------------------
+# 出力の書き込み
+# ---------------------------------------------------------------------------
+
+
+def _normalize_for_json(value):
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    if isinstance(value, list):
+        return [_normalize_for_json(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _normalize_for_json(v) for k, v in value.items()}
+    return value
+
+
+def write_jsonl(out_dir: Path, nodes: list[dict], edges: list[dict]) -> None:
+    nodes_sorted = sorted(nodes, key=lambda n: n["id"])
+    edges_sorted = sorted(edges, key=lambda e: e["id"])
+    with (out_dir / "nodes.jsonl").open("w", encoding="utf-8") as f:
+        for n in nodes_sorted:
+            f.write(json.dumps(_normalize_for_json(n), sort_keys=True, ensure_ascii=False))
+            f.write("\n")
+    with (out_dir / "edges.jsonl").open("w", encoding="utf-8") as f:
+        for e in edges_sorted:
+            f.write(json.dumps(_normalize_for_json(e), sort_keys=True, ensure_ascii=False))
+            f.write("\n")
+
+
+def write_sqlite(out_dir: Path, nodes: list[dict], aliases: list[dict], edges: list[dict]) -> None:
+    db_path = out_dir / "graph.sqlite"
+    if db_path.exists():
+        db_path.unlink()
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript("""
+            CREATE TABLE nodes (
+              id TEXT PRIMARY KEY,
+              slug TEXT NOT NULL UNIQUE,
+              title TEXT NOT NULL,
+              page_type TEXT NOT NULL,
+              node_type TEXT NOT NULL,
+              kind TEXT,
+              path TEXT NOT NULL,
+              created TEXT,
+              updated TEXT,
+              metadata_json TEXT NOT NULL
+            );
+            CREATE TABLE aliases (
+              alias TEXT NOT NULL,
+              node_id TEXT NOT NULL,
+              PRIMARY KEY (alias, node_id),
+              FOREIGN KEY (node_id) REFERENCES nodes(id)
+            );
+            CREATE TABLE edges (
+              id TEXT PRIMARY KEY,
+              subject TEXT NOT NULL,
+              predicate TEXT NOT NULL,
+              object TEXT NOT NULL,
+              source TEXT,
+              evidence TEXT,
+              confidence TEXT,
+              status TEXT,
+              extraction_method TEXT NOT NULL,
+              page TEXT NOT NULL,
+              metadata_json TEXT NOT NULL
+            );
+            CREATE INDEX idx_edges_subject ON edges(subject);
+            CREATE INDEX idx_edges_object ON edges(object);
+            CREATE INDEX idx_edges_predicate ON edges(predicate);
+            CREATE INDEX idx_edges_source ON edges(source);
+        """)
+
+        for n in sorted(nodes, key=lambda n: n["id"]):
+            metadata_json = json.dumps(_normalize_for_json({
+                "tags": n.get("tags", []),
+                "aliases": n.get("aliases", []),
+                "canonical": n.get("canonical", False),
+            }), sort_keys=True, ensure_ascii=False)
+            conn.execute(
+                "INSERT INTO nodes (id, slug, title, page_type, node_type, kind, path, created, updated, metadata_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    n["id"], n["slug"], n["title"], n["page_type"], n["node_type"],
+                    n.get("kind") or None, n["path"],
+                    str(n.get("created") or "") or None,
+                    str(n.get("updated") or "") or None,
+                    metadata_json,
+                ),
+            )
+
+        for a in sorted(aliases, key=lambda a: (a["alias"], a["node_id"])):
+            conn.execute(
+                "INSERT OR IGNORE INTO aliases (alias, node_id) VALUES (?, ?)",
+                (a["alias"], a["node_id"]),
+            )
+
+        for e in sorted(edges, key=lambda e: e["id"]):
+            metadata_json = json.dumps(_normalize_for_json(e.get("extras") or {}),
+                                       sort_keys=True, ensure_ascii=False)
+            conn.execute(
+                "INSERT INTO edges (id, subject, predicate, object, source, evidence, "
+                "confidence, status, extraction_method, page, metadata_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    e["id"], e["subject"], e["predicate"], e["object"],
+                    e.get("source") or None, e.get("evidence") or None,
+                    e.get("confidence") or None, e.get("status") or None,
+                    e["extraction_method"], e["page"], metadata_json,
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def write_graphml(out_dir: Path, nodes: list[dict], edges: list[dict]) -> None:
+    ns = "http://graphml.graphdrawing.org/xmlns"
+    ET.register_namespace("", ns)
+    root = ET.Element(f"{{{ns}}}graphml")
+
+    keys = [
+        ("d_title", "node", "title", "string"),
+        ("d_node_type", "node", "node_type", "string"),
+        ("d_page_type", "node", "page_type", "string"),
+        ("d_path", "node", "path", "string"),
+        ("d_predicate", "edge", "predicate", "string"),
+        ("d_confidence", "edge", "confidence", "string"),
+        ("d_status", "edge", "status", "string"),
+        ("d_source", "edge", "source", "string"),
+    ]
+    for kid, kfor, kname, ktype in keys:
+        k = ET.SubElement(root, f"{{{ns}}}key")
+        k.set("id", kid)
+        k.set("for", kfor)
+        k.set("attr.name", kname)
+        k.set("attr.type", ktype)
+
+    graph = ET.SubElement(root, f"{{{ns}}}graph")
+    graph.set("id", "wiki")
+    graph.set("edgedefault", "directed")
+
+    for n in sorted(nodes, key=lambda n: n["id"]):
+        node_el = ET.SubElement(graph, f"{{{ns}}}node")
+        node_el.set("id", n["id"])
+        for kid, kfor, kname, _ in keys:
+            if kfor != "node":
+                continue
+            data = ET.SubElement(node_el, f"{{{ns}}}data")
+            data.set("key", kid)
+            data.text = str(n.get(kname) or "")
+
+    for e in sorted(edges, key=lambda e: e["id"]):
+        edge_el = ET.SubElement(graph, f"{{{ns}}}edge")
+        edge_el.set("id", e["id"])
+        edge_el.set("source", e["subject"])
+        edge_el.set("target", e["object"])
+        for kid, kfor, kname, _ in keys:
+            if kfor != "edge":
+                continue
+            data = ET.SubElement(edge_el, f"{{{ns}}}data")
+            data.set("key", kid)
+            data.text = str(e.get(kname) or "")
+
+    tree = ET.ElementTree(root)
+    ET.indent(tree, space="  ")
+    tree.write(out_dir / "graph.graphml", encoding="utf-8", xml_declaration=True)
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("wiki", type=Path, help="Wiki directory.")
+    parser.add_argument("--out", type=Path, help="Output directory (default: <wiki>/graph)")
+    parser.add_argument("--formats", default=",".join(DEFAULT_FORMATS),
+                        help="Comma-list: jsonl, sqlite, graphml")
+    parser.add_argument("--ontology", type=Path, help="Ontology file (default: <wiki>/graph/ontology.yaml)")
+    args = parser.parse_args()
+
+    if not args.wiki.exists():
+        print(f"Wiki directory not found: {args.wiki}", file=sys.stderr)
+        sys.exit(1)
+
+    out_dir = args.out or (args.wiki / "graph")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ontology_path = args.ontology or (args.wiki / "graph" / "ontology.yaml")
+    ontology = load_ontology(ontology_path)
+    formats = [f.strip().lower() for f in args.formats.split(",") if f.strip()]
+    unknown = [f for f in formats if f not in DEFAULT_FORMATS]
+    if unknown:
+        print(f"Unknown formats: {unknown}. Allowed: {DEFAULT_FORMATS}", file=sys.stderr)
+        sys.exit(1)
+
+    pages = collect_pages(args.wiki)
+    nodes, slug_to_id, aliases = build_nodes(pages, ontology)
+    edges = build_edges(pages, slug_to_id)
+
+    if "jsonl" in formats:
+        write_jsonl(out_dir, nodes, edges)
+    if "sqlite" in formats:
+        write_sqlite(out_dir, nodes, aliases, edges)
+    if "graphml" in formats:
+        write_graphml(out_dir, nodes, edges)
+
+    print(f"Extracted {len(nodes)} nodes, {len(edges)} edges → {out_dir}")
+    breakdown = defaultdict(int)
+    for e in edges:
+        breakdown[e["predicate"]] += 1
+    for pred, count in sorted(breakdown.items(), key=lambda x: (-x[1], x[0])):
+        print(f"  {pred:20s} {count}")
+
+
+if __name__ == "__main__":
+    # Windows の既定の文字コード（cp932 など）ではなく、UTF-8 で入出力する。
+    for _stream in (sys.stdin, sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(encoding="utf-8")
+    main()

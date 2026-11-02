@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+.wiki-search-cache.json
+.wiki-cache/
+.claude/settings.local.json
+launch-posts.md
+.leankg/
+.remember/
+
+# Node
+node_modules/
+
+# 公開前の素材（コミットしない）
+release-assets/

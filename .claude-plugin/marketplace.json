@@ -1,0 +1,32 @@
+{
+  "name": "info-hive",
+  "owner": {
+    "name": "to884"
+  },
+  "metadata": {
+    "description": "日本語に特化した LLM Wiki。ローカルのハイブリッド検索と、経験にもとづくスキル改善を備える。",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "wiki",
+      "source": "./",
+      "description": "日本語の Markdown の wiki を、ローカルのハイブリッド検索、出典つきの根拠、グラフで構築・保守する。タスクの経験を記録し、スキルの改善案を評価して適用・ロールバックできる。info-hive スキルと 9 本の /wiki:* コマンドを含む。",
+      "version": "0.1.0",
+      "author": {
+        "name": "to884"
+      },
+      "homepage": "https://github.com/to884/info-hive",
+      "repository": "https://github.com/to884/info-hive",
+      "license": "MIT",
+      "category": "productivity",
+      "keywords": [
+        "knowledge-base",
+        "wiki",
+        "notes",
+        "research",
+        "japanese"
+      ]
+    }
+  ]
+}
