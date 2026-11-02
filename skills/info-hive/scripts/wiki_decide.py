@@ -511,7 +511,7 @@ def cmd_shortlist(args, client: DecisionClient | None) -> int:
         note(f"shortlist failed open ({exc.code}: {exc}); pages keep search order")
         out = [{k: v for k, v in c.items() if k != "text"} | {"changes": None} for c in candidates]
         print(json.dumps({"source": str(source_path), "candidates": out,
-                          "decision": block(client, threshold, started, failed_open=True, error=exc.code)}, indent=2))
+                          "decision": block(client, threshold, started, failed_open=True, error=exc.code)}, indent=2, ensure_ascii=False))
         return 0
     ranked = sorted(
         ({k: v for k, v in c.items() if k != "text"} | {"changes": round(s, 4), "shortlisted": s >= threshold}
@@ -520,7 +520,7 @@ def cmd_shortlist(args, client: DecisionClient | None) -> int:
     )
     print(json.dumps({"source": str(source_path), "candidates": ranked,
                       "decision": block(client, threshold, started, failed_open=False,
-                                        shortlisted=sum(1 for c in ranked if c["shortlisted"]))}, indent=2))
+                                        shortlisted=sum(1 for c in ranked if c["shortlisted"]))}, indent=2, ensure_ascii=False))
     return 0
 
 
@@ -575,7 +575,7 @@ def cmd_contradictions(args, client: DecisionClient | None) -> int:
     except DecisionError as exc:
         note(f"contradiction screen failed open ({exc.code}: {exc}); no pairs checked")
         print(json.dumps({"pairs": len(pairs), "flagged": [],
-                          "decision": block(client, threshold, started, failed_open=True, error=exc.code)}, indent=2))
+                          "decision": block(client, threshold, started, failed_open=True, error=exc.code)}, indent=2, ensure_ascii=False))
         return 0
     flagged = []
     for (entity, a, b), ans in zip(pairs, answers):
@@ -590,14 +590,14 @@ def cmd_contradictions(args, client: DecisionClient | None) -> int:
             })
     flagged.sort(key=lambda f: -f["contradicts"])
     print(json.dumps({"pairs": len(pairs), "flagged": flagged,
-                      "decision": block(client, threshold, started, failed_open=False)}, indent=2))
+                      "decision": block(client, threshold, started, failed_open=False)}, indent=2, ensure_ascii=False))
     return 0
 
 
 def cmd_screen(args, client: DecisionClient | None) -> int:
     text = Path(args.file).read_text(encoding="utf-8", errors="replace")
     threshold = args.threshold if args.threshold is not None else QUESTIONS["orders_agent"]["default_threshold"]
-    print(json.dumps(screen_text(client, str(args.file), text, threshold), indent=2))
+    print(json.dumps(screen_text(client, str(args.file), text, threshold), indent=2, ensure_ascii=False))
     return 0
 
 
@@ -616,13 +616,13 @@ def cmd_ask(args, client: DecisionClient | None) -> int:
     except DecisionError as exc:
         note(f"{client.backend} failed ({exc.code}: {exc})")
         return 1
-    print(json.dumps({**res, "backend": client.backend}, indent=2))
+    print(json.dumps({**res, "backend": client.backend}, indent=2, ensure_ascii=False))
     return 0
 
 
 def cmd_check(args, client: DecisionClient | None) -> int:
     if client is None:
-        print(json.dumps({"ok": False, "backend": "off", "error": "no backend configured"}))
+        print(json.dumps({"ok": False, "backend": "off", "error": "no backend configured"}, ensure_ascii=False))
         return 1
     started = time.monotonic()
     try:
@@ -630,10 +630,10 @@ def cmd_check(args, client: DecisionClient | None) -> int:
         positive_probability(res["answers"], "relevance")
     except DecisionError as exc:
         print(json.dumps({"ok": False, "backend": client.backend, "model": client.model,
-                          "url": client.endpoint, "error": exc.code, "message": str(exc)}))
+                          "url": client.endpoint, "error": exc.code, "message": str(exc)}, ensure_ascii=False))
         return 1
     print(json.dumps({"ok": True, "backend": client.backend, "model": client.model, "url": client.endpoint,
-                      "latency_ms": int((time.monotonic() - started) * 1000)}))
+                      "latency_ms": int((time.monotonic() - started) * 1000)}, ensure_ascii=False))
     return 0
 
 

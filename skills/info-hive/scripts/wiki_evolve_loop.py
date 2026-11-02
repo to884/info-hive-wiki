@@ -83,7 +83,7 @@ def calibrate(suite, corpus, calls, work):
     results = []
     for case in suite['calibration']:
         request = {k: v for k, v in case.items() if k != 'passed'}
-        request['sources'] = {p: inside(corpus, p).read_text() for p in case['sources']}
+        request['sources'] = {p: inside(corpus, p).read_text(encoding='utf-8-sig') for p in case['sources']}
         result = calls.invoke('judge', request, work)
         require(grounded_verdict(result, request['sources'], case['passed'] and bool(request['sources']))
                 and result['passed'] == case['passed'],
@@ -243,7 +243,7 @@ def artifact_checks(task, wiki):
             passed = all(s in path.read_text(encoding='utf-8') for s in check['equals'])
         else:
             try:
-                value = ([json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+                value = ([json.loads(line) for line in path.read_text(encoding='utf-8').splitlines() if line.strip()]
                          if check['kind'] == 'jsonl_subset' else read_json(path))
                 passed = value == check['equals'] if check['kind'] == 'json' else subset(check['equals'], value)
             except ValueError:
@@ -426,18 +426,18 @@ def publish_learning(args, rows, patterns, iteration):
                   'scope': 'training observation; not a causal generalization', 'observable': row}
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'experience.json'
-            path.write_text(encode(record))
+            path.write_text(encode(record), encoding='utf-8')
             receipt = capture(SimpleNamespace(raw=raw, record=path))
         source = f'sources/{name}.md'
         target = inside(args.wiki, source)
         target.parent.mkdir(exist_ok=True)
         body = (f'---\ntitle: "Training observation {name}"\ntype: source\ntags: [skill-evolution]\n'
                 f'created: {today}\nupdated: {today}\nauthors: ["Evolution runner"]\n'
-                f'raw: {json.dumps(receipt["raw"])}\ningested: {today}\n---\n\n'
+                f'raw: {json.dumps(receipt["raw"], ensure_ascii=False)}\ningested: {today}\n---\n\n'
                 f"Task: {row['question']}\n\nOutcome: {record['outcome']}\n\n"
                 + row['judge']['reason'] + '\n')
         body = body.replace('—', '-')
-        require(not target.exists() or target.read_text() == body, 'Training source already exists with different content')
+        require(not target.exists() or target.read_text(encoding='utf-8') == body, 'Training source already exists with different content')
         if not target.exists():
             target.write_text(body, encoding='utf-8')
         source_names.append(source)
@@ -448,18 +448,20 @@ def publish_learning(args, rows, patterns, iteration):
         pattern['page'] = 'concepts/evolution-pattern-' + key + '.md'
         target = args.wiki / 'concepts' / ('evolution-pattern-' + key + '.md')
         target.parent.mkdir(exist_ok=True)
-        body = (f'---\ntitle: {json.dumps(key.replace("-", " "))}\ntype: concept\ntags: [skill-evolution]\n'
-                f'created: {today}\nupdated: {today}\nsources: {json.dumps(pattern["sources"])}\n---\n\n'
+        body = (f'---\ntitle: {json.dumps(key.replace("-", " "), ensure_ascii=False)}\ntype: concept\ntags: [skill-evolution]\n'
+                f'created: {today}\nupdated: {today}\nsources: {json.dumps(pattern["sources"], ensure_ascii=False)}\n---\n\n'
                 f"{pattern['claim']}\n\nScope: {pattern['scope']}\n\nCounterexamples: {pattern['counterexamples']}\n\n"
                 + '\n'.join(f'- [[{name[:-3]}]]' for name in source_names) + '\n')
         if target.exists():
             previous = target.read_text(encoding='utf-8')
             previous = re.sub(r'^updated:.*$', 'updated: ' + today, previous, count=1, flags=re.M)
-            previous = re.sub(r'^sources:.*$', 'sources: ' + json.dumps(pattern['sources']), previous, count=1, flags=re.M)
+            # 置換文字列にバックスラッシュが入っても re がエスケープとして解釈しないよう、関数で渡す。
+            sources_line = 'sources: ' + json.dumps(pattern['sources'], ensure_ascii=False)
+            previous = re.sub(r'^sources:.*$', lambda _: sources_line, previous, count=1, flags=re.M)
             body = previous.rstrip() + f'\n\n## Observation from {args.id}, iteration {iteration}\n\n' + body.split('---', 2)[2].lstrip()
         atomic(target, body.replace('—', '-').encode())
     index = args.wiki / 'index.md'
-    old = index.read_text() if index.exists() else '# Index\n'
+    old = index.read_text(encoding='utf-8-sig') if index.exists() else '# Index\n'
     links = source_names + [p['page'] for p in patterns.values() if p.get('page')]
     for name in links:
         line = f'- [[{name[:-3]}]]'
@@ -467,7 +469,7 @@ def publish_learning(args, rows, patterns, iteration):
             old = old.rstrip() + '\n' + line + '\n'
     atomic(index, old.encode())
     log = args.wiki / 'log.md'
-    old = log.read_text() if log.exists() else '# Log\n'
+    old = log.read_text(encoding='utf-8-sig') if log.exists() else '# Log\n'
     line = f'- {today}: Captured training iteration {iteration} from evolution {args.id}.'
     if line not in old:
         atomic(log, (old.rstrip() + '\n' + line + '\n').encode())
@@ -492,7 +494,7 @@ def run(args, state):
     consumed_path = state / 'consumed-tests.json'
     consumed = read_json(consumed_path) if consumed_path.exists() else {}
     test_keys = [digest(encode({'question': t['question'], 'rubric': t['rubric'],
-                  'sources': {name: inside(corpus, name).read_text() for name in t['sources']}}).encode())
+                  'sources': {name: inside(corpus, name).read_text(encoding='utf-8-sig') for name in t['sources']}}).encode())
                  for t in tasks if t['split'] == 'test']
     require(not any(key in consumed for key in test_keys), 'Final-test tasks already exposed; supply fresh test tasks')
     config = read_json(args.config)
@@ -564,7 +566,7 @@ def run(args, state):
                         else:
                             path.parent.mkdir(parents=True, exist_ok=True)
                             path.write_text(body, encoding='utf-8')
-                    require((candidate / 'SKILL.md').is_file() and (candidate / 'SKILL.md').read_text().strip(), 'Proposal must retain or create nonempty SKILL.md')
+                    require((candidate / 'SKILL.md').is_file() and (candidate / 'SKILL.md').read_text(encoding='utf-8-sig').strip(), 'Proposal must retain or create nonempty SKILL.md')
                     purpose = '# Purpose\n\n' + proposal['reason'] + '\n\n'
                     for key in evidence:
                         item = patterns[key]
@@ -656,11 +658,11 @@ def run(args, state):
                 today = time.strftime('%Y-%m-%d')
                 selected_sources = list(dict.fromkeys(p for pattern in patterns.values() for p in pattern.get('sources', [])))
                 body = (f'---\ntitle: "Evolution {args.id}"\ntype: concept\ntags: [skill-evolution]\n'
-                        f'created: {today}\nupdated: {today}\nsources: {json.dumps(selected_sources)}\n---\n\n'
-                        + (best / 'PURPOSE.md').read_text() + '\n'.join(f'- [[{p[:-3]}]]' for p in selected_sources) + '\nSelection evidence: strict validation improvement. Final results remain in the experiment archive.\n')
+                        f'created: {today}\nupdated: {today}\nsources: {json.dumps(selected_sources, ensure_ascii=False)}\n---\n\n'
+                        + (best / 'PURPOSE.md').read_text(encoding='utf-8') + '\n'.join(f'- [[{p[:-3]}]]' for p in selected_sources) + '\nSelection evidence: strict validation improvement. Final results remain in the experiment archive.\n')
                 evidence_path.write_text(body.replace('—', '-'), encoding='utf-8')
                 index = args.wiki / 'index.md'
-                old = index.read_text() if index.exists() else '# Index\n'
+                old = index.read_text(encoding='utf-8-sig') if index.exists() else '# Index\n'
                 atomic(index, (old.rstrip() + f'\n- [[concepts/evolution-{args.id}]]\n').encode())
                 proposal_id = slug(args.id + '-selected')
                 propose(SimpleNamespace(id=proposal_id, skill=args.skill, target=None, candidate=best,

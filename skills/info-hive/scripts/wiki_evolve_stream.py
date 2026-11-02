@@ -42,7 +42,7 @@ def observable(agent, event):
 
 def stream_command(command, text, agent, trace_path=None, env=None):
     # 大きなプロンプトと標準出力で両方のパイプが埋まったときのデッドロックを、書き込み用を分けて避ける。
-    with tempfile.TemporaryFile(mode='w+') as errors:
+    with tempfile.TemporaryFile(mode='w+', encoding='utf-8', errors='replace') as errors:
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=errors, text=True, encoding="utf-8", env=env)
         def write():

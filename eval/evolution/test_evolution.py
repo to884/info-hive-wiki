@@ -38,48 +38,48 @@ def main():
         root = Path(tmp).resolve()
         wiki, skill, raw = root/'wiki', root/'skill', root/'raw'
         for p in (wiki, skill, raw): p.mkdir()
-        (wiki/'SCHEMA.md').write_text('# Wiki\n')
+        (wiki/'SCHEMA.md').write_text('# Wiki\n', encoding='utf-8')
         (wiki/'concepts').mkdir()
-        (wiki/'concepts/lesson.md').write_text('---\ntype: concept\ntags: [test]\nsources: []\nupdated: 2026-09-12\n---\nLearn from evidence.\n')
-        (skill/'SKILL.md').write_text('baseline\n')
-        candidate = root/'candidate.md'; candidate.write_text('candidate\n')
+        (wiki/'concepts/lesson.md').write_text('---\ntype: concept\ntags: [test]\nsources: []\nupdated: 2026-09-12\n---\nLearn from evidence.\n', encoding='utf-8')
+        (skill/'SKILL.md').write_text('baseline\n', encoding='utf-8')
+        candidate = root/'candidate.md'; candidate.write_text('candidate\n', encoding='utf-8')
         experience = root/'experience.json'
         data = {'id':'example', 'task':'query', 'outcome':'failure', 'verification':'checked source',
                 'actions':['read wrong source'], 'model':'test', 'tools':'test', 'scope':'query'}
-        experience.write_text(e.encode(data))
+        experience.write_text(e.encode(data), encoding='utf-8')
         captured = e.capture(SimpleNamespace(raw=raw, record=experience))
         assert Path(captured['raw']).exists()
         e.capture(SimpleNamespace(raw=raw, record=experience))  # まったく同じ再試行は安全
-        data['task']='different'; experience.write_text(e.encode(data))
+        data['task']='different'; experience.write_text(e.encode(data), encoding='utf-8')
         fails(lambda:e.capture(SimpleNamespace(raw=raw, record=experience)), 'Immutable')
-        data['id']='../bad';experience.write_text(e.encode(data))
+        data['id']='../bad';experience.write_text(e.encode(data), encoding='utf-8')
         fails(lambda:e.capture(SimpleNamespace(raw=raw, record=experience)))
 
-        corpus=root/'corpus'; corpus.mkdir();(corpus/'fact.md').write_text('correct')
+        corpus=root/'corpus'; corpus.mkdir();(corpus/'fact.md').write_text('correct', encoding='utf-8')
         suite={'version':1,'corpus':'corpus','tasks':[
             {'id':'v','split':'validation','question':'validation','abstain':False,
              'answer_all':['correct'],'answer_none':['incorrect'],'citations':['fact.md']},
             {'id':'h','split':'holdout','question':'holdout','abstain':True,
              'answer_all':[],'answer_none':[],'citations':[]}]}
-        suite_path=root/'suite.json';suite_path.write_text(e.encode(suite))
+        suite_path=root/'suite.json';suite_path.write_text(e.encode(suite), encoding='utf-8')
         runner=root/'runner.py'
         runner.write_text('''import json,sys
 from pathlib import Path
 r=json.load(sys.stdin)
 assert set(r)=={'version','question','skill_root','wiki_root','model','tools'}
 assert not (Path(r['wiki_root'])/'.evolution').exists()
-s=Path(r['skill_root'],'SKILL.md').read_text()
+s=Path(r['skill_root'],'SKILL.md').read_text(encoding='utf-8')
 h=r['question']=='holdout'
 if 'crash' in s: raise SystemExit(2)
-if 'mutate' in s: Path(r['wiki_root'],'fact.md').write_text('changed')
+if 'mutate' in s: Path(r['wiki_root'],'fact.md').write_text('changed',encoding='utf-8')
 print(json.dumps({'answer':'correct' if 'candidate' in s else 'wrong',
 'abstain':h and 'regress' not in s,'citations':[] if h else ['fact.md'],
 'tool_calls':1,'cost':3 if 'expensive' in s else 1}))
-''')
-        runner_json=root/'runner.json';runner_json.write_text(e.encode([sys.executable,str(runner)]))
+''', encoding='utf-8')
+        runner_json=root/'runner.json';runner_json.write_text(e.encode([sys.executable,str(runner)]), encoding='utf-8')
 
         def proposal(state, name, content='candidate\n'):
-            candidate.write_text(content)
+            candidate.write_text(content, encoding='utf-8')
             return e.propose(SimpleNamespace(id=name,skill=skill,target='SKILL.md',candidate=candidate,
                      evidence=['concepts/lesson.md'],reason='Address observed failure',wiki=wiki), state)
         def evaluate(state, name):
@@ -88,31 +88,31 @@ print(json.dumps({'answer':'correct' if 'candidate' in s else 'wrong',
         with e.locked(wiki) as state:
             fails(lambda:e.locked(wiki).__enter__(), 'busy')
             proposal(state,'good')
-            assert (skill/'SKILL.md').read_text()=='baseline\n'
+            assert (skill/'SKILL.md').read_text(encoding='utf-8')=='baseline\n'
             assert [p['slug'] for p in wiki_search.collect_pages(wiki)]==['lesson']
             assert len(wiki_lint.collect_pages(wiki)) == 1
             passed=evaluate(state,'good');assert passed['status']=='passed'
-            assert (state/'good/corpus/fact.md').read_text()=='correct'
+            assert (state/'good/corpus/fact.md').read_text(encoding='utf-8')=='correct'
             assert list((state/'good').glob('inputs-*.json'))
-            (corpus/'fact.md').write_text('later source change')
-            assert (state/'good/corpus/fact.md').read_text()=='correct'
-            (corpus/'fact.md').write_text('correct')
-            (state/'good/corpus/fact.md').write_text('tampered')
+            (corpus/'fact.md').write_text('later source change', encoding='utf-8')
+            assert (state/'good/corpus/fact.md').read_text(encoding='utf-8')=='correct'
+            (corpus/'fact.md').write_text('correct', encoding='utf-8')
+            (state/'good/corpus/fact.md').write_text('tampered', encoding='utf-8')
             fails(lambda:e.transition(state/'good'), 'Archived corpus changed')
-            (state/'good/corpus/fact.md').write_text('correct')
+            (state/'good/corpus/fact.md').write_text('correct', encoding='utf-8')
             assert passed['totals']['validation']=={'baseline':0,'candidate':2}
             fails(lambda:evaluate(state,'good'), 'already recorded')
-            (skill/'SKILL.md').write_text('concurrent\n')
+            (skill/'SKILL.md').write_text('concurrent\n', encoding='utf-8')
             fails(lambda:e.transition(state/'good'), 'concurrent edits')
-            (skill/'SKILL.md').write_text('baseline\n')
+            (skill/'SKILL.md').write_text('baseline\n', encoding='utf-8')
             assert e.transition(state/'good')['status']=='accepted'
-            assert (skill/'SKILL.md').read_text()=='candidate\n'
+            assert (skill/'SKILL.md').read_text(encoding='utf-8')=='candidate\n'
             assert e.transition(state/'good')['status']=='accepted'  # 冪等な再試行
-            (skill/'other.md').write_text('new concurrent file')
+            (skill/'other.md').write_text('new concurrent file', encoding='utf-8')
             fails(lambda:e.transition(state/'good',True), 'concurrent edits')
             (skill/'other.md').unlink()
             assert e.transition(state/'good',True)['status']=='rolled_back'
-            assert (skill/'SKILL.md').read_text()=='baseline\n'
+            assert (skill/'SKILL.md').read_text(encoding='utf-8')=='baseline\n'
             assert e.transition(state/'good',True)['status']=='rolled_back'
             fails(lambda:e.transition(state/'good'), 'cannot be reapplied')
 
@@ -122,22 +122,22 @@ print(json.dumps({'answer':'correct' if 'candidate' in s else 'wrong',
                 proposal(state,name,body)
                 assert evaluate(state,name)['status']==status
                 fails(lambda:e.transition(state/name), 'did not pass')
-                assert (skill/'SKILL.md').read_text()=='baseline\n'
+                assert (skill/'SKILL.md').read_text(encoding='utf-8')=='baseline\n'
             for name in ['crash','mutate']:
                 proposal(state,name,'candidate '+name+'\n')
                 fails(lambda:evaluate(state,name))
                 assert e.read_json(next((state/name).glob('evaluation-*.json')))['status']=='error'
                 fails(lambda:e.transition(state/name))
                 assert list((state/name).glob('inputs-*.json'))
-                assert (state/name/'corpus/fact.md').read_text()=='correct'
+                assert (state/name/'corpus/fact.md').read_text(encoding='utf-8')=='correct'
             proposal(state,'tamper')
-            (state/'tamper/candidate/SKILL.md').write_text('tampered')
+            (state/'tamper/candidate/SKILL.md').write_text('tampered', encoding='utf-8')
             fails(lambda:evaluate(state,'tamper'), 'snapshot changed')
             proposal(state,'recover')
             evaluate(state,'recover')
             # 置き換えのあと、完了の記録を書く前にクラッシュした場合。
-            (state/'recover/transition.json').write_text(e.encode({'status':'applying'}))
-            (skill/'SKILL.md').write_text('candidate\n')
+            (state/'recover/transition.json').write_text(e.encode({'status':'applying'}), encoding='utf-8')
+            (skill/'SKILL.md').write_text('candidate\n', encoding='utf-8')
             assert e.transition(state/'recover')['status']=='accepted'
             e.transition(state/'recover',True)
             assert any(r['id']=='regress' and r['status']=='rejected' for r in e.history(state))
@@ -159,11 +159,11 @@ print(json.dumps({'answer':'correct' if 'candidate' in s else 'wrong',
         suite['tasks'][1]['split']='validation';fails(lambda:e.suite_contract(suite,corpus), 'held-out')
         fails(lambda:e.run_runner([sys.executable,'-c','import time; time.sleep(10)'],{},root,0.05))
         # 冪等なアップグレードは、スキーマとカスタマイズしたテンプレートを残したまま、新しいマーカーを知らせる。
-        (wiki/'.experience-template.json').write_text('custom')
+        (wiki/'.experience-template.json').write_text('custom', encoding='utf-8')
         with mock.patch.object(init_wiki,'install_runtime'):
             init_wiki.init_wiki(root,'wiki','raw',upgrade=True)
             init_wiki.init_wiki(root,'wiki','raw',upgrade=True)
-        assert (wiki/'.experience-template.json').read_text()=='custom'
+        assert (wiki/'.experience-template.json').read_text(encoding='utf-8')=='custom'
         assert (wiki/'.pattern-template.md').is_file()
         assert (wiki/'.evolution/README.md').is_file()
         assert any(g['marker']=='## Skill evolution' for g in init_wiki.detect_schema_gaps(wiki/'SCHEMA.md'))
@@ -172,7 +172,7 @@ print(json.dumps({'answer':'correct' if 'candidate' in s else 'wrong',
     pilot=REPO/'eval/evolution/pilot/wiki'
     assert len(e.suite_contract(starter,pilot))==20
     for task in starter['tasks']:
-        sources=' '.join((pilot/c).read_text() for c in task['citations'])
+        sources=' '.join((pilot/c).read_text(encoding='utf-8') for c in task['citations'])
         assert all(e.normalize(s) in e.normalize(sources) for s in task['answer_all'])
     events=[{'type':'assistant','message':{'content':[{'type':'tool_use','id':'a','name':'Read'}]}},
             {'type':'result','subtype':'success','is_error':False,'structured_output':

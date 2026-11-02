@@ -192,7 +192,7 @@ def main():
 
     if not SCRIPT.exists():
         raise SystemExit(f"wiki_search.py not found at {SCRIPT}")
-    queries = json.loads(QUERIES.read_text())
+    queries = json.loads(QUERIES.read_text(encoding="utf-8"))
 
     modes = ["page", "section"]
     if hybrid_available():

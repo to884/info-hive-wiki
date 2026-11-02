@@ -168,7 +168,7 @@ def capture(args):
     path = folder / (record['id'] + '.json')
     body = encode(record)
     if path.exists():
-        require(not path.is_symlink() and path.read_text() == body, 'Immutable experience ID already exists')
+        require(not path.is_symlink() and path.read_text(encoding='utf-8') == body, 'Immutable experience ID already exists')
     else:
         with path.open('x', encoding='utf-8') as f:
             f.write(body)
@@ -571,7 +571,7 @@ def main():
                                   'selection': read_json(exp / 'selection.json') if (exp / 'selection.json').exists() else None,
                                   'trace_directory': str(exp)}
                     elif args.action == 'show':
-                        result = {'proposal': manifest(exp), 'inputs': [read_json(p) for p in exp.glob('inputs-*.json')], 'diff': (exp / 'change.diff').read_text(),
+                        result = {'proposal': manifest(exp), 'inputs': [read_json(p) for p in exp.glob('inputs-*.json')], 'diff': (exp / 'change.diff').read_text(encoding='utf-8'),
                                   'evaluations': [read_json(p) for p in exp.glob('evaluation-*.json')]}
                     else:
                         result = transition(exp, rollback=args.action == 'rollback')
