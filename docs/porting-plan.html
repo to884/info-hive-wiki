@@ -339,7 +339,7 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--ru
     <dt>移植元</dt><dd><code>praneybehl/llm-wiki-plugin</code> v4.0.1（コミット <code>2d24ccf</code>、MIT ライセンス）</dd>
     <dt>移植先</dt><dd><code>C:\Works\info-hive</code>（現在は初回コミットの <code>AGENTS.md</code> のみ）</dd>
     <dt>作成日</dt><dd>2026-11-02</dd>
-    <dt>状態</dt><dd>2026-11-02 に質問 10 問の回答を受け、方針 C〜J は確定。方針 C（名前）は、コマンド名の実測結果を受けて同日に決め直した。4 モデルのレビュー（<code>docs/agent-runs/2026-11-02-porting-plan-review/summary.md</code>）の指摘を反映済み。方針 A・B と、見直しとレビューで加えた項目も同日に決定した（<a href="#answers">7 節</a>）。未決は、実装中に決める 1 点だけ。</dd>
+    <dt>状態</dt><dd>2026-11-02 に質問 10 問の回答を受け、方針 C〜J は確定。方針 C（名前）は、コマンド名の実測結果を受けて同日に決め直した。4 モデルのレビュー（<code>docs/agent-runs/2026-11-02-porting-plan-review/summary.md</code>）の指摘を反映済み。方針 A・B と、見直しとレビューで加えた項目も同日に決定した（<a href="#answers">7 節</a>）。未決の項目はない。</dd>
   </dl>
   <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">表示: 自動</button>
 </header>
@@ -652,7 +652,7 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--ru
           <li>ファイル名、相対パス、リンク先、スラッグを NFC で比較する。グラフの明示的な参照（<code>graph.node_id</code>、<code>relationships.object</code>、<code>source</code>、<code>contradicts</code>、<code>supersedes</code>）と、問い合わせのノード ID も同じ規則にする。正規化すると同じになる別ファイルは lint で指摘する。タグは NFKC で比較する。</li>
           <li>方針 B の別名の対応表を作り、frontmatter のキーと <code>type</code>・<code>kind</code> の値を読み込み時に英語に直す。対応表は解析器の 2 系統で共有する。ページの置き場所（<code>sources/</code> など）は英語に直した <code>type</code> で決める。</li>
           <li>frontmatter のリストの <code>、</code> 区切りは受け付けず、lint で指摘する。frontmatter の解析器は 2 系統（検索・lint・統計の手書きの解析器と、グラフの PyYAML）あるので、片方だけ変えて解釈がずれないようにする。キーの後の全角 <code>：</code> も lint で指摘する（キー自体は ASCII のまま）。</li>
-          <li>wikilink の全角 <code>｜</code> と <code>＃</code> を受け付けるか、lint で指摘する（どちらにするかは実装時に決める）。</li>
+          <li>wikilink の全角 <code>｜</code> と <code>＃</code> は区切りとして受け付けず、lint で指摘する（2026-11-02 に決定）。Obsidian もこれらを区切りとして扱わないので、受け付けるとスクリプトでは通るのに Obsidian ではリンク切れになる。</li>
           <li>出力に含めるパスを <code>/</code> 区切りにそろえる。Windows では <code>wiki_search.py --json</code> がパスを <code>\</code> 区切りで出し、<code>eval/decisions/test_decisions.py</code> の <code>test_output_without_decide_is_byte_identical</code> が落ちる（P0 の作業中に確認。移植元からある不具合）。</li>
           <li>この修正のあとで <code>json.dumps</code> に <code>ensure_ascii=False</code> を付ける。先に付けると cp932 の出力で落ちる。<code>wiki_evolve_loop.py:452, 458, 659</code> は frontmatter に書く値なので、見た目の問題ではなくデータの破損として先に直す。</li>
         </ul>
@@ -866,7 +866,7 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--ru
       </tbody>
     </table>
   </div>
-  <p class="prose">残る未決は、実装中に決める 1 点だけです。wikilink の全角 <code>｜</code>・<code>＃</code> を受け付けるか、lint で指摘するか（P1）。</p>
+  <p class="prose">実装中に決めるとしていた wikilink の全角 <code>｜</code>・<code>＃</code> の扱いは、P1 で「受け付けず、lint で指摘する」に決めました。未決の項目は残っていません。</p>
 </section>
 
 <section id="appendix" aria-labelledby="appendix-h">
