@@ -25,8 +25,8 @@ import wiki_decide as wd  # noqa: E402
 
 HAS_YAML = importlib.util.find_spec("yaml") is not None
 DECISION_ENV = (
-    "INFO_HIVE_DECISIONS", "INFO_HIVE_DECISIONS_URL", "INFO_HIVE_DECISIONS_MODEL", "LLM_WIKI_URL", "LLM_WIKI_TOKEN",
-    "LLM_WIKI_CONFIG", "TYPESAFE_API_KEY", "OPENROUTER_API_KEY", "LIQUID_API_KEY",
+    "INFO_HIVE_DECISIONS", "INFO_HIVE_DECISIONS_URL", "INFO_HIVE_DECISIONS_MODEL",
+    "TYPESAFE_API_KEY", "OPENROUTER_API_KEY", "LIQUID_API_KEY",
 )
 
 
@@ -58,11 +58,6 @@ class FakeServerCase(unittest.TestCase):
 
 
 class TemplateTests(unittest.TestCase):
-    def test_json_copies_are_identical(self):
-        skill = (REPO / "skills/info-hive/assets/decision-questions.json").read_bytes()
-        server = (REPO / "server/src/decisions/decision-questions.json").read_bytes()
-        self.assertEqual(skill, server)
-
     def test_templates_use_neutral_keys(self):
         q = wd.QUESTIONS
         self.assertEqual(set(q), {"relevance", "evidence", "relation", "changes", "orders_agent"})
@@ -75,12 +70,8 @@ class TemplateTests(unittest.TestCase):
     def test_no_em_dash_in_v4_files(self):
         files = [
             SCRIPTS / "wiki_decide.py",
-            SCRIPTS / "wiki_remote.py",
             REPO / "skills/info-hive/assets/decision-questions.json",
             *(p for p in HERE.rglob("*") if p.is_file() and "__pycache__" not in p.parts),
-            *(p for p in (REPO / "eval/remote").rglob("*") if p.is_file() and "__pycache__" not in p.parts),
-            *(REPO / "server/src/decisions").glob("*"),
-            *(REPO / "server/test/decisions").glob("*"),
         ]
         self.assertIn(FIXTURES / "graph_wiki/graph/ontology.yaml", files)
         for f in files:
@@ -138,7 +129,7 @@ class ReaderTests(unittest.TestCase):
         self.assertTrue(block["failed_open"])
         self.assertEqual(block["error"], "invalid_answer")
 
-    def test_split_sentences_matches_server_contract(self):
+    def test_split_sentences(self):
         text = "\n".join([
             "# Title", "", "First sentence. Second one!", "continues here? Yes.", "",
             "- item one", "```", "code. not a sentence.", "```", "> quoted line",
@@ -168,15 +159,10 @@ class ConfigTests(unittest.TestCase):
     def test_off_by_default(self):
         self.assertIsNone(wd.client_from_config())
 
-    def test_hosted_backends_need_keys(self):
+    def test_cloud_backends_need_keys(self):
         for backend in ("typesafe", "openrouter", "liquid"):
             with self.assertRaises(wd.DecisionError):
                 wd.client_from_config(backend)
-        with tempfile.TemporaryDirectory() as tmp:
-            os.environ["LLM_WIKI_CONFIG"] = str(Path(tmp) / "missing.json")
-            with self.assertRaises(wd.DecisionError) as ctx:
-                wd.client_from_config("hosted")
-            self.assertEqual(ctx.exception.code, "unavailable")
 
     def test_backend_defaults_and_env(self):
         os.environ["OPENROUTER_API_KEY"] = "k"
@@ -188,47 +174,6 @@ class ConfigTests(unittest.TestCase):
         os.environ["INFO_HIVE_DECISIONS"] = "local"
         c = wd.client_from_config()
         self.assertEqual(c.endpoint, "http://127.0.0.1:8080/v1/systemone")
-        with tempfile.TemporaryDirectory() as tmp:
-            os.environ["LLM_WIKI_CONFIG"] = str(Path(tmp) / "missing.json")
-            os.environ["LLM_WIKI_URL"] = "https://wiki.example.invalid"
-            os.environ["LLM_WIKI_TOKEN"] = "lw_main_x"
-            c = wd.client_from_config("hosted")
-        self.assertEqual(c.endpoint, "https://wiki.example.invalid/api/v1/decide")
-        self.assertEqual(c.key, "lw_main_x")
-
-    def write_config(self, tmp: str) -> Path:
-        path = Path(tmp) / "remote.json"
-        path.write_text(json.dumps({
-            "default": "home",
-            "profiles": {
-                "home": {"url": "https://home.example.invalid", "token": "lw_main_home"},
-                "team": {"url": "https://team.example.invalid", "token": "lw_team_t", "wiki": "team"},
-            },
-        }), encoding="utf-8")
-        path.chmod(0o600)
-        os.environ["LLM_WIKI_CONFIG"] = str(path)
-        return path
-
-    def test_hosted_uses_remote_config_rules(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            self.write_config(tmp)
-            os.environ["LLM_WIKI_URL"] = "https://env.example.invalid"
-            os.environ["LLM_WIKI_TOKEN"] = "lw_main_env"
-            # 明示したプロファイルは環境変数より優先され、そのプロファイルの wiki が使われる。
-            c = wd.client_from_config("hosted", profile="team")
-            self.assertEqual((c.url, c.key, c.wiki), ("https://team.example.invalid", "lw_team_t", "team"))
-            # プロファイルを指定しなければ、環境変数が既定のプロファイルより優先される。
-            c = wd.client_from_config("hosted")
-            self.assertEqual((c.url, c.key), ("https://env.example.invalid", "lw_main_env"))
-            # 環境変数に認証情報がないときは、LLM_WIKI_CONFIG を読む。
-            os.environ.pop("LLM_WIKI_URL")
-            os.environ.pop("LLM_WIKI_TOKEN")
-            c = wd.client_from_config("hosted")
-            self.assertEqual((c.url, c.key), ("https://home.example.invalid", "lw_main_home"))
-            with self.assertRaises(wd.DecisionError) as ctx:
-                wd.client_from_config("hosted", profile="nope")
-            self.assertEqual(ctx.exception.code, "unavailable")
-            self.assertIn("nope", str(ctx.exception))
 
 
 class ClientTests(FakeServerCase):
@@ -241,35 +186,6 @@ class ClientTests(FakeServerCase):
         self.assertEqual(sent["auth"], "Bearer secret")
         self.assertEqual(sent["body"]["model"], "jev-1.14.0")
         self.assertEqual(res["model"], fake_backend.FAKE_MODEL)
-
-    def test_hosted_posts_to_decide_without_model(self):
-        client = wd.DecisionClient("hosted", self.url, "server", key="lw_main_x")
-        client.ask(wd.screen_request("sources/a.md", "hello"))
-        sent = self.server.requests[-1]
-        self.assertEqual(sent["path"], "/api/v1/decide")
-        self.assertNotIn("model", sent["body"])
-
-    def test_hosted_sends_profile_wiki_header(self):
-        client = wd.DecisionClient("hosted", self.url, "server", key="lw_team_t", wiki="team")
-        client.ask(wd.screen_request("sources/a.md", "hello"))
-        self.assertEqual(self.server.requests[-1]["wiki"], "team")
-
-    def test_hosted_profile_wiki_reaches_server(self):
-        saved = {k: os.environ.pop(k) for k in DECISION_ENV if k in os.environ}
-        try:
-            with tempfile.TemporaryDirectory() as tmp:
-                path = Path(tmp) / "remote.json"
-                path.write_text(json.dumps({"default": "team", "profiles": {
-                    "team": {"url": self.url, "token": "lw_team_t", "wiki": "team"}}}), encoding="utf-8")
-                path.chmod(0o600)
-                os.environ["LLM_WIKI_CONFIG"] = str(path)
-                wd.client_from_config("hosted").ask(wd.screen_request("sources/a.md", "hello"))
-        finally:
-            for k in DECISION_ENV:
-                os.environ.pop(k, None)
-            os.environ.update(saved)
-        sent = self.server.requests[-1]
-        self.assertEqual((sent["path"], sent["auth"], sent["wiki"]), ("/api/v1/decide", "Bearer lw_team_t", "team"))
 
 
 class ErrorServerTests(unittest.TestCase):

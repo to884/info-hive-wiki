@@ -20,6 +20,4 @@ argument-hint: "extract | lint | neighbors --node <id> | edges --subject <id> | 
 4. `lint` では、検出結果を編集案として示す。型付きの `graph.relationships` を黙って書き換えてはならない。承認された修正を適用したら、コンパイル済みの成果物を markdown と同期させるために、`extract` を再実行するよう提案する。
 5. `graph.sqlite` が `log.md` にある最新の取り込み（ingest）の行より古い場合は、先に `extract` を実行するよう提案する。
 
-**ホスト型 wiki。** 特定した wiki がホスト型の URL である場合（または指示でホスト型の URL が指定されている場合）は、`skills/info-hive/references/hosted-mode.md` のホストモードを使う。MCP ツールを使い、MCP が使えないときは `python3 "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_remote.py"` を使う。サーバーはコミットのたびにグラフを最新に保つので、`extract` は不要である。各操作は `wiki_graph`（または `wiki_remote.py graph <op>`）の `neighbors`、`edges`、`path`、`facts` に対応させる。JSONL や GraphML のファイルが必要なときは `export` を使う。`lint` は `wiki_lint` に対応する。サーバーに `graph/ontology.yaml` がない場合は、`wiki_commit` の `create` 操作でテンプレートから作成するよう提案する。
-
 詳しいリファレンス: `skills/info-hive/references/graph-workflow.md`

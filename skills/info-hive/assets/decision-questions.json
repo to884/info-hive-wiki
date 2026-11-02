@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Question templates for the optional LLM Wiki decision layer. Keep this file byte-identical to server/src/decisions/decision-questions.json.",
+  "description": "Question templates for the optional LLM Wiki decision layer.",
   "checks": {
     "relevance": {
       "id": "D1",

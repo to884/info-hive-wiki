@@ -36,8 +36,6 @@ argument-hint: "[--global] [--wiki-dir <name>] [--raw-dir <name>]"
 7. **v3.2.0:** init と upgrade は、`.experience-template.json`、`.pattern-template.md`、`.evolution/README.md` を、既存のファイルを上書きせずに追加する。`## Skill evolution` のスキーマセクションは、任意のマージとして提案する。経験の記録とスキルの改善はオプトイン方式で、既存のページやコマンドに移行作業は要らない。実験のアーカイブは、`.wiki-cache/` と違って消えずに残る。`/wiki:learn`、`/wiki:evolve`、パイロットスイート、検証・適用・ロールバックを明示的に行う流れについては、`references/evolution-workflow.md` を案内する。
 
 8. **v4.0.0 の注意点**（これもあわせて伝える）:
-   - ローカルの wiki に移行作業は要らない。ローカルのファイル、スクリプト、検索、コマンドは、これまでどおり動く。
-   - ホスト型のバックエンドを、任意で使えるようになった。MCP、JSON API、OAuth、Web のリーダーを備えた1つの Cloudflare Worker である。この wiki をそこへ移すには `/wiki:migrate` を、別のエージェントを接続するには `/wiki:init --hosted <url>` を実行する。詳しくは `skills/info-hive/references/hosted-mode.md` を参照。
+   - 既存の wiki に移行作業は要らない。ファイル、スクリプト、検索、コマンドは、これまでどおり動く。
    - 任意の判定レイヤーを使うと、検索結果を関連度でふるい分けたり、グラフの弱い証拠や信頼できないテキストにフラグを立てたりできる。既定では無効で、ユーザーがバックエンドを有効にするまで、どこにもテキストを送らない。詳しくは `skills/info-hive/references/decision-models.md` を参照。
    - Paperclip 連携（`integrations/paperclip/`）は削除された。必要なユーザーは v3.2.x を使い続ける。スキルと wiki のファイルには影響しない。
-   - この wiki がホスト型 wiki の `pull` ミラーである（`.llm-wiki-remote.json` がある）場合は、init や upgrade による書き込みを行ってはならない。サーバー側でホスト型 wiki をアップグレードしてから、もう一度 pull する。

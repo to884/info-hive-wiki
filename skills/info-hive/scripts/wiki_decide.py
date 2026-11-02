@@ -11,9 +11,6 @@ wiki_decide.py: LLM Wiki 用の任意の型付き判定チェック（標準ラ�
     typesafe    TypeSafe Jev（https://api.typesafe.ai）。TYPESAFE_API_KEY が必要。
     openrouter  OpenRouter 経由の Jev（https://openrouter.ai/api）。OPENROUTER_API_KEY が必要。
     liquid      Liquid の判定 API（https://api.liquid.ai/decisions）。LIQUID_API_KEY が必要。
-    hosted      自分のホスト型 wiki のサーバー（/api/v1/decide）。wiki_remote.py のプロファイル、URL、
-                トークン、wiki を使う。--profile は LLM_WIKI_URL と LLM_WIKI_TOKEN より優先される。
-                LLM_WIKI_CONFIG で別の設定ファイルを選べる。
 
 環境変数:
     INFO_HIVE_DECISIONS          バックエンド名（既定: off）。
@@ -62,7 +59,6 @@ BACKENDS = {
     "typesafe": {"url": "https://api.typesafe.ai", "model": "jev-1.14.0", "key": "TYPESAFE_API_KEY"},
     "openrouter": {"url": "https://openrouter.ai/api", "model": "typesafe/jev-1.14", "key": "OPENROUTER_API_KEY"},
     "liquid": {"url": "https://api.liquid.ai/decisions", "model": "d1.1", "key": "LIQUID_API_KEY"},
-    "hosted": {"url": None, "model": "server", "key": None},
 }
 BACKEND_CHOICES = ("off", *BACKENDS)
 DEFAULT_TIMEOUT = 8.0
@@ -100,7 +96,6 @@ class DecisionClient:
         key: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
         transport: Transport | None = None,
-        wiki: str | None = None,
     ):
         self.backend = backend
         self.url = url
@@ -108,13 +103,10 @@ class DecisionClient:
         self.key = key
         self.timeout = timeout
         self.transport = transport
-        self.wiki = wiki
 
     @property
     def endpoint(self) -> str:
         base = self.url.rstrip("/")
-        if self.backend == "hosted":
-            return base if base.endswith("/api/v1/decide") else base + "/api/v1/decide"
         return base if base.endswith("/v1/systemone") else base + "/v1/systemone"
 
     def ask(self, request: dict) -> dict:
@@ -136,14 +128,10 @@ class DecisionClient:
         }
 
     def _post(self, request: dict) -> dict:
-        body = {"state": request["state"], "questions": request["questions"]}
-        if self.backend != "hosted":
-            body = {"model": self.model, **body}
+        body = {"model": self.model, "state": request["state"], "questions": request["questions"]}
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if self.key:
             headers["Authorization"] = f"Bearer {self.key}"
-        if self.backend == "hosted" and self.wiki:
-            headers["X-LLM-Wiki"] = self.wiki
         req = urllib.request.Request(self.endpoint, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
@@ -173,30 +161,11 @@ def note(message: str) -> None:
     print(f"decisions: {message}", file=sys.stderr)
 
 
-def read_remote_profile(profile: str | None, url_override: str | None = None) -> tuple[str, str, str | None]:
-    """wiki_remote.py と同じ設定ファイルと規則で (url, token, wiki) を返す。
-
-    明示したプロファイルは LLM_WIKI_URL と LLM_WIKI_TOKEN より優先され、存在しなければならない。
-    LLM_WIKI_CONFIG で別の設定ファイルを選べる。DecisionError("unavailable") を送出する。
-    """
-    if str(SCRIPT_DIR) not in sys.path:
-        sys.path.insert(0, str(SCRIPT_DIR))
-    import wiki_remote
-
-    args = argparse.Namespace(profile=profile, url_override=url_override, wiki=None)
-    try:
-        url, token, wiki, _ = wiki_remote.resolve_connection(args)
-    except wiki_remote.CliError as exc:
-        raise DecisionError("unavailable", str(exc)) from None
-    return url, token, wiki
-
-
 def client_from_config(
     backend: str | None = None,
     url: str | None = None,
     model: str | None = None,
     timeout: float | None = None,
-    profile: str | None = None,
 ) -> DecisionClient | None:
     """フラグ、次に環境変数からクライアントを作る。判定が無効なら None を返す。
     選んだバックエンドのキーか URL がなければ DecisionError("unavailable") を送出する。"""
@@ -211,11 +180,7 @@ def client_from_config(
     key = os.environ.get(spec["key"]) if spec["key"] else None
     if spec["key"] and not key:
         raise DecisionError("unavailable", f"set {spec['key']} to use the {name} backend")
-    wiki = None
-    if name == "hosted":
-        # 判定用の URL（フラグか INFO_HIVE_DECISIONS_URL）は、wiki_remote.py の --url と同じく、プロファイルの URL を置き換える。
-        url, key, wiki = read_remote_profile(profile, url)
-    return DecisionClient(name, url, model, key, timeout or DEFAULT_TIMEOUT, wiki=wiki)
+    return DecisionClient(name, url, model, key, timeout or DEFAULT_TIMEOUT)
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +331,7 @@ def evidence_in_text(evidence: str, body: str) -> bool:
 
 
 def split_sentences(text: str, max_sentences: int = 60, max_chars: int = 300) -> list[str]:
-    """Markdown を文に分割する。server/src/decisions の splitSentences と同じ動作である。"""
+    """Markdown を文に分割する。"""
     blocks: list[str] = []
     para: list[str] = []
     in_fence = False
@@ -678,7 +643,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", help="Model name (default: INFO_HIVE_DECISIONS_MODEL or the backend default).")
     parser.add_argument("--url", help="Backend base URL (default: INFO_HIVE_DECISIONS_URL or the backend default).")
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="Request timeout in seconds (default: 8).")
-    parser.add_argument("--profile", help="wiki_remote.py profile for the hosted backend.")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("ask", help="Send a raw {state, questions} request.")
@@ -707,7 +671,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        client = client_from_config(args.backend, args.url, args.model, args.timeout, args.profile)
+        client = client_from_config(args.backend, args.url, args.model, args.timeout)
     except DecisionError as exc:
         note(str(exc))
         if args.command in ("ask", "check"):

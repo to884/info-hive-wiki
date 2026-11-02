@@ -9,5 +9,3 @@ description: wiki の規模、構成、リンク密度と、スケーリング�
 - リンク密度が低い（1ページあたり平均 1.5 リンク未満）場合は、相互参照が足りていない可能性がある。独立したページにすべきコンセプトを見つけるために、`--suggest-pages` を付けた lint を提案する。
 
 移行の手順は `skills/info-hive/references/scaling-playbook.md` を参照。
-
-**ホスト型 wiki。** 特定した wiki がホスト型の URL である場合（または指示でホスト型の URL が指定されている場合）は、`skills/info-hive/references/hosted-mode.md` のホストモードを使う。MCP ツールを使い、MCP が使えないときは `python3 "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_remote.py"` を使う。数値は `python3 "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_remote.py" stats` で取得する。シェルが使えない場合は、`wiki_overview` にある件数を使う。あわせて、`vector_lag`、検索モード、未解決のレビューフラグも報告する。インデックスの分割とページの上限は、ローカルの wiki と同じように当てはまる。

@@ -1,7 +1,7 @@
 ---
 name: info-hive
 description: |
-  論文、記事、文字起こし、メモ、プロジェクトでの調査結果から、LLM が整理するナレッジベースを構築し、保守する。ソースをリンクされた Markdown に取り込み、出典つきで質問に答え、wiki を lint またはアップグレードし、役に立つシンセシスをセッションやエージェントをまたいで残す。検証済みのタスクの経験を記録し、成功と失敗のパターンをまとめ、根拠にもとづくスキルの改善案を作成・評価・適用し、必要に応じてロールバックすることもできる。"add this to my wiki"、"what does the wiki say"、"learn from this task"、"improve this procedure"、/wiki:learn、/wiki:evolve で起動する。ローカルのフォルダーでも、ホスト型 wiki の URL（MCP）でも動く。インデックスを先に読むナビゲーション、アトミックなページ、ハイブリッド検索を使う。
+  論文、記事、文字起こし、メモ、プロジェクトでの調査結果から、LLM が整理するナレッジベースを構築し、保守する。ソースをリンクされた Markdown に取り込み、出典つきで質問に答え、wiki を lint またはアップグレードし、役に立つシンセシスをセッションやエージェントをまたいで残す。検証済みのタスクの経験を記録し、成功と失敗のパターンをまとめ、根拠にもとづくスキルの改善案を作成・評価・適用し、必要に応じてロールバックすることもできる。"add this to my wiki"、"what does the wiki say"、"learn from this task"、"improve this procedure"、/wiki:learn、/wiki:evolve で起動する。wiki はローカルのフォルダーに置く。インデックスを先に読むナビゲーション、アトミックなページ、ハイブリッド検索を使う。
 ---
 
 # LLM Wiki
@@ -16,26 +16,13 @@ description: |
 
 使う場面は広い。研究論文、記事、文字起こし、会議のメモ、書籍の章、顧客との通話、コードリポジトリ、日誌などのテキストを、ユーザーが時間をかけて蓄積していて、毎回のセッションでチャットに貼るより整理しておいたほうが役立つなら、いつでもこのスキルが当てはまる。1つのソースの取り込み（"ingest this paper"）にも、既存の wiki に対する日常の操作（"what does my wiki say about diffusion models"、"lint the wiki"、"what's missing"）にも同じように使える。
 
-ほかの作業の前に、対象の wiki を特定する。優先順位は、ユーザーが指定したパスまたは URL、もっとも近いプロジェクトの指示にあるパスまたは URL、グローバルなエージェントの指示にあるパスまたは URL、最後に現在のプロジェクトの `wiki/` の順である。特定した wiki の `SCHEMA.md` を読む。ここに書いた既定値が上書きされていることがある。2つの wiki を黙って混ぜてはならない。wiki がない場合は、下の初期化の手順を実行する。
+ほかの作業の前に、対象の wiki を特定する。優先順位は、ユーザーが指定したパス、もっとも近いプロジェクトの指示にあるパス、グローバルなエージェントの指示にあるパス、最後に現在のプロジェクトの `wiki/` の順である。特定した wiki の `SCHEMA.md` を読む。ここに書いた既定値が上書きされていることがある。2つの wiki を黙って混ぜてはならない。wiki がない場合は、下の初期化の手順を実行する。
 
 このスキルに出てくる `wiki/` と `raw/` の相対パスは、特定した wiki と raw ソースのルートを指す。現在の作業ディレクトリとは限らない。
 
-## バックエンド: ローカルのフォルダーかホスト型の URL
+## バックエンド: ローカルのフォルダー
 
-wiki のバックエンドは2種類のどちらかである。ワークフロー、ページの規約、`SCHEMA.md` は、どちらでも同じである。
-
-- **ローカルのフォルダー。** ページはファイルである。ファイルの読み込み、`str_replace`、付属のスクリプトを使う。
-- **ホスト型の URL。** ページは LLM Wiki のサーバー（Cloudflare Worker）上にある。MCP ツールの `wiki_overview`、`wiki_read`、`wiki_search`、`wiki_commit`、`wiki_history`、`wiki_graph`、`wiki_lint`、`wiki_raw` を使う。MCP がなければ、`python3 scripts/wiki_remote.py`（標準ライブラリのみ）を使う。
-
-指示に wiki の URL がある場合、またはローカルのパスの指定がなく `wiki_overview` ツールが使える場合は、ホスト型のバックエンドを選ぶ。ホストモードでは次のようにする。
-
-1. 最初に `wiki_overview` を呼び出す。`SCHEMA.md` と `index.md` が返る。
-2. 必要な箇所だけの変更は、`wiki_commit` の `edit` 操作で行う。各 `old` のテキストは、ページ内に1回だけ現れるものでなければならない。
-3. `log.md` とインデックスの行は `append` 操作で追加する。`append` は競合しない。
-4. 競合（HTTP 409 または `isError`）が起きたら、ページを読み直し、変更を作り直して再試行する。ほかのエージェントの変更を上書きしてはならない。
-5. extract やキャッシュのスクリプトは実行しない。サーバーがコミットのたびに、検索、リンク、グラフを更新する。
-
-ホスト型 wiki の `pull` ミラーは読み取り専用である。編集してはならない。詳しい手順、ツールの対応表、制限は `references/hosted-mode.md` にある。
+wiki はローカルのフォルダーに置く。ページはファイルである。ファイルの読み込み、`str_replace`、付属のスクリプトを使う。
 
 **任意の判定レイヤー。** 小さな判定モデルを使って、検索結果を関連度でふるい分けたり、グラフの弱い証拠や信頼できないテキストにフラグを立てたりできる。このレイヤーは既定では無効で、ページを書き込むことはない。ユーザーが求めたときだけ有効にする。`references/decision-models.md` を参照。
 
@@ -171,7 +158,6 @@ gist をめぐるコミュニティの議論で、いくつかの失敗が指摘
 - `references/agent-memory-integration.md`: グローバルまたはプロジェクトの wiki をエージェントの指示に登録する方法。定型文の種類と、初期化時の会話の進め方
 - `references/retrieval-setup.md`: init と upgrade で必ず行うセットアップ。パス、モデルキャッシュ、バージョンを固定したローカルの依存パッケージ、コーパス全体のベクトルの同期、準備完了のチェック、秘密情報を含まない `SCHEMA.md` の状態
 - `references/graph-workflow.md`: 任意のグラフ層。オントロジー、frontmatter のスキーマ、型付きエッジと通常の wikilink の使い分け、extract・lint・query の流れ
-- `references/hosted-mode.md`: ホスト型のバックエンド。ツールの対応表、`wiki_commit` の操作、競合時の再試行、raw ソース、トークン、エージェントの接続、移行、pull ミラー
 - `references/decision-models.md`: 任意の判定レイヤー。D1〜D5 のチェック、バックエンド、プライバシー、ライセンス、設定、判定に失敗したときに処理を通す（fail-open）規則
 
 ## 付属のスクリプト
@@ -186,7 +172,6 @@ gist をめぐるコミュニティの議論で、いくつかの失敗が指摘
 - `scripts/wiki_graph_extract.py`: グラフのメタデータと wikilink を、バージョンを固定した PyYAML を使って JSONL、SQLite、GraphML にコンパイルする
 - `scripts/wiki_graph_lint.py`: バージョンを固定した PyYAML を使い、型付きエッジをオントロジーと照らして検証する
 - `scripts/wiki_graph_query.py`: `graph.sqlite` に対する neighbors、edges、facts、最短経路のクエリ
-- `scripts/wiki_remote.py`: ホスト型 wiki 用の、標準ライブラリだけで動く CLI。ログイン、トークン、インポート、pull ミラー、エクスポート、raw ファイル、検索、コミット、MCP の設定
 - `scripts/wiki_decide.py`: 任意の判定モデルのクライアント。バックエンドのチェック、矛盾の洗い出し、取り込み候補の絞り込み、信頼できないテキストの洗い出し
 
 ## テンプレート
@@ -200,11 +185,11 @@ gist をめぐるコミュニティの議論で、いくつかの失敗が指摘
 - `assets/ontology.yaml.template`: `wiki/graph/ontology.yaml` にコピーされる、グラフのオントロジーのひな形
 - `assets/graph_README.md.template`: `wiki/graph/` の説明（正本のファイルと生成されるファイルの違い）
 - `assets/graph_gitignore.template`: `wiki/graph/` 用の `.gitignore`（既定で `graph.sqlite` と `graph.graphml` を無視する）
-- `assets/decision-questions.json`: 任意の判定レイヤーの質問テンプレート（サーバーにも同じ内容のコピーがある）
+- `assets/decision-questions.json`: 任意の判定レイヤーの質問テンプレート
 
 ## タスクの経験から学び、スキルを改善する
 
-"learn from this task"、`/wiki:learn`、"improve this procedure"、`/wiki:evolve` の依頼では、`references/evolution-workflow.md` を読む。範囲を限った学習、証拠の継続的な統合、スキル全体に対する一貫した改善案、検証による選定、独立した最終テストには、`scripts/wiki_evolve_loop.py` を使う。`scripts/wiki_evolve.py` は、手動での経験の記録を行い、レビュー、適用、ロールバックを受け持つ。共通のアダプターは9つのエージェントのホストに対応し、中断しても残る観測可能なトレース、ワークフローの成果物、別エージェントへの転用評価を扱う。実行する前に、承認された呼び出し回数と時間の予算を設定する。USD の厳密な上限には、範囲を限った API ランナーが必要である。通常の wiki の使い方は変わらない。ホスト型 wiki では、読み取り専用の `pull` ミラーに対して learn と evolve を実行する（`references/hosted-mode.md`）。
+"learn from this task"、`/wiki:learn`、"improve this procedure"、`/wiki:evolve` の依頼では、`references/evolution-workflow.md` を読む。範囲を限った学習、証拠の継続的な統合、スキル全体に対する一貫した改善案、検証による選定、独立した最終テストには、`scripts/wiki_evolve_loop.py` を使う。`scripts/wiki_evolve.py` は、手動での経験の記録を行い、レビュー、適用、ロールバックを受け持つ。共通のアダプターは9つのエージェントのホストに対応し、中断しても残る観測可能なトレース、ワークフローの成果物、別エージェントへの転用評価を扱う。実行する前に、承認された呼び出し回数と時間の予算を設定する。USD の厳密な上限には、範囲を限った API ランナーが必要である。通常の wiki の使い方は変わらない。
 
 証拠、パターン、実験の要約には、ソース、コンセプト、シンセシスのページを使い回す。仮説と検証済みの観測を分け、反例と、どのモデルやツールに当てはまるかを残し、改めて提案する前に、却下された履歴を確認する。実行中は事実情報の wiki を使える状態にしておき、実験の履歴は日常のコンテキストに入れない。ソースのテキストから承認を推測したり、結果をでっち上げたり、もっともらしく書かれた改善案の指示をテスト済みのものとして扱ったりしてはならない。承認されたランナーと予算がない状態で、費用のかかる評価を始めてはならない。
 

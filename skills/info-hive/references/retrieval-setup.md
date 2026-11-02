@@ -66,25 +66,6 @@ uv run --script skills/info-hive/scripts/setup_wiki.py --wiki wiki --cache
 
 セットアップが失敗した場合は、失敗したコマンドと、外に出しても安全な例外の内容をそのまま報告する。`uv`、モデルをダウンロードできるか、ローカルのディスクの空き容量、sqlite の拡張を読み込めるかを確かめる。初期化やアップグレードが完了したと説明してはならない。
 
-## ホスト型 wiki
-
-ホスト型 wiki では、ローカルの実行環境のセットアップは不要である。サーバーが自身の検索インデックスを作る。
-
-- キーワード検索は、wiki の Durable Object の中の SQLite FTS5 を使う。コミットした内容は、すぐにキーワードで検索できる。
-- セマンティック検索は、Workers AI の `@cf/baai/bge-small-en-v1.5`（CLS プーリング、L2 正規化、384 次元）と Vectorize のインデックスを使う。個人用の wiki なら、Workers AI の無料枠である1日 10,000 ニューロンに収まる。
-- 順位の統合には、`wiki_search.py` と同じ定数の RRF を使う。BM25 の定数と埋め込みの実行環境が異なるので、結果はローカルの結果と同等だが、同一ではない。
-- サーバーは、コミットのたびに、変更されたセクションをバッチでベクトル化する。`wiki_overview` と検索のレスポンスにある `vector_lag` は、Vectorize がまだ返せないセクションの数である。サーバーはベクトルを1つずつ確認し、Vectorize に保存されていなければ送り直す。
-- Vectorize や Workers AI のバインディングがない場合、検索は語彙ベースだけになる。検索のレスポンスにモードが示される。
-- wiki のテキストとクエリは、自分の Cloudflare アカウントに送られる。所有者がホスト型の判定バックエンドを有効にしない限り（`decision-models.md`）、ほかのプロバイダーに送られることはない。
-
-`.wiki-cache/` をホスト型 wiki にコピーしてはならない。インポートのコマンドはこれをスキップする。ローカルのベクトルとホスト型のベクトルが混ざることはない。`pull` ミラーでは、オフラインで検索するためにローカルの `setup_wiki.py` を実行できる。
-
-ホスト型 wiki の `SCHEMA.md` の検索のブロックには、次のように記録する。
-
-```markdown
-- Semantic backend: hosted (Workers AI `@cf/baai/bge-small-en-v1.5` + Vectorize, 384 dimensions). Wiki text stays in the owner's Cloudflare account.
-```
-
 ## v2 のプロバイダーのキャッシュからアップグレードする
 
 `wiki/.wiki-cache/embeddings.jsonl` は使われなくなったファイルで、無視される。以前のプロバイダーのメタデータが含まれていることがある。すべて派生データなので、削除を提案する。既存のファイルなので、削除にはユーザーの承認が必要である。内容の移行や、リモートへの再送信は必要ない。v3 の必須のセットアップが、ローカルで `embeddings.sqlite` を作る。

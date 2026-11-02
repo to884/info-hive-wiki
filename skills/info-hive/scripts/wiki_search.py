@@ -222,7 +222,7 @@ def collect_pages(wiki_root: Path, cache_path: Path | None = None) -> list[dict]
             continue
         if rel.parts[0] in {"indexes", "graph", "raw", ".wiki-cache", ".evolution"}:
             continue
-        rel_path = str(rel)
+        rel_path = rel.as_posix()
         try:
             raw = md_path.read_bytes()
         except OSError:

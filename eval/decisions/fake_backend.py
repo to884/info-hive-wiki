@@ -2,7 +2,7 @@
 """オフラインの判定テストと評価のスモーク実行に使う、決定的に動く System One のフェイクバックエンド。
 
 `answer(request)` は、トークンの重なりにもとづくヒューリスティックで質問を採点する。
-`serve(handler)` は、`/v1/systemone` と `/api/v1/decide` に応答するローカルの
+`serve(handler)` は、`/v1/systemone` に応答するローカルの
 HTTP サーバーを 127.0.0.1 で起動する。このフェイクがネットワークに接続することはない。
 """
 
@@ -115,8 +115,7 @@ def serve(handler: Handler = default_handler) -> tuple[ThreadingHTTPServer, str]
         def do_POST(self):  # noqa: N802
             length = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(length) or b"{}")
-            requests.append({"path": self.path, "auth": self.headers.get("Authorization"),
-                             "wiki": self.headers.get("X-LLM-Wiki"), "body": body})
+            requests.append({"path": self.path, "auth": self.headers.get("Authorization"), "body": body})
             status, payload, delay = handler(body)
             if delay:
                 time.sleep(delay)

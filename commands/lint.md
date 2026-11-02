@@ -17,12 +17,4 @@ argument-hint: "[--suggest-pages]"
 6. 承認された修正を適用したら、変わったインデックスの項目を更新し、lint の結果をまとめた行を `log.md` に1行追記する。
 7. lint のレポートが長すぎて、ユーザーが無理なく仕分けられない場合は、lint の頻度が合っていない（もっと頻繁にかけるべき）か、スキーマを見直す必要があるという兆候である。そのことをユーザーに指摘する。
 
-**ホスト型 wiki。** 特定した wiki がホスト型の URL である場合（または指示でホスト型の URL が指定されている場合）は、`skills/info-hive/references/hosted-mode.md` のホストモードを使う。MCP ツールを使い、MCP が使えないときは `python3 "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_remote.py"` を使う。上の手順は、次のように置き換える。
-
-- 手順 1: `wiki_overview` を呼び出して `SCHEMA.md` を得る。
-- 手順 2 と 2b: `wiki_lint` を呼び出す。構造の検出結果、グラフの検出結果、未解決のレビューフラグが1つの結果にまとめて返る。extract の手順は不要である。
-- 手順 4: `wiki_search` を `top_linked: 10` で呼び出し、そのあと `wiki_read` で読む。
-- 手順 6: 承認された修正は `wiki_commit` で適用する（`edit`、または `base_rev` を付けた `move` と `delete`）。`move` はリンクを書き換えないので、参照元のページも同じコミットで編集する。`log.md` の行は `append` 操作で追加する。
-- 未解決のレビューフラグは、ほかの検出結果と一緒に示す。ユーザーが判断してから、1件ずつ `wiki_remote.py review --resolve <id> --status accepted|dismissed` で解決する。
-
-ユーザーが任意の判定レイヤーを有効にしている場合は、`wiki_graph_lint.py` に `--decide` を、`wiki_lint` に `decide: true` を付ける。ローカルの wiki では `wiki_decide.py contradictions` も提案する。詳しくは `skills/info-hive/references/decision-models.md` を参照。
+ユーザーが任意の判定レイヤーを有効にしている場合は、`wiki_graph_lint.py` に `--decide` を付ける。`wiki_decide.py contradictions` も提案する。詳しくは `skills/info-hive/references/decision-models.md` を参照。

@@ -21,13 +21,4 @@ argument-hint: "<質問>"
 7. wiki に関係する内容がない場合は、そうはっきり伝える。話をでっち上げてはならない。足りない部分を補うために取り込むとよいソースを提案する。
 8. 回答が新しいつながりを見いだすものであれば、今後のクエリで役立つように `<WIKI_ROOT>/synthesis/` に保存することを提案する。提案するのを基本とし、ささいな回答ならユーザーが断れるようにする。
 
-**ホスト型 wiki。** 特定した wiki がホスト型の URL である場合（または指示でホスト型の URL が指定されている場合）は、`skills/info-hive/references/hosted-mode.md` のホストモードを使う。MCP ツールを使い、MCP が使えないときは `python3 "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_remote.py"` を使う。上の手順は、次のように置き換える。
-
-- 手順 1 と 2: `wiki_overview` を呼び出す。`SCHEMA.md` と `index.md` が返る。分割されたインデックスは `wiki_read` で読む。
-- 手順 3: `paths` を指定して `wiki_read` を呼び出す。
-- 手順 4: `query` と `top`、必要に応じて `type`、`tag`、`since`、`granularity` のフィルターを指定して `wiki_search` を呼び出す。ローカルの検索スクリプトは実行しない。
-- 手順 5: `backlinks: "<slug>"` を指定して `wiki_search` を呼び出す。
-- 手順 5b: 同じ操作を `wiki_graph` で行う。
-- 手順 8: `wiki_commit` を1回送る。シンセシスのページには `create` 操作、インデックスの行と `log.md` の行には `append` 操作を使う。
-
-ユーザーが任意の判定レイヤーを有効にしている場合は、ローカルの検索に `--decide` を、`wiki_search` に `decide: true` を付ける。すべての行が除外された場合は、wiki にはおそらく答えがないとユーザーに伝える。詳しくは `skills/info-hive/references/decision-models.md` を参照。
+ユーザーが任意の判定レイヤーを有効にしている場合は、検索スクリプトに `--decide` を付ける。すべての行が除外された場合は、wiki にはおそらく答えがないとユーザーに伝える。詳しくは `skills/info-hive/references/decision-models.md` を参照。

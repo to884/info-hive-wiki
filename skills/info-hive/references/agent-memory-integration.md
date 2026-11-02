@@ -53,24 +53,6 @@ My canonical LLM-curated wiki is at `~/wiki/` and is independent of any project.
 When work in any project produces durable facts, decisions, incidents, or post-mortems, preserve them in `~/wiki/` using the `info-hive` skill. Put captured source material under `~/wiki/raw/`. Do not ingest an entire project automatically; add only requested sources and durable findings.
 ```
 
-## ホスト型 wiki の定型文
-
-wiki が LLM Wiki のサーバー上にある場合は、この形を使う（`hosted-mode.md` を参照）。個人用の wiki ならグローバルな指示に、プロジェクトの wiki ならプロジェクトのメモリファイルに書く。URL は置き換える。トークンをメモリファイルに書いてはならない。
-
-```markdown
-## LLM Wiki
-
-My canonical LLM-curated wiki is hosted at `https://<worker>.workers.dev` (MCP server `llm-wiki`, endpoint `/mcp`). Use the `info-hive` skill in hosted mode.
-
-Call `wiki_overview` first and follow the `SCHEMA.md` it returns. Use `index.md` first, then `wiki_search`. Cite with `[[wikilinks]]`. Write with `wiki_commit`: `edit` operations for surgical changes, `append` for `log.md` and index lines. After a conflict, read the page again and retry. If MCP is not available, use `python3 scripts/wiki_remote.py` with the token in `LLM_WIKI_TOKEN`.
-
-Preserve durable facts, decisions and post-mortems from any project in this wiki. Do not ingest a full project automatically. A local `pull` mirror, if present, is read-only.
-```
-
-エージェントには、MCP サーバーの設定とトークンも必要である。`python3 scripts/wiki_remote.py mcp-config <client>` を実行して結果を示し、ユーザーが承認してから設定を追加する。エージェントごとに別のトークンを使うので、どのコミットをどのエージェントが行ったかが分かる。
-
-ローカルの wiki をホスト型 wiki に移行したら、ローカル用の定型文を置き換える。両方を残してはならない。定型文を変えるのは、インポートの検証に合格し、ユーザーが文面を承認してからにする。
-
 ## 初期化時のやり取り
 
 初期化の時点で、ディレクトリ構成ができてスキーマの説明が終わったら、定型文を提案する。黙って追記してはならない。メモリファイルはユーザーのものである。
@@ -96,7 +78,6 @@ This project has an LLM-curated wiki at `wiki/`. Read `wiki/index.md` before ans
 定型文は案内であり、手順書ではない。新しいページの種類、新しいタグ、分野ごとの規約といった wiki の変更のほとんどは、メモリファイルではなく `SCHEMA.md` で行う。メモリファイルを変えるのは、次の場合だけである。
 
 - wiki を標準以外のディレクトリに移した（パスを直す）。
-- wiki をホスト型のサーバーに移した（定型文をホスト型 wiki 用のものに置き換える）。
 - wiki のインデックスを分割した（エージェントがそこから読み始めるように、`wiki/indexes/` を明記する）。
 - wiki を廃止した（定型文を削除する。参照先のない案内を残さない）。
 
