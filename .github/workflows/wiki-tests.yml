@@ -21,6 +21,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: python -m pip install PyYAML==6.0.3 fastembed==0.8.0 sqlite-vec==0.1.9
       - run: python -m compileall -q skills/info-hive/scripts eval/evolution eval/decisions
+      - run: python eval/check_encoding.py
       - run: python -m unittest discover -s eval/retrieval -p 'test_*.py'
       - run: python skills/info-hive/scripts/test_link_resolution.py
       - run: python eval/evolution/test_evolution.py
@@ -30,16 +31,13 @@ jobs:
       - run: python eval/decisions/test_decisions.py
 
   # Linux と同じテストを Windows で動かす。
-  # 文字コードの修正（P1）が終わるまでは、このジョブが文字コードで落ちるのは想定どおり。
-  #
   # cp932 の再現について: Python の open() や subprocess の text=True が使う既定の文字コードは、
   # Windows ではシステムロケールの ANSI コードページ（GetACP）で決まる。GitHub の Windows ランナーは
   # en-US で cp1252 と見込まれ、UTF-8 の日本語をほぼ例外なく読めてしまうので、cp932 の不具合を再現しない。
   # システムロケールの変更（Set-WinSystemLocale ja-JP）は再起動しないと効かず、ホスト型ランナーでは使えない。
   # chcp 932 はコンソールのコードページ、PYTHONIOENCODING は標準入出力だけを変え、ファイルの読み書きには効かない。
   # そのため、ここでは PYTHONUTF8=0 で UTF-8 モードを確実に切る（Python 3.15 からは既定で有効になる）ことに留める。
-  # encoding の付け忘れは P1 で静的に検査する（例: -X warn_default_encoding で EncodingWarning を出し、
-  # 自前のスクリプトから出たものだけを失敗にする）。
+  # encoding の付け忘れは、両方のジョブの eval/check_encoding.py で静的に検査する。
   python-windows:
     runs-on: windows-latest
     strategy:
@@ -61,6 +59,7 @@ jobs:
       - id: deps
         run: python -m pip install PyYAML==6.0.3 fastembed==0.8.0 sqlite-vec==0.1.9
       - run: python -m compileall -q skills/info-hive/scripts eval/evolution eval/decisions
+      - run: python eval/check_encoding.py
       # どのテストが落ちるかを一度に見られるよう、前のテストが失敗しても続けて動かす。
       - if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: python -m unittest discover -s eval/retrieval -p 'test_*.py'
