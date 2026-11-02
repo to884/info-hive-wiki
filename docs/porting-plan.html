@@ -1,0 +1,982 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>info-hive 移植計画</title>
+<style>
+/*
+  色: 地 #F5F7FA / 墨 #1B2230 / 鼠 #5B6576 / 罫 #D8DEE7 / 藍 #284E86
+  状態色（アクセントとは別系統）: 壊れる #B0362E / 劣化 #9A620F / 見た目 #5B6576
+  書体: 見出しは明朝、本文はゴシック、コードは等幅。CJK フォントは容量が大きいため埋め込まず、OS の書体を使う。
+  レイアウト: 広い画面では左に目次を固定し、本文は 1 段。狭い画面では目次を折りたたむ。
+*/
+:root {
+  --ground: #F5F7FA;
+  --surface: #FFFFFF;
+  --ink: #1B2230;
+  --muted: #5B6576;
+  --rule: #D8DEE7;
+  --accent: #284E86;
+  --accent-soft: #E6EDF7;
+  --code-bg: #EEF1F5;
+  --sev-break: #B0362E;
+  --sev-break-bg: #F8E7E5;
+  --sev-degrade: #9A620F;
+  --sev-degrade-bg: #F7EEDC;
+  --sev-cosmetic: #5B6576;
+  --sev-cosmetic-bg: #ECEFF3;
+  --font-display: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN", "Noto Serif JP", serif;
+  --font-body: "Hiragino Sans", "Yu Gothic UI", "Yu Gothic", "YuGothic", "Meiryo", "Noto Sans JP", sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, ui-monospace, "BIZ UDGothic", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #12161D;
+    --surface: #181D26;
+    --ink: #E3E8EF;
+    --muted: #9AA4B5;
+    --rule: #2B3340;
+    --accent: #8FB3EA;
+    --accent-soft: #1E2A3D;
+    --code-bg: #1F2530;
+    --sev-break: #F0938B;
+    --sev-break-bg: #3A1F1E;
+    --sev-degrade: #E3B566;
+    --sev-degrade-bg: #352A17;
+    --sev-cosmetic: #AEB7C6;
+    --sev-cosmetic-bg: #252B35;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #12161D;
+  --surface: #181D26;
+  --ink: #E3E8EF;
+  --muted: #9AA4B5;
+  --rule: #2B3340;
+  --accent: #8FB3EA;
+  --accent-soft: #1E2A3D;
+  --code-bg: #1F2530;
+  --sev-break: #F0938B;
+  --sev-break-bg: #3A1F1E;
+  --sev-degrade: #E3B566;
+  --sev-degrade-bg: #352A17;
+  --sev-cosmetic: #AEB7C6;
+  --sev-cosmetic-bg: #252B35;
+}
+:root[data-theme="light"] {
+  --ground: #F5F7FA;
+  --surface: #FFFFFF;
+  --ink: #1B2230;
+  --muted: #5B6576;
+  --rule: #D8DEE7;
+  --accent: #284E86;
+  --accent-soft: #E6EDF7;
+  --code-bg: #EEF1F5;
+  --sev-break: #B0362E;
+  --sev-break-bg: #F8E7E5;
+  --sev-degrade: #9A620F;
+  --sev-degrade-bg: #F7EEDC;
+  --sev-cosmetic: #5B6576;
+  --sev-cosmetic-bg: #ECEFF3;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15.5px;
+  line-height: 1.85;
+}
+a { color: var(--accent); text-underline-offset: 0.2em; }
+a:focus-visible, summary:focus-visible, button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--code-bg);
+  padding: 0.08em 0.35em;
+  border-radius: 3px;
+  overflow-wrap: anywhere;
+}
+h1, h2, h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.45;
+  text-wrap: balance;
+  margin: 0;
+}
+h1 { font-size: 1.9rem; letter-spacing: 0.02em; }
+h2 { font-size: 1.4rem; }
+h3 { font-size: 1.1rem; }
+p, ul, ol { margin: 0; }
+ul, ol { padding-left: 1.4em; }
+li + li { margin-top: 0.3em; }
+
+.shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+@media (min-width: 1000px) {
+  .shell {
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 48px;
+    padding: 0 32px;
+  }
+}
+
+/* 目次 */
+.toc { padding: 24px 0 0; }
+.toc details { border-bottom: 1px solid var(--rule); padding-bottom: 12px; }
+.toc summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+.toc ol { list-style: none; padding: 0; margin-top: 8px; display: grid; gap: 2px; }
+.toc li + li { margin-top: 0; }
+.toc a {
+  display: block;
+  text-decoration: none;
+  color: var(--ink);
+  font-size: 0.9rem;
+  padding: 3px 8px;
+  border-left: 2px solid transparent;
+}
+.toc a:hover { border-left-color: var(--accent); color: var(--accent); }
+@media (min-width: 1000px) {
+  .toc { position: sticky; top: 0; align-self: start; max-height: 100vh; overflow-y: auto; padding-top: 48px; }
+  .toc details { border-bottom: 0; }
+}
+
+main { min-width: 0; padding: 32px 0 96px; }
+@media (min-width: 1000px) { main { padding-top: 48px; } }
+.content { max-width: 46rem; display: grid; grid-template-columns: minmax(0, 1fr); gap: 64px; }
+.content > *, section > * { min-width: 0; }
+section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; scroll-margin-top: 16px; }
+section > p, section > ul, section > ol, .prose { max-width: 40em; }
+
+/* 表題部 */
+.masthead { display: grid; gap: 14px; padding-bottom: 28px; border-bottom: 1px solid var(--rule); }
+.eyebrow { font-size: 0.78rem; letter-spacing: 0.14em; color: var(--muted); }
+.meta {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 16px;
+  font-size: 0.88rem;
+  margin: 0;
+}
+.meta dt { color: var(--muted); }
+.meta dd { margin: 0; color: var(--ink); }
+.lede { font-size: 1.05rem; max-width: 38em; }
+
+.sec-head { display: flex; align-items: baseline; gap: 12px; }
+.sec-num { font-family: var(--font-mono); font-size: 0.85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* 判断の区分 */
+.ledger { display: grid; gap: 12px; }
+.ledger-group { display: grid; gap: 8px; }
+.ledger-label {
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 4px;
+}
+.item {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 14px 16px;
+  display: grid;
+  gap: 6px;
+}
+.item h3 { font-family: var(--font-body); font-size: 1rem; font-weight: 700; }
+.item p { font-size: 0.95rem; }
+.item .why { color: var(--muted); font-size: 0.88rem; }
+.item .src { color: var(--muted); font-size: 0.82rem; }
+
+/* 表 */
+.table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 4px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.88rem; line-height: 1.65; }
+caption { text-align: left; padding: 10px 12px; font-weight: 700; caption-side: top; border-bottom: 1px solid var(--rule); }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--rule); }
+tr:last-child td { border-bottom: 0; }
+thead th { font-size: 0.78rem; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; background: var(--ground); white-space: nowrap; }
+td.loc { font-family: var(--font-mono); font-size: 0.8rem; color: var(--muted); min-width: 13em; }
+td.nowrap { white-space: nowrap; }
+.wide-table { min-width: 640px; }
+
+.sev {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0 7px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.sev-break { color: var(--sev-break); background: var(--sev-break-bg); }
+.sev-degrade { color: var(--sev-degrade); background: var(--sev-degrade-bg); }
+.sev-cosmetic { color: var(--sev-cosmetic); background: var(--sev-cosmetic-bg); }
+
+/* 段階 */
+.phases { list-style: none; padding: 0; display: grid; }
+.phase {
+  display: grid;
+  grid-template-columns: 3.2rem minmax(0, 1fr);
+  gap: 0 16px;
+  padding: 20px 0;
+  border-top: 1px solid var(--rule);
+}
+.phase + .phase { margin-top: 0; }
+.phase-id {
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  padding-top: 2px;
+}
+.phase-body { display: grid; gap: 10px; min-width: 0; }
+.phase-body h3 { font-size: 1.15rem; }
+.phase-deps { font-size: 0.85rem; color: var(--muted); }
+.phase-deps strong { color: var(--ink); font-weight: 600; }
+.checks { list-style: none; padding: 0; }
+.checks li { padding-left: 1.4em; position: relative; }
+.checks li::before {
+  content: "";
+  position: absolute;
+  left: 0.15em;
+  top: 0.62em;
+  width: 0.62em;
+  height: 0.62em;
+  border: 1.5px solid var(--muted);
+  border-radius: 2px;
+}
+
+/* 依存関係の図 */
+.flow-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 4px; background: var(--surface); padding: 12px; }
+.flow-wrap svg { display: block; min-width: 600px; width: 100%; height: auto; }
+.flow-wrap .n-box { fill: var(--surface); stroke: var(--rule); stroke-width: 1.5; }
+.flow-wrap .n-box.main { stroke: var(--accent); }
+.flow-wrap text { fill: var(--ink); font-family: var(--font-body); font-size: 13px; }
+.flow-wrap .n-id { fill: var(--accent); font-family: var(--font-mono); font-size: 12px; }
+.flow-wrap .edge { stroke: var(--muted); stroke-width: 1.4; fill: none; }
+.flow-wrap .arrow { fill: var(--muted); }
+
+.callout {
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  padding: 12px 16px;
+  border-radius: 0 4px 4px 0;
+  font-size: 0.95rem;
+}
+
+details.appendix { border: 1px solid var(--rule); border-radius: 4px; background: var(--surface); }
+details.appendix > summary { cursor: pointer; padding: 12px 16px; font-weight: 700; }
+details.appendix > .table-wrap { border: 0; border-top: 1px solid var(--rule); border-radius: 0; }
+
+.theme-toggle {
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 2px 10px;
+  cursor: pointer;
+  justify-self: start;
+}
+
+footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--rule); padding-top: 16px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+@media print {
+  .toc, .theme-toggle { display: none; }
+  .shell { display: block; }
+  body { background: #fff; }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+
+<nav class="toc" aria-label="目次">
+  <details id="toc-details" open>
+    <summary>目次</summary>
+    <ol>
+      <li><a href="#goal">1. 目的と範囲</a></li>
+      <li><a href="#findings">2. 調査で分かったこと</a></li>
+      <li><a href="#decisions">3. 方針</a></li>
+      <li><a href="#phases">4. 作業の段階</a></li>
+      <li><a href="#acceptance">5. 完了の判定</a></li>
+      <li><a href="#risks">6. リスク</a></li>
+      <li><a href="#answers">7. 質問への回答</a></li>
+      <li><a href="#appendix">8. 付録: 修正箇所の一覧</a></li>
+    </ol>
+  </details>
+</nav>
+
+<main id="top">
+<div class="content">
+
+<header class="masthead">
+  <p class="eyebrow">移植計画</p>
+  <h1>llm-wiki-plugin を日本語向けに移植する</h1>
+  <p class="lede"><code>praneybehl/llm-wiki-plugin</code> は文書を訳しても日本語の wiki では動きません。検索のトークン化、埋め込みモデル、Windows の文字コードが英語前提だからです。この計画は、日本語に特化した移植版を <code>info-hive</code> リポジトリに作る手順をまとめたものです。</p>
+  <dl class="meta">
+    <dt>移植元</dt><dd><code>praneybehl/llm-wiki-plugin</code> v4.0.1（コミット <code>2d24ccf</code>、MIT ライセンス）</dd>
+    <dt>移植先</dt><dd><code>C:\Works\info-hive</code>（現在は初回コミットの <code>AGENTS.md</code> のみ）</dd>
+    <dt>作成日</dt><dd>2026-11-02</dd>
+    <dt>状態</dt><dd>2026-11-02 に質問 10 問の回答を受け、方針 C〜J は確定。方針 C（名前）は、コマンド名の実測結果を受けて同日に決め直した。4 モデルのレビュー（<code>docs/agent-runs/2026-11-02-porting-plan-review/summary.md</code>）の指摘を反映済み。方針 A・B と、見直しとレビューで加えた項目も同日に決定した（<a href="#answers">7 節</a>）。未決は、実装中に決める 1 点だけ。</dd>
+  </dl>
+  <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">表示: 自動</button>
+</header>
+
+<section id="goal" aria-labelledby="goal-h">
+  <div class="sec-head"><span class="sec-num">01</span><h2 id="goal-h">目的と範囲</h2></div>
+  <p>依頼の内容は次の 2 点です。</p>
+  <ul>
+    <li><code>llm-wiki-plugin</code> は日本語に対応していない。</li>
+    <li>日本語に特化した移植版を <code>info-hive</code> リポジトリに作る。</li>
+  </ul>
+  <p class="prose">ここでいう「対応」は、日本語のページ・クエリ・ファイル名で、取り込み、検索、lint、統計、グラフ、判定、評価ループがどれも正しく動くことを指します。文書やコメントの翻訳だけでは足りません。日英が混ざった wiki（技術用語は英語、本文は日本語）が普通にあると想定し、英語の扱いを悪くしないことも条件に含めます。</p>
+  <p class="prose">ホスト型 wiki（Cloudflare のサーバーと、それにつなぐ機能）は対象外です（<a href="#answers">Q4</a>）。</p>
+</section>
+
+<section id="findings" aria-labelledby="findings-h">
+  <div class="sec-head"><span class="sec-num">02</span><h2 id="findings-h">調査で分かったこと</h2></div>
+
+  <h3>手元の llm-wiki-plugin の状態</h3>
+  <ul>
+    <li><code>C:\Works\llm-wiki-plugin</code>（自分のフォーク）には、未コミットの日本語訳が 94 ファイル分あります。README、SKILL.md、コマンド 10 本、references 12 本、docs/ 全体、テンプレートの本文、Python のコメントと docstring が対象です。</li>
+    <li>Python は、docstring とコメントを除くと、訳の前後で構文木が同一でした。コード、正規表現、文字列リテラルは何も変わっていません。ただし docstring は <code>argparse</code> の説明に使われるので、<code>--help</code> の出力はすでに一部が日本語です（<code>—</code> を含み、cp932 の出力で落ちる）。</li>
+    <li>テンプレートの見出しと機械が読むキーは、意図して英語のまま残してあります。<code>init_wiki.py --upgrade</code> が <code>## Skill evolution</code> などの見出しを行単位で照合するためで、この判断は正しいです。</li>
+  </ul>
+
+  <h3>日本語で何が起きるか</h3>
+  <p class="prose">Python スクリプトと指示文書について、主な項目を影響の大きい順に並べます。行番号つきの一覧は <a href="#appendix">8 節</a> にあります。</p>
+
+  <div class="table-wrap">
+    <table class="wide-table">
+      <caption>主な問題</caption>
+      <thead>
+        <tr><th scope="col">影響</th><th scope="col">問題</th><th scope="col">日本語での症状</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="nowrap"><span class="sev sev-break">壊れる</span></td>
+          <td>検索のトークン化が <code>[a-z0-9]+</code> だけ</td>
+          <td>日本語だけのクエリはトークンが 0 個になり、「Empty query.」で終わる。埋め込み検索まで進まないので、ハイブリッド検索でも 0 件。日本語のページは BM25 の索引にほぼ何も載らない。</td>
+        </tr>
+        <tr>
+          <td class="nowrap"><span class="sev sev-break">壊れる</span></td>
+          <td>埋め込みモデルが英語専用（<code>bge-small-en-v1.5</code>）</td>
+          <td>意味検索がほぼ雑音になる。類似度のしきい値（距離 0.35）も英語で調整した値。</td>
+        </tr>
+        <tr>
+          <td class="nowrap"><span class="sev sev-break">壊れる</span></td>
+          <td>Windows で文字コードを指定していない</td>
+          <td>このマシンは cp932 が既定。日本語入りのテンプレートを <code>read_text()</code> すると <code>UnicodeDecodeError</code>。パイプ出力は文字化けし、<code>—</code> や <code>𠮷</code> を出力すると落ちる。評価ループが Node の CLI に渡す JSON も cp932 になる。</td>
+        </tr>
+        <tr>
+          <td class="nowrap"><span class="sev sev-break">壊れる</span></td>
+          <td>ファイル名とリンクの Unicode 正規化がない</td>
+          <td>macOS の NFD ファイル名（<code>ガイド.md</code> など）が NFC のリンクと一致せず、リンク切れ・孤立ページ・重複スラッグとして誤検出される。</td>
+        </tr>
+        <tr>
+          <td class="nowrap"><span class="sev sev-break">壊れる</span></td>
+          <td>解析キャッシュが古い解析結果を使い回す</td>
+          <td><code>wiki_search.py</code> は、ファイルの SHA-256 が同じなら保存済みの frontmatter・リンク・セクションを再利用する。キャッシュの形式番号は固定なので、P1 で BOM や frontmatter の解析を直しても既存の wiki には効かない。埋め込みの接頭辞や分割方式を変えても、索引のハッシュに現れないため作り直されない。</td>
+        </tr>
+        <tr>
+          <td class="nowrap"><span class="sev sev-break">壊れる</span></td>
+          <td>評価が日本語のクエリで止まる</td>
+          <td>日本語のクエリで <code>wiki_search.py</code> が JSON を出さずに終わり、<code>run_eval.py:96</code> の <code>json.loads</code> が失敗する。P2 の基準測定は「0 件」ではなくエラーになる。また <code>--gate</code> は方式どうしの相対比較しかしないので、英語の成績が全体に下がっても通る。</td>
+        </tr>
+        <tr>
+          <td class="nowrap"><span class="sev sev-break">壊れる</span></td>
+          <td>評価ループが frontmatter を壊す</td>
+          <td><code>wiki_evolve_loop.py</code> は出典の一覧を <code>ensure_ascii</code> の既定のまま frontmatter に書く。日本語のパスは <code>\uXXXX</code> になり、手書きの解析器は元に戻さない。<code>:429</code> は文字コードを指定せずに書き、直後に UTF-8 で読む。</td>
+        </tr>
+        <tr>
+          <td class="nowrap"><span class="sev sev-break">壊れる</span></td>
+          <td>判定レイヤー D2 の文分割が <code>[.!?]</code> だけ</td>
+          <td>日本語の段落全体が 1 文になり、300 文字で切られる。行をまたぐ引用は空白の扱いの違いで一致しない。根拠のある関係が「根拠なし」と判定される。</td>
+        </tr>
+        <tr>
+          <td class="nowrap"><span class="sev sev-degrade">劣化</span></td>
+          <td>語数とページの大きさを空白区切り・行数で数える</td>
+          <td>日本語の段落は 1 語と数えられる。改行しない段落は 800 行の上限をすり抜ける。</td>
+        </tr>
+        <tr>
+          <td class="nowrap"><span class="sev sev-degrade">劣化</span></td>
+          <td>frontmatter の解析が ASCII 前提</td>
+          <td>全角の <code>：</code> の行が捨てられる。<code>[機械学習、深層学習]</code> が 1 つのタグになる。<code>ＡＩ</code> と <code>AI</code> が別のタグになる。BOM 付きの UTF-8 は frontmatter なしと扱われる。</td>
+        </tr>
+        <tr>
+          <td class="nowrap"><span class="sev sev-degrade">劣化</span></td>
+          <td>新規ページの提案が大文字始まりの英語句だけを拾う</td>
+          <td><code>wiki_lint.py --suggest-pages</code> が日本語の用語をひとつも提案しない。</td>
+        </tr>
+        <tr>
+          <td class="nowrap"><span class="sev sev-degrade">劣化</span></td>
+          <td>Shift_JIS のソースと漢字の日付</td>
+          <td>Shift_JIS のファイルは黙って読み飛ばされる。<code>2026年11月2日</code> は日付と認識されず、<code>--since</code> と更新停止チェックの対象から外れる。</td>
+        </tr>
+        <tr>
+          <td class="nowrap"><span class="sev sev-degrade">劣化</span></td>
+          <td>判定モデルへの質問文が英語</td>
+          <td>日本語での精度は未検証。</td>
+        </tr>
+        <tr>
+          <td class="nowrap"><span class="sev sev-cosmetic">見た目</span></td>
+          <td>出力の表示まわり</td>
+          <td>判定・lint・グラフの <code>json.dumps</code> が日本語を <code>\uXXXX</code> にする（検索の JSON 出力はすでに <code>ensure_ascii=False</code>）。全角文字で表の桁がずれる。出力メッセージの多くが英語。</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>変えてはいけないもの</h3>
+  <p class="prose">次の文字列はスクリプトやテストが字句どおりに読むので、訳したり変えたりすると既存の wiki と互換がなくなります。このうち frontmatter のキーと、<code>type</code>・<code>kind</code> の値は、方針 B で日本語の別名も読めるようにします。書くときは英語のままです。</p>
+  <ul>
+    <li>frontmatter のキー（<code>type</code>、<code>title</code>、<code>tags</code>、<code>sources</code>、<code>created</code>、<code>updated</code> など）と、<code>type</code> の値（<code>source</code>、<code>entity</code>、<code>concept</code>、<code>synthesis</code>）</li>
+    <li>グラフの述語名（<code>mentions</code>、<code>sourced_from</code> など）と <code>kind</code> の値。説明文は訳してよい。</li>
+    <li><code>SCHEMA.md</code> のアップグレード検出用の目印 6 つ（行単位で照合する見出し 4 つと、部分文字列で照合する 2 つ）、固定のファイル名とディレクトリ名（<code>index.md</code>、<code>log.md</code>、<code>raw/</code>、<code>graph/</code>、<code>.wiki-cache/</code> など）</li>
+    <li>日付形式 <code>YYYY-MM-DD</code> と wikilink の書き方 <code>[[slug|表示名]]</code></li>
+    <li>スクリプトの JSON 出力のキー（<code>orphans</code>、<code>broken_links</code>、<code>results</code> など）とコマンドラインの引数名。エージェントとテストが読む。</li>
+  </ul>
+  <p class="prose">一方、ページの見出し（<code>## Sources</code> など）、ログ行の書式、スラッグの命名規則は、どのスクリプトも解析していないので自由に変えられます。</p>
+
+  <h3>移植元の更新ペース</h3>
+  <p class="prose">直近 3 か月で 36 コミットです。CHANGELOG では 2026-07-20 以降に 14 リリース（2.0.0〜2.0.7 の 8 本と 3.0.0〜4.0.1 の 6 本、うちメジャー 3 回）があります。更新は短期間に集中して入ります。</p>
+</section>
+
+<section id="decisions" aria-labelledby="decisions-h">
+  <div class="sec-head"><span class="sec-num">03</span><h2 id="decisions-h">方針</h2></div>
+  <p class="prose">どの方針も確定です。各項目の末尾に、根拠となった依頼または回答を示します。回答の一覧は <a href="#answers">7 節</a> にあります。</p>
+
+  <div class="ledger">
+    <div class="ledger-group">
+      <p class="ledger-label">確定</p>
+
+      <div class="item">
+        <h3>A. コピーして独立させ、v0.1.0 から始める</h3>
+        <p>v4.0.1（<code>2d24ccf</code>）のファイルを履歴なしで取り込み、以後は移植元を追いかけずに独立して育てます。バージョンは v0.1.0 から始めます。移植元のスクリプト修正は、必要なものだけ移植元を <code>git fetch</code> して <code>cherry-pick</code> するか、手で移します。起点のコミットと取り込んだ修正は <code>UPSTREAM.md</code> に記録します。info-hive の修正を移植元に送ることはしません（Q9）。</p>
+        <p><code>eval/evolution/workflows/build_suite.py</code> は移植元の固定コミットを <code>git show</code> で読むので、取り込まずに <code>UPSTREAM.md</code> から参照します。取り込む前に、未コミットの訳の差分（またはファイルごとのハッシュ）を保存します。</p>
+        <p class="why">理由: 日本語訳がほぼすべての文書に、トークン化の変更がスクリプトとテストの基準データにまたがります。更新の速い移植元をマージで追うと、毎回大きな衝突が起きます。レビューでは履歴ごと取り込む案と 2 対 2 に分かれましたが、共通の履歴がなくても <code>cherry-pick</code> はできるので、コピーでも足ります。</p>
+        <p class="src">根拠: 方針 A の質問への回答</p>
+      </div>
+
+      <div class="item">
+        <h3>B. 英語で書き、frontmatter のキーと type・kind の値は日本語でも読む</h3>
+        <ul>
+          <li>frontmatter のキーは、日本語の別名でも読めるようにする（例: <code>タイトル</code> → <code>title</code>、<code>種類</code> → <code>type</code>、<code>タグ</code> → <code>tags</code>、<code>出典</code> → <code>sources</code>、<code>作成日</code> → <code>created</code>、<code>更新日</code> → <code>updated</code>）。</li>
+          <li><code>type</code> と <code>kind</code> の値も、日本語の別名で読めるようにする（例: <code>概念</code> → <code>concept</code>、<code>人物</code> → <code>person</code>）。</li>
+          <li>スクリプト、テンプレート、エージェントが書くときは英語のキーと値を使う。日本語は読むだけにする。</li>
+          <li>グラフの述語名、<code>--json</code> の出力のキー、コマンドラインの引数名、<code>SCHEMA.md</code> の目印、固定のファイル名とディレクトリ名は英語のまま残す。</li>
+          <li>別名の対応表は 1 か所に置き、検索・lint・統計の手書きの解析器と、グラフの PyYAML の両方が同じ表で英語に直す。同じページに <code>title</code> と <code>タイトル</code> のように両方がある場合は lint で指摘する。対応表は <code>SCHEMA.md</code> のテンプレートにも載せる。</li>
+        </ul>
+        <p class="why">理由: 人が日本語で書いたページを読めるようにしつつ、移植元の wiki や Obsidian のプラグインとの互換を保つためです。</p>
+        <p class="src">根拠: 方針 B の質問と、範囲を確かめる追加の質問への回答</p>
+      </div>
+
+      <div class="item">
+        <h3>C. 名前: プラグイン名を <code>wiki</code> にし、コマンドを <code>/wiki:query</code> の形にする</h3>
+        <ul>
+          <li>プラグイン名は <code>wiki</code> にする。リポジトリ名とマーケットプレイス名は <code>info-hive</code> のままにする（導入時の指定は <code>wiki@info-hive</code>）。</li>
+          <li><code>commands/wiki/*.md</code> を <code>commands/*.md</code> に移し、コマンドを <code>/wiki:init</code>、<code>/wiki:query</code> などにする。移植元の README や references にある <code>/wiki:*</code> の表記がそのまま正しくなる。</li>
+          <li>スキル名は <code>info-hive</code> のままにする（呼び出し名は <code>wiki:info-hive</code>）。</li>
+          <li>モデルのキャッシュは <code>~/.cache/info-hive/fastembed</code>、環境変数は <code>INFO_HIVE_*</code> にする。移植元のキャッシュや設定を読んだり上書きしたりしない。</li>
+        </ul>
+        <p class="why">実測（Claude Code 2.1.316、2026-11-02）: 試験用のプラグインでは、<code>commands/wiki/hello.md</code> が <code>/nstest:wiki:hello</code>、<code>commands/flat.md</code> が <code>/nstest:flat</code> として登録された。短い形の <code>/wiki:hello</code> と <code>/hello</code> では起動しなかった。コマンド名には必ずプラグイン名が付くため、移植元のコマンドは実際には <code>/llm-wiki:wiki:query</code> であり、info-hive の <code>/wiki:query</code> とは衝突しない。</p>
+        <p class="src">根拠: Q1 の再質問、追加の質問。最初の回答（プラグイン名 info-hive、コマンド <code>/wiki:*</code> を維持）は、実測で両立しないと分かったため決め直した。</p>
+      </div>
+
+      <div class="item">
+        <h3>D. スラッグに日本語を許す</h3>
+        <p>ファイル名は <code>機械学習.md</code> のように日本語で付けてよいとします。英語の固有名詞は英語のままでかまいません。比較の前にファイル名とリンク先を NFC に正規化します。</p>
+        <p class="src">根拠: Q2</p>
+      </div>
+
+      <div class="item">
+        <h3>E. トークン化: NFKC → 小文字化 → ASCII の語 ＋ 日本語の文字 bigram</h3>
+        <p>英数字は今までどおり語単位で、かな・漢字は 2 文字ずつ重ねて切り出します（1 文字だけの並びは 1 文字で）。形態素解析（SudachiPy など）は既定では使いません。P3 の評価で bigram より明らかに良ければ、入れたい人だけが使える任意の機能として追加します。</p>
+        <p>この定義だけでは、本文の「消費税」が「消費」「費税」になり、「税」「癌」のような単漢字のクエリが当たりません。そこで漢字は 1 文字単位（unigram）も索引に加え、文字種（漢字、ひらがな、カタカナ、英数字）の境界で区切ります。索引の大きさは P3 で測ります。</p>
+        <p class="why">理由: 辞書が要らず、依存が増えません。trigram は「東京」「検索」のような 2 文字語に当たりません。</p>
+        <p class="src">根拠: Q6、単漢字の質問への回答</p>
+      </div>
+
+      <div class="item">
+        <h3>F. 埋め込みモデル: 既定は 0.3 GB 程度まで</h3>
+        <p>既定のモデルは 0.3 GB 程度に収まるものから、日本語の評価セットで選びます。大きいモデルは設定で選べるようにします。類似度のしきい値は、選んだモデルで測り直します。</p>
+        <ul>
+          <li>既定の第一候補: <code>sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2</code>（384 次元、約 0.22 GB）</li>
+          <li>既定の候補（条件付き）: <code>multilingual-e5-small</code>。調査時点の fastembed 0.8.0 には含まれていないため、<code>add_custom_model</code> で登録する。サイズが 0.3 GB 程度に収まる形式がある場合だけ候補にする。</li>
+          <li>設定で選べるモデル: <code>intfloat/multilingual-e5-large</code>（約 2.24 GB）など。英語専用の <code>bge-small-en-v1.5</code> は残さず、多言語モデルだけにする。</li>
+          <li>e5 系を使うときは、クエリと文書に <code>query:</code> と <code>passage:</code> の接頭辞を付ける。</li>
+        </ul>
+        <p>注意: <code>paraphrase-multilingual-MiniLM-L12-v2</code> は、元のモデルの学習時の入力の上限が 128 トークンです。一方、fastembed の登録情報では 512 トークンで切り詰めます。実際にどこで切れるか、長い入力で精度が落ちるかは誰も測っていません。P3 で測り、埋め込み用にセクションを段落単位で分けるかを決めます。</p>
+        <p class="src">根拠: Q3、英語専用モデルの質問への回答</p>
+      </div>
+
+      <div class="item">
+        <h3>G. ホスト型 wiki は提供せず、関連する機能を削る</h3>
+        <p><code>server/</code> は取り込みません。サーバーがなければ使い道がないので、サーバーにつなぐ機能も合わせて削ります。</p>
+        <ul>
+          <li><code>wiki_remote.py</code> と <code>eval/remote/</code></li>
+          <li><code>/wiki:migrate</code> と <code>/wiki:init --hosted</code></li>
+          <li>各コマンドにある「ホスト型 wiki」の分岐（graph、ingest、lint、query、stats、upgrade）</li>
+          <li><code>references/hosted-mode.md</code> と <code>docs/hosted.md</code>、他の references にあるホスト型の記述</li>
+          <li><code>wiki_decide.py</code> の <code>hosted</code> バックエンド（<code>wiki_remote</code> を import している）</li>
+          <li><code>decision-questions.json</code> をサーバー側の写しとバイト単位で比べるテストと CI の手順</li>
+        </ul>
+        <p class="why">理由: 保守の範囲が小さくなります。Python と TypeScript で同じ仕様を保つ必要もなくなります。</p>
+        <p class="src">根拠: Q4。関連する機能まで削ることは、この回答からの解釈です。</p>
+      </div>
+
+      <div class="item">
+        <h3>H. 判定レイヤーと評価ループは両方残し、文字コードと D2 だけ先に直す</h3>
+        <p>D2 の文分割（<code>。！？</code> 対応）と空白の扱いは第 1 段階で直します。英語の質問文の日本語化と、判定モデルの日本語での精度検証は後回しにします。それまで判定レイヤーは既定で無効のままにします。</p>
+        <p>D2 は、根拠の引用が本文と一致するとモデルを呼ばずに確定させます（<code>confidence=1.0</code>）。このため、照合で空白をすべて除くと <code>now here</code> と <code>nowhere</code> を同じとみなし、誤った根拠を確定させます。吸収するのは日本語の文字どうしの間の改行と空白だけにし、英数字の間の空白は残します。NFKC は引用の一致判定には使いません。</p>
+        <p>評価ループは、初回リリースで文字コード、frontmatter の破損、引用の照合を直し、さらに評価ループが生成する文面（index と log の行、ページ本文の見出し、<code>Task:</code> などの項目名）も日本語にします。スクリプトが読み返す文字列は、読む側と同時に変えます。</p>
+        <p class="src">根拠: Q7、評価ループの範囲の質問への回答</p>
+      </div>
+
+      <div class="item">
+        <h3>I. ページの大きさ: 目安 4,000 文字、上限 8,000 文字</h3>
+        <p>空白を除いた文字数で数えます。移植元の行数の上限（目安 400 行、上限 800 行）も残し、どちらかを超えたら指摘します。値は実際の wiki を使いながら調整します。</p>
+        <p class="src">根拠: Q5</p>
+      </div>
+
+      <div class="item">
+        <h3>J. 手元の訳を出発点にする</h3>
+        <p>llm-wiki-plugin のフォークにある未コミットの訳を info-hive に取り込み、P5 で日本語の wiki の運用として書き直します。フォーク側の作業ツリーは、取り込みを確かめてから別ブランチに退避します。</p>
+        <p class="src">根拠: Q8</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="phases" aria-labelledby="phases-h">
+  <div class="sec-head"><span class="sec-num">04</span><h2 id="phases-h">作業の段階</h2></div>
+  <p class="prose">番号は着手の順です。矢印は「先に終わっている必要がある」という依存を表します。P4 と P5 は P1 のあとなら並べて進められます。ただし P5 で書くページの大きさや検索の説明は、P3・P4 の結果が出てから確定します。</p>
+
+  <div class="flow-wrap" role="img" aria-label="段階の依存関係。P0 から P1、P1 から P2・P4・P5、P2 から P3、P3・P4・P5 から P6 へ進む。">
+    <svg viewBox="0 0 720 210" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" class="arrow"/>
+        </marker>
+      </defs>
+      <path class="edge" d="M118,105 L148,105" marker-end="url(#ah)"/>
+      <path class="edge" d="M258,95 C280,60 280,40 300,40" marker-end="url(#ah)"/>
+      <path class="edge" d="M258,105 L300,105" marker-end="url(#ah)"/>
+      <path class="edge" d="M258,115 C280,150 280,170 300,170" marker-end="url(#ah)"/>
+      <path class="edge" d="M410,40 L450,40" marker-end="url(#ah)"/>
+      <path class="edge" d="M560,40 C575,40 575,90 580,90" marker-end="url(#ah)"/>
+      <path class="edge" d="M410,105 L580,105" marker-end="url(#ah)"/>
+      <path class="edge" d="M410,170 C560,170 560,120 580,120" marker-end="url(#ah)"/>
+
+      <rect class="n-box" x="8" y="80" width="110" height="50" rx="4"/>
+      <text class="n-id" x="20" y="100">P0</text><text x="20" y="120">土台づくり</text>
+
+      <rect class="n-box main" x="148" y="80" width="110" height="50" rx="4"/>
+      <text class="n-id" x="160" y="100">P1</text><text x="160" y="120">文字コード</text>
+
+      <rect class="n-box" x="300" y="15" width="110" height="50" rx="4"/>
+      <text class="n-id" x="312" y="35">P2</text><text x="312" y="55">評価セット</text>
+
+      <rect class="n-box main" x="450" y="15" width="110" height="50" rx="4"/>
+      <text class="n-id" x="462" y="35">P3</text><text x="462" y="55">検索</text>
+
+      <rect class="n-box" x="300" y="80" width="110" height="50" rx="4"/>
+      <text class="n-id" x="312" y="100">P4</text><text x="312" y="120">lint・統計</text>
+
+      <rect class="n-box" x="300" y="145" width="110" height="50" rx="4"/>
+      <text class="n-id" x="312" y="165">P5</text><text x="312" y="185">指示文書</text>
+
+      <rect class="n-box" x="580" y="80" width="130" height="50" rx="4"/>
+      <text class="n-id" x="592" y="100">P6</text><text x="592" y="120">初回リリース</text>
+    </svg>
+  </div>
+
+  <ol class="phases">
+    <li class="phase">
+      <span class="phase-id">P0</span>
+      <div class="phase-body">
+        <h3>リポジトリの土台をつくる</h3>
+        <p class="phase-deps"><strong>前提:</strong> なし（方針 A、C、G、J と 7 節の決定）</p>
+        <ul>
+          <li>取り込む前に、フォークにある未コミットの訳の差分（またはファイルごとのハッシュ）を保存する。</li>
+          <li>移植元 v4.0.1 のファイルを取り込む。<code>server/</code>、<code>research/</code>（移植元の調査メモ）、<code>node_modules/</code>、<code>__pycache__/</code>、<code>eval/**/results-*.json</code> などの生成物は除く。<code>eval/evolution/workflows/build_suite.py</code> は取り込まず、<code>UPSTREAM.md</code> から参照する（方針 A）。</li>
+          <li>フォークにある未コミットの日本語訳を取り込み、取り込みを確かめてからフォーク側を別ブランチに退避する。</li>
+          <li>方針 G のとおり、ホスト型 wiki に関わるスクリプト、コマンド、文書、テスト、CI の手順を削る。</li>
+          <li><code>LICENSE</code> は Praney Behl の著作権表示と許諾文を残し、自分の著作権行を追加する。<code>README</code> に移植元を明記する。</li>
+          <li><code>UPSTREAM.md</code> に起点のコミットを記録する。</li>
+          <li>プラグイン名を <code>wiki</code> に、スキル名を <code>info-hive</code> に、マーケットプレイス名を <code>info-hive</code> に変える。マーケットプレイスの所有者とリンクも変える。</li>
+          <li><code>commands/wiki/</code> の 9 本を <code>commands/</code> 直下に移す。導入後に <code>/wiki:query</code> などで起動できることを確かめる（Claude Code の起動時の <code>slash_commands</code> で確認できる）。</li>
+          <li>モデルのキャッシュを <code>~/.cache/llm-wiki/fastembed</code>（<code>wiki_search.py:427</code>）から <code>~/.cache/info-hive/fastembed</code> に変える。</li>
+          <li>環境変数を改名する: <code>LLM_WIKI_DECISIONS</code>、<code>LLM_WIKI_DECISIONS_MODEL</code>、<code>LLM_WIKI_DECISIONS_URL</code> を <code>INFO_HIVE_*</code> に。<code>LLM_WIKI_URL</code>、<code>LLM_WIKI_TOKEN</code>、<code>LLM_WIKI_CONFIG</code> はホスト型 wiki 用なので削る。</li>
+          <li>スキルのディレクトリ <code>skills/llm-wiki/</code> を <code>skills/info-hive/</code> に改名し、29 ファイルにある <code>${CLAUDE_PLUGIN_ROOT}/skills/llm-wiki/…</code> などのパスを書き換える。</li>
+          <li>docs は Markdown の文書だけを残す。サイトの仕組み（<code>docs/.vitepress/</code>、<code>docs/public/</code>）、ドキュメント専用の <code>package.json</code>（名前は <code>llm-wiki-plugin-docs</code>）と <code>pnpm-lock.yaml</code>、<code>deploy-docs.yml</code>、<code>wiki-tests.yml</code> の docs ジョブを削る。<code>docs/hosted.md</code> は方針 G で削る。<code>docs/v3/</code> は v3 系の旧版の説明で移植版には当てはまらないので外す。README にあるサイトへのリンクを、<code>docs/</code> の Markdown へのリンクに書き換える。</li>
+          <li><code>AGENTS.md</code> を info-hive 用に書き直す。初回コミットの内容は移植元のリリース規則の写しで、作業ツリーでは削除済み。</li>
+          <li>CI（<code>wiki-tests.yml</code>）からサーバーのジョブを外し、Windows のジョブを追加する。</li>
+          <li>評価ループのテストを Windows で動くように直す。<code>test_adapters.py</code> は偽のコマンドを shebang と <code>chmod</code> で作って <code>symlink_to</code> を使い、<code>test_evolution.py</code> も symlink を使うので、文字コードを直しても Windows では落ちる。偽のコマンドは <code>python</code> 経由で起動し、symlink の検査は作る権限がない環境では飛ばす。</li>
+          <li>GitHub の Windows ランナーは既定のコードページが cp1252 と見込まれ、cp932 の不具合をそのままでは再現しない（未確認）。CI では文字コードを cp932 に固定して動かすか、<code>encoding</code> の付け忘れを静的に検査する。</li>
+        </ul>
+      </div>
+    </li>
+
+    <li class="phase">
+      <span class="phase-id">P1</span>
+      <div class="phase-body">
+        <h3>文字コードと正規化の土台を直す</h3>
+        <p class="phase-deps"><strong>前提:</strong> P0（方針 D）</p>
+        <ul>
+          <li>すべての <code>open</code>、<code>read_text</code>、<code>write_text</code> に <code>encoding="utf-8"</code> を付ける。読み込みは BOM を許す <code>utf-8-sig</code> にする。<code>wiki_evolve_loop.py:429</code> の書き込みも含める。</li>
+          <li>各スクリプトの入口で標準入力・標準出力・標準エラーを UTF-8 にする。標準入力を読む箇所（<code>wiki_decide.py:640</code>、<code>wiki_evolve_agent.py:223</code>、<code>wiki_evolve_claude.py:44</code>、<code>wiki_evolve_api.py:130</code>）を含める。<code>subprocess</code> は <code>encoding="utf-8"</code> にし、子プロセスに <code>PYTHONUTF8=1</code> を渡す。</li>
+          <li>解析キャッシュ（<code>.wiki-cache/search-index.json</code>）に形式番号を持たせ、解析の仕方を変えたら番号を上げて作り直す。埋め込みの接頭辞や分割方式も、ベクトル索引を作り直す条件に含める。</li>
+          <li>ファイル名、相対パス、リンク先、スラッグを NFC で比較する。グラフの明示的な参照（<code>graph.node_id</code>、<code>relationships.object</code>、<code>source</code>、<code>contradicts</code>、<code>supersedes</code>）と、問い合わせのノード ID も同じ規則にする。正規化すると同じになる別ファイルは lint で指摘する。タグは NFKC で比較する。</li>
+          <li>方針 B の別名の対応表を作り、frontmatter のキーと <code>type</code>・<code>kind</code> の値を読み込み時に英語に直す。対応表は解析器の 2 系統で共有する。ページの置き場所（<code>sources/</code> など）は英語に直した <code>type</code> で決める。</li>
+          <li>frontmatter のリストの <code>、</code> 区切りは受け付けず、lint で指摘する。frontmatter の解析器は 2 系統（検索・lint・統計の手書きの解析器と、グラフの PyYAML）あるので、片方だけ変えて解釈がずれないようにする。キーの後の全角 <code>：</code> も lint で指摘する（キー自体は ASCII のまま）。</li>
+          <li>wikilink の全角 <code>｜</code> と <code>＃</code> を受け付けるか、lint で指摘する（どちらにするかは実装時に決める）。</li>
+          <li>この修正のあとで <code>json.dumps</code> に <code>ensure_ascii=False</code> を付ける。先に付けると cp932 の出力で落ちる。<code>wiki_evolve_loop.py:452, 458, 659</code> は frontmatter に書く値なので、見た目の問題ではなくデータの破損として先に直す。</li>
+        </ul>
+      </div>
+    </li>
+
+    <li class="phase">
+      <span class="phase-id">P2</span>
+      <div class="phase-body">
+        <h3>日本語の評価セットをつくる</h3>
+        <p class="phase-deps"><strong>前提:</strong> P1。検索を変える前に、比較の基準を用意する。</p>
+        <ul>
+          <li>先に、トークンが 0 個のクエリでも <code>wiki_search.py --json</code> が空の結果を JSON で返すようにする。今は何も出さずに終わり、<code>run_eval.py</code> が JSON の解析で止まる。</li>
+          <li>英語の評価セットで、変更前の絶対値（recall@10、MRR、偽陽性率）を保存する。<code>--gate</code> は方式どうしの相対比較しかしないので、P3 の判定に使う。</li>
+          <li><code>eval/retrieval/</code> と同じ形で、日本語の wiki（20〜30 ページ）とクエリ集を作る。日英混在のページと、英語の用語を日本語で尋ねるクエリを含める。ページは自分で書いた文章で作り、他人の著作物を写さない。</li>
+          <li>200 文字を超える長いセクションを含め、埋め込みの入力上限の影響を測れるようにする。</li>
+          <li>境界のケースを入れる: 日本語のファイル名、NFD のファイル名、全角英数字、<code>。</code> で区切られた長い段落、BOM 付きのファイル、2 文字の語（「東京」「検索」）。</li>
+          <li><code>test_link_resolution.py</code> と <code>test_decisions.py</code> に日本語のケースを足す。判定のテストで使う偽のバックエンド（<code>eval/decisions/fake_backend.py:34</code>）は <code>[a-z0-9]+</code> で語の重なりを数えるので、日本語では重なりが常に 0 になる。本番と同じトークン化を使うと検証が独立しなくなるので、文字の重なりなど別の簡単な方法にする。</li>
+          <li>D2 のテストに負例（<code>now here</code> と <code>nowhere</code> のように、空白の有無で意味が変わる引用）を入れる。</li>
+          <li>現状のコードでの成績を記録する（ほぼ 0 件のはず）。</li>
+        </ul>
+      </div>
+    </li>
+
+    <li class="phase">
+      <span class="phase-id">P3</span>
+      <div class="phase-body">
+        <h3>検索を日本語に対応させる</h3>
+        <p class="phase-deps"><strong>前提:</strong> P2（方針 E、F）</p>
+        <ul>
+          <li>方針 E のトークン化を <code>wiki_search.py</code> に入れる。</li>
+          <li>語彙側のトークンが 0 個でも、埋め込み検索は実行する。</li>
+          <li>方針 F の候補を評価セットで比べ、既定のモデルとしきい値を決める。大きいモデルを設定で選べるようにする。</li>
+          <li>入力の上限が短いモデルを選んだ場合は、埋め込み用にセクションを段落単位で分けるかを評価する。</li>
+          <li>SudachiPy の分かち書きとも比べ、bigram との差を記録する。明らかに良ければ、任意の機能として追加する。</li>
+          <li>索引の大きさと検索時間を測る。</li>
+          <li>漢字の unigram を加えたときの索引の大きさと、単漢字のクエリの成績を測る。</li>
+          <li>英語の評価セットで、<code>--gate</code> に加えて、P2 で保存した絶対値と比べる。英語専用モデルを残さないので、英語の成績は多言語モデルで測る。許容する低下の幅は、多言語モデルを実測してから決める。</li>
+        </ul>
+      </div>
+    </li>
+
+    <li class="phase">
+      <span class="phase-id">P4</span>
+      <div class="phase-body">
+        <h3>lint・統計・グラフ・判定・評価ループを日本語に合わせる</h3>
+        <p class="phase-deps"><strong>前提:</strong> P1（方針 H、I）</p>
+        <ul>
+          <li>統計に文字数（空白を除くコードポイント数）を加える。ページの大きさを、目安 4,000 文字・上限 8,000 文字でも判定する。</li>
+          <li><code>--suggest-pages</code> にカタカナ語（3 文字以上）と漢字の複合語を加える。</li>
+          <li>D2 の文分割を <code>。！？</code> にも対応させる。<code>(?&lt;=[。！？])\s*</code> のように句点のあとに空白がなくても分ける（<code>[.!?]</code> の文字クラスに足すだけでは、空白のない日本語の文を分けられない）。照合は方針 H のとおり、日本語の文字どうしの間の改行と空白だけを吸収する。</li>
+          <li>評価ループの照合を直す。<code>wiki_evolve.py:260</code> の <code>normalize</code> は旧形式の採点にしか使われず、引用の照合は <code>wiki_evolve_loop.py:73-79</code> の <code>grounded_verdict</code> が <code>quote in source</code> で直接比べている。両方を D2 と同じ規則にそろえる。</li>
+          <li>評価ループが生成する文面（<code>wiki_evolve_loop.py</code> などが書く index と log の行、ページ本文の見出し、<code>Task:</code> などの項目名）を日本語にする。スクリプトやテストが読み返す文字列は、読む側も同時に変える。</li>
+          <li>日付は ISO 形式（<code>YYYY-MM-DD</code>）を必須にし、それ以外は lint で指摘する。</li>
+          <li>Shift_JIS のソースは、取り込み時に検出して UTF-8 に変換する手順を用意する。</li>
+          <li>スクリプトの出力メッセージ、<code>--help</code>、lint の表示上の項目名を日本語にする。<code>--json</code> の出力のキーは英語のまま残す（方針 B）。全角文字を 2 桁と数えて表をそろえる。</li>
+        </ul>
+      </div>
+    </li>
+
+    <li class="phase">
+      <span class="phase-id">P5</span>
+      <div class="phase-body">
+        <h3>エージェント向けの指示を日本語の wiki に合わせて書き直す</h3>
+        <p class="phase-deps"><strong>前提:</strong> P0 で取り込んだ訳（方針 D、I、J）。ページの大きさ、検索、評価ループの説明は P3・P4 の結果を待って確定する。</p>
+        <ul>
+          <li>SKILL.md、コマンド 9 本、references、テンプレートを、訳文の直しではなく日本語の wiki の運用として書き直す。</li>
+          <li>スラッグの方針（日本語可、NFC）、ページの大きさ（文字数）、引用の書き方、ログ行の書式を日本語前提で書く。</li>
+          <li>SKILL.md の起動条件（<code>description</code>）を日本語の依頼で起動するように書き、スキル名を <code>info-hive</code> にする。</li>
+          <li>references に残る英語の例文（<code>ingest-workflow.md</code> の「as established in [[paper-X]]」など）を日本語の例に替える。</li>
+          <li>テンプレートの英語の見出しのうち、スクリプトが読む 6 つは残す。読まないもの（<code>## Sources</code> など）は日本語にしてよい。</li>
+          <li>オントロジーの述語の説明文を訳す（述語名は残す）。</li>
+        </ul>
+      </div>
+    </li>
+
+    <li class="phase">
+      <span class="phase-id">P6</span>
+      <div class="phase-body">
+        <h3>初回リリース</h3>
+        <p class="phase-deps"><strong>前提:</strong> P3、P4、P5</p>
+        <ul>
+          <li>バージョンは v0.1.0 にする（方針 A）。タグは <code>v0.1.0</code>。</li>
+          <li>バージョンを書く場所を、サーバーと docs サイトを除いた構成（<code>plugin.json</code>、<code>marketplace.json</code> の 2 か所、CHANGELOG）に合わせて <code>CONTRIBUTING.md</code> に書き直す。</li>
+          <li>CHANGELOG に移植元からの変更点をまとめる。削った機能（ホスト型 wiki）も書く。</li>
+          <li>Claude Code のマーケットプレイスから <code>wiki@info-hive</code> として入れられ、コマンドが <code>/wiki:*</code> の形で起動することを確かめる。</li>
+        </ul>
+      </div>
+    </li>
+  </ol>
+</section>
+
+<section id="acceptance" aria-labelledby="acceptance-h">
+  <div class="sec-head"><span class="sec-num">05</span><h2 id="acceptance-h">完了の判定</h2></div>
+  <p class="prose">初回リリースまでを終えたと判断する条件です。検索の数値の目標は P2 で基準を測ってから決めます。</p>
+  <ul class="checks">
+    <li>Windows（cp932 が既定、<code>PYTHONUTF8</code> なし）で、すべてのスクリプトが日本語・<code>—</code>・<code>𠮷</code> を含む入出力（標準入力を含む）で落ちず、文字化けしない。</li>
+    <li>日本語だけのクエリが結果を返し、日本語の評価セットで P2 の基準を上回る。「税」のような単漢字のクエリが「消費税」を含むページに当たる。</li>
+    <li>frontmatter のキーと <code>type</code>・<code>kind</code> の値を日本語で書いたページを、英語で書いたページと同じように検索・lint・統計・グラフで扱える。スクリプトとテンプレートが書くページは英語のキーと値になっている。</li>
+    <li>移植前に作った既存の wiki で、P1 以降の解析の修正が効く（古い解析キャッシュが自動で作り直される）。</li>
+    <li>既定の埋め込みモデルのダウンロードが 0.3 GB 程度に収まる。</li>
+    <li>英語の評価セットの <code>--gate</code> が通り、P2 で保存した絶対値からの低下が、P3 で決めた許容幅に収まる。</li>
+    <li>日本語のファイル名のページ、NFD のファイル名のページに NFC のリンクを張っても、リンク切れや孤立ページとして報告されない。</li>
+    <li>8,000 文字を超えるページが、行数に関係なく lint で指摘される。</li>
+    <li>移植元の llm-wiki で作った既存の wiki を、変換なしで lint・検索できる。</li>
+    <li>導入後、<code>/wiki:init</code> などの 9 本のコマンドが <code>/wiki:*</code> の形で起動する。移植元と同時に入れても、コマンド、モデルのキャッシュ、環境変数が衝突しない。</li>
+    <li>D2 のテストで、<code>。</code> 区切りの段落の後半にある根拠と、行をまたぐ引用が見つかる。空白の有無で意味が変わる負例は一致しない。</li>
+    <li>評価ループが書いた frontmatter に、日本語のパスが <code>\uXXXX</code> のまま残らない。評価ループが生成する index と log の行、ページ本文が日本語になっている。</li>
+    <li>ホスト型 wiki への参照（<code>wiki_remote</code>、<code>--hosted</code>、<code>/wiki:migrate</code>）が、<code>CHANGELOG.md</code> と <code>UPSTREAM.md</code> を除くコードと文書に残っていない。</li>
+    <li>CI が Linux と Windows の両方で通る。評価ループのテストも Windows で動く。</li>
+  </ul>
+</section>
+
+<section id="risks" aria-labelledby="risks-h">
+  <div class="sec-head"><span class="sec-num">06</span><h2 id="risks-h">リスク</h2></div>
+  <div class="table-wrap">
+    <table class="wide-table">
+      <thead>
+        <tr><th scope="col">リスク</th><th scope="col">起きること</th><th scope="col">対策</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>小さい多言語モデルの精度が足りない</td>
+          <td>0.3 GB 程度のモデルでは、日本語の意味検索が期待ほど良くならない。</td>
+          <td>P3 で bigram の語彙検索だけの成績とも比べる。足りなければ、大きいモデルを設定で選ぶよう README で案内する。</td>
+        </tr>
+        <tr>
+          <td>英語の検索の成績が下がる</td>
+          <td>英語専用モデルを残さないので、英語だけの wiki でも多言語モデルを使う。英語の意味検索は、今の <code>bge-small-en-v1.5</code> より弱くなるおそれがある。</td>
+          <td>P2 で英語の絶対値を保存し、P3 で比べる。下がり幅を CHANGELOG と README に書く。</td>
+        </tr>
+        <tr>
+          <td>埋め込みの入力上限</td>
+          <td>MiniLM 系は元の学習時の上限が 128 トークンで、長いセクションでは精度が落ちるおそれがある。fastembed の切り詰めは 512 トークンで、実際の影響は未測定。</td>
+          <td>P2 の評価セットに長いセクションを入れ、P3 で段落単位の分割と比べる。</td>
+        </tr>
+        <tr>
+          <td>Windows の CI で不具合が再現しない</td>
+          <td>GitHub の Windows ランナーは cp1252 と見込まれ、UTF-8 の日本語をほぼ例外なく読めてしまう。<code>encoding</code> の付け忘れが CI を通り抜ける。</td>
+          <td>CI で cp932 を固定するか、<code>encoding</code> の付け忘れを静的に検査する（P0）。</td>
+        </tr>
+        <tr>
+          <td>bigram で索引が大きくなる</td>
+          <td>日本語のページはトークン数が文字数とほぼ同じになり、キャッシュと BM25 の計算が重くなる。</td>
+          <td>P3 で索引の大きさと検索時間を測る。問題があれば形態素解析と比べる。</td>
+        </tr>
+        <tr>
+          <td>プラグイン名 <code>wiki</code> が他と重なる</td>
+          <td>同じく <code>wiki</code> という名前のプラグインを入れると、コマンドとスキルの名前がぶつかる。移植元（<code>llm-wiki</code>）とは衝突しない。</td>
+          <td>README に、<code>wiki</code> という名前のプラグインとは併用できないと書く。マーケットプレイス名 <code>info-hive</code> で出どころを区別する。</td>
+        </tr>
+        <tr>
+          <td>移植元の修正を取り込めなくなる</td>
+          <td>独立させるので、移植元のバグ修正が自動では入らない。</td>
+          <td><code>UPSTREAM.md</code> に起点を記録し、移植元のリリースごとに差分を見て必要なものを個別に取り込む。</td>
+        </tr>
+        <tr>
+          <td>判定モデルが日本語で弱い</td>
+          <td>判定レイヤーを有効にすると、関係のある結果を誤って捨てる。</td>
+          <td>精度を検証するまで判定レイヤーは既定で無効にする（方針 H）。</td>
+        </tr>
+        <tr>
+          <td>ホスト型 wiki の削り残し</td>
+          <td>文書やコマンドに <code>--hosted</code> などの記述が残り、エージェントが存在しない機能を案内する。</td>
+          <td>P0 の最後に参照を検索して確かめる。完了の判定にも入れてある。</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="answers" aria-labelledby="answers-h">
+  <div class="sec-head"><span class="sec-num">07</span><h2 id="answers-h">質問への回答</h2></div>
+  <p class="prose">2026-11-02 に受けた回答です。3 節の方針 C〜J はこの回答にもとづきます。</p>
+  <div class="table-wrap">
+    <table class="wide-table">
+      <thead>
+        <tr><th scope="col">質問</th><th scope="col">回答</th><th scope="col">反映先</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Q1. プラグイン名とコマンドの名前空間</td><td>最初の回答: プラグイン名は <code>info-hive</code>、コマンドは <code>/wiki:*</code> を維持。実測で両立しないと分かり、再質問で「プラグイン名を <code>wiki</code> にして <code>/wiki:query</code>」に変更</td><td class="nowrap">方針 C、P0</td></tr>
+        <tr><td>追加. 設定ファイルと環境変数の名前</td><td>info-hive に合わせる（モデルのキャッシュ <code>~/.cache/info-hive/</code>、<code>INFO_HIVE_*</code>）</td><td class="nowrap">方針 C、P0</td></tr>
+        <tr><td>Q2. スラッグに日本語を許すか</td><td>許す</td><td class="nowrap">方針 D、P1、P5</td></tr>
+        <tr><td>Q3. 埋め込みモデルの大きさ</td><td>0.3 GB 程度まで</td><td class="nowrap">方針 F、P3</td></tr>
+        <tr><td>Q4. ホスト型サーバーを提供するか</td><td>提供しない</td><td class="nowrap">方針 G、P0</td></tr>
+        <tr><td>Q5. ページの大きさの上限</td><td>目安 4,000 文字、上限 8,000 文字</td><td class="nowrap">方針 I、P4</td></tr>
+        <tr><td>Q6. 形態素解析の依存</td><td>評価次第で任意の機能にする</td><td class="nowrap">方針 E、P3</td></tr>
+        <tr><td>Q7. 判定レイヤーと評価ループ</td><td>両方残す</td><td class="nowrap">方針 H、P4</td></tr>
+        <tr><td>Q8. 手元の未コミットの訳</td><td>取り込んで出発点にする</td><td class="nowrap">方針 J、P0、P5</td></tr>
+        <tr><td>Q9. 移植元への還元</td><td>還元しない</td><td class="nowrap">方針 A</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="prose">回答から計画に持ち込んだ解釈が 1 つあります。Q4 の「提供しない」を受けて、サーバーにつなぐ側の機能（<code>wiki_remote.py</code>、<code>/wiki:migrate</code>、<code>--hosted</code>、判定の <code>hosted</code> バックエンド）も削ることにしました（方針 G）。</p>
+  <h3>見直しとレビューで加えた項目の決定</h3>
+  <p class="prose">質問で扱わなかった項目と、計画書の見直しと 4 モデルのレビューで加えた項目です。2026-11-02 に決めました。</p>
+  <div class="table-wrap">
+    <table class="wide-table">
+      <thead>
+        <tr><th scope="col">項目</th><th scope="col">決定</th><th scope="col">反映先</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>移植元をフォークで追うか、コピーして独立させるか</td><td>コピーして独立させ、v0.1.0 から始める</td><td class="nowrap">方針 A、P0、P6</td></tr>
+        <tr><td>機械が読むキーを英語のまま残すか</td><td>frontmatter のキーと <code>type</code>・<code>kind</code> の値は日本語の別名も読む。書くときは英語。述語名、JSON のキー、引数名は英語のまま</td><td class="nowrap">方針 B、P1</td></tr>
+        <tr><td>スキルのディレクトリを <code>skills/info-hive/</code> に改名するか</td><td>改名する</td><td class="nowrap">P0</td></tr>
+        <tr><td>docs サイト（VitePress）を残すか</td><td><code>docs/</code> の Markdown だけ残し、サイトの仕組みは削る</td><td class="nowrap">P0</td></tr>
+        <tr><td>Windows で評価ループのテストをどう扱うか</td><td>Windows で動くように直す</td><td class="nowrap">P0、5 節</td></tr>
+        <tr><td>単漢字のクエリに対応するか</td><td>漢字の unigram を索引に加える</td><td class="nowrap">方針 E、P3</td></tr>
+        <tr><td>英語だけの wiki 向けに <code>bge-small-en-v1.5</code> を残すか</td><td>残さない。多言語モデルだけにする</td><td class="nowrap">方針 F、P3</td></tr>
+        <tr><td>評価ループの日本語対応を初回にどこまで含めるか</td><td>評価ループが生成する文面（index・log の行、本文の見出し、<code>Task:</code> など）まで日本語にする</td><td class="nowrap">方針 H、P4</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="prose">残る未決は、実装中に決める 1 点だけです。wikilink の全角 <code>｜</code>・<code>＃</code> を受け付けるか、lint で指摘するか（P1）。</p>
+</section>
+
+<section id="appendix" aria-labelledby="appendix-h">
+  <div class="sec-head"><span class="sec-num">08</span><h2 id="appendix-h">付録: 修正箇所の一覧</h2></div>
+  <p class="prose">パスは <code>skills/llm-wiki/scripts/</code> からの相対パスです。行番号は、日本語訳を入れた手元の作業ツリーでの値です。docstring の訳で行数が変わっている場合があるため、v4.0.1 のコミットとは一致しないことがあります。</p>
+
+  <details class="appendix" open>
+    <summary>検索・解析・判定</summary>
+    <div class="table-wrap">
+      <table class="wide-table">
+        <thead>
+          <tr><th scope="col">項目</th><th scope="col">場所</th><th scope="col">段階</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>トークン化</td><td class="loc">wiki_search.py:57, 94</td><td>P3</td></tr>
+          <tr><td>空クエリで終了</td><td class="loc">wiki_search.py:729-732</td><td>P3</td></tr>
+          <tr><td>埋め込みモデル・しきい値・接頭辞</td><td class="loc">wiki_search.py:59, 62, 478-487</td><td>P3</td></tr>
+          <tr><td>frontmatter の解析</td><td class="loc">wiki_search.py:78, 82; wiki_lint.py:95, 99</td><td>P1</td></tr>
+          <tr><td>リンク解決・正規化</td><td class="loc">wiki_search.py:100; wiki_lint.py:51-81, 125; wiki_graph_extract.py:128; wiki_graph_lint.py:105</td><td>P1</td></tr>
+          <tr><td>タグの絞り込み</td><td class="loc">wiki_search.py:386</td><td>P1</td></tr>
+          <tr><td>語数・文字数</td><td class="loc">wiki_stats.py:100, 146</td><td>P4</td></tr>
+          <tr><td>ページの大きさの上限</td><td class="loc">wiki_lint.py:130</td><td>P4</td></tr>
+          <tr><td>解析キャッシュの再利用</td><td class="loc">wiki_search.py:229-245, 447-461</td><td>P1</td></tr>
+          <tr><td>グラフの明示的な参照</td><td class="loc">wiki_graph_extract.py:194-199; wiki_graph_query.py:50-71</td><td>P1</td></tr>
+          <tr><td>D2 の文分割と照合</td><td class="loc">wiki_decide.py:355-398, 418-423</td><td>P4</td></tr>
+          <tr><td>評価ループの引用の照合</td><td class="loc">wiki_evolve_loop.py:73-79</td><td>P4</td></tr>
+          <tr><td>評価の JSON の解析と gate</td><td class="loc">eval/retrieval/run_eval.py:96, 213-227</td><td>P2</td></tr>
+          <tr><td>判定テストの偽のバックエンド</td><td class="loc">eval/decisions/fake_backend.py:34</td><td>P2</td></tr>
+          <tr><td>日付の解析</td><td class="loc">wiki_search.py:376; wiki_lint.py:149</td><td>P4</td></tr>
+          <tr><td>新規ページの提案</td><td class="loc">wiki_lint.py:38, 269</td><td>P4</td></tr>
+          <tr><td>評価ループの照合の正規化</td><td class="loc">wiki_evolve.py:260</td><td>P4</td></tr>
+          <tr><td>判定の質問文</td><td class="loc">assets/decision-questions.json</td><td>後回し</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </details>
+
+  <details class="appendix">
+    <summary>文字コードと出力</summary>
+    <div class="table-wrap">
+      <table class="wide-table">
+        <thead>
+          <tr><th scope="col">項目</th><th scope="col">場所</th><th scope="col">段階</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>encoding を指定しない読み書き</td><td class="loc">init_wiki.py:86, 91; wiki_evolve_loop.py:86, 246, 429, 440, 462, 470, 495, 567, 660, 663; wiki_evolve.py:171, 574; wiki_evolve_agent.py:123, 191, 204</td><td>P1</td></tr>
+          <tr><td>標準入力</td><td class="loc">wiki_decide.py:640; wiki_evolve_agent.py:223; wiki_evolve_claude.py:44; wiki_evolve_api.py:130</td><td>P1</td></tr>
+          <tr><td>Windows で動かないテスト</td><td class="loc">eval/evolution/test_adapters.py:71-106; eval/evolution/test_evolution.py:148</td><td>P0</td></tr>
+          <tr><td><code>subprocess</code> の <code>text=True</code></td><td class="loc">wiki_evolve.py:290; wiki_evolve_stream.py:47, 144, 196; wiki_decide.py:516</td><td>P1</td></tr>
+          <tr><td>出力で落ちる文字</td><td class="loc">wiki_lint.py:303; init_wiki.py:118; test_link_resolution.py:111</td><td>P1</td></tr>
+          <tr><td>BOM と Shift_JIS</td><td class="loc">wiki_search.py:239-240; wiki_lint.py:83; wiki_graph_extract.py:121; wiki_decide.py:633</td><td>P1 / P4</td></tr>
+          <tr><td><code>ensure_ascii</code>（frontmatter の破損）</td><td class="loc">wiki_evolve_loop.py:452, 458, 659</td><td>P1</td></tr>
+          <tr><td><code>ensure_ascii</code>（表示）</td><td class="loc">wiki_decide.py:548, 556, 612, 627, 635, 654; wiki_lint.py:356; wiki_graph_lint.py:526; wiki_graph_query.py:257</td><td>P1（最後）</td></tr>
+          <tr><td>表の桁そろえ</td><td class="loc">wiki_stats.py:134; wiki_graph_extract.py:574</td><td>P4</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </details>
+
+  <details class="appendix">
+    <summary>削除する機能（ホスト型 wiki）</summary>
+    <div class="table-wrap">
+      <table class="wide-table">
+        <thead>
+          <tr><th scope="col">対象</th><th scope="col">場所</th><th scope="col">段階</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>サーバー本体</td><td class="loc">server/ 全体（取り込まない）</td><td>P0</td></tr>
+          <tr><td>クライアントとテスト</td><td class="loc">wiki_remote.py; eval/remote/test_remote.py</td><td>P0</td></tr>
+          <tr><td>判定の <code>hosted</code> バックエンド</td><td class="loc">wiki_decide.py:14-15, 65, 116, 140, 145, 177-188</td><td>P0</td></tr>
+          <tr><td>コマンド</td><td class="loc">commands/wiki/migrate.md; init.md の --hosted; graph.md, ingest.md, lint.md, query.md, stats.md, upgrade.md のホスト型の分岐</td><td>P0</td></tr>
+          <tr><td>文書</td><td class="loc">references/hosted-mode.md; docs/hosted.md; SKILL.md と references のホスト型の記述</td><td>P0</td></tr>
+          <tr><td>テストと CI</td><td class="loc">eval/decisions/test_decisions.py:62; .github/workflows/wiki-tests.yml（cmp とサーバーのジョブ）</td><td>P0</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </details>
+</section>
+
+<footer>
+  <p>この計画は、<code>C:\Works\llm-wiki-plugin</code>（v4.0.1、未コミットの訳を含む作業ツリー）を 2026-11-02 に調べた結果に基づきます。fastembed のモデル一覧は、uv で fastembed 0.8.0 を入れて <code>TextEmbedding.list_supported_models()</code> で確かめた内容です。多言語のモデルは、MiniLM-L12（0.22 GB）、mpnet-base（1.0 GB）、multilingual-e5-large（2.24 GB）、jina-embeddings-v3（2.29 GB）の 4 つでした。</p>
+</footer>
+
+</div>
+</main>
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var btn = document.getElementById("theme-toggle");
+  var states = ["auto", "light", "dark"];
+  var labels = { auto: "表示: 自動", light: "表示: 明るい", dark: "表示: 暗い" };
+  var current = "auto";
+  try { current = localStorage.getItem("plan-theme") || "auto"; } catch (e) {}
+  function apply(s) {
+    current = s;
+    if (s === "auto") root.removeAttribute("data-theme"); else root.setAttribute("data-theme", s);
+    btn.textContent = labels[s];
+    btn.setAttribute("aria-pressed", s === "auto" ? "false" : "true");
+  }
+  apply(states.indexOf(current) >= 0 ? current : "auto");
+  btn.addEventListener("click", function () {
+    var next = states[(states.indexOf(current) + 1) % states.length];
+    apply(next);
+    try { localStorage.setItem("plan-theme", next); } catch (e) {}
+  });
+  // 狭い画面では目次を閉じた状態で始める
+  var toc = document.getElementById("toc-details");
+  if (window.matchMedia && !window.matchMedia("(min-width: 1000px)").matches) toc.removeAttribute("open");
+})();
+</script>
+</body>
+</html>
