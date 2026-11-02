@@ -17,6 +17,11 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+# スクリプトとして実行したときも、テストから importlib で読み込んだときも、
+# 同じディレクトリの wiki_text を import できるようにする。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from wiki_text import canonical_meta, nfc, posix_rel  # noqa: E402
+
 
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
@@ -40,7 +45,8 @@ def link_stem(link: str) -> str:
     target = target.rsplit("/", 1)[-1]  # ディレクトリの接頭辞を取り除く
     if target.lower().endswith(".md"):
         target = target[:-3]
-    return target.strip()
+    # NFD で書かれたリンクも、NFC のファイル名と同じページとして数える。
+    return nfc(target.strip())
 
 
 SKIP_TOP_LEVEL_FILES = {"SCHEMA.md", "log.md", "README.md"}
@@ -48,15 +54,19 @@ SKIP_TOP_LEVEL_DIRS = {"indexes", "graph", "raw", ".evolution"}
 
 
 def parse_type(text: str) -> str | None:
+    """frontmatter の type を返す。「種類: 概念」のような日本語の別名も英語に直して返す。"""
     m = FRONTMATTER_RE.match(text)
     if not m:
         return None
     fm = m.group(1)
+    meta: dict[str, str] = {}
     for line in fm.split("\n"):
-        kv = re.match(r"^type:\s*(.*)$", line)
+        kv = re.match(r"^(\w+):\s*(.*)$", line)
         if kv:
-            return kv.group(1).strip().strip('"').strip("'")
-    return None
+            # 同じキーが何度もあれば、これまでどおり最初の行を使う。
+            meta.setdefault(kv.group(1), kv.group(2).strip().strip('"').strip("'"))
+    meta, _conflicts = canonical_meta(meta)
+    return meta.get("type")
 
 
 def main():
@@ -81,7 +91,8 @@ def main():
     for md_path in args.wiki.rglob("*.md"):
         rel = md_path.relative_to(args.wiki)
         try:
-            text = md_path.read_text(encoding="utf-8")
+            # 先頭に BOM があっても読めるようにする。
+            text = md_path.read_text(encoding="utf-8-sig")
         except (UnicodeDecodeError, OSError):
             continue
 
@@ -112,7 +123,7 @@ def main():
             pages_by_dir[rel.parts[0]] += 1
         else:
             pages_by_dir["(root)"] += 1
-        largest.append((line_count, str(rel)))
+        largest.append((line_count, posix_rel(rel.as_posix())))
 
     largest.sort(reverse=True)
 

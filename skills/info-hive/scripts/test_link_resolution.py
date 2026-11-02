@@ -22,11 +22,21 @@
 単純にステムに縮めると、`[[raw/foo]]` が `sources/foo.md` に解決されてしまう。
 この衝突は仮定の話ではない。ソースページは、要約する raw ファイルにちなんで名付けるのが慣例なので、
 ステムだけにすると、ツリーの外を指す本当のリンク切れを誤って合格にしてしまう。
+
+日本語の wiki のケース
+----------------------
+macOS は濁点付きのファイル名を NFD（「カ」＋「゛」）で返す。NFC で書いた [[ガイド]] と
+ファイル名の「ガイド」が一致しないと、どのスクリプトでもリンク切れや孤立ページになる。
+後半のケースでは NFD のファイル名を実際に作り、lint、search、stats、graph_extract のすべてで
+NFC のリンクが解決されることを確かめる。あわせて、日本語の frontmatter のキーが読めること、
+lint が日本語の書き損じ（別名の衝突、全角の「：」「｜」、「、」区切りのリスト）を指摘することを確かめる。
 """
 
 import contextlib
 import io
 import sys
+import tempfile
+import unicodedata
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -88,12 +98,224 @@ KEY_CASES = [
 ]
 
 
+GUIDE = unicodedata.normalize("NFC", "ガイド")
+GUIDE_NFD = unicodedata.normalize("NFD", "ガイド")
+
+# NFD で書かれたリンクも、NFC のインデックスで解決されなければならない。
+NFD_BY_PATH = {f"concepts/{GUIDE}": GUIDE}
+NFD_BY_SLUG = {GUIDE}
+NFD_RESOLVE_CASES = [
+    (GUIDE_NFD, GUIDE, "NFD bare link resolves to the NFC slug"),
+    (f"concepts/{GUIDE_NFD}", GUIDE, "NFD path-qualified link resolves"),
+    (GUIDE, GUIDE, "NFC bare link resolves"),
+]
+
+REQUIRED_FM = ["type", "title", "tags", "created", "updated"]
+
+# 一時ディレクトリに作る wiki。ガイド.md だけはファイル名を NFD で作る。
+FIXTURE_PAGES = {
+    # 日本語のキーと日本語の type の値だけで書いたページ
+    f"concepts/{GUIDE_NFD}.md": (
+        "---\n"
+        "種類: 概念\n"
+        "タイトル: ガイド\n"
+        "タグ: [入門]\n"
+        "作成日: 2026-01-01\n"
+        "更新日: 2026-01-02\n"
+        "---\n"
+        "日本語の wiki の使い方。\n"
+    ),
+    # NFC で書いたリンクを2つの形で持つページ
+    "concepts/目次.md": (
+        "---\n"
+        "type: concept\n"
+        "title: 目次\n"
+        "tags: [入門]\n"
+        "created: 2026-01-01\n"
+        "updated: 2026-01-02\n"
+        "---\n"
+        f"[[{GUIDE}]] と [[concepts/{GUIDE}]] を読む。\n"
+    ),
+    # NFD で書いたリンクを持つページ
+    "concepts/索引.md": (
+        "---\n"
+        "type: concept\n"
+        "title: 索引\n"
+        "tags: [入門]\n"
+        "created: 2026-01-01\n"
+        "updated: 2026-01-02\n"
+        "---\n"
+        f"[[{GUIDE_NFD}]] と [[目次]] を参照する。\n"
+    ),
+    # 英語のキーと日本語の別名の両方がある
+    "concepts/conflict.md": (
+        "---\n"
+        "type: concept\n"
+        "title: Conflict\n"
+        "タイトル: 衝突\n"
+        "tags: [test]\n"
+        "created: 2026-01-01\n"
+        "updated: 2026-01-02\n"
+        "---\n"
+        f"[[{GUIDE}]]\n"
+    ),
+    # 全角の「：」のキーと、「、」で区切ったリスト
+    "concepts/typos.md": (
+        "---\n"
+        "type: concept\n"
+        "title: Typos\n"
+        "tags: [機械学習、深層学習]\n"
+        "created: 2026-01-01\n"
+        "updated: 2026-01-02\n"
+        "メモ：あとで書く\n"
+        "---\n"
+        f"[[{GUIDE}]]\n"
+    ),
+    # 全角の「｜」を区切りのつもりで使った wikilink
+    "concepts/fullwidth.md": (
+        "---\n"
+        "type: concept\n"
+        "title: Fullwidth\n"
+        "tags: [test]\n"
+        "created: 2026-01-01\n"
+        "updated: 2026-01-02\n"
+        "---\n"
+        f"[[{GUIDE}｜案内]]\n"
+    ),
+}
+
+CHECKED = [0]
+
+
 def check(label, got, expected, why, failures):
+    CHECKED[0] += 1
     ok = got == expected
     if not ok:
         failures.append(f"{label}: {why} -> got {got!r}, expected {expected!r}")
     print(f"  {'PASS' if ok else 'FAIL'}  {label:<7} {str(got):<22} {why}")
     return ok
+
+
+def write_fixture(root: Path, pages: dict) -> None:
+    for rel, text in pages.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def check_fixture_lint(root: Path, failures) -> None:
+    print("lint: NFD filename, Japanese frontmatter, Japanese typos")
+    pages = wiki_lint.collect_pages(root)
+    findings = wiki_lint.lint(pages, 400, 800, REQUIRED_FM, False, 5)
+    guide_path = f"concepts/{GUIDE}.md"
+
+    guide_page = next((p for p in pages if p["slug"] == GUIDE), None)
+    check("lint", guide_page is not None and guide_page["rel_path"], guide_path,
+          "NFD filename yields NFC slug and NFC posix rel_path", failures)
+    check("lint", guide_page is not None and guide_page["meta"].get("type"), "concept",
+          "種類: 概念 is read as type: concept", failures)
+
+    broken_to_guide = [f for f in findings["broken_links"]
+                       if unicodedata.normalize("NFC", f["to"]).endswith(GUIDE)]
+    check("lint", broken_to_guide, [],
+          "[[ガイド]] / [[concepts/ガイド]] (NFC and NFD) are not broken", failures)
+    check("lint", any(f["slug"] == GUIDE for f in findings["orphans"]), False,
+          "NFD-named page is not an orphan", failures)
+    check("lint", [f for f in findings["missing_frontmatter"] if f["path"] == guide_path], [],
+          "Japanese frontmatter keys satisfy required fields", failures)
+
+    check("lint", findings["frontmatter_alias_conflicts"],
+          [{"path": "concepts/conflict.md", "key": "title", "keys": ["title", "タイトル"]}],
+          "title + タイトル reported as alias conflict", failures)
+    check("lint", findings["fullwidth_colon_keys"],
+          [{"path": "concepts/typos.md", "keys": ["メモ"]}],
+          "メモ：... reported as full-width colon key", failures)
+    check("lint", findings["ideographic_comma_lists"],
+          [{"path": "concepts/typos.md", "keys": ["tags"]}],
+          "[機械学習、深層学習] reported as ideographic comma list", failures)
+    check("lint", findings["fullwidth_link_syntax"],
+          [{"from_path": "concepts/fullwidth.md", "link": f"{GUIDE}｜案内"}],
+          "[[ガイド｜案内]] reported as full-width link syntax", failures)
+    check("lint", any(f["to"] == f"{GUIDE}｜案内" for f in findings["broken_links"]), True,
+          "full-width ｜ is not a separator, so the link is broken", failures)
+    for key in ("frontmatter_alias_conflicts", "fullwidth_colon_keys",
+                "ideographic_comma_lists", "fullwidth_link_syntax"):
+        check("lint", findings["summary"].get(key), 1, f"summary counts {key}", failures)
+    print()
+
+
+def check_fixture_search(root: Path, failures) -> None:
+    print("search: NFD filename resolves NFC links")
+    pages = wiki_search.collect_pages(root)
+    by_path, by_slug = wiki_search.build_link_index(pages)
+    for name in ("目次", "索引"):
+        page = next((p for p in pages if p["slug"] == name), None)
+        links = page["links"] if page else []
+        guide_links = [l for l in links if unicodedata.normalize("NFC", l).endswith(GUIDE)]
+        resolved = [wiki_search.resolve_link(l, by_path, by_slug) for l in guide_links]
+        check("search", bool(resolved) and all(r == GUIDE for r in resolved), True,
+              f"links from {name} resolve to NFC slug", failures)
+
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
+        wiki_search.cmd_backlinks(SimpleNamespace(backlinks=GUIDE), pages)
+    text = output.getvalue()
+    check("search", "concepts/目次.md" in text and "concepts/索引.md" in text, True,
+          "--backlinks ガイド finds NFC and NFD linkers", failures)
+    print()
+
+
+def check_fixture_stats(root: Path, failures) -> None:
+    print("stats: NFC and NFD links counted together")
+    output = io.StringIO()
+    argv = sys.argv
+    sys.argv = ["wiki_stats.py", str(root)]
+    try:
+        with contextlib.redirect_stdout(output):
+            wiki_stats.main()
+    finally:
+        sys.argv = argv
+    # 目次 から2件、索引・conflict・typos から1件ずつ。NFD のリンクを別に数えると 4 になる。
+    check("stats", f"{5:4d}  [[{GUIDE}]]" in output.getvalue(), True,
+          "hub count for [[ガイド]] is 5", failures)
+    print()
+
+
+def check_fixture_graph(root: Path, failures) -> None:
+    print("graph: NFD filename gets mentions edges from NFC links")
+    pages = wiki_graph_extract.collect_pages(root)
+    ontology = {"node_types": {}, "predicates": {}}
+    nodes, slug_to_id, _aliases = wiki_graph_extract.build_nodes(pages, ontology)
+    edges = wiki_graph_extract.build_edges(pages, slug_to_id)
+    guide_id = slug_to_id.get(GUIDE)
+    check("graph", guide_id is not None, True, "node for NFD file is keyed by NFC slug", failures)
+    for name in ("目次", "索引"):
+        subject = slug_to_id.get(name)
+        found = any(e["predicate"] == "mentions" and e["subject"] == subject
+                    and e["object"] == guide_id for e in edges) if guide_id else False
+        check("graph", found, True, f"{name} -> ガイド mentions edge", failures)
+    print()
+
+
+def check_nfc_collision(root: Path, failures) -> None:
+    print("lint: NFC and NFD files with the same name are duplicate slugs")
+    root.mkdir(parents=True)
+    page = "---\ntype: concept\ntitle: x\ntags: [x]\ncreated: 2026-01-01\nupdated: 2026-01-01\n---\n"
+    (root / f"{GUIDE}.md").write_text(page, encoding="utf-8")
+    (root / f"{GUIDE_NFD}.md").write_text(page, encoding="utf-8")
+    if len(list(root.iterdir())) < 2:
+        # macOS の APFS などは正規化の違いを同じ名前とみなすので、2つのファイルを作れない。
+        print("  SKIP  lint    filesystem treats NFC and NFD names as the same file")
+        return
+    findings = wiki_lint.lint(wiki_lint.collect_pages(root), 400, 800, REQUIRED_FM, False, 5)
+    dup = findings["duplicate_slugs"]
+    check("lint", len(dup) == 1 and dup[0]["slug"] == GUIDE, True,
+          "one duplicate-slug finding for ガイド", failures)
+    check("lint", bool(dup) and sorted(dup[0]["paths"]) == sorted([f"{GUIDE}.md", f"{GUIDE_NFD}.md"]),
+          True, "finding lists both on-disk paths", failures)
+    check("lint", bool(dup) and dup[0].get("normalization_collision"), True,
+          "finding is marked as a normalization collision", failures)
+    print()
 
 
 def main():
@@ -144,7 +366,27 @@ def main():
         check("stats", wiki_stats.link_stem(link), expected,
               f"[[{link}]] — {why}", failures)
 
-    total = len(RESOLVE_CASES) * len(resolvers) + len(KEY_CASES) + len(STEM_CASES) + 2
+    print()
+    print("unicode: NFD link text resolves against NFC index")
+    for label, fn in resolvers:
+        for link, expected, why in NFD_RESOLVE_CASES:
+            check(label, fn(link, NFD_BY_PATH, NFD_BY_SLUG), expected, why, failures)
+    check("stats", wiki_stats.link_stem(f"concepts/{GUIDE_NFD}"), GUIDE,
+          "NFD link stem counted as NFC", failures)
+    print()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "wiki"
+        write_fixture(root, FIXTURE_PAGES)
+        check_fixture_lint(root, failures)
+        check_fixture_search(root, failures)
+        check_fixture_stats(root, failures)
+        check_fixture_graph(root, failures)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        check_nfc_collision(Path(tmp) / "wiki", failures)
+
+    total = CHECKED[0]
     print(f"\n{total - len(failures)}/{total} passed")
     if failures:
         print("\nFAILURES:")
