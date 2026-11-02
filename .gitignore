@@ -13,12 +13,8 @@ launch-posts.md
 .leankg/
 .remember/
 
-# Node / VitePress docs toolchain
+# Node
 node_modules/
-docs/.vitepress/dist/
-docs/.vitepress/cache/
 
-# Local launch assets (never commit)
+# 公開前の素材（コミットしない）
 release-assets/
-docs/public/assets/second-brain-*.png
-docs/public/assets/llm-wiki-second-brain-*.png

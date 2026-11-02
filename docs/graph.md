@@ -1,17 +1,10 @@
----
-title: グラフ層
-description: markdown の wiki の上に、出典つきの型付きの関係をまとめる任意のコンパイル済みグラフ。
----
-
 <!-- Adapted from: docs/graph.html (source: skills/info-hive/references/graph-workflow.md). -->
 
-# グラフ層 {#graph-layer}
+# グラフ層
 
 グラフは、markdown の wiki をもとにコンパイルする任意のインデックスである。出典つきの型付きの関係をプログラムからクエリできるようにしつつ、正本はあくまで markdown のままにする。グラフはいつでもページから作り直せる。
 
-::: info
-グラフ層はオプトイン方式である。`wiki/graph/ontology.yaml` がなければ、その wiki はグラフ層を導入する前の状態である。extract、lint、query を実行してはならず、オントロジーのファイルをでっち上げてもならない。先にグラフ層を初期化する（[`/wiki:graph`](/commands#graph) または [`/wiki:init`](/commands#init) を使う）か、グラフ層なしで進める。
-:::
+> グラフ層はオプトイン方式である。`wiki/graph/ontology.yaml` がなければ、その wiki はグラフ層を導入する前の状態である。extract、lint、query を実行してはならず、オントロジーのファイルをでっち上げてもならない。先にグラフ層を初期化する（[`/wiki:graph`](./commands.md#wikigraph-action) または [`/wiki:init`](./commands.md#wikiinit) を使う）か、グラフ層なしで進める。
 
 正本は markdown のページであり、下の図の成果物はすべて生成物なので、いつでも削除して作り直せる。
 
@@ -30,7 +23,7 @@ flowchart LR
   queryg --> out["neighbors / edges / path / facts"]
 ```
 
-## グラフが表すもの {#what-the-graph-captures}
+## グラフが表すもの
 
 extract を実行すると、次の3種類のエッジができる。
 
@@ -38,7 +31,7 @@ extract を実行すると、次の3種類のエッジができる。
 2. **`mentions` エッジ。** 本文の `[[wikilink]]` 1つにつき1本で、ページ内の重複はまとめられ、確信度は `low` になる。目的のページを早く見つけるためのもので、型付きの関係の証拠にはならない。
 3. **`sourced_from` と `summarizes_raw` のエッジ。** 前者はソースページ以外のページの `sources:` リストからソースページへ、後者はソースページの `raw:` フィールドから raw ファイルへ張られる。
 
-## frontmatter のスキーマ {#frontmatter-schema}
+## frontmatter のスキーマ
 
 型付きの関係は、ページの frontmatter に書く。
 
@@ -59,15 +52,15 @@ graph:
 
 関係に必須のフィールドは `predicate`、`object`、`source`、`evidence`、`confidence`、`status` である。`node_id` は `<node_type>:<slug>` の形をとる。
 
-## オントロジー {#the-ontology}
+## オントロジー
 
 `wiki/graph/ontology.yaml` は、グラフの仕様を決めるファイルである。`node_types[*].maps_from`（ページの `type` や `kind` をどのノード種別に対応させるか）と、`predicates[*]`（使える述語と、その `subject_types`、`object_types`、`requires_evidence`）を宣言する。`"*"` はワイルドカードである。分野固有の述語を追加するときはオントロジーを編集し、lint を再実行して、既存のエッジがオントロジーに合っているかを検証する。
 
-## 型付きエッジと通常の wikilink の使い分け {#typed-edge-vs-plain-wikilink}
+## 型付きエッジと通常の wikilink の使い分け
 
 特定のソースが関係をはっきり述べていて、証拠を引用でき、その述語が後のクエリで意味を持つなら、**型付きエッジ**を追加する。関係が暗黙的なもの、1つの引用に結びつけられないもの、`mentions` エッジにしかならないものには、通常の **`[[wikilink]]`** を使う。迷ったら wikilink を書けばよい。lint は証拠の欠落を指摘するが、関係を控えめに書いたことを問題にはしない。
 
-## extract、lint、query {#extract-lint-query}
+## extract、lint、query
 
 ```bash
 # まず型付きメタデータを検証する。lint はファイルを編集しない。
@@ -83,9 +76,9 @@ python skills/info-hive/scripts/wiki_graph_query.py wiki/ path     --from person
 python skills/info-hive/scripts/wiki_graph_query.py wiki/ facts    --about product:konvy
 ```
 
-`--json` は lint と query のどちらのコマンドでも使える。同じ操作は、スラッシュコマンドの [`/wiki:graph`](/commands#graph) からも実行できる。回答では、必ず wiki ページとその raw ソースを出典として示す。グラフはどのページを読めばよいかを教えるものであり、グラフそのものは証拠ではない。
+`--json` は lint と query のどちらのコマンドでも使える。同じ操作は、スラッシュコマンドの [`/wiki:graph`](./commands.md#wikigraph-action) からも実行できる。回答では、必ず wiki ページとその raw ソースを出典として示す。グラフはどのページを読めばよいかを教えるものであり、グラフそのものは証拠ではない。
 
-## 生成物の扱い {#generated-artifact-policy}
+## 生成物の扱い
 
 | ファイル | 正本か | 既定の管理方法 |
 | --- | --- | --- |
@@ -95,6 +88,4 @@ python skills/info-hive/scripts/wiki_graph_query.py wiki/ facts    --about produ
 | `graph.sqlite` | 生成物 | 既定で gitignore する（大きいバイナリのため） |
 | `graph.graphml` | 生成物 | 既定で gitignore する |
 
-::: info
-グラフの lint と抽出は、PyYAML 6.0.3 にバージョンを固定したメタデータを持ち、`uv run --script` で実行される。手作業での `pip install` は不要である。グラフのクエリは Python の標準ライブラリだけを使う。
-:::
+> グラフの lint と抽出は、PyYAML 6.0.3 にバージョンを固定したメタデータを持ち、`uv run --script` で実行される。手作業での `pip install` は不要である。グラフのクエリは Python の標準ライブラリだけを使う。

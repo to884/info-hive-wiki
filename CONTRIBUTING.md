@@ -1,48 +1,40 @@
-# Contributing
+# コントリビュートの手引き
 
-Thanks for your interest in improving this plugin. The structure below is meant to make contributions land smoothly: none of it is gatekeeping, and small PRs are welcome.
+このプラグインの改善に関心を持ってくれたことに感謝する。以下の取り決めは、コントリビュートを滞りなく取り込むためのもので、参加を制限するためのものではない。小さな PR も歓迎する。
 
-## What kinds of contributions fit
+info-hive は、Praney Behl の [llm-wiki-plugin](https://github.com/praneybehl/llm-wiki-plugin) v4.0.1 を日本語向けに移植したものである。移植元とは独立して開発しており、info-hive への修正を移植元に送ることはしない。起点のコミットと取り込んだ修正は [UPSTREAM.md](./UPSTREAM.md) に記録する。
 
-The plugin has five surface areas that take contributions well: the skill itself (`skills/info-hive/SKILL.md` and the references), the bundled scripts (`skills/info-hive/scripts/`), the slash commands (`commands/wiki/`), the optional hosted server (`server/`), and the documentation (README, CHANGELOG, `docs/`, this file). Bug fixes and small improvements to any of these are easy yes-es.
+## 受け付けやすいコントリビュート
 
-For larger changes (new page types baked into the bootstrap, new lint checks, restructuring the references, changing the default schema), please open an issue first to discuss the shape before writing code. The skill is opinionated by design; some "improvements" would unwind a deliberate trade-off (atomic pages, index-first navigation, schema-as-config), so a quick issue conversation saves rework.
+コントリビュートを受け付けやすい場所は4つある。スキル本体（`skills/info-hive/SKILL.md` と references）、同梱のスクリプト（`skills/info-hive/scripts/`）、スラッシュコマンド（`commands/`）、ドキュメント（README、CHANGELOG、`docs/`、このファイル）である。どれについても、不具合の修正と小さな改善はそのまま受け入れやすい。
 
-What probably doesn't fit: features that move the plugin away from Markdown as the canonical store, or that make the local folder mode depend on a service. The optional hosted server keeps Markdown canonical and must stay deployable with one click on the Cloudflare Workers Free plan: one Worker, only bindings that the Deploy button creates, one secret, and no code imported from outside `server/`. If your idea needs a separate canonical database, a second service or a manual deploy step, it's likely a different project rather than a PR here. The reference implementations linked in the README (OmegaWiki, Synthadoc, etc.) explore those directions if that's where you want to go.
+大きな変更（初期化で作るページの種類の追加、lint のチェックの追加、references の構成の変更、既定のスキーマの変更など）は、コードを書く前に issue を立てて、変更の形を相談してほしい。このスキルは意図して特定の設計を選んでいる。アトミックなページ、インデックスを先に読むナビゲーション、設定としてのスキーマなどである。「改善」のつもりの変更が、意図したトレードオフを崩すこともあるので、先に issue で話しておけば手戻りが減る。
 
-## Development setup
+合わないと思われるのは、Markdown を正本とする方針から離れる機能や、ローカルのフォルダーで動くモードを外部のサービスに依存させる機能である。別の正本のデータベースや、2つ目のサービスが必要な案は、このリポジトリへの PR より、別のプロジェクトとして進めるほうが向いている。その方向を探るなら、README で紹介している実装（OmegaWiki、Synthadoc など）が参考になる。
 
-Clone your fork and install the plugin into a Claude Code session pointed at the local checkout:
+## 開発環境の準備
+
+フォークをクローンし、ローカルのチェックアウトを指す形で、Claude Code のセッションにプラグインをインストールする。
 
 ```bash
-git clone https://github.com/<your-fork>/llm-wiki-plugin
-cd llm-wiki-plugin
+git clone https://github.com/<your-fork>/info-hive
+cd info-hive
 ```
 
-Then in Claude Code, add the local path as a marketplace and install:
+続いて Claude Code で、ローカルのパスをマーケットプレイスとして追加し、インストールする。
 
 ```
-/plugin marketplace add /absolute/path/to/llm-wiki-plugin
+/plugin marketplace add /absolute/path/to/info-hive
 /plugin install wiki@info-hive
 ```
 
-After making changes, refresh with `/plugin marketplace update` and reinstall. There's no build step: the skill, commands, and scripts run as-is from the filesystem.
+変更したら、`/plugin marketplace update` で更新してからインストールし直す。ビルドの手順はない。スキル、コマンド、スクリプトは、ファイルシステムにあるものがそのまま動く。
 
-The hosted server in `server/` is a self-contained TypeScript Worker. It uses npm, not pnpm, so the Deploy button can build it:
+同梱の Python スクリプトは Python 3.10 以上を対象にする。改善のワークフロー、語彙ベースの検索、lint、stats、グラフのクエリは標準ライブラリだけを使う。実行環境のセットアップ、ハイブリッド検索、グラフのコンパイルは、uv を通じて、バージョンを固定した既存の PEP 723 の依存パッケージを使う。新しい補助の処理には標準ライブラリを優先し、改善のワークフローには依存パッケージを加えない。
 
-```bash
-cd server
-npm ci
-npm run typecheck
-npm test
-npm run dev        # local Worker with wrangler
-```
+## 変更を確かめる
 
-The bundled Python scripts target Python 3.10+. Evolution, lexical search, lint, stats and graph queries use the standard library. Runtime setup, hybrid retrieval and graph compilation use existing pinned PEP 723 dependencies through uv. Prefer stdlib for new helpers; do not add dependencies for the evolution workflow.
-
-## Testing changes
-
-Run the relevant checked-in suites and exercise changed workflows against a disposable wiki before submission:
+提出する前に、関係するリポジトリ内のテストを実行し、変更したワークフローを使い捨ての wiki で試す。
 
 ```bash
 uv run --with fastembed==0.8.0 --with sqlite-vec==0.1.9 --with PyYAML==6.0.3 python -m unittest discover -s eval/retrieval -p 'test_*.py'
@@ -51,165 +43,156 @@ python eval/evolution/test_evolution.py
 python eval/evolution/test_loop.py
 python eval/evolution/test_adapters.py
 python eval/retrieval/run_eval.py --gate
-python eval/remote/test_remote.py
 python eval/decisions/test_decisions.py
-cmp skills/info-hive/assets/decision-questions.json server/src/decisions/decision-questions.json
-(cd server && npm ci && npm run typecheck && npm test)
-pnpm docs:build
 ```
 
-`skills/info-hive/assets/decision-questions.json` and `server/src/decisions/decision-questions.json` must stay identical. Change both in one commit. CI fails when they differ. Decision tests use a fake backend. Do not send private wiki text to a hosted decision backend.
+判定レイヤーのテストは偽のバックエンドを使う。非公開の wiki のテキストを、外部の判定バックエンドに送ってはならない。
 
-The evolution suite uses deterministic runners to verify lifecycle behavior, not model improvement. Live-model trials require an explicitly selected runner/model and inference budget; record actual results separately.
+改善のワークフローのテストは、決まった結果を返すランナーでライフサイクルの動作を確かめるもので、モデルの品質が上がったことを確かめるものではない。実際のモデルを使う試験には、ランナーとモデルを明示して選び、推論の予算を決める必要がある。その結果は別に記録する。
 
-The minimum manual smoke test:
+手作業で行う最小限のスモークテストは次のとおり。
 
 ```bash
 mkdir /tmp/test-wiki && cd /tmp/test-wiki
-python /path/to/llm-wiki-plugin/skills/info-hive/scripts/init_wiki.py .
-# create a few markdown pages by hand under wiki/sources/, wiki/concepts/, etc.
-# include some deliberate issues (an orphan page, a broken [[wikilink]], missing frontmatter)
-python /path/to/llm-wiki-plugin/skills/info-hive/scripts/wiki_lint.py wiki/
-python /path/to/llm-wiki-plugin/skills/info-hive/scripts/wiki_stats.py wiki/
-python /path/to/llm-wiki-plugin/skills/info-hive/scripts/wiki_search.py "your query terms"
+python /path/to/info-hive/skills/info-hive/scripts/init_wiki.py .
+# wiki/sources/ や wiki/concepts/ などの下に、Markdown のページを手でいくつか作る
+# わざと問題を入れておく（孤立ページ、リンク切れの [[wikilink]]、frontmatter の欠落）
+python /path/to/info-hive/skills/info-hive/scripts/wiki_lint.py wiki/
+python /path/to/info-hive/skills/info-hive/scripts/wiki_stats.py wiki/
+python /path/to/info-hive/skills/info-hive/scripts/wiki_search.py "your query terms"
 ```
 
-For changes to the skill itself (`SKILL.md` or the references), the most useful test is a real ingest: drop a paper or article into a test project's `raw/`, run `/wiki:ingest <path>`, and read what gets produced. If the workflow drifts in ways that hurt output quality, the skill needs adjustment.
+スキル本体（`SKILL.md` や references）を変えたときにもっとも役立つのは、実際に取り込んでみることである。テスト用のプロジェクトの `raw/` に論文や記事を置き、`/wiki:ingest <path>` を実行し、できあがったものを読む。ワークフローがずれて出力の質が落ちているなら、スキルを直す必要がある。
 
-For changes to slash commands, install the plugin into a fresh project and exercise the command end-to-end.
+スラッシュコマンドを変えたときは、新しいプロジェクトにプラグインをインストールし、コマンドを最初から最後まで実行して確かめる。
 
-## Style notes for the skill prose
+## スキルの文章の書き方
 
-The skill body and references are written in a particular voice and structure. Keep new prose consistent with what's there:
+スキル本体と references は、一定の文体と構成で書いている。新しく書く文章も、既存の文章にそろえる。
 
-The reference files use prose with minimal bullets: explanations connected by reasoning, not lists of disconnected points. This is deliberate: the LLM reading the skill benefits more from continuous reasoning than from bullet-pointed assertions. If you find yourself writing more than three or four bullets in a row, reconsider whether prose would carry the same content better.
+references のファイルは、箇条書きを最小限にした文章で書く。ばらばらの要点を並べるのではなく、理由でつないで説明する。これは意図した選択である。スキルを読む LLM にとっては、箇条書きの断定より、つながった説明のほうが役に立つ。箇条書きが3つか4つより多く続くようなら、文章で書いたほうがよくないかを考え直す。
 
-Imperative voice for instructions ("Read the source", "Check the schema first"), explanatory voice for rationale ("The reason for the size cap is..."). Avoid all-caps MUSTs and NEVERs unless something is genuinely non-negotiable: explain *why* a constraint exists rather than shouting it.
+指示は命令の形で書き（「ソースを読む」「先にスキーマを確かめる」）、理由は説明の形で書く（「大きさに上限を設ける理由は……」）。本当に譲れない制約でない限り、大文字の MUST や NEVER のような強い言い方は避け、制約がある理由を説明する。
 
-Hedge claims that aren't yet established. "The pattern shines for accumulating textual research and degrades for highly relational data" is a defensible claim. "The pattern is the best knowledge management approach" is not.
+まだ確かめられていない主張は、言い切らない。「このパターンは、積み重なっていく文章の調査には向いているが、関係の多いデータには向かない」は、根拠を示せる主張である。「このパターンは最良の知識管理の方法である」はそうではない。
 
-## Style notes for the scripts
+## スクリプトの書き方
 
-The bundled scripts share a few conventions worth preserving:
+同梱のスクリプトには、守っておきたい共通の取り決めがある。
 
-Each script has a docstring at the top with its purpose, usage, and an example invocation. New scripts should follow the same pattern: `python script.py --help` should produce useful output.
+どのスクリプトも、先頭の docstring に目的、使い方、実行例を書く。新しいスクリプトも同じ形にし、`python script.py --help` で役に立つ説明が出るようにする。
 
-Output is human-readable by default with an optional `--json` flag for programmatic use (currently `wiki_lint.py` has this; others can add it as needed).
+出力は、既定では人が読む形にし、プログラムから使うための `--json` を任意で付けられるようにする（今は `wiki_lint.py` にある。ほかのスクリプトにも必要に応じて加えてよい）。
 
-Diagnostic scripts report findings without applying fixes. Init/setup and the explicitly invoked evolution lifecycle write their documented artifacts. Evolution candidates stay isolated until a passing, reviewed change is explicitly applied; snapshots and measurements must remain inspectable.
+診断用のスクリプトは、検出結果を報告するだけで、修正は適用しない。初期化とセットアップ、明示的に呼び出す改善のライフサイクルは、ドキュメントに書いた成果物を書き込む。改善の候補は、合格してレビューを済ませた変更を明示的に適用するまで隔離しておく。スナップショットと測定結果は、あとから確認できる状態で残す。
 
-New lifecycle helpers use stdlib. Reuse the existing pinned runtime for dependency-bearing search and graph operations.
+ライフサイクルの新しい補助の処理は、標準ライブラリで書く。依存パッケージが必要な検索とグラフの処理には、バージョンを固定した既存の実行環境を使い回す。
 
-## Schema and breaking changes
+## スキーマの変更と互換性のない変更
 
-Some changes affect existing wikis users have built: adding a required frontmatter field, renaming a default page type, changing the index format. These are breaking changes and need:
+変更によっては、ユーザーがすでに作った wiki に影響する。必須の frontmatter のフィールドを加える、既定のページの種類の名前を変える、インデックスの形式を変える、といった変更である。これらは互換性のない変更であり、次のものが必要になる。
 
-A migration path documented in the PR (a script, a manual procedure, or both).
+PR に移行の手順を書く（スクリプト、手作業の手順、またはその両方）。
 
-A clear note in `CHANGELOG.md` under a `### Changed` or `### Breaking` heading.
+`CHANGELOG.md` の `### Changed` か `### Breaking` の見出しの下に、はっきり書く。
 
-A version bump that respects semver: minor bump if backward-compatible with old wikis, major bump if not.
+SemVer に沿ってバージョンを上げる。古い wiki と互換性があればマイナー、なければメジャーを上げる。
 
-If a change can be made backward-compatible (e.g. new frontmatter field is optional with a sensible default), prefer that over the breaking version.
+互換性を保てる変更（妥当な既定値を持つ任意の frontmatter のフィールドを加えるなど）にできるなら、互換性のない形より、そちらを選ぶ。
 
-## PR checklist
+## PR のチェックリスト
 
-Before opening a PR, verify:
+PR を出す前に、次を確かめる。
 
-- [ ] Affected bundled scripts and existing regression suites pass against a small test wiki.
-- [ ] `python -c "import json; json.load(open('.claude-plugin/plugin.json')); json.load(open('.claude-plugin/marketplace.json'))"` succeeds.
-- [ ] The plugin still loads in Claude Code (`/plugin marketplace add <local-path>`, `/plugin install`, no errors).
-- [ ] `CHANGELOG.md` describes the change under `[Unreleased]`, or the selected release heading when the version is prepared in this PR.
-- [ ] If you changed the skill description in `SKILL.md` frontmatter or `plugin.json`, the description is still under 1024 characters.
-- [ ] If you changed the SKILL.md description, the change clearly improves the trigger surface (more relevant phrasings, fewer false negatives): descriptions are the primary mechanism that makes Claude reach for the skill, so wording matters.
+- [ ] 影響を受ける同梱のスクリプトと、既存の回帰テストが、小さなテスト用の wiki で通る。
+- [ ] `python -c "import json; json.load(open('.claude-plugin/plugin.json', encoding='utf-8')); json.load(open('.claude-plugin/marketplace.json', encoding='utf-8'))"` が成功する。
+- [ ] Claude Code でプラグインを読み込める（`/plugin marketplace add <local-path>`、`/plugin install`、エラーが出ない）。
+- [ ] `CHANGELOG.md` の `[Unreleased]` に変更を書いた。この PR でバージョンを準備する場合は、そのリリースの見出しの下に書いた。
+- [ ] `SKILL.md` の frontmatter や `plugin.json` の説明文を変えた場合、1024 文字未満に収まっている。
+- [ ] SKILL.md の説明文を変えた場合、スキルが呼び出される範囲がはっきり良くなっている（関係する言い回しが増える、呼び出されるべきときに呼び出されないことが減る）。説明文は、Claude がスキルを使うかどうかを決める主な手がかりなので、言葉の選び方が大事である。
 
-## Issues
+## issue
 
-For bug reports, the most useful information is: the command or natural-language request that triggered the issue, the relevant slice of the wiki (a couple of pages or the full directory if you're comfortable sharing), and what you expected vs. what happened. If the bug is in a script, the exact command line and the output (or stack trace).
+不具合の報告でもっとも役に立つのは、問題を起こしたコマンドや自然言語の依頼、関係する wiki の一部（共有してよければ、数ページかディレクトリ全体）、期待した結果と実際の結果である。スクリプトの不具合なら、正確なコマンドラインと出力（またはスタックトレース）も添える。
 
-For feature requests, please describe the underlying use case as well as the proposed feature: sometimes the right answer is a different approach to the same problem rather than the requested feature.
+機能の要望では、求める機能だけでなく、その背景にある使い方も書いてほしい。要望された機能そのものより、同じ問題への別のやり方のほうが合っていることもある。
 
-## Releasing (maintainers)
+## リリース（メンテナー向け）
 
-### Where the version lives
+### バージョンを書く場所
 
-The main release version is declared in five JSON fields, one TypeScript constant and one CHANGELOG heading. **Bump them together**. `claude plugin validate` rejects mismatches between the plugin manifest and marketplace entry, while `package.json` keeps the documentation package aligned with the plugin and skill release.
+リリースのバージョンは、JSON の3つのフィールドと、CHANGELOG の見出しに書く。**すべて一緒に上げる**。`claude plugin validate` は、プラグインのマニフェストとマーケットプレイスの項目でバージョンが食い違うと、エラーにする。
 
-| Location | Field | Notes |
+| 場所 | フィールド | 備考 |
 |----------|-------|-------|
-| `package.json` | `version` | Repository documentation package; keep aligned with the plugin and skill release. |
-| `.claude-plugin/plugin.json` | `version` | Authoritative: Claude Code resolves the installed version from here first. |
-| `.claude-plugin/marketplace.json` | `metadata.version` | Top-level marketplace version. |
-| `.claude-plugin/marketplace.json` | `plugins[0].version` | Per-plugin entry; must match `plugin.json`. |
-| `server/package.json` | `version` | Hosted server package; keep aligned with the plugin release. |
-| `server/src/types.ts` | `SERVER_VERSION` | Reported by `/healthz` and `wiki_overview`. |
-| `CHANGELOG.md` | `## [X.Y.Z] - YYYY-MM-DD` heading + the `[X.Y.Z]: …/releases/tag/vX.Y.Z` link line | Human-facing record. |
+| `.claude-plugin/plugin.json` | `version` | 正本。Claude Code は、インストールしたバージョンをまずここから読む。 |
+| `.claude-plugin/marketplace.json` | `metadata.version` | マーケットプレイス全体のバージョン。 |
+| `.claude-plugin/marketplace.json` | `plugins[0].version` | プラグインごとの項目。`plugin.json` と一致させる。 |
+| `CHANGELOG.md` | `## [X.Y.Z] - YYYY-MM-DD` の見出しと、`[X.Y.Z]: …/releases/tag/vX.Y.Z` のリンクの行 | 人が読むための記録。 |
 
-`skills/info-hive/SKILL.md` does **not** carry a version field. Skills are versioned by the enclosing plugin's `plugin.json`: leave SKILL.md frontmatter alone unless you're changing `name` or `description`.
+`skills/info-hive/SKILL.md` には、バージョンのフィールドを**置かない**。スキルのバージョンは、それを含むプラグインの `plugin.json` で決まる。`name` か `description` を変えるとき以外は、SKILL.md の frontmatter に手を付けない。
 
-The bundled scripts and slash commands also have no version metadata; the plugin version covers them.
+同梱のスクリプトとスラッシュコマンドにも、バージョンの情報はない。プラグインのバージョンがそれらも表す。
 
-### SemVer policy
+### SemVer の方針
 
-- **Major** (`1.0.0` → `2.0.0`): breaking changes to wiki structure, frontmatter schema, or script CLI flags that existing wikis cannot accommodate without manual migration.
-- **Minor** (`0.3.0` → `0.4.0`): additive features (new commands, new optional frontmatter, new scripts) that pre-existing wikis can ignore. Always pair with an `--upgrade`-style flow (or extend the existing one in `init_wiki.py`) so users on older wikis can pick up the new files idempotently without losing customisations.
-- **Patch** (`0.3.0` → `0.3.1`): bug fixes, doc-only changes, internal refactors with identical observable behaviour.
+- **メジャー**（`1.0.0` → `2.0.0`）: wiki の構造、frontmatter のスキーマ、スクリプトのコマンドラインのフラグに対する互換性のない変更で、既存の wiki を手作業で移行しないと使えなくなるもの。
+- **マイナー**（`0.3.0` → `0.4.0`）: 既存の wiki が無視できる機能の追加（新しいコマンド、任意の frontmatter、新しいスクリプト）。古い wiki を使っている人が、カスタマイズを失わずに新しいファイルを冪等に取り込めるよう、必ず `--upgrade` の流れを用意する（または `init_wiki.py` の既存の流れを広げる）。
+- **パッチ**（`0.3.0` → `0.3.1`）: 不具合の修正、ドキュメントだけの変更、外から見た動作が変わらない内部の整理。
 
-If a feature can be made backward-compatible (e.g. a new frontmatter field with a sensible default), prefer that over a breaking change.
+互換性を保てる形（妥当な既定値を持つ新しい frontmatter のフィールドなど）にできるなら、互換性のない変更より、そちらを選ぶ。
 
-### Release checklist
+### リリースの手順
 
-1. **Move `[Unreleased]` entries** in `CHANGELOG.md` under a new `## [X.Y.Z] - YYYY-MM-DD` heading. Add the corresponding `[X.Y.Z]: https://github.com/praneybehl/llm-wiki-plugin/releases/tag/vX.Y.Z` line at the bottom and update `[Unreleased]: …/compare/vX.Y.Z...HEAD`.
-2. **Bump `version` to `X.Y.Z`** in:
-   - `package.json`
+1. `CHANGELOG.md` の **`[Unreleased]` の項目を**、新しい `## [X.Y.Z] - YYYY-MM-DD` の見出しの下に**移す**。末尾に `[X.Y.Z]: https://github.com/to884/info-hive/releases/tag/vX.Y.Z` の行を加え、`[Unreleased]: https://github.com/to884/info-hive/compare/vX.Y.Z...HEAD` に更新する。
+2. 次の場所で **`version` を `X.Y.Z` に上げる**。
    - `.claude-plugin/plugin.json`
-   - `.claude-plugin/marketplace.json` (both `metadata.version` and `plugins[0].version`)
-   - `server/package.json` and `SERVER_VERSION` in `server/src/types.ts`
-3. **If the release adds files or schema sections** users on older wikis would otherwise miss, extend `scripts/init_wiki.py`:
-   - Add new template files to `template_map` (idempotent: `init_wiki.py` skips files that already exist).
-   - Add a marker entry to `SCHEMA_SECTION_MARKERS` for any new SCHEMA.md section so `--upgrade` surfaces it as a manual merge.
-   - Update the `/wiki:upgrade` slash command if the manual steps change.
-4. **Validate the manifests** (catches version mismatches and schema errors):
+   - `.claude-plugin/marketplace.json`（`metadata.version` と `plugins[0].version` の両方）
+3. 古い wiki を使っている人が取り逃がす**ファイルやスキーマのセクションをリリースで加える場合**は、`skills/info-hive/scripts/init_wiki.py` を広げる。
+   - 新しいテンプレートのファイルを `template_map` に加える（冪等である。`init_wiki.py` は、すでにあるファイルを飛ばす）。
+   - SCHEMA.md に新しいセクションを加えるなら、`SCHEMA_SECTION_MARKERS` に目印を加え、`--upgrade` が手作業のマージとして示すようにする。
+   - 手作業の手順が変わるなら、`/wiki:upgrade` のスラッシュコマンドを更新する。
+4. **マニフェストを検証する**（バージョンの食い違いとスキーマの誤りを見つける）。
    ```bash
    claude plugin validate .
    ```
-   Should print `✔ Validation passed`.
-5. **Smoke-test** the bundled scripts against a temp fixture (`init_wiki.py` into `/tmp`, seed a couple of pages, run lint + extract + query). For graph changes, exercise every lint branch with a fixture page that triggers each finding type.
-6. **Commit in two parts** to mirror prior history:
+   `✔ Validation passed` と表示されればよい。
+5. 一時的なフィクスチャで、同梱のスクリプトの**スモークテストを行う**（`init_wiki.py` で一時ディレクトリに wiki を作り、ページをいくつか置き、lint、extract、query を実行する）。グラフを変えた場合は、検出結果の種類ごとにそれを起こすフィクスチャのページを用意し、lint のすべての分岐を通す。
+6. **2つに分けてコミットする**。
    ```bash
-   git commit -m "feat: <one-line summary>"      # the substantive changes
-   git commit -m "release: vX.Y.Z"               # the version bumps + CHANGELOG
+   git commit -m "feat: <1行の要約>"      # 中身の変更
+   git commit -m "release: vX.Y.Z"        # バージョンの更新と CHANGELOG
    ```
-7. **Push and tag**:
+7. **push してタグを付ける**。
    ```bash
    git push origin main
-   git tag -a vX.Y.Z -m "vX.Y.Z: <one-line summary>"
+   git tag -a vX.Y.Z -m "vX.Y.Z: <1行の要約>"
    git push origin vX.Y.Z
    ```
-   The repo uses simple `vX.Y.Z` tags (matches `v0.1.0` and `v0.2.0`). The `claude plugin tag` command would create `llm-wiki--vX.Y.Z` instead: that's also valid for Claude Code installs, but keep this repo on the `vX.Y.Z` convention for consistency.
-8. **Create the GitHub Release**:
+   タグは単純な `vX.Y.Z` の形にする。`claude plugin tag` コマンドを使うと `wiki--vX.Y.Z` の形のタグができる。これでも Claude Code からのインストールには使えるが、このリポジトリでは `vX.Y.Z` にそろえる。
+8. **GitHub のリリースを作る**。
    ```bash
-   gh release create vX.Y.Z --title "vX.Y.Z: <summary>" \
+   gh release create vX.Y.Z --repo to884/info-hive --title "vX.Y.Z: <要約>" \
      --notes "$(cat <<'EOF'
-     <release notes: usually a tightened version of the CHANGELOG entry>
+     <リリースノート。ふつうは CHANGELOG の項目を短くしたもの>
      EOF
      )"
    ```
 
-### How users pick up the new version
+### 利用者が新しいバージョンを取り込む方法
 
-- **Claude Code:** `/plugin marketplace update` followed by `/plugin install wiki@info-hive`. Claude Code compares the resolved `version` against the cached one and refreshes when they differ.
-- **Other agents installed via `npx skills add`:** `npx skills update info-hive`, or re-run the original `npx skills add praneybehl/llm-wiki-plugin -a <agent>` command.
-- **Existing wikis bootstrapped under an older plugin version:** users run `/wiki:upgrade` (or `python /path/to/llm-wiki-plugin/skills/info-hive/scripts/init_wiki.py /absolute/path/to/project --upgrade` from the CLI). The script path and target project must be separate; the upgrade flow is idempotent for files and walked-through for SCHEMA.md merges.
+- **Claude Code:** `/plugin marketplace update` のあとに `/plugin install wiki@info-hive` を実行する。Claude Code は、解決した `version` をキャッシュしているものと比べ、違っていれば更新する。
+- **`npx skills add` でインストールしたほかのエージェント:** `npx skills update info-hive` を実行するか、最初に使った `npx skills add to884/info-hive -a <agent>` をもう一度実行する。
+- **以前のバージョンで作った既存の wiki:** `/wiki:upgrade` を実行する（コマンドラインからなら `python /path/to/info-hive/skills/info-hive/scripts/init_wiki.py /absolute/path/to/project --upgrade`）。スクリプトのパスと対象のプロジェクトは別にしておく。アップグレードは、ファイルについては冪等で、SCHEMA.md のマージは手順を追って確認しながら進める。
 
-### What does NOT need to change on every release
+### リリースのたびに変えなくてよいもの
 
-- `skills/info-hive/SKILL.md` frontmatter (no version field)
-- Slash command files in `commands/wiki/` (no version field)
-- Reference docs in `skills/info-hive/references/` (unless the change introduces new content)
-- Asset templates in `skills/info-hive/assets/` (unless the change introduces new templates)
-- `LICENSE`, `README.md` (unless the user-facing summary changed)
+- `skills/info-hive/SKILL.md` の frontmatter（バージョンのフィールドはない）
+- `commands/` のスラッシュコマンドのファイル（バージョンのフィールドはない）
+- `skills/info-hive/references/` のリファレンス（新しい内容を加える変更でない限り）
+- `skills/info-hive/assets/` のテンプレート（新しいテンプレートを加える変更でない限り）
+- `LICENSE`、`README.md`（利用者向けの概要が変わらない限り）
 
-## License
+## ライセンス
 
-By contributing, you agree that your contributions will be licensed under the project's [MIT License](./LICENSE).
+コントリビュートした内容は、このプロジェクトの [MIT ライセンス](./LICENSE)で提供することに同意したものとする。

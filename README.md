@@ -1,8 +1,16 @@
-# LLM Wiki: AI エージェントのための第二の脳
+# info-hive: AI エージェントのための日本語の第二の脳
 
 PDF、記事、文字起こし、メモを、AI エージェントが検索し、出典を示し、最新の状態に保てる共有の wiki に変える。ソースは一度追加するだけでよい。あとから質問し、役に立った回答は残しておける。
 
-Claude Code、Codex、Cursor、Gemini CLI、OpenCode、OpenClaw、Pi、OMP、Hermes で動く。[ドキュメントを読む](https://praneybehl.github.io/llm-wiki-plugin/)。
+info-hive は、Praney Behl の [llm-wiki-plugin](https://github.com/praneybehl/llm-wiki-plugin) v4.0.1 を日本語向けに移植したものである。日本語に合わせた検索の改善（トークン化と多言語の埋め込みモデル）は[移植計画](docs/porting-plan.html)に沿って進めている途中で、現時点の検索は移植元と同じ英語向けの設定のままである。
+
+Claude Code、Codex、Cursor、Gemini CLI、OpenCode、OpenClaw、Pi、OMP、Hermes で動く。詳しい説明は [docs/](docs/index.md) にある。
+
+## 移植元
+
+info-hive は、Praney Behl による [llm-wiki-plugin](https://github.com/praneybehl/llm-wiki-plugin)（MIT ライセンス）の v4.0.1（コミット `2d24ccf`）をもとにしている。移植元の著作権表示と許諾文は [LICENSE](LICENSE) に残している。起点のコミットと取り込んだ範囲は [UPSTREAM.md](UPSTREAM.md) に記録している。
+
+移植元にあるホスト型 wiki（Cloudflare Workers 上のサーバーと、それにつなぐコマンドやスクリプト）は、info-hive には含めていない。info-hive の不具合や要望は、移植元ではなくこのリポジトリに報告してほしい。
 
 ## LLM Wiki とは
 
@@ -10,17 +18,7 @@ AI エージェントは目の前のタスクには強いが、新しいセッ�
 
 ソースを追加すると、エージェントはそれをリンクでつながった Markdown ページに変える。あとで適切なセクションを見つけ、出典つきで答えられる。役に立った回答は wiki に保存し直せるので、知識は毎回ゼロから組み立て直されるのではなく、積み重なっていく。
 
-正本はすべて、読める Markdown のまま残る。既定のセマンティック検索はローカルで動き、ホスト型のベクトルデータベースや埋め込みサービスは使わない。自分の Cloudflare アカウントに置く任意の[ホスト型 wiki](#ホスト型-wiki) を使えば、複数のマシンのエージェントで1つの wiki を共有できる。
-
-## v4 の新機能
-
-- **任意で使えるホスト型 wiki。** ワンクリックで、自分のアカウントに Cloudflare Worker を1つデプロイできる。どのマシンのエージェントも、MCP か JSON API で wiki を読み書きできる。[ホスト型 wiki](#ホスト型-wiki) を参照。
-- **安全な共有の書き込み。** 変更はすべて、作成者とリビジョンを持つアトミックなコミットになる。必要な箇所だけを変える `edit` と `append` の操作は、めったに競合しない。競合したときは、エージェントにページを読み直して再試行するよう伝える。
-- **移行とミラー。** `/wiki:migrate` はローカルの wiki を移行し、アップロードしたすべてのファイルを SHA-256 で検証し、インポートがスキップしたファイルを報告する。`wiki_remote.py pull --git` は、Git の履歴や Obsidian で使える読み取り専用のローカルミラーを保つ。
-- **任意で使える判定モデル。** 小さなモデルで、検索結果を関連度でふるい分けたり、グラフの証拠をチェックしたり、信頼できないテキストにフラグを立てたりできる。既定では無効。[任意の判定レイヤー](#任意の判定レイヤー)を参照。
-- **ローカルモードは変わらない。** 既存の wiki、スクリプト、コマンドは、これまでどおり動く。
-
-v3.2.0 では、完了した作業から学ぶ機能が加わった。`/wiki:learn` は検証済みの経験を記録し、`/wiki:evolve` はスキルの変更を提案、テスト、適用し、ロールバックする。[学習とスキルの改善](https://praneybehl.github.io/llm-wiki-plugin/evolution.html)を参照。改善のワークフローは、[WikiSkill: Compiling Agent Experience into Persistent Knowledge for Skill Evolution](https://arxiv.org/html/2608.27454v1)（Google Research と Virginia Tech、2026）を応用したものである。[取り入れた点と変えた点](https://praneybehl.github.io/llm-wiki-plugin/evolution.html#research-basis-and-adaptation)と[測定結果](eval/evolution/workflows/README.md)を参照。私たちの調査では2つの提案がどちらも却下され、品質の向上は示されなかった。
+正本はすべて、読める Markdown のまま残る。既定のセマンティック検索はローカルで動き、外部のベクトルデータベースや埋め込みサービスは使わない。
 
 ## 使う理由
 
@@ -33,6 +31,7 @@ v3.2.0 では、完了した作業から学ぶ機能が加わった。`/wiki:lea
 LLM Wiki がもっとも役立つのは、時間とともに増えていく知識である。調査、会議のメモ、顧客との通話、論文、記事、プロジェクトの決定事項がこれに当たる。構造化されたレコードやトランザクションが主な課題なら、ふつうのデータベースを使う。
 
 ## インストール
+
 前提として必要なのは `uv` だけである。`uv` は、対応しているすべてのプラットフォームで、バージョンを固定したスクリプトの実行環境を作る。`/wiki:init` や、それに当たる自然言語での依頼を実行する前に、[uv の公式の手順](https://docs.astral.sh/uv/getting-started/installation/)でインストールしておく。
 
 プラグインやスキルをインストールすると、エージェントが使うコマンドと同梱のツールがすべてコピーされる。そのあと wiki の初期化で、必須の実行環境のセットアップを行う。対象は、FastEmbed `0.8.0`、sqlite-vec `0.1.9`、PyYAML `6.0.3`、ローカルの `BAAI/bge-small-en-v1.5` モデル、パースキャッシュ、既存の全セクションのベクトルである。アップグレードでも同じセットアップを再実行し、変更されたセクションと削除されたセクションを差分で同期する。
@@ -40,10 +39,10 @@ LLM Wiki がもっとも役立つのは、時間とともに増えていく知�
 
 ### Claude Code: プラグイン一式
 
-ネイティブの方法である。スキル、10個の `/wiki:*` スラッシュコマンド、マーケットプレイスのマニフェストが、1回のインストールでそろう。
+ネイティブの方法である。スキル、9個の `/wiki:*` スラッシュコマンド、マーケットプレイスのマニフェストが、1回のインストールでそろう。
 
 ```
-/plugin marketplace add praneybehl/llm-wiki-plugin
+/plugin marketplace add to884/info-hive
 /plugin install wiki@info-hive
 ```
 
@@ -55,17 +54,17 @@ LLM Wiki がもっとも役立つのは、時間とともに増えていく知�
 
 ```bash
 # グローバルにインストールし、すべてのプロジェクトでスキルを使えるようにする
-npx skills add praneybehl/llm-wiki-plugin -a <agent> -g
+npx skills add to884/info-hive -a <agent> -g
 
 # または、現在のプロジェクトだけにインストールする
-npx skills add praneybehl/llm-wiki-plugin -a <agent>
+npx skills add to884/info-hive -a <agent>
 ```
 
 | エージェント | `--agent` の値 | 呼び出し方 | スクリプトの実行 |
 |-------|-----------------|------------|:-----------:|
 | Claude Code | `claude-code` | `/wiki:*` スラッシュコマンド（同梱）または自然言語 | ✅ |
 | Codex (OpenAI) | `codex` | `/skills` または `$info-hive` / 自然言語 | ✅ |
-| Cursor | `cursor` | `/llm-wiki` または自然言語 | ✅ |
+| Cursor | `cursor` | `/info-hive` または自然言語 | ✅ |
 | Gemini CLI | `gemini-cli` | `/skills` の管理コマンド / 自然言語 | ✅ |
 | OpenCode | `opencode` | 自然言語（エージェントがネイティブの `skill` ツールを呼び出す） | ✅ |
 | OpenClaw | `openclaw` | ユーザーコマンドとして自動で公開される | ✅ |
@@ -77,15 +76,15 @@ OpenCode は `.claude/skills/` と `~/.claude/skills/` も読むので、Claude 
 **Hermes Agent**（Nous Research）、**OMP**（"Oh My Pi"）など、まだ `npx skills` のレジストリにない agentskills.io 互換のランタイムでも、このスキルは使える。リポジトリをクローンし、`skills/info-hive/` をエージェントのスキルディレクトリにシンボリックリンクするかコピーする。Hermes は `~/.hermes/skills/` から読む。OMP は、管理されたスキルとユーザーのスキルを `~/.omp/agent/skills/` から読み、`skill://` で公開する。
 
 ```bash
-git clone https://github.com/praneybehl/llm-wiki-plugin.git
+git clone https://github.com/to884/info-hive.git
 mkdir -p ~/.hermes/skills ~/.omp/agent/skills
-ln -s "$(pwd)/llm-wiki-plugin/skills/info-hive" ~/.hermes/skills/info-hive
-ln -s "$(pwd)/llm-wiki-plugin/skills/info-hive" ~/.omp/agent/skills/info-hive
+ln -s "$(pwd)/info-hive/skills/info-hive" ~/.hermes/skills/info-hive
+ln -s "$(pwd)/info-hive/skills/info-hive" ~/.omp/agent/skills/info-hive
 ```
 
 Claude Code 以外でスキルを使うときに知っておくべきことは次のとおり。
 
-- **スラッシュコマンドは Claude Code 専用である。** 10個の `/wiki:*` コマンドは、Claude Code プラグインのマニフェストとして `commands/wiki/` にある。ほかのエージェントでは、自然言語でスキルを呼び出す（「この論文を wiki に追加して」「X について wiki には何が書いてある？」「wiki に lint をかけて」）。あとは SKILL.md が処理する。
+- **スラッシュコマンドは Claude Code 専用である。** 9個の `/wiki:*` コマンドは、Claude Code プラグインのマニフェストとして `commands/` にある。ほかのエージェントでは、自然言語でスキルを呼び出す（「この論文を wiki に追加して」「X について wiki には何が書いてある？」「wiki に lint をかけて」）。あとは SKILL.md が処理する。
 - **同梱のツールはすべて、エージェントから使える。** 一覧のどのエージェントも、インストールしたスキルを通じて、`setup_wiki.py`、ハイブリッド検索と語彙ベースの検索、lint、stats、グラフの lint・抽出・クエリ、初期化を実行できる。依存パッケージを持つスクリプトには、バージョンを固定した PEP 723 のメタデータがあり、`uv run --script` で実行する。初期化とアップグレードでは、準備が整ったと報告する前に実行環境一式を検証する。
 - **wiki 自体はエージェントに依存しない。** ただの Markdown ファイルのディレクトリである。あるエージェントで取り込み、別のエージェントでクエリしてもよい。`wiki/` の中に、特定のランタイムに縛るものは何もない。
 
@@ -156,8 +155,6 @@ Claude はインデックスを読んで候補のページを見つけ、それ�
 | `/wiki:graph <action>` | コンパイル済みのグラフ層に対して `extract` / `lint` / `neighbors` / `edges` / `path` / `facts` を実行する。 |
 | `/wiki:learn <task artifacts>` | 検証済みの経験を記録し、根拠にリンクした再利用できるパターンにまとめる。 |
 | `/wiki:evolve <goal or action>` | スキルの改善案を作成・評価・確認・適用し、ロールバックする。すべての試行の結果を残す。 |
-| `/wiki:init --hosted <url>` | このエージェントをホスト型 wiki に接続する。トークンを保存し、MCP の設定を出力し、メモリに書く記述を提案する。 |
-| `/wiki:migrate [<wiki-dir>]` | ローカルの wiki をホスト型 wiki に移行し、アップロードしたすべてのファイルを SHA-256 で検証し、スキップされたファイルを確認し、読み取り専用の `pull` ミラーを残す。 |
 | `/wiki:upgrade` | 既存の wiki を現在のプラグインのバージョンにアップグレードする（冪等なファイル操作と、手順を追った SCHEMA.md のマージ）。 |
 
 コマンドを使わなくてもよい。Claude は、自然言語での依頼（「この論文を wiki に追加して」「拡散モデルについて wiki には何が書いてある？」「wiki に lint をかけて」）でも、裏にあるスキルを起動する。コマンドは、明示的に呼び出したいときのためにある。
@@ -176,7 +173,9 @@ wiki は3つの層と3つの操作でできている。
 
 ## 経験から学ぶ
 
-任意で使う改善のワークフローは、変更不可のタスクの証拠を、通常のソースとコンセプトのパターンに結びつけ、さらに測定にもとづくスキルの変更に結びつける。評価の間、候補のスキルは隔離される。消えずに残る `.evolution/` のアーカイブは、通常の wiki の検索からは除外されるが、出典つきの教訓と要約は検索できる。`wiki_evolve.py --help` か[エージェント向けのワークフロー](skills/info-hive/references/evolution-workflow.md)を参照。モデルのランナーでは、リモートの推論に費用がかかることがある。記録とハーネスそのものは、標準ライブラリだけで動く。
+`/wiki:learn` は完了した作業から検証済みの経験を記録し、`/wiki:evolve` はスキルの変更を提案、テスト、適用し、ロールバックする（移植元の v3.2.0 で追加）。この任意で使う改善のワークフローは、変更不可のタスクの証拠を、通常のソースとコンセプトのパターンに結びつけ、さらに測定にもとづくスキルの変更に結びつける。評価の間、候補のスキルは隔離される。消えずに残る `.evolution/` のアーカイブは、通常の wiki の検索からは除外されるが、出典つきの教訓と要約は検索できる。`wiki_evolve.py --help` か[エージェント向けのワークフロー](skills/info-hive/references/evolution-workflow.md)を参照。モデルのランナーでは、リモートの推論に費用がかかることがある。記録とハーネスそのものは、標準ライブラリだけで動く。
+
+改善のワークフローは、[WikiSkill: Compiling Agent Experience into Persistent Knowledge for Skill Evolution](https://arxiv.org/html/2608.27454v1)（Google Research と Virginia Tech、2026）を応用したものである。[取り入れた点と変えた点](docs/evolution.md#研究上の根拠と取り入れ方)と[測定結果](eval/evolution/workflows/README.md)を参照。移植元の調査では2つの提案がどちらも却下され、品質の向上は示されなかった。
 
 ## スケーリングの仕組み
 
@@ -204,33 +203,11 @@ LLM Wiki パターンで最大の失敗は、wiki が大きくなるにつれて
 
 知っておくべき失敗のパターンは次の3つで、どれも `skills/info-hive/SKILL.md` で扱っている。1つ目は、気づかないうちに内容が壊れることである。1つのソースを読み違えると、それが権威のある wiki ページのように見え、その後の取り込みに影響する。これは、必須の `sources:` frontmatter と lint で抑える。2つ目は、wiki が自分の出力を読むことによるずれである。Claude が raw のソースと照らし合わせずに、以前の wiki ページを正しいものとして扱ってしまう。これは、主張を更新するときに raw のソースを読み直すよう求める取り込みのワークフローの指示で抑える。3つ目は、保守の負担が増え続けることである。lint のレポートが、ユーザーがレビューできるより速く増えていく。これはスケーリングのための規律で抑えるが、それでも起きるなら、スキーマを見直す必要がある。
 
-## ホスト型 wiki
-
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/praneybehl/llm-wiki-plugin/tree/main/server)
-
-ホスト型 wiki は任意で使うものである。wiki を自分のアカウントの Cloudflare Worker に置くので、複数のマシンのエージェント、リモートのエージェント、ファイルにアクセスできないエージェントで1つの wiki を共有できる。
-
-- **ワンクリックでデプロイできる。** ボタンを押すと、Worker、wiki ごとの SQLite Durable Object、KV、R2、Vectorize、Workers AI が作成される。フォームでは、`ADMIN_TOKEN` と Vectorize の設定（`384` 次元、`cosine` 指標）を入力する。デプロイのあとに必要な作業はない。サーバーは Workers の Free プランで動く。
-- **どのエージェントからも MCP で使える。** `/mcp` に8つのツールがある: `wiki_overview`、`wiki_read`、`wiki_search`、`wiki_commit`、`wiki_history`、`wiki_graph`、`wiki_lint`、`wiki_raw`。スクリプトや CI からは、`/api/v1` の JSON API を使う。
-- **エージェントごとのアクセス。** エージェントごとにスコープ付きのトークンを発行し、そのラベルがコミットの作成者になる。OAuth に対応した MCP クライアントは、トークンなしで接続できる。
-- **正本は Markdown のまま。** ハイブリッド検索（FTS5 の BM25 と Workers AI の `bge-small-en-v1.5` のベクトルを RRF で統合）、リンク、グラフは、コミットのたびに更新される。
-- **履歴とバックアップ。** すべてのコミットがリビジョンとして残る。revert は新しいコミットを作る。`export` はすべてのページを書き出す。Durable Objects では、30 日分のポイントインタイムリカバリーが使える。
-- **ブラウザー用のリーダー**が `/ui/<wiki>/` にあり、フォルダーツリー、検索、被リンク、履歴、差分、レビューフラグを表示できる。`/setup` のページでは、wiki、トークン、クライアントごとの MCP の設定を作れる。
-
-始め方:
-
-1. 上のボタンを押すか、`server/` で `npm run deploy` を実行して CLI からデプロイする（初回のデプロイで使うシークレットについてはガイドを参照）。
-2. `https://<your-worker>/setup` を開き、`ADMIN_TOKEN` でサインインし、wiki と、エージェントごとのトークンを作る。
-3. 各エージェントで `/wiki:init --hosted https://<your-worker>` を実行する。
-4. 既存の wiki を移すには、`/wiki:migrate` を実行する。
-
-エージェントごとの MCP のセットアップ、OAuth、Free プランと Paid プランの制限、費用、セキュリティについては、[ホスト型 wiki のガイド](https://praneybehl.github.io/llm-wiki-plugin/hosted.html)を参照。
-
 ## 任意の判定レイヤー
 
 小さな判定モデルは、コードが用意した選択式の問い（たとえば「このセクションはクエリに答える助けになるか？」）に答える。LLM Wiki はこれを使って、検索結果を関連度でふるい分けたり、型付きのグラフのエッジの証拠をチェックしたり、矛盾を洗い出したり、取り込みの間にページの候補を絞り込んだり、AI エージェントに命令するようなソースのテキストにフラグを立てたりできる。
 
-このレイヤーは既定では無効である。判定の結果でページが書き込まれたり、書き込みが止められたりすることはない。読み取りの処理では、判定に失敗しても処理を通す（fail-open）。バックエンドは、`llama-server` で動かすローカルの Liquid `d1-2B` モデル（データはマシンの外に出ない）、TypeSafe Jev、OpenRouter、Liquid API、ホスト型 wiki では Workers AI 上の Jev から選べる。ホスト型のバックエンドには wiki のテキストが送られるので、有効にするかは自分で決める。プライバシー、ライセンスの条件、費用については[判定モデル](https://praneybehl.github.io/llm-wiki-plugin/decisions.html)を参照。
+このレイヤーは既定では無効である。判定の結果でページが書き込まれたり、書き込みが止められたりすることはない。読み取りの処理では、判定に失敗しても処理を通す（fail-open）。バックエンドは、`llama-server` で動かすローカルの Liquid `d1-2B` モデル（データはマシンの外に出ない）、TypeSafe Jev、OpenRouter、Liquid API から選べる。外部の API のバックエンドには wiki のテキストが送られるので、有効にするかは自分で決める。プライバシー、ライセンスの条件、費用については[判定モデル](docs/decisions.md)を参照。
 
 ## ツール
 
@@ -240,18 +217,20 @@ wiki をセットアップしたら、どの Markdown ビューアーでもペ�
 
 ## クレジット
 
-任意で使うスキルの改善のワークフローは、[WikiSkill の論文](https://arxiv.org/html/2608.27454v1)を応用したものである。[応用の対応表](https://praneybehl.github.io/llm-wiki-plugin/evolution.html#research-basis-and-adaptation)では、研究のアイデア、このプロジェクトの実装上の選択、検証の限界を区別している。
+info-hive の土台は、Praney Behl の [llm-wiki-plugin](https://github.com/praneybehl/llm-wiki-plugin) である（[移植元](#移植元)を参照）。以下は、移植元が挙げているクレジットである。
 
-このパターンは、Andrej Karpathy の [llm-wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)（2026 年 4 月）にもとづく。このプラグインは、そのパターンの実装の1つである。ほかに見ておく価値のある実装として、[vanillaflava/llm-wiki-claude-skills](https://github.com/vanillaflava/llm-wiki-claude-skills)、[skyllwt/OmegaWiki](https://github.com/skyllwt/OmegaWiki)、[axoviq-ai/synthadoc](https://github.com/axoviq-ai/synthadoc) がある。
+任意で使うスキルの改善のワークフローは、[WikiSkill の論文](https://arxiv.org/html/2608.27454v1)を応用したものである。[応用の対応表](docs/evolution.md#研究上の根拠と取り入れ方)では、研究のアイデア、このプロジェクトの実装上の選択、検証の限界を区別している。
 
-v2 の検索のアーキテクチャは、Cerebras のエンジニアリングの記事 [How We Built Our Knowledge Base](https://www.cerebras.ai/blog/how-we-built-our-knowledge-base) を参考にした。特に、セクション単位の検索、複数の検索器の結果の統合、証拠のまとめ方、評価の方法を参考にしている。
+このパターンは、Andrej Karpathy の [llm-wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)（2026 年 4 月）にもとづく。移植元のプラグインは、そのパターンの実装の1つである。ほかに見ておく価値のある実装として、[vanillaflava/llm-wiki-claude-skills](https://github.com/vanillaflava/llm-wiki-claude-skills)、[skyllwt/OmegaWiki](https://github.com/skyllwt/OmegaWiki)、[axoviq-ai/synthadoc](https://github.com/axoviq-ai/synthadoc) がある。
 
-v3 でローカルの検索に切り替えるときは、[Basic Memory](https://github.com/basicmachines-co/basic-memory) と比べて評価した。LLM Wiki は、同じローカルファーストの形（FastEmbed、SQLite のベクトル検索、差分で更新する派生インデックス）を取り入れている。一方で、Basic Memory のアプリケーションと MCP サービスを2つ目の正本のシステムとして加えることはせず、既存の Markdown のスキーマ、型付きグラフ、RRF による順位付け、エージェントに合わせたワークフローを残している。
+移植元の v2 の検索のアーキテクチャは、Cerebras のエンジニアリングの記事 [How We Built Our Knowledge Base](https://www.cerebras.ai/blog/how-we-built-our-knowledge-base) を参考にした。特に、セクション単位の検索、複数の検索器の結果の統合、証拠のまとめ方、評価の方法を参考にしている。
+
+移植元の v3 でローカルの検索に切り替えるときは、[Basic Memory](https://github.com/basicmachines-co/basic-memory) と比べて評価した。LLM Wiki は、同じローカルファーストの形（FastEmbed、SQLite のベクトル検索、差分で更新する派生インデックス）を取り入れている。一方で、Basic Memory のアプリケーションと MCP サービスを2つ目の正本のシステムとして加えることはせず、既存の Markdown のスキーマ、型付きグラフ、RRF による順位付け、エージェントに合わせたワークフローを残している。
 
 ## ライセンス
 
-MIT。[LICENSE](./LICENSE) を参照。
+MIT。移植元の著作権表示（Praney Behl）を含む [LICENSE](./LICENSE) を参照。
 
 ## コントリビュート
 
-Issue と PR を歓迎する。スキル本体は `skills/info-hive/`、スラッシュコマンドは `commands/wiki/`、ホスト型のサーバーは `server/` にある。[CONTRIBUTING.md](./CONTRIBUTING.md) を参照。PR を出す前に、同梱のスクリプトを小さなテスト用の wiki に対して実行し、何も壊れていないことを確かめてほしい。
+Issue と PR を歓迎する。スキル本体は `skills/info-hive/`、スラッシュコマンドは `commands/` にある。[CONTRIBUTING.md](./CONTRIBUTING.md) を参照。PR を出す前に、同梱のスクリプトを小さなテスト用の wiki に対して実行し、何も壊れていないことを確かめてほしい。
