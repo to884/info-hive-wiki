@@ -145,9 +145,14 @@ print(json.dumps({'answer':'correct' if 'candidate' in s else 'wrong',
             fails(lambda:proposal(state,'reject'), 'already exists')
         assert not (wiki/'.evolution/lock').exists()
         fails(lambda:e.inside(skill,'../escape'))
-        (skill/'link').symlink_to(root)
-        fails(lambda:e.tree(skill), 'Symlink')
-        (skill/'link').unlink()
+        try:
+            (skill/'link').symlink_to(root)
+        except OSError:
+            # Windows で開発者モードも管理者権限もないと symlink を作れない。この検査だけを飛ばす。
+            print('symlink を作れないため、symlink の拒否の検査を飛ばした')
+        else:
+            fails(lambda:e.tree(skill), 'Symlink')
+            (skill/'link').unlink()
         invalid = {'answer':'correct','abstain':False,'citations':['../escape'],'tool_calls':0,'cost':0}
         assert not e.score(suite['tasks'][0],invalid,corpus)['passed']
         invalid['cost']=float('nan');fails(lambda:e.score(suite['tasks'][0],invalid,corpus))

@@ -67,11 +67,10 @@ with tempfile.TemporaryDirectory() as tmp:
     request = {'role': 'inference', 'model': 'test-model', 'wiki_root': tmp, 'skill_files': {},
                'skill_sha256': 'test', 'question': 'Read source.md', 'max_usd': None}
     (root / 'source.md').write_text('42')
-    fake = root / 'fake.py'
-    fake.write_text('''#!'''+sys.executable+'''
+    fake_body = '''
 import json,os,sys,time
 from pathlib import Path
-name=Path(sys.argv[0]).name
+name=Path(sys.argv[0]).name.removesuffix('.exe')
 if '--version' in sys.argv: print('test-version');sys.exit()
 if name=='openclaw' and 'gateway' in sys.argv:
  p=json.loads(sys.argv[sys.argv.index('--params')+1]);assert p['key']=='acp-bridge:s'
@@ -100,10 +99,32 @@ if '--output-last-message' in sys.argv:
 for e in events:
  print(json.dumps(e),flush=True)
  if os.environ.get('FAKE_HANG'): time.sleep(60)
-''')
-    fake.chmod(0o755)
-    for name in (*streams, 'cursor-agent', 'hermes', 'openclaw'):
-        (root / name).symlink_to(fake)
+'''
+    fake_names = (*streams, 'cursor-agent', 'hermes', 'openclaw')
+    if os.name == 'nt':
+        # Windows の CreateProcess は、拡張子のないコマンド名に .exe だけを補って PATH を探す。
+        # shebang、実行権限、.cmd のシムでは起動できないので、pip が console script に使う
+        # distlib のランチャー（exe の後ろに shebang と __main__.py の zip を付けたもの）で
+        # 名前ごとに .exe を作り、今の Python で偽のコマンドを動かす。
+        try:
+            from distlib.scripts import ScriptMaker
+        except ImportError:
+            from pip._vendor.distlib.scripts import ScriptMaker
+        source = root / 'fake-src'
+        source.mkdir()
+        maker = ScriptMaker(str(source), str(root), add_launchers=True)
+        maker.executable = sys.executable
+        maker.variants = {''}
+        for name in fake_names:
+            # shebang の "python" は、distlib が maker.executable に置き換える。
+            (source / (name+'.py')).write_text('#!python'+fake_body)
+            assert maker.make(name+'.py') == [str(root / (name+'.exe'))], name
+    else:
+        fake = root / 'fake.py'
+        fake.write_text('#!'+sys.executable+fake_body)
+        fake.chmod(0o755)
+        for name in fake_names:
+            (root / name).symlink_to(fake)
     (root / 'streams.json').write_text(json.dumps(streams))
     old = dict(os.environ)
     os.environ.update(PATH=str(root)+os.pathsep+os.environ['PATH'], FAKE_STREAMS=str(root/'streams.json'))
@@ -121,8 +142,11 @@ for e in events:
         del os.environ['FAKE_MODEL_FALLBACK']
         os.environ['FAKE_HANG'] = '1'
         request['trace_path'] = str(root/'interrupted.jsonl')
+        # Windows では .exe のランチャーを経由するので起動が遅く、負荷が高いと 1 秒では
+        # トレースが書かれる前に打ち切られる。打ち切りを待つ試験なので、待ち時間だけを延ばす。
+        hang_timeout = 5 if os.name == 'nt' else 1
         try:
-            lifecycle.run_runner([sys.executable, str(SCRIPTS/'wiki_evolve_agent.py'), 'codex'], request, root, 1)
+            lifecycle.run_runner([sys.executable, str(SCRIPTS/'wiki_evolve_agent.py'), 'codex'], request, root, hang_timeout)
         except subprocess.TimeoutExpired:
             pass
         else:
