@@ -1,0 +1,123 @@
+# Wiki Graph Ontology
+#
+# コンパイル済みのグラフ層（wiki/graph/）が認識するノードの種類と述語を宣言する。
+# ドメイン固有の新しい述語やノードの種類を導入するときに、このファイルを編集する。
+# wiki_graph_lint.py はこのファイルを読み、ページの frontmatter で宣言された
+# 型付きのエッジをすべて検証する。
+#
+# 正本は Markdown のままである。このファイルは、グラフ層を機械的に
+# チェックできるようにするための取り決めにすぎない。
+
+node_types:
+  person:
+    maps_from:
+      type: entity
+      kind: person
+  company:
+    maps_from:
+      type: entity
+      kind: company
+  product:
+    maps_from:
+      type: entity
+      kind: product
+  paper:
+    maps_from:
+      type: entity
+      kind: paper
+  place:
+    maps_from:
+      type: entity
+      kind: place
+  organization:
+    maps_from:
+      type: entity
+      kind: organization
+  concept:
+    maps_from:
+      type: concept
+  source:
+    maps_from:
+      type: source
+  synthesis:
+    maps_from:
+      type: synthesis
+  decision:
+    explicit_only: true
+  claim:
+    explicit_only: true
+  raw:
+    explicit_only: true
+
+predicates:
+  # --- 抽出スクリプトが自動で出力する暗黙の述語。 ---
+  mentions:
+    subject_types: ["*"]
+    object_types: ["*"]
+    requires_evidence: false
+    description: |
+      Low-specificity edge derived from body wikilinks. Use it for
+      navigation, not as evidence of a typed relationship.
+  sourced_from:
+    subject_types: ["*"]
+    object_types: [source]
+    requires_evidence: false
+    description: |
+      Derived from each non-source page's frontmatter `sources:` list.
+  summarizes_raw:
+    subject_types: [source]
+    object_types: ["*"]
+    requires_evidence: false
+    description: |
+      Derived from a source page's frontmatter `raw:` field. Object is
+      the raw file path string, not a wiki node id.
+
+  # --- 型付きの意味的な述語。ドメイン固有の述語は下に追加する。 ---
+  founded:
+    subject_types: [person]
+    object_types: [company, organization]
+    requires_evidence: true
+  owns:
+    subject_types: [person, company, organization]
+    object_types: [company, product, organization]
+    requires_evidence: true
+  contains_product:
+    subject_types: [company, organization]
+    object_types: [product]
+    requires_evidence: true
+  works_on:
+    subject_types: [person]
+    object_types: [product, concept]
+    requires_evidence: true
+  chose:
+    subject_types: [person, company, organization]
+    object_types: [product, concept]
+    requires_evidence: true
+  proposed:
+    subject_types: [person]
+    object_types: [decision, claim]
+    requires_evidence: true
+  competes_with:
+    subject_types: [product, company, organization]
+    object_types: [product, company, organization]
+    requires_evidence: true
+  depends_on:
+    subject_types: [product, concept]
+    object_types: [product, concept]
+    requires_evidence: true
+  authored:
+    subject_types: [person, organization]
+    object_types: [paper, source]
+    requires_evidence: true
+  cites:
+    subject_types: [paper, source, synthesis]
+    object_types: [paper, source]
+    requires_evidence: true
+  contradicts:
+    subject_types: [claim, source, synthesis]
+    object_types: [claim, source, synthesis]
+    requires_evidence: true
+  supersedes:
+    subject_types: [claim, source, decision]
+    object_types: [claim, source, decision]
+    requires_evidence: true

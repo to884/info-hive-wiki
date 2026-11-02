@@ -1,0 +1,130 @@
+# Wiki Schema
+
+このファイルは、この wiki の設定ファイルである。規約、ページの種類、タグの分類、ワークフローのカスタマイズを記録する。LLM は wiki で作業を始めるときに最初にこのファイルを読み、ここに書かれた規約は `llm-wiki` スキルに書かれた既定の規約より優先される。
+
+このファイルは**ユーザーと一緒に改訂していく**ものである。ユーザーの編集やフィードバックに、ここに書かれていない繰り返しのパターンがあることに LLM が気づいたら、その追加を提案する。ここに書かれた内容が合わなくなったら、削る。
+
+## Wiki location
+
+- Wiki のルート: `wiki/`
+- raw ソース: `raw/`
+- アセットと画像の保存先: `raw/assets/`
+
+## Page types
+
+この wiki では次のページの種類を使い、それぞれに専用のサブディレクトリを置く。
+
+- `source`（`wiki/sources/`）: 取り込んだソースごとに1ページの要約ページ。
+- `entity`（`wiki/entities/`）: 人、論文、製品、場所、組織など、特定の対象についてのページ。
+- `concept`（`wiki/concepts/`）: 考え方、手法、フレームワーク、抽象概念についてのページ。
+- `synthesis`（`wiki/synthesis/`）: 複数のページにまたがる分析、比較、wiki に保存したクエリの回答。
+
+wiki が成長するにつれて必要になった種類は、ここに追加する。
+
+## Tag taxonomy
+
+（最初は空である。タグを使い始めたら、1行の説明を付けてここに追加する。このリストは少なく保ち、規律を持って運用する。タグが 200 個ある wiki は、実質的にタグがないのと同じである。）
+
+構成の例:
+- `methodology`: 研究や分析の手法についてのページ。
+- `open-question`: 未解決の問いを示すページやセクション。
+- `contested`: ソースどうしが矛盾しているページ。
+
+## Page sizing
+
+- ソフト上限: 400 行、約 2,000 語。これを超えたら分割を検討する。
+- ハード上限: 800 行。必ず分割する。
+
+## Frontmatter requirements
+
+すべてのページに次の項目が必要である。
+- `type`
+- `title`
+- `tags`
+- `created`
+- `updated`
+
+種類ごとに、さらに次の項目が必要である。
+- `source` ページ: `authors`、`url`（該当する場合）、`raw`、`ingested`
+- source 以外のページ: 参照したソースの要約ページを並べた `sources`
+
+## Optional graph metadata
+
+ページには、トップレベルの `graph:` キーの下に型付きのグラフのメタデータを宣言できる。これが、`wiki/graph/` の下にコンパイルされるナレッジグラフの元データになる。正本は Markdown であり、グラフは作り直せるインデックスである。`graph:` がないページも、ノードとして現れ（`type` と `kind` から導く）、本文の `[[wikilinks]]` から `mentions` のエッジも作られる。
+
+```yaml
+graph:
+  node_id: person:praney-behl       # 任意。既定は <node_type>:<slug>
+  node_type: person                  # 任意。既定はオントロジーで type/kind から対応付ける
+  canonical: true                    # 複数のスラッグが同じエンティティの別名になっているとき、正本として示す
+  aliases: [Praney, praney@example.com]
+  relationships:
+    - predicate: founded
+      object: company:seedblocks
+      source: praney-founder-context-dump   # ソースページのスラッグ
+      evidence: "Solo technical founder and sole director..."
+      confidence: high               # high | medium | low
+      status: current                # current | historical | proposed | disputed | superseded
+      # 任意:
+      # valid_from: 2025-01-15
+      # valid_to: 2026-03-01
+      # notes: "..."
+      # raw_ref: "raw/founder-dump.md#L42"
+      # contradicts: edge-id-or-source-slug
+      # supersedes: edge-id-or-source-slug
+```
+
+すべての関係に必須のフィールドは、`predicate`、`object`、`source`、`evidence`、`confidence`、`status` である。述語と、それぞれが受け付ける主語と目的語の種類は、`wiki/graph/ontology.yaml` で宣言する。型付きの意味的なエッジは、明示的なソースで裏づけなければならない。学習データだけから推測したエッジを出力してはならない。
+
+## Index structure
+
+（インデックスを分割したら、このセクションを更新する。）
+
+現在は分割していない。1つの `wiki/index.md` にすべてのページを並べている。
+
+wiki が約 150 ページを超えるか、`index.md` が 300 行を超えたら、`wiki/indexes/<type>.md` に分割し、このセクションを更新する。
+
+## Retrieval
+
+- 検索は、既定でセクション単位のハイブリッド検索である: `uv run --script skills/llm-wiki/scripts/wiki_search.py "query" --json`。
+- Semantic backend: local FastEmbed + sqlite-vec（`BAAI/bge-small-en-v1.5`、384 次元）。wiki やクエリのテキストがマシンの外に出ることはない。
+- セマンティック検索を初めて使うときに、モデルのファイルを `~/.cache/llm-wiki/fastembed/` にダウンロードする。モデルのキャッシュの場所を変えるには `FASTEMBED_CACHE_PATH` を設定する。
+- `wiki/.wiki-cache/` には、作り直せる検索用のファイルを置く。`search-index.json`（パースキャッシュ）と `embeddings.sqlite`（セクションのメタデータと sqlite-vec のベクトル）である。削除してかまわない。手で編集してはならない。gitignore の対象である。
+- ベクトルのインデックスは内容のハッシュで管理する。新しいセクションと変更されたセクションだけをベクトル化し直し、削除されたセクションは取り除き、モデルやスキーマが変わったときは自動で作り直す。
+- 依存パッケージを使わない語彙ベースの検索: `python skills/llm-wiki/scripts/wiki_search.py "query" --no-embed`（Python で直接実行すると、PEP 723 の依存関係の解決を経由しない）。ローカルのバックエンドがない場合や失敗した場合も、コマンドは失敗せずに語彙ベースの検索に切り替わる。
+
+## Graph layer
+
+この wiki には、`wiki/graph/` の下に、任意で使うコンパイル済みのグラフ層がある。
+
+- `wiki/graph/ontology.yaml`: ノードの種類と述語を宣言する。**git で管理する。** 新しい述語やドメインの種類を導入するときに編集する。
+- `wiki/graph/nodes.jsonl`、`wiki/graph/edges.jsonl`: 生成されるファイル。PR でグラフの差分を見たい場合だけ git で管理する。
+- `wiki/graph/graph.sqlite`: 生成されるファイル。既定で gitignore の対象である。
+- `wiki/graph/graph.graphml`: 生成されるファイル。差分を見たい場合だけ git で管理する。
+
+グラフは `scripts/wiki_graph_extract.py` で Markdown から再現性のある形で生成できる。正本は Markdown なので、グラフはいつ削除しても、知識を失わずに作り直せる。
+
+## Workflow customizations
+
+（最初は空である。既定の取り込み、クエリ、lint のワークフローと違うやり方をする場合は、ここに書く。）
+
+## User preferences
+
+（最初は空である。ユーザーが書き方の好みを示したら、セッションをまたいで残るようにここに記録する。たとえば「コンセプトのページには必ず『Why this matters』のセクションを入れる」「要約では箇条書きを使わない」「シンセシスのページでは比較表を優先する」などである。）
+
+## Lint cadence
+
+- 構造の lint: 取り込み 5 回ごと。
+- 内容の lint: 毎週、または取り込み 20 回ごと。
+- 足りない点の洗い出し: 毎月。
+- Graph lint + extract: 型付きの `graph.relationships` を追加した取り込みのたびに行う。
+
+頻度は、wiki の成長の速さに合わせて調整する。
+
+## Skill evolution
+
+任意: `/wiki:learn` で検証済みのタスクの経験を記録し、`/wiki:evolve` でテスト済みの手順の改善を提案する。既存のページとワークフローは変わらない。raw の経験の JSON は、設定した raw ルートの `experiences/` ディレクトリに置き、変更しない。観測した内容は、証拠、適用できる範囲、モデルとツールのバージョン、反例を添えて、通常のソースページとコンセプトページにまとめる。パターンに付けられる任意のフィールドは、`kind: experience-pattern` と `status: hypothesis|supported|superseded` である。
+
+`wiki/.evolution/` には、消えずに残る実験のスナップショット、証拠、差分、測定結果を置く。キャッシュではない。wiki の検索、lint、統計、グラフの抽出は、このディレクトリを対象から外す。検索できる要約は、ソースページやパターンのページ、インデックスにリンクした通常のシンセシスのページに置く。非公開の記録を、共有するスキルと一緒に公開してはならない。
+
+候補の編集は、レビューを受け、検証用のタスクで選ばれ、一度も使っていない最終テスト用のタスクで独立に測定され、ユーザーの承認の範囲で明示的に適用されるまで、隔離したままにする。失敗した編集は、記録を残したまま、有効なスキルを変えない。却下された提案は、新しい証拠や条件の変化がない限り繰り返さない。通常の作業では、事実情報の wiki へのアクセスを保ち、タスクの実行に実験の履歴を混ぜない。根拠のない教訓は、その raw の証拠を消さずに修正する。ランナーの取り決め、費用の上限、復旧の手順は、インストールしたスキルの `references/evolution-workflow.md` に従う。

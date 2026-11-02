@@ -1,0 +1,30 @@
+# Wiki Graph Layer
+
+このディレクトリには、Markdown の wiki から導いたコンパイル済みのナレッジグラフを置く。**正本は Markdown である。** ここにあるものはすべて、知識を失わずに削除して作り直せる。
+
+```bash
+uv run --script scripts/wiki_graph_extract.py wiki/ --out wiki/graph
+```
+
+## Files
+
+| ファイル | 用途 | git での管理 |
+|------|---------|----------|
+| `ontology.yaml` | グラフが認識するノードの種類と述語を宣言する。`wiki_graph_lint.py` が検証に使う取り決めである。 | **git で管理する。手で編集する。** |
+| `nodes.jsonl` | ノードごとに1つの JSON オブジェクト。id 順に並ぶ。 | 生成されるファイル。PR でグラフの差分を見たいなら git で管理し、そうでなければ gitignore する。 |
+| `edges.jsonl` | エッジごとに1つの JSON オブジェクト。id 順に並ぶ。型付きの意味的なエッジ、`mentions`、`sourced_from`、`summarizes_raw` を含む。 | 生成されるファイル。`nodes.jsonl` と同じ判断で扱う。 |
+| `graph.sqlite` | `wiki_graph_query.py` が使う、クエリできるインデックス。スキーマ: `nodes`、`aliases`、`edges`。 | 生成されるファイル。**gitignore の対象**。必要なときに作り直す。 |
+| `graph.graphml` | Gephi や yEd などのツール向けの GraphML のエクスポート。 | 生成されるファイル。既定で gitignore の対象。 |
+
+## Workflow
+
+1. wiki のページを書くか編集する。型付きの `graph.relationships` は、明示的なソースが裏づけている場合だけ追加する。
+2. `uv run --script scripts/wiki_graph_lint.py wiki/` を実行する。未知の述語、壊れた目的語の参照、証拠の欠落、エイリアスの衝突を検出する。
+3. `uv run --script scripts/wiki_graph_extract.py wiki/ --out wiki/graph` を実行する。上のファイルを生成し直す。
+4. `python scripts/wiki_graph_query.py wiki/ neighbors --node product:konvy`（または `edges`、`path`、`facts`）でクエリする。
+
+## Anti-patterns
+
+- **`nodes.jsonl`、`edges.jsonl`、`graph.sqlite` を手で編集する。** Markdown を編集して、生成し直す。
+- **グラフの行を証拠として扱う。** グラフの行は目的のページを早く見つけるためのものである。重要な主張については、エッジの `source` と `evidence` のフィールドをたどって、wiki のページと raw ソースを確かめる。
+- **ソースが裏づけていない型付きのエッジを追加する。** 代わりに通常の `[[wikilink]]` を使う。`mentions` のエッジが、言い過ぎずにつながりを記録する。
