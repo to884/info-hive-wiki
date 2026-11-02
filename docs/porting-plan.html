@@ -653,6 +653,7 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--ru
           <li>方針 B の別名の対応表を作り、frontmatter のキーと <code>type</code>・<code>kind</code> の値を読み込み時に英語に直す。対応表は解析器の 2 系統で共有する。ページの置き場所（<code>sources/</code> など）は英語に直した <code>type</code> で決める。</li>
           <li>frontmatter のリストの <code>、</code> 区切りは受け付けず、lint で指摘する。frontmatter の解析器は 2 系統（検索・lint・統計の手書きの解析器と、グラフの PyYAML）あるので、片方だけ変えて解釈がずれないようにする。キーの後の全角 <code>：</code> も lint で指摘する（キー自体は ASCII のまま）。</li>
           <li>wikilink の全角 <code>｜</code> と <code>＃</code> を受け付けるか、lint で指摘する（どちらにするかは実装時に決める）。</li>
+          <li>出力に含めるパスを <code>/</code> 区切りにそろえる。Windows では <code>wiki_search.py --json</code> がパスを <code>\</code> 区切りで出し、<code>eval/decisions/test_decisions.py</code> の <code>test_output_without_decide_is_byte_identical</code> が落ちる（P0 の作業中に確認。移植元からある不具合）。</li>
           <li>この修正のあとで <code>json.dumps</code> に <code>ensure_ascii=False</code> を付ける。先に付けると cp932 の出力で落ちる。<code>wiki_evolve_loop.py:452, 458, 659</code> は frontmatter に書く値なので、見た目の問題ではなくデータの破損として先に直す。</li>
         </ul>
       </div>
