@@ -2,6 +2,10 @@
 
 info-hive は、Claude Code プラグイン llm-wiki（praneybehl/llm-wiki-plugin v4.0.1）を日本語に特化して移植したものである。作業の前に [docs/porting-plan.html](docs/porting-plan.html) の方針と段階を読み、それに従う。移植元との関係は [UPSTREAM.md](UPSTREAM.md) に記録する。
 
+## 応答
+
+- ユーザーへの応答は日本語で書く。コード、コマンド、パス、識別子は原文のまま書く。
+
 ## 名前
 
 - プラグイン名は `wiki`、マーケットプレイス名とスキル名は `info-hive` である。コマンドは `/wiki:<名前>` の形で起動する。

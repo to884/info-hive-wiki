@@ -662,7 +662,7 @@ def json_result(
 def emit_json(args, results: list[dict], mode: str = "lexical", decision: dict | None = None) -> None:
     payload = {
         "query": args.query,
-        "wiki": str(args.wiki),
+        "wiki": Path(args.wiki).as_posix(),
         "granularity": args.granularity,
         "mode": mode,
         "results": results,
