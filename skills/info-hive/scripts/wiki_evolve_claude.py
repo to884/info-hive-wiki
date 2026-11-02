@@ -54,6 +54,10 @@ def main():
 
 
 if __name__ == '__main__':
+    # Windows の既定の文字コード（cp932 など）ではなく、UTF-8 で入出力する。
+    for _stream in (sys.stdin, sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(encoding="utf-8")
     try:
         main()
     except (ValueError, KeyError, OSError, subprocess.SubprocessError) as exc:

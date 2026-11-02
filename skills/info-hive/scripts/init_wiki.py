@@ -83,12 +83,12 @@ def copy_template(src: Path, dst: Path, substitutions: dict | None = None) -> bo
     """テンプレートのファイルを dst にコピーする。ファイルを作成したら True、すでにあれば False を返す。"""
     if dst.exists():
         return False
-    text = src.read_text()
+    text = src.read_text(encoding="utf-8")
     if substitutions:
         for key, value in substitutions.items():
             text = text.replace(key, value)
     dst.parent.mkdir(parents=True, exist_ok=True)
-    dst.write_text(text)
+    dst.write_text(text, encoding="utf-8")
     return True
 
 
@@ -257,4 +257,8 @@ def main():
 
 
 if __name__ == "__main__":
+    # Windows の既定の文字コード（cp932 など）ではなく、UTF-8 で入出力する。
+    for _stream in (sys.stdin, sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(encoding="utf-8")
     main()

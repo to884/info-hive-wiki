@@ -124,7 +124,7 @@ def search_pool(query: str, mode: str) -> list[dict]:
         cmd = [sys.executable, str(script), *argv, "--no-embed"]
     else:
         cmd = ["uv", "run", "--quiet", "--script", str(script), *argv]
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", check=True)
     return json.loads(proc.stdout)["results"] if proc.stdout.strip() else []
 
 
@@ -354,4 +354,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # Windows の既定の文字コード（cp932 など）ではなく、UTF-8 で入出力する。
+    for _stream in (sys.stdin, sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(encoding="utf-8")
     sys.exit(main())

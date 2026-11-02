@@ -205,7 +205,7 @@ def execute(agent, request):
                       parse_claude(lines) if agent == 'claude' else parse_native(agent, events))
             # バージョンの取得はメタデータにすぎない。完了した有料の実行を捨てる理由にしてはならない。
             try:
-                version = subprocess.run([command[0], '--version'], text=True, capture_output=True, timeout=10)
+                version = subprocess.run([command[0], '--version'], text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=10)
                 output['agent_version'] = (version.stdout.strip() or version.stderr.strip() or 'unknown') if version.returncode == 0 else 'unknown'
             except subprocess.TimeoutExpired:
                 output['agent_version'] = 'unknown'
@@ -228,4 +228,8 @@ def main():
 
 
 if __name__ == '__main__':
+    # Windows の既定の文字コード（cp932 など）ではなく、UTF-8 で入出力する。
+    for _stream in (sys.stdin, sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(encoding="utf-8")
     sys.exit(main())

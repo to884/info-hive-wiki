@@ -39,7 +39,7 @@ def clean_env(**extra: str) -> dict:
 def run(script: str, *argv: str, env: dict | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(SCRIPTS / script), *argv],
-        capture_output=True, text=True, cwd=REPO, env=env or clean_env(),
+        capture_output=True, text=True, encoding="utf-8", cwd=REPO, env=env or clean_env(),
     )
 
 
@@ -403,7 +403,7 @@ class EvalRunnerTests(unittest.TestCase):
             out_path = Path(tmp) / "results.json"
             proc = subprocess.run(
                 [sys.executable, str(HERE / "run_eval.py"), "--backend", "fake", "--out", str(out_path)],
-                capture_output=True, text=True, cwd=REPO, env=clean_env(),
+                capture_output=True, text=True, encoding="utf-8", cwd=REPO, env=clean_env(),
             )
             self.assertEqual(proc.returncode, 0, proc.stderr)
             out = json.loads(out_path.read_text(encoding="utf-8"))
@@ -421,4 +421,8 @@ class EvalRunnerTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    # Windows の既定の文字コード（cp932 など）ではなく、UTF-8 で入出力する。
+    for _stream in (sys.stdin, sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(encoding="utf-8")
     unittest.main()

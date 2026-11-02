@@ -44,7 +44,7 @@ def stream_command(command, text, agent, trace_path=None, env=None):
     # 大きなプロンプトと標準出力で両方のパイプが埋まったときのデッドロックを、書き込み用を分けて避ける。
     with tempfile.TemporaryFile(mode='w+') as errors:
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                   stderr=errors, text=True, env=env)
+                                   stderr=errors, text=True, encoding="utf-8", env=env)
         def write():
             try:
                 process.stdin.write(text)
@@ -141,7 +141,7 @@ def acp(command, request, text, env=None):
     """新しい ACP セッションを1つ使う。公開されるツールの入出力は残し、範囲を限らない権限は拒否する。"""
     with tempfile.TemporaryFile() as errors:
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                   stderr=errors, text=True, env=env)
+                                   stderr=errors, text=True, encoding="utf-8", env=env)
         observed, chunks, serial = [], [], 0
         def send(message):
             process.stdin.write(json.dumps(dict(jsonrpc='2.0', **message)) + '\n')
@@ -193,7 +193,7 @@ def acp(command, request, text, env=None):
                 gateway = command[:command.index('acp')]
                 result = subprocess.run(gateway + ['gateway', 'call', 'sessions.patch', '--json', '--params',
                     json.dumps({'key': 'acp-bridge:'+sid, 'model': request['model']})],
-                    text=True, capture_output=True, env=env, timeout=30, check=True)
+                    text=True, encoding="utf-8", capture_output=True, env=env, timeout=30, check=True)
                 patched = json.loads(result.stdout)
                 resolved = patched.get('resolved', {})
                 require(patched.get('ok') is True and '/'.join((resolved.get('modelProvider', ''), resolved.get('model', ''))) == request['model'],

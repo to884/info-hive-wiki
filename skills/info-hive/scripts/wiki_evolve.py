@@ -287,7 +287,7 @@ def score(task, output, corpus):
 
 def run_runner(argv, request, cwd, timeout):
     process = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, text=True, cwd=cwd,
+                               stderr=subprocess.PIPE, text=True, encoding="utf-8", cwd=cwd,
                                start_new_session=os.name == 'posix')
     try:
         stdout, stderr = process.communicate(encode(request), timeout=timeout)
@@ -300,7 +300,7 @@ def run_runner(argv, request, cwd, timeout):
             # 親を kill する前に子孫プロセスのスナップショットを取る。そうしないと、
             # 特定できない孤児プロセスになる。ホストはプロセスの調査を許可している必要がある。
             try:
-                rows = subprocess.check_output(['ps', '-eo', 'pid=,ppid='], text=True, stderr=subprocess.DEVNULL)
+                rows = subprocess.check_output(['ps', '-eo', 'pid=,ppid='], text=True, encoding="utf-8", errors="replace", stderr=subprocess.DEVNULL)
                 parents = {int(pid): int(ppid) for pid, ppid in (line.split() for line in rows.splitlines())}
                 descendants, frontier = [], [process.pid]
                 while frontier:
@@ -585,4 +585,8 @@ def main():
 
 
 if __name__ == '__main__':
+    # Windows の既定の文字コード（cp932 など）ではなく、UTF-8 で入出力する。
+    for _stream in (sys.stdin, sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(encoding="utf-8")
     sys.exit(main())

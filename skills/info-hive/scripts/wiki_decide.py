@@ -478,7 +478,7 @@ def search_candidates(source_query: str, wiki: Path, top: int, no_embed: bool) -
         argv.append("--no-embed")
     uv = shutil.which("uv")
     cmd = [uv, "run", "--quiet", "--script", str(script), *argv] if uv and not no_embed else [sys.executable, str(script), *argv]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     if proc.returncode != 0 or not proc.stdout.strip():
         return []
     return json.loads(proc.stdout).get("results", [])
@@ -691,4 +691,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # Windows の既定の文字コード（cp932 など）ではなく、UTF-8 で入出力する。
+    for _stream in (sys.stdin, sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(encoding="utf-8")
     sys.exit(main())

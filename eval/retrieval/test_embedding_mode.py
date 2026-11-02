@@ -243,7 +243,7 @@ class LocalFallbackTests(unittest.TestCase):
             ):
                 payload, _stderr = self.run_cmd(wiki, query="sourdough")
         self.assertEqual(payload["mode"], "hybrid")
-        self.assertEqual(payload["wiki"], str(wiki))
+        self.assertEqual(payload["wiki"], wiki.as_posix())
         self.assertEqual(payload["granularity"], "section")
         self.assertEqual(payload["results"], [])
 
@@ -258,7 +258,7 @@ class LocalFallbackTests(unittest.TestCase):
             ):
                 payload, _stderr = self.run_cmd(wiki, query="sourdough")
         self.assertEqual(payload["mode"], "lexical")
-        self.assertEqual(payload["wiki"], str(wiki))
+        self.assertEqual(payload["wiki"], wiki.as_posix())
         self.assertEqual(payload["granularity"], "section")
         self.assertEqual(payload["results"], [])
 
