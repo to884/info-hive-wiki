@@ -1,13 +1,13 @@
 {
-  "name": "llm-wiki",
-  "version": "4.0.1",
-  "description": "Build a shared Markdown knowledge base with local hybrid search or an optional hosted Cloudflare wiki over MCP, and an optional evidence-linked workflow to capture task lessons, evaluate skill improvements, and apply or roll back tested changes.",
+  "name": "wiki",
+  "version": "0.1.0",
+  "description": "日本語に特化した Markdown の wiki を構築し、ローカルのハイブリッド検索、出典つきの回答、グラフ、タスクの経験からのスキル改善を提供する。praneybehl/llm-wiki-plugin v4.0.1 の日本語向け移植版。",
   "author": {
-    "name": "Praney Behl"
+    "name": "to884"
   },
   "license": "MIT",
-  "homepage": "https://github.com/praneybehl/llm-wiki-plugin",
-  "repository": "https://github.com/praneybehl/llm-wiki-plugin",
+  "homepage": "https://github.com/to884/info-hive",
+  "repository": "https://github.com/to884/info-hive",
   "keywords": [
     "knowledge-base",
     "wiki",
@@ -16,7 +16,7 @@
     "second-brain",
     "obsidian",
     "markdown",
-    "rag-alternative",
+    "japanese",
     "llm-wiki"
   ]
 }

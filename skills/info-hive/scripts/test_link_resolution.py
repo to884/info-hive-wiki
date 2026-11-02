@@ -3,7 +3,7 @@
 
 標準ライブラリだけを使い、テストフレームワークは使わない。直接実行する:
 
-    python3 skills/llm-wiki/scripts/test_link_resolution.py
+    python3 skills/info-hive/scripts/test_link_resolution.py
 
 成功すれば 0、1件でも失敗すれば 1 で終了する。
 

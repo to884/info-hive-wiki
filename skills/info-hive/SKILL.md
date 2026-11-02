@@ -1,5 +1,5 @@
 ---
-name: llm-wiki
+name: info-hive
 description: |
   論文、記事、文字起こし、メモ、プロジェクトでの調査結果から、LLM が整理するナレッジベースを構築し、保守する。ソースをリンクされた Markdown に取り込み、出典つきで質問に答え、wiki を lint またはアップグレードし、役に立つシンセシスをセッションやエージェントをまたいで残す。検証済みのタスクの経験を記録し、成功と失敗のパターンをまとめ、根拠にもとづくスキルの改善案を作成・評価・適用し、必要に応じてロールバックすることもできる。"add this to my wiki"、"what does the wiki say"、"learn from this task"、"improve this procedure"、/wiki:learn、/wiki:evolve で起動する。ローカルのフォルダーでも、ホスト型 wiki の URL（MCP）でも動く。インデックスを先に読むナビゲーション、アトミックなページ、ハイブリッド検索を使う。
 ---

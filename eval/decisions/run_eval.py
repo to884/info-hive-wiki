@@ -26,7 +26,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
-SCRIPTS = REPO / "skills/llm-wiki/scripts"
+SCRIPTS = REPO / "skills/info-hive/scripts"
 CORPUS = REPO / "eval/retrieval/corpus/wiki"
 FIXTURES = HERE / "fixtures"
 sys.path.insert(0, str(SCRIPTS))

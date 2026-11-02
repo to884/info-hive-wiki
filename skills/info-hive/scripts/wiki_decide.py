@@ -4,7 +4,7 @@ wiki_decide.py: LLM Wiki 用の任意の型付き判定チェック（標準ラ�
 
 判定モデルは状態を読み、型付きの質問に選択肢と確率で答える。テキストは書かない。
 このツールは既定では無効である。wiki のテキストをバックエンドに送るのは、
---backend か環境変数 LLM_WIKI_DECISIONS でそのバックエンドを選んだときだけである。
+--backend か環境変数 INFO_HIVE_DECISIONS でそのバックエンドを選んだときだけである。
 
 バックエンド:
     local       LiquidAI/d1-2B-GGUF を載せた llama-server（既定は http://127.0.0.1:8080）。キーは不要。
@@ -16,9 +16,9 @@ wiki_decide.py: LLM Wiki 用の任意の型付き判定チェック（標準ラ�
                 LLM_WIKI_CONFIG で別の設定ファイルを選べる。
 
 環境変数:
-    LLM_WIKI_DECISIONS          バックエンド名（既定: off）。
-    LLM_WIKI_DECISIONS_URL      バックエンドのベース URL。
-    LLM_WIKI_DECISIONS_MODEL    モデル名。
+    INFO_HIVE_DECISIONS          バックエンド名（既定: off）。
+    INFO_HIVE_DECISIONS_URL      バックエンドのベース URL。
+    INFO_HIVE_DECISIONS_MODEL    モデル名。
 
 コマンド:
     ask [FILE]                     生の {state, questions} の JSON リクエストを送る（FILE か標準入力）。
@@ -31,7 +31,7 @@ wiki_decide.py: LLM Wiki 用の任意の型付き判定チェック（標準ラ�
 結果をそのまま残し、"failed_open": true を設定し、stderr に注記を出す。
 
 例:
-    LLM_WIKI_DECISIONS=local python wiki_decide.py check
+    INFO_HIVE_DECISIONS=local python wiki_decide.py check
     python wiki_decide.py --backend openrouter screen raw/article.md
     python wiki_decide.py --backend local shortlist raw/paper.md --wiki wiki
 """
@@ -200,20 +200,20 @@ def client_from_config(
 ) -> DecisionClient | None:
     """フラグ、次に環境変数からクライアントを作る。判定が無効なら None を返す。
     選んだバックエンドのキーか URL がなければ DecisionError("unavailable") を送出する。"""
-    name = (backend or os.environ.get("LLM_WIKI_DECISIONS") or "off").strip().lower()
+    name = (backend or os.environ.get("INFO_HIVE_DECISIONS") or "off").strip().lower()
     if name in ("", "off", "none", "0", "false"):
         return None
     if name not in BACKENDS:
         raise DecisionError("bad_request", f"unknown backend {name!r}; use one of {', '.join(BACKEND_CHOICES)}")
     spec = BACKENDS[name]
-    url = url or os.environ.get("LLM_WIKI_DECISIONS_URL") or spec["url"]
-    model = model or os.environ.get("LLM_WIKI_DECISIONS_MODEL") or spec["model"]
+    url = url or os.environ.get("INFO_HIVE_DECISIONS_URL") or spec["url"]
+    model = model or os.environ.get("INFO_HIVE_DECISIONS_MODEL") or spec["model"]
     key = os.environ.get(spec["key"]) if spec["key"] else None
     if spec["key"] and not key:
         raise DecisionError("unavailable", f"set {spec['key']} to use the {name} backend")
     wiki = None
     if name == "hosted":
-        # 判定用の URL（フラグか LLM_WIKI_DECISIONS_URL）は、wiki_remote.py の --url と同じく、プロファイルの URL を置き換える。
+        # 判定用の URL（フラグか INFO_HIVE_DECISIONS_URL）は、wiki_remote.py の --url と同じく、プロファイルの URL を置き換える。
         url, key, wiki = read_remote_profile(profile, url)
     return DecisionClient(name, url, model, key, timeout or DEFAULT_TIMEOUT, wiki=wiki)
 
@@ -331,7 +331,7 @@ def gate_pool(
     started = time.monotonic()
     try:
         if client is None:
-            raise DecisionError("unavailable", "no backend configured (set LLM_WIKI_DECISIONS)")
+            raise DecisionError("unavailable", "no backend configured (set INFO_HIVE_DECISIONS)")
         scores = score_relevance(client, query, rows, texts)
     except DecisionError as exc:
         note(f"relevance gate failed open ({exc.code}: {exc})")
@@ -473,7 +473,7 @@ def screen_text(client: DecisionClient | None, path: str, text: str, threshold: 
     started = time.monotonic()
     try:
         if client is None:
-            raise DecisionError("unavailable", "no backend configured (set LLM_WIKI_DECISIONS)")
+            raise DecisionError("unavailable", "no backend configured (set INFO_HIVE_DECISIONS)")
         res = client.ask(screen_request(path, text))
         score = positive_probability(res["answers"], "orders_agent")
     except DecisionError as exc:
@@ -539,7 +539,7 @@ def cmd_shortlist(args, client: DecisionClient | None) -> int:
         candidates.append({"rel_path": row["rel_path"], "title": row["title"], "search_rank": rank, "text": page_body})
     try:
         if client is None:
-            raise DecisionError("unavailable", "no backend configured (set LLM_WIKI_DECISIONS)")
+            raise DecisionError("unavailable", "no backend configured (set INFO_HIVE_DECISIONS)")
         results = ask_many(client, [changes_request(title, body, c["title"], c["text"]) for c in candidates])
         scores = [positive_probability(r["answers"], "changes") for r in results]
     except DecisionError as exc:
@@ -604,7 +604,7 @@ def cmd_contradictions(args, client: DecisionClient | None) -> int:
     started = time.monotonic()
     try:
         if client is None:
-            raise DecisionError("unavailable", "no backend configured (set LLM_WIKI_DECISIONS)")
+            raise DecisionError("unavailable", "no backend configured (set INFO_HIVE_DECISIONS)")
         results = ask_many(client, [relation_request(e, a, b) for e, a, b in pairs])
         answers = [read_choice(r["answers"], t["question"], list(t["criteria"])) for r in results]
     except DecisionError as exc:
@@ -644,7 +644,7 @@ def cmd_ask(args, client: DecisionClient | None) -> int:
         note(f"request is not JSON ({exc})")
         return 2
     if client is None:
-        note("no backend configured (set LLM_WIKI_DECISIONS or --backend)")
+        note("no backend configured (set INFO_HIVE_DECISIONS or --backend)")
         return 1
     try:
         res = client.ask(request)
@@ -674,9 +674,9 @@ def cmd_check(args, client: DecisionClient | None) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--backend", choices=BACKEND_CHOICES, help="Decision backend (default: LLM_WIKI_DECISIONS or off).")
-    parser.add_argument("--model", help="Model name (default: LLM_WIKI_DECISIONS_MODEL or the backend default).")
-    parser.add_argument("--url", help="Backend base URL (default: LLM_WIKI_DECISIONS_URL or the backend default).")
+    parser.add_argument("--backend", choices=BACKEND_CHOICES, help="Decision backend (default: INFO_HIVE_DECISIONS or off).")
+    parser.add_argument("--model", help="Model name (default: INFO_HIVE_DECISIONS_MODEL or the backend default).")
+    parser.add_argument("--url", help="Backend base URL (default: INFO_HIVE_DECISIONS_URL or the backend default).")
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="Request timeout in seconds (default: 8).")
     parser.add_argument("--profile", help="wiki_remote.py profile for the hosted backend.")
     sub = parser.add_subparsers(dest="command", required=True)

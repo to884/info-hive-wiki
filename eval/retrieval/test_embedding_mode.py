@@ -13,7 +13,7 @@ from unittest import mock
 
 
 REPO = Path(__file__).resolve().parents[2]
-SEARCH = REPO / "skills" / "llm-wiki" / "scripts" / "wiki_search.py"
+SEARCH = REPO / "skills" / "info-hive" / "scripts" / "wiki_search.py"
 SPEC = importlib.util.spec_from_file_location("wiki_search", SEARCH)
 WIKI_SEARCH = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(WIKI_SEARCH)

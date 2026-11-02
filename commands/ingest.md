@@ -3,7 +3,7 @@ description: ソース（論文、記事、文字起こし、PDF、メモ）を 
 argument-hint: "<ソースのパス、URL、または説明>"
 ---
 
-`llm-wiki` スキルの取り込みワークフローに従い、ソースを wiki に取り込む。
+`info-hive` スキルの取り込みワークフローに従い、ソースを wiki に取り込む。
 
 ソース: $ARGUMENTS
 
@@ -16,10 +16,10 @@ argument-hint: "<ソースのパス、URL、または説明>"
 4. wiki に何かを書く前に、要点をユーザーと簡単に話し合う。目立つ点、既存のページとつながる点、意外な点を挙げる。
 5. wiki を調べて、このソースが関係する既存のページを洗い出す。候補のページはそれぞれ読んで確かめる。
 6. `<WIKI_ROOT>/sources/` にソースの要約ページを書く。関係するエンティティやコンセプトのページは、`str_replace` で必要な箇所だけを更新する。新しいエンティティやコンセプトには新しいページを作り、それぞれに少なくとも1つの被リンクを付ける。インデックスを更新し、`log.md` に1行追記する。
-7. `<WIKI_ROOT>/graph/ontology.yaml` があり、今回の取り込みで型付きの `graph.relationships[]` を追加した、または追加できる場合は、ソースが明示的に裏づけている場合に限って型付きのエッジを追加する（述語、ソースページのスラッグ、証拠となる引用、確信度、ステータスを付ける）。次に `uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/llm-wiki/scripts/wiki_graph_lint.py" "<WIKI_ROOT>"` を実行し、検出結果をユーザーと一緒に仕分けてから、`uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/llm-wiki/scripts/wiki_graph_extract.py" "<WIKI_ROOT>"` を実行する。`log.md` の取り込みの行の下に、`   graph: +N nodes, +M typed edges` というサブ行を追記する。
+7. `<WIKI_ROOT>/graph/ontology.yaml` があり、今回の取り込みで型付きの `graph.relationships[]` を追加した、または追加できる場合は、ソースが明示的に裏づけている場合に限って型付きのエッジを追加する（述語、ソースページのスラッグ、証拠となる引用、確信度、ステータスを付ける）。次に `uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_graph_lint.py" "<WIKI_ROOT>"` を実行し、検出結果をユーザーと一緒に仕分けてから、`uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_graph_extract.py" "<WIKI_ROOT>"` を実行する。`log.md` の取り込みの行の下に、`   graph: +N nodes, +M typed edges` というサブ行を追記する。
 8. 作業が終わったら、何をしたかをユーザーに伝える。更新したページ、作成したページ、指摘した矛盾、追って調べる価値のある点を報告する。
 
-**ホスト型 wiki。** 特定した wiki がホスト型の URL である場合（または指示でホスト型の URL が指定されている場合）は、`skills/llm-wiki/references/hosted-mode.md` のホストモードを使う。MCP ツールを使い、MCP が使えないときは `python3 "${CLAUDE_PLUGIN_ROOT}/skills/llm-wiki/scripts/wiki_remote.py"` を使う。上の手順は、次のように置き換える。
+**ホスト型 wiki。** 特定した wiki がホスト型の URL である場合（または指示でホスト型の URL が指定されている場合）は、`skills/info-hive/references/hosted-mode.md` のホストモードを使う。MCP ツールを使い、MCP が使えないときは `python3 "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_remote.py"` を使う。上の手順は、次のように置き換える。
 
 - 手順 1: `wiki_overview` を呼び出す。`SCHEMA.md` と `index.md` が返る。
 - 手順 2: ファイルは `wiki_remote.py raw put <file>` でアップロードし、テキストのソースは `wiki_raw` の `put_text` で保存する。サーバーに raw ストレージがない場合は、ファイルをローカルに置いたままにし、そのパスと SHA-256 をソースページに記録する。

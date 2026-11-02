@@ -3,7 +3,7 @@ title: グラフ層
 description: markdown の wiki の上に、出典つきの型付きの関係をまとめる任意のコンパイル済みグラフ。
 ---
 
-<!-- Adapted from: docs/graph.html (source: skills/llm-wiki/references/graph-workflow.md). -->
+<!-- Adapted from: docs/graph.html (source: skills/info-hive/references/graph-workflow.md). -->
 
 # グラフ層 {#graph-layer}
 
@@ -71,16 +71,16 @@ graph:
 
 ```bash
 # まず型付きメタデータを検証する。lint はファイルを編集しない。
-uv run --script skills/llm-wiki/scripts/wiki_graph_lint.py wiki/
+uv run --script skills/info-hive/scripts/wiki_graph_lint.py wiki/
 
 # nodes.jsonl、edges.jsonl、graph.sqlite、graph.graphml にコンパイルする。
-uv run --script skills/llm-wiki/scripts/wiki_graph_extract.py wiki/
+uv run --script skills/info-hive/scripts/wiki_graph_extract.py wiki/
 
 # グラフをたどる。
-python skills/llm-wiki/scripts/wiki_graph_query.py wiki/ neighbors --node product:konvy
-python skills/llm-wiki/scripts/wiki_graph_query.py wiki/ edges    --subject person:stephanie-emmanouel
-python skills/llm-wiki/scripts/wiki_graph_query.py wiki/ path     --from person:praney-behl --to product:konvy
-python skills/llm-wiki/scripts/wiki_graph_query.py wiki/ facts    --about product:konvy
+python skills/info-hive/scripts/wiki_graph_query.py wiki/ neighbors --node product:konvy
+python skills/info-hive/scripts/wiki_graph_query.py wiki/ edges    --subject person:stephanie-emmanouel
+python skills/info-hive/scripts/wiki_graph_query.py wiki/ path     --from person:praney-behl --to product:konvy
+python skills/info-hive/scripts/wiki_graph_query.py wiki/ facts    --about product:konvy
 ```
 
 `--json` は lint と query のどちらのコマンドでも使える。同じ操作は、スラッシュコマンドの [`/wiki:graph`](/commands#graph) からも実行できる。回答では、必ず wiki ページとその raw ソースを出典として示す。グラフはどのページを読めばよいかを教えるものであり、グラフそのものは証拠ではない。

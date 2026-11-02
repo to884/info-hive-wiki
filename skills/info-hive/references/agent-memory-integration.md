@@ -30,9 +30,9 @@ wiki を初期化したら、AI エージェントが次のセッション以降
 
 This project maintains an LLM-curated wiki at `wiki/` following Andrej Karpathy's "LLM Wiki" pattern (https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f).
 
-Before answering questions that rely on knowledge accumulated in this project, read `wiki/index.md` (or the relevant shard under `wiki/indexes/` if the wiki has been sharded) and use its one-line summaries to find the pages you need. Cite with `[[wikilinks]]`. If the index does not surface good candidates, fall back to `wiki_search.py` from the `llm-wiki` skill for local hybrid retrieval; add `--no-embed` for dependency-free BM25.
+Before answering questions that rely on knowledge accumulated in this project, read `wiki/index.md` (or the relevant shard under `wiki/indexes/` if the wiki has been sharded) and use its one-line summaries to find the pages you need. Cite with `[[wikilinks]]`. If the index does not surface good candidates, fall back to `wiki_search.py` from the `info-hive` skill for local hybrid retrieval; add `--no-embed` for dependency-free BM25.
 
-To add a new source, follow the `llm-wiki` skill's ingest workflow: decide placement under `wiki/sources/`, `wiki/entities/`, `wiki/concepts/`, or `wiki/synthesis/`; identify touched pages and make surgical `str_replace` updates rather than rewrites; update the index; append a one-line entry to `wiki/log.md`.
+To add a new source, follow the `info-hive` skill's ingest workflow: decide placement under `wiki/sources/`, `wiki/entities/`, `wiki/concepts/`, or `wiki/synthesis/`; identify touched pages and make surgical `str_replace` updates rather than rewrites; update the index; append a one-line entry to `wiki/log.md`.
 
 Scaling discipline: atomic pages (400-line soft cap, 800-line hard cap), sharded indexes past ~150 pages or 300 index lines, required YAML frontmatter on every page, `[[wikilinks]]` for every cross-reference.
 
@@ -50,7 +50,7 @@ Full conventions live in `wiki/SCHEMA.md`. Treat it as authoritative when it dis
 
 My canonical LLM-curated wiki is at `~/wiki/` and is independent of any project. Before answering from accumulated knowledge, read `~/wiki/index.md` first, then the relevant shard under `~/wiki/indexes/`. Full conventions live in `~/wiki/SCHEMA.md`.
 
-When work in any project produces durable facts, decisions, incidents, or post-mortems, preserve them in `~/wiki/` using the `llm-wiki` skill. Put captured source material under `~/wiki/raw/`. Do not ingest an entire project automatically; add only requested sources and durable findings.
+When work in any project produces durable facts, decisions, incidents, or post-mortems, preserve them in `~/wiki/` using the `info-hive` skill. Put captured source material under `~/wiki/raw/`. Do not ingest an entire project automatically; add only requested sources and durable findings.
 ```
 
 ## ホスト型 wiki の定型文
@@ -60,7 +60,7 @@ wiki が LLM Wiki のサーバー上にある場合は、この形を使う（`h
 ```markdown
 ## LLM Wiki
 
-My canonical LLM-curated wiki is hosted at `https://<worker>.workers.dev` (MCP server `llm-wiki`, endpoint `/mcp`). Use the `llm-wiki` skill in hosted mode.
+My canonical LLM-curated wiki is hosted at `https://<worker>.workers.dev` (MCP server `llm-wiki`, endpoint `/mcp`). Use the `info-hive` skill in hosted mode.
 
 Call `wiki_overview` first and follow the `SCHEMA.md` it returns. Use `index.md` first, then `wiki_search`. Cite with `[[wikilinks]]`. Write with `wiki_commit`: `edit` operations for surgical changes, `append` for `log.md` and index lines. After a conflict, read the page again and retry. If MCP is not available, use `python3 scripts/wiki_remote.py` with the token in `LLM_WIKI_TOKEN`.
 
@@ -86,7 +86,7 @@ Preserve durable facts, decisions and post-mortems from any project in this wiki
 ```markdown
 ## LLM Wiki
 
-This project has an LLM-curated wiki at `wiki/`. Read `wiki/index.md` before answering research questions. Full conventions in `wiki/SCHEMA.md`. Ingest and query workflows live in the `llm-wiki` skill.
+This project has an LLM-curated wiki at `wiki/`. Read `wiki/index.md` before answering research questions. Full conventions in `wiki/SCHEMA.md`. Ingest and query workflows live in the `info-hive` skill.
 ```
 
 4. ユーザーがどれを選んでも、それを書き込み、書き込んだことを伝える。

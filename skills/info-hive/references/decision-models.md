@@ -49,9 +49,9 @@
 バックエンドは、環境変数かフラグで設定する。既定は `off` である。
 
 ```bash
-export LLM_WIKI_DECISIONS=local          # off | local | typesafe | openrouter | liquid | hosted
-export LLM_WIKI_DECISIONS_URL=http://127.0.0.1:8080   # 任意。ベース URL
-export LLM_WIKI_DECISIONS_MODEL=d1-2B                 # 任意。モデルを上書きする
+export INFO_HIVE_DECISIONS=local          # off | local | typesafe | openrouter | liquid | hosted
+export INFO_HIVE_DECISIONS_URL=http://127.0.0.1:8080   # 任意。ベース URL
+export INFO_HIVE_DECISIONS_MODEL=d1-2B                 # 任意。モデルを上書きする
 python scripts/wiki_decide.py check                   # バックエンドを試す
 ```
 

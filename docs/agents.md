@@ -1,25 +1,25 @@
 ---
 title: エージェント
-description: llm-wiki スキルに対応しているコーディングエージェント、それぞれのインストール方法、使うエージェントのメモリファイル。
+description: info-hive スキルに対応しているコーディングエージェント、それぞれのインストール方法、使うエージェントのメモリファイル。
 ---
 
-<!-- Adapted from: docs/agents.html (source: README.md agent table, skills/llm-wiki/references/agent-memory-integration.md). -->
+<!-- Adapted from: docs/agents.html (source: README.md agent table, skills/info-hive/references/agent-memory-integration.md). -->
 
 # エージェント {#agents}
 
-`llm-wiki` スキルは標準の [agentskills.io](https://agentskills.io) 形式なので、以下のどのエージェントでも動く。wiki の操作は、インストールしたスキルを通じて使える。対象は、init と実行環境のセットアップ、ハイブリッド検索または語彙ベースの検索、構造の lint、統計、グラフの lint、グラフの抽出、グラフのクエリである。依存パッケージを必要とするスクリプトは、`uv run --script` を通じて、バージョンを固定した PEP 723 の環境で動く。
+`info-hive` スキルは標準の [agentskills.io](https://agentskills.io) 形式なので、以下のどのエージェントでも動く。wiki の操作は、インストールしたスキルを通じて使える。対象は、init と実行環境のセットアップ、ハイブリッド検索または語彙ベースの検索、構造の lint、統計、グラフの lint、グラフの抽出、グラフのクエリである。依存パッケージを必要とするスクリプトは、`uv run --script` を通じて、バージョンを固定した PEP 723 の環境で動く。
 
 ## 対応表 {#support-matrix}
 
 | エージェント | `--agent` の値 | 呼び出し方 | スクリプトの実行 |
 | --- | --- | --- | :---: |
 | Claude Code | `claude-code` | `/wiki:*` スラッシュコマンド（同梱）または自然言語 | ✅ |
-| Codex (OpenAI) | `codex` | `/skills` または `$llm-wiki` / 自然言語 | ✅ |
+| Codex (OpenAI) | `codex` | `/skills` または `$info-hive` / 自然言語 | ✅ |
 | Cursor | `cursor` | `/llm-wiki` または自然言語 | ✅ |
 | Gemini CLI | `gemini-cli` | `/skills` の管理コマンド / 自然言語 | ✅ |
 | OpenCode | `opencode` | 自然言語（エージェントがネイティブの `skill` ツールを呼び出す） | ✅ |
 | OpenClaw | `openclaw` | ユーザーコマンドとして自動で公開される | ✅ |
-| Pi Agent | `pi` | `/skill:llm-wiki` または自然言語 | ✅ |
+| Pi Agent | `pi` | `/skill:info-hive` または自然言語 | ✅ |
 | OMP ("Oh My Pi") | 手動（下記参照） | 自然言語（スキルは `skill://` で自動的に公開される） | ✅ |
 | Hermes Agent | 手動（下記参照） | 自然言語 | ✅ |
 
@@ -33,7 +33,7 @@ OpenCode は `.claude/skills/` と `~/.claude/skills/` も読むので、Claude 
 
 ```bash
 /plugin marketplace add praneybehl/llm-wiki-plugin
-/plugin install llm-wiki@llm-wiki
+/plugin install wiki@info-hive
 ```
 
 **Codex、Cursor、Gemini CLI、OpenCode、OpenClaw、Pi** では、`skills` CLI でスキルをインストールする。対応表の `--agent` の値に置き換えて使う。
@@ -54,8 +54,8 @@ npx skills add praneybehl/llm-wiki-plugin -a pi -g
 ```bash
 git clone https://github.com/praneybehl/llm-wiki-plugin.git
 mkdir -p ~/.omp/agent/skills ~/.hermes/skills
-ln -s "$(pwd)/llm-wiki-plugin/skills/llm-wiki" ~/.omp/agent/skills/llm-wiki
-ln -s "$(pwd)/llm-wiki-plugin/skills/llm-wiki" ~/.hermes/skills/llm-wiki
+ln -s "$(pwd)/llm-wiki-plugin/skills/info-hive" ~/.omp/agent/skills/info-hive
+ln -s "$(pwd)/llm-wiki-plugin/skills/info-hive" ~/.hermes/skills/info-hive
 ```
 
 ## エージェントのメモリファイル {#agent-memory-file}
@@ -73,7 +73,7 @@ wiki を作ったら、エージェントがその場所を覚えておけるよ
 | OpenClaw | `AGENTS.md` |
 | OMP (Oh My Pi) | `AGENTS.md` |
 
-複数のエージェントを使う場合は、対応しているエージェントでは `AGENTS.md` を正本にし、`CLAUDE.md` をそこへのシンボリックリンクにするのがよい。スキルが、ユーザーの承認なしにメモリファイルに書き込むことはない。グローバル用とプロジェクト用の記述の例は、`skills/llm-wiki/references/agent-memory-integration.md` にある。
+複数のエージェントを使う場合は、対応しているエージェントでは `AGENTS.md` を正本にし、`CLAUDE.md` をそこへのシンボリックリンクにするのがよい。スキルが、ユーザーの承認なしにメモリファイルに書き込むことはない。グローバル用とプロジェクト用の記述の例は、`skills/info-hive/references/agent-memory-integration.md` にある。
 
 ::: info
 スラッシュコマンドは Claude Code 専用である。ほかのエージェントでは、「この論文を wiki に追加して」「X について wiki には何と書いてある？」「wiki に lint をかけて」のように、自然言語でスキルを呼び出す。wiki そのものは特定のエージェントに依存しないので、あるエージェントで取り込み、別のエージェントでクエリすることもできる。
@@ -94,7 +94,7 @@ wiki を作ったら、エージェントがその場所を覚えておけるよ
 | Pi | `~/.pi/agent/mcp.json`（全プロジェクト）または `.pi/mcp.json`（1つのプロジェクト）。組み込みの MCP、または `pi mcp add` |
 | Hermes、OpenClaw、その他 | URL と `Authorization: Bearer <token>` ヘッダー |
 
-クライアントごとの設定の文面は、[ホスト型 wiki](/hosted#connect-agents-over-mcp) のページ、サーバーの `/setup` ページ、`python3 skills/llm-wiki/scripts/wiki_remote.py mcp-config <client>` の出力にある。OAuth に対応したクライアントは、トークンなしで接続できる。メモリファイルには、`skills/llm-wiki/references/agent-memory-integration.md` にあるホスト型 wiki 用の記述を使う。
+クライアントごとの設定の文面は、[ホスト型 wiki](/hosted#connect-agents-over-mcp) のページ、サーバーの `/setup` ページ、`python3 skills/info-hive/scripts/wiki_remote.py mcp-config <client>` の出力にある。OAuth に対応したクライアントは、トークンなしで接続できる。メモリファイルには、`skills/info-hive/references/agent-memory-integration.md` にあるホスト型 wiki 用の記述を使う。
 
 ## 経験の記録と手順の改善 {#experience-and-procedure-improvements}
 

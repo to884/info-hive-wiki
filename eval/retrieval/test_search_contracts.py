@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 REPO = Path(__file__).resolve().parents[2]
-SCRIPT = REPO / "skills/llm-wiki/scripts/wiki_search.py"
+SCRIPT = REPO / "skills/info-hive/scripts/wiki_search.py"
 SPEC = importlib.util.spec_from_file_location("wiki_search", SCRIPT)
 WIKI_SEARCH = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None

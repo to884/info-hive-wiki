@@ -2,7 +2,7 @@
 """llm-wiki のセクション検索の検索品質を評価するハーネス。
 
 固定したフィクスチャのコーパス（``corpus/wiki``）とクエリセット（``queries.json``）に対して
-``skills/llm-wiki/scripts/wiki_search.py`` をサブプロセスで実行し、モードごとの検索品質を報告する。
+``skills/info-hive/scripts/wiki_search.py`` をサブプロセスで実行し、モードごとの検索品質を報告する。
 
   * ``page``    -- ページ単位の BM25（``--granularity page --no-embed``）
   * ``section`` -- セクション単位の BM25（``--no-embed``）
@@ -35,7 +35,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
-SCRIPT = REPO / "skills" / "llm-wiki" / "scripts" / "wiki_search.py"
+SCRIPT = REPO / "skills" / "info-hive" / "scripts" / "wiki_search.py"
 CORPUS = HERE / "corpus" / "wiki"
 QUERIES = HERE / "queries.json"
 

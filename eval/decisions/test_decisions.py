@@ -14,7 +14,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
-SCRIPTS = REPO / "skills/llm-wiki/scripts"
+SCRIPTS = REPO / "skills/info-hive/scripts"
 CORPUS = REPO / "eval/retrieval/corpus/wiki"
 FIXTURES = HERE / "fixtures"
 sys.path.insert(0, str(SCRIPTS))
@@ -25,7 +25,7 @@ import wiki_decide as wd  # noqa: E402
 
 HAS_YAML = importlib.util.find_spec("yaml") is not None
 DECISION_ENV = (
-    "LLM_WIKI_DECISIONS", "LLM_WIKI_DECISIONS_URL", "LLM_WIKI_DECISIONS_MODEL", "LLM_WIKI_URL", "LLM_WIKI_TOKEN",
+    "INFO_HIVE_DECISIONS", "INFO_HIVE_DECISIONS_URL", "INFO_HIVE_DECISIONS_MODEL", "LLM_WIKI_URL", "LLM_WIKI_TOKEN",
     "LLM_WIKI_CONFIG", "TYPESAFE_API_KEY", "OPENROUTER_API_KEY", "LIQUID_API_KEY",
 )
 
@@ -54,12 +54,12 @@ class FakeServerCase(unittest.TestCase):
         self.server.server_close()
 
     def local_env(self) -> dict:
-        return clean_env(LLM_WIKI_DECISIONS="local", LLM_WIKI_DECISIONS_URL=self.url)
+        return clean_env(INFO_HIVE_DECISIONS="local", INFO_HIVE_DECISIONS_URL=self.url)
 
 
 class TemplateTests(unittest.TestCase):
     def test_json_copies_are_identical(self):
-        skill = (REPO / "skills/llm-wiki/assets/decision-questions.json").read_bytes()
+        skill = (REPO / "skills/info-hive/assets/decision-questions.json").read_bytes()
         server = (REPO / "server/src/decisions/decision-questions.json").read_bytes()
         self.assertEqual(skill, server)
 
@@ -76,7 +76,7 @@ class TemplateTests(unittest.TestCase):
         files = [
             SCRIPTS / "wiki_decide.py",
             SCRIPTS / "wiki_remote.py",
-            REPO / "skills/llm-wiki/assets/decision-questions.json",
+            REPO / "skills/info-hive/assets/decision-questions.json",
             *(p for p in HERE.rglob("*") if p.is_file() and "__pycache__" not in p.parts),
             *(p for p in (REPO / "eval/remote").rglob("*") if p.is_file() and "__pycache__" not in p.parts),
             *(REPO / "server/src/decisions").glob("*"),
@@ -185,7 +185,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(c.model, "typesafe/jev-1.14")
         os.environ["LIQUID_API_KEY"] = "k"
         self.assertEqual(wd.client_from_config("liquid").endpoint, "https://api.liquid.ai/decisions/v1/systemone")
-        os.environ["LLM_WIKI_DECISIONS"] = "local"
+        os.environ["INFO_HIVE_DECISIONS"] = "local"
         c = wd.client_from_config()
         self.assertEqual(c.endpoint, "http://127.0.0.1:8080/v1/systemone")
         with tempfile.TemporaryDirectory() as tmp:

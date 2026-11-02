@@ -1,23 +1,23 @@
 {
-  "name": "llm-wiki",
+  "name": "info-hive",
   "owner": {
-    "name": "Praney Behl"
+    "name": "to884"
   },
   "metadata": {
-    "description": "Durable agent knowledge with local hybrid retrieval, an optional one-click hosted wiki on Cloudflare, and optional experience-driven, evaluated skill improvements.",
-    "version": "4.0.1"
+    "description": "日本語に特化した LLM Wiki。ローカルのハイブリッド検索と、経験にもとづくスキル改善を備える。",
+    "version": "0.1.0"
   },
   "plugins": [
     {
-      "name": "llm-wiki",
+      "name": "wiki",
       "source": "./",
-      "description": "Build a shared Markdown wiki with local hybrid search, cited evidence and a compiled graph. Capture task experience and evaluate skill improvements with explicit apply/rollback. Optional hosted wiki on Cloudflare with MCP access for every agent. Includes the llm-wiki skill and ten /wiki:* commands.",
-      "version": "4.0.1",
+      "description": "日本語の Markdown の wiki を、ローカルのハイブリッド検索、出典つきの根拠、グラフで構築・保守する。タスクの経験を記録し、スキルの改善案を評価して適用・ロールバックできる。info-hive スキルと 9 本の /wiki:* コマンドを含む。",
+      "version": "0.1.0",
       "author": {
-        "name": "Praney Behl"
+        "name": "to884"
       },
-      "homepage": "https://github.com/praneybehl/llm-wiki-plugin",
-      "repository": "https://github.com/praneybehl/llm-wiki-plugin",
+      "homepage": "https://github.com/to884/info-hive",
+      "repository": "https://github.com/to884/info-hive",
       "license": "MIT",
       "category": "productivity",
       "keywords": [
@@ -25,7 +25,7 @@
         "wiki",
         "notes",
         "research",
-        "second-brain"
+        "japanese"
       ]
     }
   ]

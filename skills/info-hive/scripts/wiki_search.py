@@ -28,7 +28,7 @@ wiki_search.py — wiki のページを対象にした、セクション単位�
     --per-page N            1ページあたりのセクションの結果の最大数（既定: 2）
     --json                  構造化された証拠の行を出力する
     --no-embed              語彙ベースの BM25 だけを使う
-    --decide                判定モデルが関連ありと判定した行だけを残す（LLM_WIKI_DECISIONS が必要）
+    --decide                判定モデルが関連ありと判定した行だけを残す（INFO_HIVE_DECISIONS が必要）
     --decide-pool N         --decide で採点する行の数（既定: 20）
     --decide-threshold X    行を残すのに必要な P(relevant)（既定: 0.65）
 
@@ -424,7 +424,7 @@ def load_local_embedding_backend():
     cache_dir = Path(
         os.environ.get(
             "FASTEMBED_CACHE_PATH",
-            Path.home() / ".cache" / "llm-wiki" / "fastembed",
+            Path.home() / ".cache" / "info-hive" / "fastembed",
         )
     )
     model = TextEmbedding(model_name=LOCAL_EMBED_MODEL, cache_dir=str(cache_dir))
@@ -925,7 +925,7 @@ def main():
     parser.add_argument("--json", action="store_true", help="Emit structured JSON search results.")
     parser.add_argument("--no-embed", action="store_true", help="Force lexical-only search.")
     parser.add_argument("--decide", action="store_true",
-                        help="Keep only rows that the decision model rates relevant. Needs LLM_WIKI_DECISIONS.")
+                        help="Keep only rows that the decision model rates relevant. Needs INFO_HIVE_DECISIONS.")
     parser.add_argument("--decide-pool", type=int, default=20,
                         help="Rows to score with --decide (default: 20).")
     parser.add_argument("--decide-threshold", type=float, default=None,

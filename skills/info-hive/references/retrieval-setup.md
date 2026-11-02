@@ -23,7 +23,7 @@
 ## 1回でまとめて聞く
 
 1. **保存先の範囲とパス:** 個人用のグローバルな wiki（`~/wiki/` と `~/wiki/raw/` を提案する）か、プロジェクトの wiki（既定は `wiki/` と `raw/`）かを選んでもらい、両方のパスを確認する。
-2. **モデルのキャッシュ:** `~/.cache/llm-wiki/fastembed/` を使うか、`FASTEMBED_CACHE_PATH` を別のローカルのディレクトリに設定するか。
+2. **モデルのキャッシュ:** `~/.cache/info-hive/fastembed/` を使うか、`FASTEMBED_CACHE_PATH` を別のローカルのディレクトリに設定するか。
 3. **グラフ層:** 型付きグラフのメタデータを今設定するか、生成されるグラフは使える状態にしておくだけで使わないか、後回しにするか。
 4. **エージェントとの連携:** どのエージェントのメモリファイルから wiki を指すか、または見送るか。
 
@@ -41,7 +41,7 @@
 
 ```markdown
 - Semantic backend: local FastEmbed + sqlite-vec (`BAAI/bge-small-en-v1.5`, 384 dimensions). No wiki or query text leaves the machine.
-- First semantic use downloads model artifacts to `~/.cache/llm-wiki/fastembed/`; set `FASTEMBED_CACHE_PATH` to override the model cache.
+- First semantic use downloads model artifacts to `~/.cache/info-hive/fastembed/`; set `FASTEMBED_CACHE_PATH` to override the model cache.
 - Semantic setup verified: YYYY-MM-DD | not yet built
 ```
 
@@ -52,7 +52,7 @@
 初期化とアップグレードは、次のコマンドを自動で呼び出す。
 
 ```bash
-uv run --script skills/llm-wiki/scripts/setup_wiki.py --wiki wiki --cache
+uv run --script skills/info-hive/scripts/setup_wiki.py --wiki wiki --cache
 ```
 
 準備完了を報告する前に、次のすべてを満たしていることを確かめる。

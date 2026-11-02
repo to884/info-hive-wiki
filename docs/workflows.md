@@ -3,7 +3,7 @@ title: ワークフロー
 description: エンドユーザー向けに、取り込み、クエリ、lint の流れを手順ごとに説明する。
 ---
 
-<!-- Adapted from: docs/workflows.html (source: skills/llm-wiki/references/{ingest-workflow,query-workflow,lint-workflow}.md). -->
+<!-- Adapted from: docs/workflows.html (source: skills/info-hive/references/{ingest-workflow,query-workflow,lint-workflow}.md). -->
 
 # ワークフロー {#workflows}
 
@@ -64,17 +64,17 @@ flowchart TD
 2. **候補のページを絞り込む。** 候補は短く、厳選した一覧にする。1つの質問に答えるために 30 ページを読むのは力任せのやり方である。インデックスの要約だけでは候補を絞れない場合、エージェントはローカルのハイブリッド検索を実行する。
 
    ```bash
-   uv run --script skills/llm-wiki/scripts/wiki_search.py \
+   uv run --script skills/info-hive/scripts/wiki_search.py \
      "your query terms" --top 10 --json
    ```
 
-   FastEmbed によるセマンティック検索の順位と BM25 の順位を、ローカルで統合する。絞り込むには `--type concept`、`--tag <tag>`、`--since YYYY-MM-DD` を付ける。依存パッケージを使わない語彙ベースの検索にしたい場合は、`uv run --script` の形ではなく `python skills/llm-wiki/scripts/wiki_search.py "your query terms" --no-embed` を実行する。詳しくは[検索](/search)を参照。
+   FastEmbed によるセマンティック検索の順位と BM25 の順位を、ローカルで統合する。絞り込むには `--type concept`、`--tag <tag>`、`--since YYYY-MM-DD` を付ける。依存パッケージを使わない語彙ベースの検索にしたい場合は、`uv run --script` の形ではなく `python skills/info-hive/scripts/wiki_search.py "your query terms" --no-embed` を実行する。詳しくは[検索](/search)を参照。
 3. **関係を問う質問ではグラフを参照する。** 「X とつながっているものは？」「Y を提案したのは誰？」「A → B の経路をたどって」のような質問で、`graph.sqlite` がある場合に使う。グラフは読むページを選ぶために使い、それだけを証拠にすることはない。
 4. **候補のページを読む。** ページは全体を読み、有望な `[[wikilinks]]` をたどる。すべてのリンクを再帰的に追いかけることはしない。
 5. **必要ならバックリンクを調べる。** 「X はどこで言及されているか」という質問では、ページそのものより、そのページへの被リンクのほうが役に立つことが多い。
 
    ```bash
-   python skills/llm-wiki/scripts/wiki_search.py "" --backlinks <slug>
+   python skills/info-hive/scripts/wiki_search.py "" --backlinks <slug>
    ```
 6. **回答をまとめる。** エージェントは自分の言葉で回答を書き、`[[wikilink]]` で出典を示す。矛盾がある場合は、どちらか一方を選んで片づけず、矛盾をそのまま示す。wiki に関係する内容がなければそうはっきり伝え、取り込むとよいソースを提案する。話をでっち上げることはない。
 7. **wiki への保存を提案する。** 回答が新しいつながりを見いだしたものであれば、エージェントは `wiki/synthesis/` への保存を提案する。保存しておけば、次に関連する質問が来たときに役立つ。ちょっとした調べものなら断ってよい。
@@ -86,7 +86,7 @@ flowchart TD
 1. **構造の lint を実行する。**
 
    ```bash
-   python skills/llm-wiki/scripts/wiki_lint.py wiki/
+   python skills/info-hive/scripts/wiki_lint.py wiki/
    ```
 
    孤立ページ、リンク切れの wikilink、大きすぎるページ、frontmatter の問題、更新の止まったページ、重複したスラッグを報告する。グラフ層があれば、`wiki_graph_lint.py` も実行される。
@@ -94,12 +94,12 @@ flowchart TD
 3. **内容の確認でページを読む。** エージェントは、最近更新された約 10 ページと、もっとも多くリンクされているハブページを読み、古いページとの矛盾、ページ内の食い違い、あちこちで言及されているのに専用のページがないコンセプトを探す。ハブページは次のコマンドで見つける。
 
    ```bash
-   python skills/llm-wiki/scripts/wiki_search.py "" --top-linked 10
+   python skills/info-hive/scripts/wiki_search.py "" --top-linked 10
    ```
 4. **足りていない点を挙げる。** 多くのページに出てくるのに専用のページがない名前は、独立したページにする候補である。
 
    ```bash
-   python skills/llm-wiki/scripts/wiki_lint.py wiki/ --suggest-pages
+   python skills/info-hive/scripts/wiki_lint.py wiki/ --suggest-pages
    ```
 5. **インデックスを更新する。** 追加、名前変更、削除したページについてインデックスを更新し、`log.md` に要約を1行追記する。
 

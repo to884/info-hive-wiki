@@ -3,7 +3,7 @@ description: 検証済みのタスクの経験を記録し、再利用できる�
 argument-hint: "<タスクの成果物、または経験の記録>"
 ---
 
-`llm-wiki` スキルを使い、`references/evolution-workflow.md` を読むこと。
+`info-hive` スキルを使い、`references/evolution-workflow.md` を読むこと。
 
 入力: $ARGUMENTS
 

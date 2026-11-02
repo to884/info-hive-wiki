@@ -21,7 +21,7 @@ description: 使っているエージェント向けに LLM Wiki スキルをイ
 
 ```bash
 /plugin marketplace add praneybehl/llm-wiki-plugin
-/plugin install llm-wiki@llm-wiki
+/plugin install wiki@info-hive
 ```
 
 インストールすれば、プラグインはどのプロジェクトでも動く。インストールしただけでは、wiki をどこに置くかは決まらない。
@@ -34,7 +34,7 @@ description: 使っているエージェント向けに LLM Wiki スキルをイ
 npx skills add praneybehl/llm-wiki-plugin -a codex -g
 ```
 
-`/skills`、`$llm-wiki`、または自然言語で呼び出す。同梱のスクリプトも実行できる。
+`/skills`、`$info-hive`、または自然言語で呼び出す。同梱のスクリプトも実行できる。
 
 ### Cursor {#a-cursor}
 
@@ -74,7 +74,7 @@ npx skills add praneybehl/llm-wiki-plugin -a openclaw -g
 npx skills add praneybehl/llm-wiki-plugin -a pi -g
 ```
 
-`/skill:llm-wiki` または自然言語で呼び出す。同梱のスクリプトも実行できる。
+`/skill:info-hive` または自然言語で呼び出す。同梱のスクリプトも実行できる。
 
 ### OMP ("Oh My Pi") {#a-omp}
 
@@ -83,7 +83,7 @@ OMP は、管理対象のスキルとユーザーのスキルを `~/.omp/agent/s
 ```bash
 git clone https://github.com/praneybehl/llm-wiki-plugin.git
 mkdir -p ~/.omp/agent/skills
-ln -s "$(pwd)/llm-wiki-plugin/skills/llm-wiki" ~/.omp/agent/skills/llm-wiki
+ln -s "$(pwd)/llm-wiki-plugin/skills/info-hive" ~/.omp/agent/skills/info-hive
 ```
 
 ### その他のランタイム: クローンしてシンボリックリンクを張る {#a-other}
@@ -93,7 +93,7 @@ Hermes Agent をはじめ、まだ `npx skills` のレジストリに載って�
 ```bash
 git clone https://github.com/praneybehl/llm-wiki-plugin.git
 mkdir -p ~/.hermes/skills
-ln -s "$(pwd)/llm-wiki-plugin/skills/llm-wiki" ~/.hermes/skills/llm-wiki
+ln -s "$(pwd)/llm-wiki-plugin/skills/info-hive" ~/.hermes/skills/info-hive
 ```
 
 wiki そのものは、特定のエージェントに依存しない。中身は markdown ファイルを置いたディレクトリにすぎない。あるエージェントで取り込み、別のエージェントでクエリすることもできる。

@@ -62,11 +62,11 @@ wiki をもとに、出典つきで質問に答える。
 エージェントはインデックス（または該当する分割インデックス）を読み、必要な `[[wikilinks]]` をたどり、出典つきで回答をまとめる。インデックスの要約だけでは足りない場合は、ローカルのハイブリッド検索を実行する。
 
 ```bash
-uv run --script skills/llm-wiki/scripts/wiki_search.py \
+uv run --script skills/info-hive/scripts/wiki_search.py \
   "<query terms>" --top 10 --cache --json
 ```
 
-FastEmbed と sqlite-vec によるセマンティックな順位を、BM25 の結果と統合する。API キーは不要で、wiki やクエリのテキストを外部に送ることもない。依存パッケージを使わない語彙ベースの検索にするには、`python skills/llm-wiki/scripts/wiki_search.py "<query>" --no-embed` で PEP 723 の依存解決を経由せずに実行する。ページ単位で順位を付けるには `--granularity page` を使う。[検索と取得](/search)を参照。関係を問う質問では `graph.sqlite` も参照でき、内容のある回答は `wiki/synthesis/` に保存できる。ホスト型 wiki では、エージェントは `wiki_search`、`wiki_read`、`wiki_graph` を呼び出す。オプションの[判定レイヤー](/decisions)を使う場合、`--decide` を付けると、クエリへの回答に役立たない行が除外される。
+FastEmbed と sqlite-vec によるセマンティックな順位を、BM25 の結果と統合する。API キーは不要で、wiki やクエリのテキストを外部に送ることもない。依存パッケージを使わない語彙ベースの検索にするには、`python skills/info-hive/scripts/wiki_search.py "<query>" --no-embed` で PEP 723 の依存解決を経由せずに実行する。ページ単位で順位を付けるには `--granularity page` を使う。[検索と取得](/search)を参照。関係を問う質問では `graph.sqlite` も参照でき、内容のある回答は `wiki/synthesis/` に保存できる。ホスト型 wiki では、エージェントは `wiki_search`、`wiki_read`、`wiki_graph` を呼び出す。オプションの[判定レイヤー](/decisions)を使う場合、`--decide` を付けると、クエリへの回答に役立たない行が除外される。
 
 ## `/wiki:lint` {#lint}
 

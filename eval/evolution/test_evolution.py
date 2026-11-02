@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 REPO = Path(__file__).resolve().parents[2]
-SCRIPTS = REPO / 'skills/llm-wiki/scripts'
+SCRIPTS = REPO / 'skills/info-hive/scripts'
 sys.path.insert(0, str(SCRIPTS))
 import wiki_evolve as e
 import wiki_evolve_claude as claude

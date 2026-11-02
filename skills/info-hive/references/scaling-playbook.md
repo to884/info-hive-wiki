@@ -43,7 +43,7 @@ wiki の構造を変える必要が出てくる閾値と、その移行の手順
 - `--backlinks <slug>`: 指定したページにリンクしているページを探す。
 - `--top-linked N`: もっとも多くリンクされている N 個のページ（ハブ）を探す。
 
-モデルのキャッシュは `~/.cache/llm-wiki/fastembed/` で共有され、wiki ごとのベクトルは `.wiki-cache/embeddings.sqlite` に置かれる。今後のセッションでは、再帰的な grep ではなく、読む量に上限のあるこの検索の経路を使うべきである。
+モデルのキャッシュは `~/.cache/info-hive/fastembed/` で共有され、wiki ごとのベクトルは `.wiki-cache/embeddings.sqlite` に置かれる。今後のセッションでは、再帰的な grep ではなく、読む量に上限のあるこの検索の経路を使うべきである。
 
 ## 閾値 4: 約 500 ページ
 

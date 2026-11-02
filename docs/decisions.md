@@ -88,27 +88,27 @@ npx wrangler secret put TYPESAFE_API_KEY     # または OPENROUTER_API_KEY、LI
 
 ```bash
 llama-server -hf LiquidAI/d1-2B-GGUF --host 127.0.0.1 --port 8080
-export LLM_WIKI_DECISIONS=local
-python skills/llm-wiki/scripts/wiki_decide.py check
+export INFO_HIVE_DECISIONS=local
+python skills/info-hive/scripts/wiki_decide.py check
 ```
 
 または、ホスト型のバックエンドを選ぶ。
 
 ```bash
-export LLM_WIKI_DECISIONS=typesafe        # off | local | typesafe | openrouter | liquid | hosted
+export INFO_HIVE_DECISIONS=typesafe        # off | local | typesafe | openrouter | liquid | hosted
 export TYPESAFE_API_KEY=...
 ```
 
-任意: `LLM_WIKI_DECISIONS_URL` でベース URL を、`LLM_WIKI_DECISIONS_MODEL` でモデルを変えられる。`wiki_decide.py` のフラグ `--backend`、`--model`、`--url`、`--timeout` は、環境変数より優先される。
+任意: `INFO_HIVE_DECISIONS_URL` でベース URL を、`INFO_HIVE_DECISIONS_MODEL` でモデルを変えられる。`wiki_decide.py` のフラグ `--backend`、`--model`、`--url`、`--timeout` は、環境変数より優先される。
 
 チェックを使う。
 
 ```bash
-uv run --script skills/llm-wiki/scripts/wiki_search.py "query" --json --decide
-uv run --script skills/llm-wiki/scripts/wiki_graph_lint.py wiki/ --decide
-python skills/llm-wiki/scripts/wiki_decide.py contradictions --wiki wiki/
-python skills/llm-wiki/scripts/wiki_decide.py shortlist raw/new-source.md --wiki wiki/
-python skills/llm-wiki/scripts/wiki_decide.py screen raw/new-clipping.md
+uv run --script skills/info-hive/scripts/wiki_search.py "query" --json --decide
+uv run --script skills/info-hive/scripts/wiki_graph_lint.py wiki/ --decide
+python skills/info-hive/scripts/wiki_decide.py contradictions --wiki wiki/
+python skills/info-hive/scripts/wiki_decide.py shortlist raw/new-source.md --wiki wiki/
+python skills/info-hive/scripts/wiki_decide.py screen raw/new-clipping.md
 ```
 
 `--decide` を付けなければ、検索とグラフの lint の出力は変わらない。
@@ -118,8 +118,8 @@ python skills/llm-wiki/scripts/wiki_decide.py screen raw/new-clipping.md
 `/setup` を開いてサインインし、その wiki の判定の設定を変える。または、管理者トークンを使って CLI で設定する。
 
 ```bash
-python3 skills/llm-wiki/scripts/wiki_remote.py settings --set decisions.enabled=true
-python3 skills/llm-wiki/scripts/wiki_remote.py settings --set decisions.backend=workers-ai
+python3 skills/info-hive/scripts/wiki_remote.py settings --set decisions.enabled=true
+python3 skills/info-hive/scripts/wiki_remote.py settings --set decisions.backend=workers-ai
 ```
 
 | 設定 | 意味 | 既定値 |

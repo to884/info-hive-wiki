@@ -44,14 +44,14 @@ LLM Wiki がもっとも役立つのは、時間とともに増えていく知�
 
 ```
 /plugin marketplace add praneybehl/llm-wiki-plugin
-/plugin install llm-wiki@llm-wiki
+/plugin install wiki@info-hive
 ```
 
 インストールすると、プラグインはどのプロジェクトでも使える。インストールしただけでは、wiki をどこに置くかは決まらない。
 
 ### ほかのコーディングエージェント: スキルのみ
 
-`llm-wiki` スキルは標準の [agentskills.io](https://agentskills.io) 形式なので、[`skills` CLI](https://github.com/vercel-labs/skills) が対応しているどのエージェントにもそのままインストールできる。環境に合った `--agent` フラグを選ぶ。
+`info-hive` スキルは標準の [agentskills.io](https://agentskills.io) 形式なので、[`skills` CLI](https://github.com/vercel-labs/skills) が対応しているどのエージェントにもそのままインストールできる。環境に合った `--agent` フラグを選ぶ。
 
 ```bash
 # グローバルにインストールし、すべてのプロジェクトでスキルを使えるようにする
@@ -64,23 +64,23 @@ npx skills add praneybehl/llm-wiki-plugin -a <agent>
 | エージェント | `--agent` の値 | 呼び出し方 | スクリプトの実行 |
 |-------|-----------------|------------|:-----------:|
 | Claude Code | `claude-code` | `/wiki:*` スラッシュコマンド（同梱）または自然言語 | ✅ |
-| Codex (OpenAI) | `codex` | `/skills` または `$llm-wiki` / 自然言語 | ✅ |
+| Codex (OpenAI) | `codex` | `/skills` または `$info-hive` / 自然言語 | ✅ |
 | Cursor | `cursor` | `/llm-wiki` または自然言語 | ✅ |
 | Gemini CLI | `gemini-cli` | `/skills` の管理コマンド / 自然言語 | ✅ |
 | OpenCode | `opencode` | 自然言語（エージェントがネイティブの `skill` ツールを呼び出す） | ✅ |
 | OpenClaw | `openclaw` | ユーザーコマンドとして自動で公開される | ✅ |
-| Pi Agent | `pi` | `/skill:llm-wiki` または自然言語 | ✅ |
+| Pi Agent | `pi` | `/skill:info-hive` または自然言語 | ✅ |
 | OMP ("Oh My Pi") | 手動（下記を参照） | 自然言語（スキルは `skill://` から自動で見つかる） | ✅ |
 
 OpenCode は `.claude/skills/` と `~/.claude/skills/` も読むので、Claude Code 用にスキルをインストール済みなら、OpenCode で使うために改めてインストールする必要はない。
 
-**Hermes Agent**（Nous Research）、**OMP**（"Oh My Pi"）など、まだ `npx skills` のレジストリにない agentskills.io 互換のランタイムでも、このスキルは使える。リポジトリをクローンし、`skills/llm-wiki/` をエージェントのスキルディレクトリにシンボリックリンクするかコピーする。Hermes は `~/.hermes/skills/` から読む。OMP は、管理されたスキルとユーザーのスキルを `~/.omp/agent/skills/` から読み、`skill://` で公開する。
+**Hermes Agent**（Nous Research）、**OMP**（"Oh My Pi"）など、まだ `npx skills` のレジストリにない agentskills.io 互換のランタイムでも、このスキルは使える。リポジトリをクローンし、`skills/info-hive/` をエージェントのスキルディレクトリにシンボリックリンクするかコピーする。Hermes は `~/.hermes/skills/` から読む。OMP は、管理されたスキルとユーザーのスキルを `~/.omp/agent/skills/` から読み、`skill://` で公開する。
 
 ```bash
 git clone https://github.com/praneybehl/llm-wiki-plugin.git
 mkdir -p ~/.hermes/skills ~/.omp/agent/skills
-ln -s "$(pwd)/llm-wiki-plugin/skills/llm-wiki" ~/.hermes/skills/llm-wiki
-ln -s "$(pwd)/llm-wiki-plugin/skills/llm-wiki" ~/.omp/agent/skills/llm-wiki
+ln -s "$(pwd)/llm-wiki-plugin/skills/info-hive" ~/.hermes/skills/info-hive
+ln -s "$(pwd)/llm-wiki-plugin/skills/info-hive" ~/.omp/agent/skills/info-hive
 ```
 
 Claude Code 以外でスキルを使うときに知っておくべきことは次のとおり。
@@ -118,7 +118,7 @@ Claude Code 以外でスキルを使うときに知っておくべきことは�
 
 初期化では、選んだ wiki と raw のソースのルートに、`SCHEMA.md`、`index.md`、`log.md`、ページのテンプレートを用意したあと、実行環境の JSON のレポートを出力する。セットアップが完了したのは、レポートが `"status": "ready"` を示したときだけである。
 
-同じ手順の中で、スキルは、エージェントが今後のセッションでも wiki を覚えているように、wiki の場所を示す記述を提案する。個人用のグローバルな wiki ならグローバルな指示に、プロジェクトの wiki ならプロジェクトのエージェントのメモリファイルに書く。スキルは、ユーザーの承認なしにメモリファイルに書き込むことはない。両方の書き方は `skills/llm-wiki/references/agent-memory-integration.md` を参照。
+同じ手順の中で、スキルは、エージェントが今後のセッションでも wiki を覚えているように、wiki の場所を示す記述を提案する。個人用のグローバルな wiki ならグローバルな指示に、プロジェクトの wiki ならプロジェクトのエージェントのメモリファイルに書く。スキルは、ユーザーの承認なしにメモリファイルに書き込むことはない。両方の書き方は `skills/info-hive/references/agent-memory-integration.md` を参照。
 
 最初のソースを、設定した raw のルート（グローバルな構成なら `~/wiki/raw/` など）に置いてから、次を実行する。
 
@@ -172,11 +172,11 @@ wiki は3つの層と3つの操作でできている。
 
 **任意の4つ目の層**として、`wiki/graph/` のグラフもある。ページの frontmatter には、型付きの `graph:` メタデータ（`founded`、`proposed`、`depends_on` など）を、明示的なソースページのスラッグと証拠となる引用とともに宣言できる。同梱の抽出スクリプトは、すべてのページを `nodes.jsonl`、`edges.jsonl`、`graph.sqlite`、`graph.graphml` にコンパイルする。**正本は Markdown のまま**で、グラフはいつでも削除して作り直せる。インデックスだけでは安く答えられない関係を問うクエリ（「X とつながっているものは？」「Y を提案したのは誰？」「A → B の最短経路」）には、`/wiki:graph` を使う。
 
-ページの種類、frontmatter の規約、各設計判断の理由、ワークフローの手順を含むアーキテクチャの詳しい説明は、スキルの中のリファレンス `skills/llm-wiki/references/` を参照。グラフ層については `skills/llm-wiki/references/graph-workflow.md` に書いてある。
+ページの種類、frontmatter の規約、各設計判断の理由、ワークフローの手順を含むアーキテクチャの詳しい説明は、スキルの中のリファレンス `skills/info-hive/references/` を参照。グラフ層については `skills/info-hive/references/graph-workflow.md` に書いてある。
 
 ## 経験から学ぶ
 
-任意で使う改善のワークフローは、変更不可のタスクの証拠を、通常のソースとコンセプトのパターンに結びつけ、さらに測定にもとづくスキルの変更に結びつける。評価の間、候補のスキルは隔離される。消えずに残る `.evolution/` のアーカイブは、通常の wiki の検索からは除外されるが、出典つきの教訓と要約は検索できる。`wiki_evolve.py --help` か[エージェント向けのワークフロー](skills/llm-wiki/references/evolution-workflow.md)を参照。モデルのランナーでは、リモートの推論に費用がかかることがある。記録とハーネスそのものは、標準ライブラリだけで動く。
+任意で使う改善のワークフローは、変更不可のタスクの証拠を、通常のソースとコンセプトのパターンに結びつけ、さらに測定にもとづくスキルの変更に結びつける。評価の間、候補のスキルは隔離される。消えずに残る `.evolution/` のアーカイブは、通常の wiki の検索からは除外されるが、出典つきの教訓と要約は検索できる。`wiki_evolve.py --help` か[エージェント向けのワークフロー](skills/info-hive/references/evolution-workflow.md)を参照。モデルのランナーでは、リモートの推論に費用がかかることがある。記録とハーネスそのものは、標準ライブラリだけで動く。
 
 ## スケーリングの仕組み
 
@@ -190,19 +190,19 @@ LLM Wiki パターンで最大の失敗は、wiki が大きくなるにつれて
 
 **インデックスを先に読むナビゲーション。** クエリでは最初にインデックスを読み、1行の要約から候補のページを見つけ、それだけを読む。インデックスは、このパターン全体をスケールさせるキャッシュである。
 
-**ローカルのハイブリッド検索。** インデックスの要約で足りないときは、`uv run --script skills/llm-wiki/scripts/wiki_search.py "query terms"` が、ローカルの FastEmbed によるセマンティックなベクトルと BM25 の結果を RRF で統合して、Markdown のセクションに順位を付ける。sqlite-vec は、内容のハッシュを付けたベクトルを `wiki/.wiki-cache/embeddings.sqlite` に保存し、変更されたセクションだけをベクトル化し直す。API キーもプロバイダーも不要で、wiki やクエリのテキストを外部に送ることもない。`--json` は証拠の行を出力し、`--cache` はパースしたセクションを保存する。依存パッケージをまったく使わない方法では、`python skills/llm-wiki/scripts/wiki_search.py "query terms" --no-embed` を実行する。`--granularity page` を付けると、ページ単位の順位付けに戻る。
+**ローカルのハイブリッド検索。** インデックスの要約で足りないときは、`uv run --script skills/info-hive/scripts/wiki_search.py "query terms"` が、ローカルの FastEmbed によるセマンティックなベクトルと BM25 の結果を RRF で統合して、Markdown のセクションに順位を付ける。sqlite-vec は、内容のハッシュを付けたベクトルを `wiki/.wiki-cache/embeddings.sqlite` に保存し、変更されたセクションだけをベクトル化し直す。API キーもプロバイダーも不要で、wiki やクエリのテキストを外部に送ることもない。`--json` は証拠の行を出力し、`--cache` はパースしたセクションを保存する。依存パッケージをまったく使わない方法では、`python skills/info-hive/scripts/wiki_search.py "query terms" --no-embed` を実行する。`--granularity page` を付けると、ページ単位の順位付けに戻る。
 
 **必要な箇所だけの編集。** 取り込みの間にページを更新するとき、Claude は `str_replace` で該当するセクションだけを変え、ページ全体を書き直さない。速く、トークンの消費が少なく、wiki を git で管理していれば差分も読みやすいまま保てる。
 
 **ソースの分割取り込み。** 大きな raw のソース（長い PDF、何時間もの文字起こし）は、取り込みの間に分割して読み、全体を一度に読み込まない。取り込みのワークフローが、これを自動で行う。
 
-`/wiki:stats` コマンドで、どの閾値に達しているかと、次に行う移行が分かる。閾値と移行の手順をまとめたスケーリングの手引きは `skills/llm-wiki/references/scaling-playbook.md` にある。
+`/wiki:stats` コマンドで、どの閾値に達しているかと、次に行う移行が分かる。閾値と移行の手順をまとめたスケーリングの手引きは `skills/info-hive/references/scaling-playbook.md` にある。
 
 ## 目指していないもの
 
 これは Markdown にもとづく個人用のナレッジベースであり、データベースではない。扱う領域が本質的にリレーショナルなら（10万件の顧客レコードの管理、複雑な組織構造、厳密な参照整合性が必要な会計の台帳など）、本物のデータベースのほうが向いている。Markdown と grep と frontmatter の組み合わせは、思ったよりもスケールする（Karpathy 自身の wiki は約 100 記事、40 万語で問題なく動いていた）が、どこかで適したツールは変わる。
 
-知っておくべき失敗のパターンは次の3つで、どれも `skills/llm-wiki/SKILL.md` で扱っている。1つ目は、気づかないうちに内容が壊れることである。1つのソースを読み違えると、それが権威のある wiki ページのように見え、その後の取り込みに影響する。これは、必須の `sources:` frontmatter と lint で抑える。2つ目は、wiki が自分の出力を読むことによるずれである。Claude が raw のソースと照らし合わせずに、以前の wiki ページを正しいものとして扱ってしまう。これは、主張を更新するときに raw のソースを読み直すよう求める取り込みのワークフローの指示で抑える。3つ目は、保守の負担が増え続けることである。lint のレポートが、ユーザーがレビューできるより速く増えていく。これはスケーリングのための規律で抑えるが、それでも起きるなら、スキーマを見直す必要がある。
+知っておくべき失敗のパターンは次の3つで、どれも `skills/info-hive/SKILL.md` で扱っている。1つ目は、気づかないうちに内容が壊れることである。1つのソースを読み違えると、それが権威のある wiki ページのように見え、その後の取り込みに影響する。これは、必須の `sources:` frontmatter と lint で抑える。2つ目は、wiki が自分の出力を読むことによるずれである。Claude が raw のソースと照らし合わせずに、以前の wiki ページを正しいものとして扱ってしまう。これは、主張を更新するときに raw のソースを読み直すよう求める取り込みのワークフローの指示で抑える。3つ目は、保守の負担が増え続けることである。lint のレポートが、ユーザーがレビューできるより速く増えていく。これはスケーリングのための規律で抑えるが、それでも起きるなら、スキーマを見直す必要がある。
 
 ## ホスト型 wiki
 
@@ -236,7 +236,7 @@ LLM Wiki パターンで最大の失敗は、wiki が大きくなるにつれて
 
 wiki をセットアップしたら、どの Markdown ビューアーでもページを読んで編集できる。[Obsidian](https://obsidian.md) は、グラフビュー、`[[wikilinks]]` の構文、Web Clipper 拡張機能があるので特に相性がよいが、必須ではない。wiki はプロジェクトの中にある、ただの Markdown ファイルのディレクトリである。
 
-ツールには Python 3.10 以上と `uv` が必要である。初期化とアップグレードでは `setup_wiki.py` を呼び出す。その PEP 723 の環境では、FastEmbed 0.8.0、sqlite-vec 0.1.9、PyYAML 6.0.3 のバージョンを固定しており、モデルをキャッシュし、wiki のインデックス全体を同期する。検索、グラフの lint、グラフの抽出も、それぞれバージョンを固定したスクリプトのメタデータを持つ。語彙ベースの `wiki_search.py --no-embed`、`wiki_lint.py`、`wiki_stats.py`、グラフのクエリは、標準ライブラリだけの Python で直接実行できる。同梱のスクリプトは、インストール後は `skills/llm-wiki/scripts/` にある。
+ツールには Python 3.10 以上と `uv` が必要である。初期化とアップグレードでは `setup_wiki.py` を呼び出す。その PEP 723 の環境では、FastEmbed 0.8.0、sqlite-vec 0.1.9、PyYAML 6.0.3 のバージョンを固定しており、モデルをキャッシュし、wiki のインデックス全体を同期する。検索、グラフの lint、グラフの抽出も、それぞれバージョンを固定したスクリプトのメタデータを持つ。語彙ベースの `wiki_search.py --no-embed`、`wiki_lint.py`、`wiki_stats.py`、グラフのクエリは、標準ライブラリだけの Python で直接実行できる。同梱のスクリプトは、インストール後は `skills/info-hive/scripts/` にある。
 
 ## クレジット
 
@@ -254,4 +254,4 @@ MIT。[LICENSE](./LICENSE) を参照。
 
 ## コントリビュート
 
-Issue と PR を歓迎する。スキル本体は `skills/llm-wiki/`、スラッシュコマンドは `commands/wiki/`、ホスト型のサーバーは `server/` にある。[CONTRIBUTING.md](./CONTRIBUTING.md) を参照。PR を出す前に、同梱のスクリプトを小さなテスト用の wiki に対して実行し、何も壊れていないことを確かめてほしい。
+Issue と PR を歓迎する。スキル本体は `skills/info-hive/`、スラッシュコマンドは `commands/wiki/`、ホスト型のサーバーは `server/` にある。[CONTRIBUTING.md](./CONTRIBUTING.md) を参照。PR を出す前に、同梱のスクリプトを小さなテスト用の wiki に対して実行し、何も壊れていないことを確かめてほしい。

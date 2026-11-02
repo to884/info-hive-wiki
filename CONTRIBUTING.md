@@ -4,7 +4,7 @@ Thanks for your interest in improving this plugin. The structure below is meant 
 
 ## What kinds of contributions fit
 
-The plugin has five surface areas that take contributions well: the skill itself (`skills/llm-wiki/SKILL.md` and the references), the bundled scripts (`skills/llm-wiki/scripts/`), the slash commands (`commands/wiki/`), the optional hosted server (`server/`), and the documentation (README, CHANGELOG, `docs/`, this file). Bug fixes and small improvements to any of these are easy yes-es.
+The plugin has five surface areas that take contributions well: the skill itself (`skills/info-hive/SKILL.md` and the references), the bundled scripts (`skills/info-hive/scripts/`), the slash commands (`commands/wiki/`), the optional hosted server (`server/`), and the documentation (README, CHANGELOG, `docs/`, this file). Bug fixes and small improvements to any of these are easy yes-es.
 
 For larger changes (new page types baked into the bootstrap, new lint checks, restructuring the references, changing the default schema), please open an issue first to discuss the shape before writing code. The skill is opinionated by design; some "improvements" would unwind a deliberate trade-off (atomic pages, index-first navigation, schema-as-config), so a quick issue conversation saves rework.
 
@@ -23,7 +23,7 @@ Then in Claude Code, add the local path as a marketplace and install:
 
 ```
 /plugin marketplace add /absolute/path/to/llm-wiki-plugin
-/plugin install llm-wiki@llm-wiki
+/plugin install wiki@info-hive
 ```
 
 After making changes, refresh with `/plugin marketplace update` and reinstall. There's no build step: the skill, commands, and scripts run as-is from the filesystem.
@@ -46,19 +46,19 @@ Run the relevant checked-in suites and exercise changed workflows against a disp
 
 ```bash
 uv run --with fastembed==0.8.0 --with sqlite-vec==0.1.9 --with PyYAML==6.0.3 python -m unittest discover -s eval/retrieval -p 'test_*.py'
-python skills/llm-wiki/scripts/test_link_resolution.py
+python skills/info-hive/scripts/test_link_resolution.py
 python eval/evolution/test_evolution.py
 python eval/evolution/test_loop.py
 python eval/evolution/test_adapters.py
 python eval/retrieval/run_eval.py --gate
 python eval/remote/test_remote.py
 python eval/decisions/test_decisions.py
-cmp skills/llm-wiki/assets/decision-questions.json server/src/decisions/decision-questions.json
+cmp skills/info-hive/assets/decision-questions.json server/src/decisions/decision-questions.json
 (cd server && npm ci && npm run typecheck && npm test)
 pnpm docs:build
 ```
 
-`skills/llm-wiki/assets/decision-questions.json` and `server/src/decisions/decision-questions.json` must stay identical. Change both in one commit. CI fails when they differ. Decision tests use a fake backend. Do not send private wiki text to a hosted decision backend.
+`skills/info-hive/assets/decision-questions.json` and `server/src/decisions/decision-questions.json` must stay identical. Change both in one commit. CI fails when they differ. Decision tests use a fake backend. Do not send private wiki text to a hosted decision backend.
 
 The evolution suite uses deterministic runners to verify lifecycle behavior, not model improvement. Live-model trials require an explicitly selected runner/model and inference budget; record actual results separately.
 
@@ -66,12 +66,12 @@ The minimum manual smoke test:
 
 ```bash
 mkdir /tmp/test-wiki && cd /tmp/test-wiki
-python /path/to/llm-wiki-plugin/skills/llm-wiki/scripts/init_wiki.py .
+python /path/to/llm-wiki-plugin/skills/info-hive/scripts/init_wiki.py .
 # create a few markdown pages by hand under wiki/sources/, wiki/concepts/, etc.
 # include some deliberate issues (an orphan page, a broken [[wikilink]], missing frontmatter)
-python /path/to/llm-wiki-plugin/skills/llm-wiki/scripts/wiki_lint.py wiki/
-python /path/to/llm-wiki-plugin/skills/llm-wiki/scripts/wiki_stats.py wiki/
-python /path/to/llm-wiki-plugin/skills/llm-wiki/scripts/wiki_search.py "your query terms"
+python /path/to/llm-wiki-plugin/skills/info-hive/scripts/wiki_lint.py wiki/
+python /path/to/llm-wiki-plugin/skills/info-hive/scripts/wiki_stats.py wiki/
+python /path/to/llm-wiki-plugin/skills/info-hive/scripts/wiki_search.py "your query terms"
 ```
 
 For changes to the skill itself (`SKILL.md` or the references), the most useful test is a real ingest: drop a paper or article into a test project's `raw/`, run `/wiki:ingest <path>`, and read what gets produced. If the workflow drifts in ways that hurt output quality, the skill needs adjustment.
@@ -145,7 +145,7 @@ The main release version is declared in five JSON fields, one TypeScript constan
 | `server/src/types.ts` | `SERVER_VERSION` | Reported by `/healthz` and `wiki_overview`. |
 | `CHANGELOG.md` | `## [X.Y.Z] - YYYY-MM-DD` heading + the `[X.Y.Z]: …/releases/tag/vX.Y.Z` link line | Human-facing record. |
 
-`skills/llm-wiki/SKILL.md` does **not** carry a version field. Skills are versioned by the enclosing plugin's `plugin.json`: leave SKILL.md frontmatter alone unless you're changing `name` or `description`.
+`skills/info-hive/SKILL.md` does **not** carry a version field. Skills are versioned by the enclosing plugin's `plugin.json`: leave SKILL.md frontmatter alone unless you're changing `name` or `description`.
 
 The bundled scripts and slash commands also have no version metadata; the plugin version covers them.
 
@@ -198,16 +198,16 @@ If a feature can be made backward-compatible (e.g. a new frontmatter field with 
 
 ### How users pick up the new version
 
-- **Claude Code:** `/plugin marketplace update` followed by `/plugin install llm-wiki@llm-wiki`. Claude Code compares the resolved `version` against the cached one and refreshes when they differ.
-- **Other agents installed via `npx skills add`:** `npx skills update llm-wiki`, or re-run the original `npx skills add praneybehl/llm-wiki-plugin -a <agent>` command.
-- **Existing wikis bootstrapped under an older plugin version:** users run `/wiki:upgrade` (or `python /path/to/llm-wiki-plugin/skills/llm-wiki/scripts/init_wiki.py /absolute/path/to/project --upgrade` from the CLI). The script path and target project must be separate; the upgrade flow is idempotent for files and walked-through for SCHEMA.md merges.
+- **Claude Code:** `/plugin marketplace update` followed by `/plugin install wiki@info-hive`. Claude Code compares the resolved `version` against the cached one and refreshes when they differ.
+- **Other agents installed via `npx skills add`:** `npx skills update info-hive`, or re-run the original `npx skills add praneybehl/llm-wiki-plugin -a <agent>` command.
+- **Existing wikis bootstrapped under an older plugin version:** users run `/wiki:upgrade` (or `python /path/to/llm-wiki-plugin/skills/info-hive/scripts/init_wiki.py /absolute/path/to/project --upgrade` from the CLI). The script path and target project must be separate; the upgrade flow is idempotent for files and walked-through for SCHEMA.md merges.
 
 ### What does NOT need to change on every release
 
-- `skills/llm-wiki/SKILL.md` frontmatter (no version field)
+- `skills/info-hive/SKILL.md` frontmatter (no version field)
 - Slash command files in `commands/wiki/` (no version field)
-- Reference docs in `skills/llm-wiki/references/` (unless the change introduces new content)
-- Asset templates in `skills/llm-wiki/assets/` (unless the change introduces new templates)
+- Reference docs in `skills/info-hive/references/` (unless the change introduces new content)
+- Asset templates in `skills/info-hive/assets/` (unless the change introduces new templates)
 - `LICENSE`, `README.md` (unless the user-facing summary changed)
 
 ## License

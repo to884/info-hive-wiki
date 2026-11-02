@@ -3,7 +3,7 @@ description: 根拠にもとづくスキルの改善案を作成・評価・適�
 argument-hint: "<スキルと改善の目的 | history | show/apply/rollback 実験 ID>"
 ---
 
-`llm-wiki` スキルを使い、作業を始める前に `references/evolution-workflow.md` を読むこと。
+`info-hive` スキルを使い、作業を始める前に `references/evolution-workflow.md` を読むこと。
 
 依頼内容: $ARGUMENTS
 

@@ -14,7 +14,7 @@ v4.0.0 では、オプションのホスト型バックエンドと、オプシ�
 - **ローカルの wiki に移行作業は要らない。** `wiki/` の下は何も変わらない。ローカルの検索、lint、グラフ、改善のスクリプトも同じである。
 - **ホスト型 wiki（オプション）。** Deploy ボタンで Cloudflare Worker を1つデプロイする。エージェントは、それぞれのトークンか OAuth を使い、MCP または JSON API で接続する。[ホスト型 wiki](/hosted) を参照。
 - **新しいコマンド。** `/wiki:init --hosted <url>` は、エージェントをホスト型 wiki に接続する。`/wiki:migrate` は、ローカルの wiki をホスト型 wiki に移し、選んだすべてのファイルを検証し、スキップしたファイルを報告する。
-- **新しい CLI。** `skills/llm-wiki/scripts/wiki_remote.py`（Python の標準ライブラリだけを使う）が、ログイン、トークン、インポート、pull ミラー、エクスポート、raw ファイル、MCP の設定を扱う。
+- **新しい CLI。** `skills/info-hive/scripts/wiki_remote.py`（Python の標準ライブラリだけを使う）が、ログイン、トークン、インポート、pull ミラー、エクスポート、raw ファイル、MCP の設定を扱う。
 - **判定モデル（オプション、既定では無効）。** 小さなモデルを使って、検索結果を関連度でふるい分けたり、グラフの証拠を確かめたり、信頼できないテキストを選別したりできる。[判定モデル](/decisions)を参照。
 - **Paperclip 連携の削除。** `integrations/paperclip/` のプラグインとそのドキュメントはなくなった。npm パッケージは一度もレジストリに公開していないので、レジストリ側での対応は不要である。Paperclip が必要なら、v3.2.x を使い続ける。[v3.2.0 のドキュメント](/v3/)は引き続き参照できる。
 
@@ -73,16 +73,16 @@ flowchart TD
    直接実行する場合は、インストール済みのスクリプトと、選んだベースディレクトリを別々に渡す。プロジェクトの wiki の場合:
 
    ```bash
-   python "${CLAUDE_PLUGIN_ROOT}/skills/llm-wiki/scripts/init_wiki.py" "<absolute-project-root>" --upgrade
+   python "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/init_wiki.py" "<absolute-project-root>" --upgrade
    ```
 
    標準の個人用グローバル構成の場合:
 
    ```bash
-   python "${CLAUDE_PLUGIN_ROOT}/skills/llm-wiki/scripts/init_wiki.py" "<absolute-home-directory>" --wiki-dir wiki --raw-dir wiki/raw --upgrade
+   python "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/init_wiki.py" "<absolute-home-directory>" --wiki-dir wiki --raw-dir wiki/raw --upgrade
    ```
 
-   スキルだけをインストールしている場合は、`${CLAUDE_PLUGIN_ROOT}/skills/llm-wiki` を、そのエージェントにインストールされた `llm-wiki` スキルのディレクトリに置き換える。プラグインやスキルのディレクトリを、ベースディレクトリとして使ってはならない。
+   スキルだけをインストールしている場合は、`${CLAUDE_PLUGIN_ROOT}/skills/info-hive` を、そのエージェントにインストールされた `info-hive` スキルのディレクトリに置き換える。プラグインやスキルのディレクトリを、ベースディレクトリとして使ってはならない。
 
    > **期待される動作**: 何度実行しても同じ結果になるファイル操作なので、既存のページには手が付かない。続いて実行環境のセットアップが `"status": "ready"` を返し、固定した依存パッケージのバージョン、モデル、ページ数、セクション数、ベクトルインデックスのパスを報告する。そのあとで、コマンドが SCHEMA に欠けているマーカーを報告する。
 3. **SCHEMA.md のマージを承認する。** 現在のテンプレートにあるローカルのセマンティック検索のバックエンドについての行を、既存の `## Retrieval` セクションに追加する。SCHEMA.md はユーザーと一緒に改訂してきたものなので、黙って変更されることはない。

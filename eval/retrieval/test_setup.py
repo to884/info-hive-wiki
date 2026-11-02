@@ -12,7 +12,7 @@ from unittest import mock
 
 
 REPO = Path(__file__).resolve().parents[2]
-SCRIPTS = REPO / "skills" / "llm-wiki" / "scripts"
+SCRIPTS = REPO / "skills" / "info-hive" / "scripts"
 
 
 def load_module(name, path):

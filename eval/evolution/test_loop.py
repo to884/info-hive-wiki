@@ -6,7 +6,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 
-SCRIPTS = Path(__file__).resolve().parents[2] / 'skills/llm-wiki/scripts'
+SCRIPTS = Path(__file__).resolve().parents[2] / 'skills/info-hive/scripts'
 sys.path.insert(0, str(SCRIPTS))
 import wiki_evolve as lifecycle
 import wiki_evolve_loop as loop

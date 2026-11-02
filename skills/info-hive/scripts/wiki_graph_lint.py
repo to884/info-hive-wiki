@@ -394,7 +394,7 @@ def decide_evidence(pages: list[dict], ontology: dict, threshold: float | None) 
     if errors:
         wd.note(f"evidence check failed for {len(errors)} of {len(items)} edges ({errors[0]}); those edges are not flagged")
     elif items and client is None:
-        wd.note("evidence check skipped: no backend configured (set LLM_WIKI_DECISIONS)")
+        wd.note("evidence check skipped: no backend configured (set INFO_HIVE_DECISIONS)")
     block = {
         "backend": client.backend if client else "off",
         "model": client.model if client else None,
@@ -492,7 +492,7 @@ def main():
     parser.add_argument("--ontology", type=Path, help="Ontology file (default: <wiki>/graph/ontology.yaml)")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--decide", action="store_true",
-                        help="Check unquoted edge evidence with the decision model. Needs LLM_WIKI_DECISIONS.")
+                        help="Check unquoted edge evidence with the decision model. Needs INFO_HIVE_DECISIONS.")
     parser.add_argument("--decide-threshold", type=float, default=None,
                         help="Confidence needed to accept a supporting sentence "
                              f"(default: {decision_default_threshold('evidence')}).")

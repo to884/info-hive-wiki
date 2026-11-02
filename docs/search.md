@@ -12,7 +12,7 @@ v3.0.0 では、セクション単位のハイブリッド検索がローカル�
 検索スクリプトは、インデックスの1行の要約から適切な候補が見つからないときの代わりの手段である（[クエリのワークフロー](/workflows#query)を参照）。リポジトリのルートで実行する。
 
 ```bash
-uv run --script skills/llm-wiki/scripts/wiki_search.py "attention mechanism" --wiki wiki --json
+uv run --script skills/info-hive/scripts/wiki_search.py "attention mechanism" --wiki wiki --json
 ```
 
 ```mermaid
@@ -87,7 +87,7 @@ flowchart LR
 `--granularity page` を指定すると、v1 とまったく同じ方法でページ全体に順位を付ける。v2 より前の動作をバイト単位で再現する。ページ単位の行は、`heading_path` が空で `section_index` が `null` になり、常に語彙ベースの検索になる（埋め込みはセクション単位でだけ使われる）。
 
 ```bash
-python skills/llm-wiki/scripts/wiki_search.py "attention mechanism" --wiki wiki --granularity page --no-embed --json
+python skills/info-hive/scripts/wiki_search.py "attention mechanism" --wiki wiki --granularity page --no-embed --json
 ```
 
 ## フィルター {#filters}
@@ -95,7 +95,7 @@ python skills/llm-wiki/scripts/wiki_search.py "attention mechanism" --wiki wiki 
 frontmatter のフィルターで結果を絞り込める。フィルターはすべて組み合わせられる。
 
 ```bash
-uv run --script skills/llm-wiki/scripts/wiki_search.py "diffusion" --wiki wiki \
+uv run --script skills/info-hive/scripts/wiki_search.py "diffusion" --wiki wiki \
   --type concept --tag generative --since 2026-01-01 --top 10 --per-page 3
 ```
 
@@ -107,10 +107,10 @@ uv run --script skills/llm-wiki/scripts/wiki_search.py "diffusion" --wiki wiki \
 
 ```bash
 # 既定のキャッシュの場所を使う
-uv run --script skills/llm-wiki/scripts/wiki_search.py "attention" --wiki wiki --json --cache
+uv run --script skills/info-hive/scripts/wiki_search.py "attention" --wiki wiki --json --cache
 
 # またはパスを明示する
-uv run --script skills/llm-wiki/scripts/wiki_search.py "attention" --wiki wiki --json --cache /tmp/idx.json
+uv run --script skills/info-hive/scripts/wiki_search.py "attention" --wiki wiki --json --cache /tmp/idx.json
 ```
 
 各ファイルは、生のバイト列の SHA-256 をキーにして管理する。変わっていないファイルはキャッシュを再利用し、変わったファイルはパースし直し、削除されたファイルはキャッシュから除く。キャッシュがない、パースできない、古いスキーマのものである、といった場合は一から作り直し、標準エラー出力に `cache: rebuilding (<reason>)` を1行出す。キャッシュはアトミックに書き込まれる。
@@ -126,16 +126,16 @@ uv run --script skills/llm-wiki/scripts/wiki_search.py "attention" --wiki wiki -
 スクリプトは、バージョンを固定した [PEP 723](https://peps.python.org/pep-0723/) の依存関係を宣言している。`uv` で実行すれば、プロジェクトの環境を変えずに、それらのパッケージを使える。
 
 ```bash
-uv run --script skills/llm-wiki/scripts/wiki_search.py \
+uv run --script skills/info-hive/scripts/wiki_search.py \
   "how does self-attention weigh tokens" --wiki wiki --json --top 5
 ```
 
-初期化とアップグレードのたびに `setup_wiki.py` が実行される。FastEmbed のモデルのファイルは `~/.cache/llm-wiki/fastembed/` にキャッシュされ（`FASTEMBED_CACHE_PATH` で変更できる）、現在のすべてのセクションが `wiki/.wiki-cache/embeddings.sqlite` に同期される。以降の検索とアップグレードでは、新しいセクションや変更されたセクションだけをベクトル化し、削除されたセクションは取り除く。
+初期化とアップグレードのたびに `setup_wiki.py` が実行される。FastEmbed のモデルのファイルは `~/.cache/info-hive/fastembed/` にキャッシュされ（`FASTEMBED_CACHE_PATH` で変更できる）、現在のすべてのセクションが `wiki/.wiki-cache/embeddings.sqlite` に同期される。以降の検索とアップグレードでは、新しいセクションや変更されたセクションだけをベクトル化し、削除されたセクションは取り除く。
 
 ハイブリッドモードでは、JSON の `mode` が `"hybrid"` になり、各行の `retrievers` フィールドで、BM25、埋め込み、その両方のどれがその行を見つけたかが分かる。
 
 ::: warning 失敗しても検索は壊れない
-FastEmbed が使えない、モデルの初期化に失敗した、sqlite-vec を読み込めない、といった場合、コマンドは機密情報を含まない警告を標準エラー出力に出し、BM25 に切り替え、`mode: "lexical"` で終了コード 0 で終わる。依存パッケージを使わない方法を明示的に選ぶには、PEP 723 による解決を経由せずに `python skills/llm-wiki/scripts/wiki_search.py "<query>" --no-embed` を実行する。
+FastEmbed が使えない、モデルの初期化に失敗した、sqlite-vec を読み込めない、といった場合、コマンドは機密情報を含まない警告を標準エラー出力に出し、BM25 に切り替え、`mode: "lexical"` で終了コード 0 で終わる。依存パッケージを使わない方法を明示的に選ぶには、PEP 723 による解決を経由せずに `python skills/info-hive/scripts/wiki_search.py "<query>" --no-embed` を実行する。
 :::
 
 ## キャッシュディレクトリ {#the-cache-directory}
@@ -154,7 +154,7 @@ FastEmbed が使えない、モデルの初期化に失敗した、sqlite-vec �
 任意の[判定レイヤー](/decisions)を有効にしていれば、`--decide` を付けると、上位 20 のセクションのそれぞれがクエリに答える役に立つかを、小さな判定モデルに問い合わせる。閾値を下回る行は除かれる。その結果が空なら、wiki にはおそらく答えがないということである。
 
 ```bash
-uv run --script skills/llm-wiki/scripts/wiki_search.py "query" --wiki wiki --json --decide
+uv run --script skills/info-hive/scripts/wiki_search.py "query" --wiki wiki --json --decide
 ```
 
 JSON には、トップレベルの `decision` ブロック（バックエンド、モデル、閾値、候補の数、残した数、除いた数、`failed_open`、レイテンシー）と、各行の `decision` フィールドが加わる。バックエンドが失敗した場合、検索は `failed_open: true` を付けて通常の行を返す。`--decide` を付けなければ、出力は変わらない。
