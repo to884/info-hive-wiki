@@ -30,7 +30,7 @@ def fails(fn, contains=None):
         if contains:
             assert contains in str(exc), str(exc)
     else:
-        raise AssertionError('Expected failure')
+        raise AssertionError('失敗するはずだった')
 
 
 def main():
@@ -51,7 +51,7 @@ def main():
         assert Path(captured['raw']).exists()
         e.capture(SimpleNamespace(raw=raw, record=experience))  # まったく同じ再試行は安全
         data['task']='different'; experience.write_text(e.encode(data), encoding='utf-8')
-        fails(lambda:e.capture(SimpleNamespace(raw=raw, record=experience)), 'Immutable')
+        fails(lambda:e.capture(SimpleNamespace(raw=raw, record=experience)), '変更できない')
         data['id']='../bad';experience.write_text(e.encode(data), encoding='utf-8')
         fails(lambda:e.capture(SimpleNamespace(raw=raw, record=experience)))
 
@@ -86,7 +86,7 @@ print(json.dumps({'answer':'correct' if 'candidate' in s else 'wrong',
             return e.evaluate(SimpleNamespace(suite=suite_path,runner=runner_json,repeats=2,timeout=5,
                                              model='test-model',tools='test-tools'), state/name)
         with e.locked(wiki) as state:
-            fails(lambda:e.locked(wiki).__enter__(), 'busy')
+            fails(lambda:e.locked(wiki).__enter__(), '実行中')
             proposal(state,'good')
             assert (skill/'SKILL.md').read_text(encoding='utf-8')=='baseline\n'
             assert [p['slug'] for p in wiki_search.collect_pages(wiki)]==['lesson']
@@ -98,30 +98,30 @@ print(json.dumps({'answer':'correct' if 'candidate' in s else 'wrong',
             assert (state/'good/corpus/fact.md').read_text(encoding='utf-8')=='correct'
             (corpus/'fact.md').write_text('correct', encoding='utf-8')
             (state/'good/corpus/fact.md').write_text('tampered', encoding='utf-8')
-            fails(lambda:e.transition(state/'good'), 'Archived corpus changed')
+            fails(lambda:e.transition(state/'good'), '記録したコーパスが変わった')
             (state/'good/corpus/fact.md').write_text('correct', encoding='utf-8')
             assert passed['totals']['validation']=={'baseline':0,'candidate':2}
-            fails(lambda:evaluate(state,'good'), 'already recorded')
+            fails(lambda:evaluate(state,'good'), 'すでに記録された')
             (skill/'SKILL.md').write_text('concurrent\n', encoding='utf-8')
-            fails(lambda:e.transition(state/'good'), 'concurrent edits')
+            fails(lambda:e.transition(state/'good'), '同時に行われた編集')
             (skill/'SKILL.md').write_text('baseline\n', encoding='utf-8')
             assert e.transition(state/'good')['status']=='accepted'
             assert (skill/'SKILL.md').read_text(encoding='utf-8')=='candidate\n'
             assert e.transition(state/'good')['status']=='accepted'  # 冪等な再試行
             (skill/'other.md').write_text('new concurrent file', encoding='utf-8')
-            fails(lambda:e.transition(state/'good',True), 'concurrent edits')
+            fails(lambda:e.transition(state/'good',True), '同時に行われた編集')
             (skill/'other.md').unlink()
             assert e.transition(state/'good',True)['status']=='rolled_back'
             assert (skill/'SKILL.md').read_text(encoding='utf-8')=='baseline\n'
             assert e.transition(state/'good',True)['status']=='rolled_back'
-            fails(lambda:e.transition(state/'good'), 'cannot be reapplied')
+            fails(lambda:e.transition(state/'good'), '再び適用できない')
 
             for name,body,status in [('reject','different\n','rejected'),
                                       ('regress','candidate regress\n','rejected'),
                                       ('cost','candidate expensive\n','rejected')]:
                 proposal(state,name,body)
                 assert evaluate(state,name)['status']==status
-                fails(lambda:e.transition(state/name), 'did not pass')
+                fails(lambda:e.transition(state/name), '評価に通らなかった')
                 assert (skill/'SKILL.md').read_text(encoding='utf-8')=='baseline\n'
             for name in ['crash','mutate']:
                 proposal(state,name,'candidate '+name+'\n')
@@ -132,7 +132,7 @@ print(json.dumps({'answer':'correct' if 'candidate' in s else 'wrong',
                 assert (state/name/'corpus/fact.md').read_text(encoding='utf-8')=='correct'
             proposal(state,'tamper')
             (state/'tamper/candidate/SKILL.md').write_text('tampered', encoding='utf-8')
-            fails(lambda:evaluate(state,'tamper'), 'snapshot changed')
+            fails(lambda:evaluate(state,'tamper'), 'スナップショットが変わった')
             proposal(state,'recover')
             evaluate(state,'recover')
             # 置き換えのあと、完了の記録を書く前にクラッシュした場合。
@@ -142,7 +142,7 @@ print(json.dumps({'answer':'correct' if 'candidate' in s else 'wrong',
             e.transition(state/'recover',True)
             assert any(r['id']=='regress' and r['status']=='rejected' for r in e.history(state))
             assert (state/'reject/change.diff').exists()
-            fails(lambda:proposal(state,'reject'), 'already exists')
+            fails(lambda:proposal(state,'reject'), 'すでにある')
         assert not (wiki/'.evolution/lock').exists()
         fails(lambda:e.inside(skill,'../escape'))
         try:
@@ -151,12 +151,12 @@ print(json.dumps({'answer':'correct' if 'candidate' in s else 'wrong',
             # Windows で開発者モードも管理者権限もないと symlink を作れない。この検査だけを飛ばす。
             print('symlink を作れないため、symlink の拒否の検査を飛ばした')
         else:
-            fails(lambda:e.tree(skill), 'Symlink')
+            fails(lambda:e.tree(skill), 'シンボリックリンク')
             (skill/'link').unlink()
         invalid = {'answer':'correct','abstain':False,'citations':['../escape'],'tool_calls':0,'cost':0}
         assert not e.score(suite['tasks'][0],invalid,corpus)['passed']
         invalid['cost']=float('nan');fails(lambda:e.score(suite['tasks'][0],invalid,corpus))
-        suite['tasks'][1]['split']='validation';fails(lambda:e.suite_contract(suite,corpus), 'held-out')
+        suite['tasks'][1]['split']='validation';fails(lambda:e.suite_contract(suite,corpus), '最終テスト用')
         fails(lambda:e.run_runner([sys.executable,'-c','import time; time.sleep(10)'],{},root,0.05))
         # 冪等なアップグレードは、スキーマとカスタマイズしたテンプレートを残したまま、新しいマーカーを知らせる。
         (wiki/'.experience-template.json').write_text('custom', encoding='utf-8')
@@ -180,7 +180,7 @@ print(json.dumps({'answer':'correct' if 'candidate' in s else 'wrong',
     parsed=claude.parse_events('\n'.join(json.dumps(v) for v in events))
     assert parsed['tool_calls']==1 and parsed['cost']==0.01
     fails(lambda:claude.parse_events('{}'))
-    print('Evolution lifecycle, rejection, recovery, isolation, validation and pilot contracts: PASS')
+    print('評価ループのライフサイクル、却下、復旧、分離、検証、パイロットの契約: PASS')
 
 
 if __name__=='__main__':

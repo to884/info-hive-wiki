@@ -9,7 +9,7 @@
   python wiki_evolve.py capture --raw ~/wiki/raw --record experience.json
   python wiki_evolve.py --wiki ~/wiki propose --id query-v1 --skill ./my-skill \
     --target references/query.md --candidate /tmp/query.md \
-    --evidence concepts/stale-decisions.md --reason 'Resolve superseded decisions'
+    --evidence concepts/stale-decisions.md --reason '置き換わった決定を見分ける'
   python wiki_evolve.py --wiki ~/wiki evaluate query-v1 --suite suite.json \
     --runner runner.json --model model-version --tools tool-versions
   python wiki_evolve.py --wiki ~/wiki apply query-v1
@@ -34,6 +34,9 @@ import sys
 import tempfile
 import uuid
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from wiki_text import localize_argparse, normalize_quote  # noqa: E402
+
 IGNORED = {'.git', '__pycache__', '.wiki-cache', '.evolution', 'node_modules', '.wiki-evolve-lock'}
 
 
@@ -56,23 +59,23 @@ def digest(data):
 
 def slug(value):
     require(isinstance(value, str) and re.fullmatch(r'[a-z0-9][a-z0-9-]{0,63}', value),
-            'IDs must be lowercase letters, numbers and hyphens (1-64 characters)')
+            'ID に使えるのは英小文字、数字、ハイフンだけで、長さは 1～64 文字である')
     return value
 
 
 def relative(value):
     path = Path(value)
     require(value and not path.is_absolute() and '..' not in path.parts
-            and not any(p.startswith('.') for p in path.parts), 'Unsafe relative path')
+            and not any(p.startswith('.') for p in path.parts), '安全でない相対パスである（絶対パス、..、ドットで始まる名前は使えない）')
     return path
 
 
 def inside(root, value):
     path = root / relative(value)
-    require(path.resolve().is_relative_to(root.resolve()), 'Path escapes its root')
+    require(path.resolve().is_relative_to(root.resolve()), 'パスがルートの外を指している')
     require(not any((root / Path(*path.relative_to(root).parts[:i])).is_symlink()
                     for i in range(1, len(path.relative_to(root).parts) + 1)),
-            'Symlink paths are not supported')
+            'シンボリックリンクを含むパスは扱えない')
     return path
 
 
@@ -91,16 +94,16 @@ def atomic(path, data, mode=None):
 
 
 def tree(root):
-    require(root.is_dir() and not root.is_symlink(), f'Not a regular directory: {root}')
+    require(root.is_dir() and not root.is_symlink(), f'通常のディレクトリではない: {root}')
     result = {}
     for directory, dirs, files in os.walk(root, followlinks=False):
         dirs[:] = sorted(d for d in dirs if d not in IGNORED)
         for name in dirs + sorted(files):
             path = Path(directory) / name
-            require(not path.is_symlink(), f'Symlink not allowed: {path}')
+            require(not path.is_symlink(), f'シンボリックリンクは使えない: {path}')
         for name in sorted(files):
             path = Path(directory) / name
-            require(path.is_file(), f'Not a regular file: {path}')
+            require(path.is_file(), f'通常のファイルではない: {path}')
             result[path.relative_to(root).as_posix()] = {
                 'sha256': digest(path.read_bytes()), 'mode': path.stat().st_mode & 0o777,
             }
@@ -119,16 +122,16 @@ def copy_tree(source, dest):
 
 @contextmanager
 def locked(wiki):
-    require((wiki / 'SCHEMA.md').is_file(), 'Select an initialized wiki with SCHEMA.md')
+    require((wiki / 'SCHEMA.md').is_file(), 'SCHEMA.md がない。初期化済みの wiki を指定する')
     state = wiki / '.evolution'
-    require(not state.is_symlink(), 'Evolution directory cannot be a symlink')
+    require(not state.is_symlink(), '.evolution のディレクトリをシンボリックリンクにはできない')
     state.mkdir(exist_ok=True)
     lock = state / 'lock'
     # ponytail: wiki 全体で1つのロックを使う。同時実行が問題になるなら、実験ごとのロックにする。
     try:
         lock.mkdir()
     except FileExistsError:
-        raise ValueError(f'Evolution busy. If its process died, inspect then remove {lock}')
+        raise ValueError(f'評価ループが実行中である。そのプロセスが終了しているなら、確かめてから {lock} を削除する')
     try:
         yield state
     finally:
@@ -145,8 +148,8 @@ def event(exp, kind, payload):
 
 def manifest(exp):
     value = read_json(exp / 'proposal.json')
-    require(tree(exp / 'baseline') == value['baseline'], 'Baseline snapshot changed')
-    require(tree(exp / 'candidate') == value['candidate'], 'Candidate snapshot changed')
+    require(tree(exp / 'baseline') == value['baseline'], 'ベースラインのスナップショットが変わった')
+    require(tree(exp / 'candidate') == value['candidate'], '候補のスナップショットが変わった')
     return value
 
 
@@ -154,21 +157,21 @@ def capture(args):
     record = read_json(args.record)
     slug(record.get('id'))
     for key in ('task', 'verification', 'model', 'tools', 'scope'):
-        require(isinstance(record.get(key), str) and record[key].strip(), f'Missing {key}')
-    require(record.get('outcome') in ('success', 'failure'), 'Outcome must be success or failure')
+        require(isinstance(record.get(key), str) and record[key].strip(), f'{key} がない')
+    require(record.get('outcome') in ('success', 'failure'), 'outcome は success か failure にする')
     require(isinstance(record.get('actions'), list) and record['actions']
-            and all(isinstance(x, str) and x.strip() for x in record['actions']), 'Actions required')
+            and all(isinstance(x, str) and x.strip() for x in record['actions']), 'actions がない')
     for key in ('hypothesis', 'counterexamples'):
-        require(isinstance(record.get(key, ''), str), f'{key} must be text')
+        require(isinstance(record.get(key, ''), str), f'{key} は文字列にする')
     raw = args.raw.resolve()
-    require(raw.is_dir(), 'Raw root must already exist')
+    require(raw.is_dir(), 'raw のディレクトリがない。先に作っておく')
     folder = raw / 'experiences'
-    require(not folder.is_symlink(), 'Experience directory cannot be a symlink')
+    require(not folder.is_symlink(), 'experiences のディレクトリをシンボリックリンクにはできない')
     folder.mkdir(exist_ok=True)
     path = folder / (record['id'] + '.json')
     body = encode(record)
     if path.exists():
-        require(not path.is_symlink() and path.read_text(encoding='utf-8') == body, 'Immutable experience ID already exists')
+        require(not path.is_symlink() and path.read_text(encoding='utf-8') == body, 'この ID の経験はすでに記録されていて、変更できない')
     else:
         with path.open('x', encoding='utf-8') as f:
             f.write(body)
@@ -177,29 +180,29 @@ def capture(args):
 
 def propose(args, state):
     exp = state / slug(args.id)
-    require(not exp.exists(), 'Experiment ID already exists; use a new ID')
+    require(not exp.exists(), 'この実験の ID はすでにある。新しい ID を使う')
     source = args.skill.resolve()
     directory = args.candidate.is_dir()
-    require(directory or args.target, 'File proposals require --target')
-    require(not args.skill.is_symlink(), 'Skill cannot be a symlink')
-    require(source.is_dir() or directory, 'New skills require a candidate directory')
-    require(not source.is_relative_to(state.resolve()), 'Installed target cannot be an experiment archive')
+    require(directory or args.target, 'ファイル単位の提案には --target が必要である')
+    require(not args.skill.is_symlink(), 'スキルをシンボリックリンクにはできない')
+    require(source.is_dir() or directory, '新しいスキルには候補のディレクトリが必要である')
+    require(not source.is_relative_to(state.resolve()), 'インストール先を実験の記録の中にはできない')
     if source.exists():
-        require((source / 'SKILL.md').is_file() or not tree(source), 'Skill directory must contain SKILL.md or be empty')
+        require((source / 'SKILL.md').is_file() or not tree(source), 'スキルのディレクトリには SKILL.md が必要である（空のディレクトリならよい）')
     if directory:
-        require((args.candidate / 'SKILL.md').is_file(), 'Candidate requires SKILL.md')
+        require((args.candidate / 'SKILL.md').is_file(), '候補に SKILL.md がない')
     else:
         target = inside(source, args.target)
-        require(target.is_file(), 'Target must be an existing file in this skill')
+        require(target.is_file(), '--target には、このスキルにある既存のファイルを指定する')
         after = args.candidate.read_text(encoding='utf-8')
-        require(after.strip(), 'Candidate must be nonempty')
-    require(args.reason.strip(), 'Proposal reason is required')
+        require(after.strip(), '候補が空である')
+    require(args.reason.strip(), '提案の理由（--reason）が空である')
     evidence = {}
     for name in args.evidence:
         path = inside(args.wiki, name)
-        require(path.suffix == '.md' and path.is_file(), 'Evidence must reference existing wiki Markdown')
+        require(path.suffix == '.md' and path.is_file(), '根拠には、wiki にある既存の Markdown のページを指定する')
         evidence[name] = path.read_text(encoding='utf-8')
-    require(evidence, 'At least one evidence page is required')
+    require(evidence, '根拠のページが少なくとも 1 つ必要である')
     with tempfile.TemporaryDirectory(prefix='.staging-', dir=state) as tmp:
         staging = Path(tmp) / 'experiment'
         (staging / 'baseline').mkdir(parents=True)
@@ -207,7 +210,7 @@ def propose(args, state):
         copy_tree(args.candidate if directory else source, staging / 'candidate')
         if not directory:
             (staging / 'candidate' / args.target).write_text(after, encoding='utf-8')
-        require(tree(staging / 'candidate') != baseline, 'Candidate must differ from baseline')
+        require(tree(staging / 'candidate') != baseline, '候補がベースラインと同じである')
         value = {'id': args.id, 'skill': str(source), 'target': args.target if not directory else None, 'new_skill': not source.exists(),
                  'reason': args.reason, 'evidence': evidence, 'baseline': baseline,
                  'candidate': tree(staging / 'candidate')}
@@ -226,48 +229,52 @@ def propose(args, state):
 
 def finite(value, label):
     require(type(value) in (int, float) and math.isfinite(value) and value >= 0,
-            f'{label} must be a finite nonnegative number')
+            f'{label} は有限の 0 以上の数でなければならない')
     return value
 
 
 def suite_contract(suite, corpus):
-    require(suite.get('version') == 1, 'Suite version must be 1')
+    require(suite.get('version') == 1, 'スイートの version は 1 でなければならない')
     tasks = suite.get('tasks')
-    require(isinstance(tasks, list) and tasks, 'Suite tasks required')
+    require(isinstance(tasks, list) and tasks, 'スイートに課題がない')
     seen, splits = set(), set()
     for task in tasks:
         slug(task.get('id'))
-        require(task['id'] not in seen, 'Duplicate task ID')
+        require(task['id'] not in seen, '課題の ID が重複している')
         seen.add(task['id'])
-        require(task.get('split') in ('validation', 'holdout'), 'Use validation or holdout splits')
+        require(task.get('split') in ('validation', 'holdout'), 'split には validation か holdout を使う')
         splits.add(task['split'])
-        require(isinstance(task.get('question'), str) and task['question'].strip(), 'Question required')
-        require(type(task.get('abstain')) is bool, 'Expected abstain must be boolean')
+        require(isinstance(task.get('question'), str) and task['question'].strip(), '課題の質問がない')
+        require(type(task.get('abstain')) is bool, 'abstain の期待値は真偽値にする')
         for key in ('answer_all', 'answer_none', 'citations'):
             require(isinstance(task.get(key), list) and all(isinstance(s, str) and s for s in task[key]),
-                    f'{key} must be a list of nonempty strings')
+                    f'{key} は空でない文字列のリストにする')
         require(task['abstain'] or (task['answer_all'] and task['citations']),
-                'Answerable tasks require answer checks and supporting citations')
+                '答えのある課題には、答えの照合（answer_all）と裏づけの引用（citations）が必要である')
         for name in task['citations']:
-            require(inside(corpus, name).is_file(), f'Expected citation missing: {name}')
-    require(splits == {'validation', 'holdout'}, 'Both validation and held-out tasks are required')
+            require(inside(corpus, name).is_file(), f'期待する引用先のファイルがない: {name}')
+    require(splits == {'validation', 'holdout'}, '検証用と最終テスト用の課題の両方が必要である')
     for key in ('max_cost_ratio', 'max_tool_ratio'):
         finite(suite.get(key, 1.25), key)
     return tasks
 
 
 def normalize(text):
-    return ' '.join(text.casefold().split())
+    """答えの照合に使う形。D2 と同じ規則（wiki_text.normalize_quote）にそろえる。
+
+    日本語の文字どうしの間の改行と空白は取り除き、英数字の間の空白は残す。
+    """
+    return normalize_quote(text.casefold())
 
 
 def score(task, output, corpus):
-    require(isinstance(output, dict) and isinstance(output.get('answer'), str), 'Runner must return an answer')
-    require(type(output.get('abstain')) is bool, 'Runner abstain must be boolean')
+    require(isinstance(output, dict) and isinstance(output.get('answer'), str), 'ランナーが answer を返さなかった')
+    require(type(output.get('abstain')) is bool, 'ランナーの abstain は真偽値でなければならない')
     calls = output.get('tool_calls')
-    require(type(calls) is int and calls >= 0, 'Runner tool_calls must be a nonnegative integer')
-    finite(output.get('cost'), 'Runner cost')
+    require(type(calls) is int and calls >= 0, 'ランナーの tool_calls は 0 以上の整数でなければならない')
+    finite(output.get('cost'), 'ランナーの cost')
     citations = output.get('citations')
-    require(isinstance(citations, list) and all(isinstance(c, str) for c in citations), 'Runner citations must be strings')
+    require(isinstance(citations, list) and all(isinstance(c, str) for c in citations), 'ランナーの citations は文字列のリストでなければならない')
     valid = True
     for name in citations:
         try:
@@ -294,7 +301,7 @@ def run_runner(argv, request, cwd, timeout):
     try:
         stdout, stderr = process.communicate(encode(request), timeout=timeout)
         if process.returncode:
-            raise ValueError(f'Runner exited {process.returncode}; no skill was applied. {stderr[-4000:]}')
+            raise ValueError(f'ランナーが終了コード {process.returncode} で終わった。スキルは適用していない。{stderr[-4000:]}')
         return json.loads(stdout)
     except BaseException:
         if os.name == 'posix':
@@ -329,17 +336,17 @@ def run_runner(argv, request, cwd, timeout):
 def evaluate(args, exp):
     value = manifest(exp)
     require(not list(exp.glob('evaluation-*.json')) and not list(exp.glob('inputs-*.json')),
-            'Evaluation already recorded or started; use a new proposal for a new trial')
-    require(not (exp / 'transition.json').exists(), 'Cannot evaluate a promoted experiment')
+            '評価はすでに記録されたか、始まっている。新しく試すときは新しい提案を作る')
+    require(not (exp / 'transition.json').exists(), '適用した実験は評価できない')
     suite_path = args.suite.resolve()
     suite = read_json(suite_path)
     corpus = (suite_path.parent / relative(suite['corpus'])).resolve()
     runner = read_json(args.runner)
     require(isinstance(runner, list) and runner and all(isinstance(x, str) and x for x in runner),
-            'Runner file must contain a nonempty JSON argv array (no shell)')
+            'ランナーのファイルには、空でない argv の JSON 配列を書く（シェルは使わない）')
     finite(args.timeout, 'timeout')
-    require(args.repeats >= 1 and args.timeout > 0, 'Positive repeats and timeout required')
-    require(args.model.strip() and args.tools.strip(), 'Model and tool versions required')
+    require(args.repeats >= 1 and args.timeout > 0, '--repeats と --timeout には正の値を指定する')
+    require(args.model.strip() and args.tools.strip(), 'モデルとツールのバージョン（--model、--tools）が空である')
     suite_contract(suite, corpus)
     # ランナーを呼び出す前に入力を保存する。失敗した試行や中断した試行も対象にする。
     event(exp, 'inputs', {'suite': suite, 'model': args.model, 'tools': args.tools,
@@ -350,7 +357,7 @@ def evaluate(args, exp):
     with tempfile.TemporaryDirectory(prefix='wiki-evaluation-') as tmp:
         workspace = Path(tmp)
         require(copy_tree(exp / 'corpus', workspace / 'corpus') == corpus_hash,
-                'Archived corpus changed during preparation')
+                '準備中に、記録したコーパスが変わった')
         tasks = suite_contract(suite, workspace / 'corpus')
         rows = []
         try:
@@ -369,12 +376,12 @@ def evaluate(args, exp):
                             output = run_runner(runner, request, run, args.timeout)
                             result = score(task, output, run / 'wiki')
                             # クエリのランナーは、証拠や手順を変更してはならない。
-                            require(tree(run / 'wiki') == corpus_hash, 'Runner modified the evaluation corpus')
-                            require(tree(run / 'skill') == value[variant], 'Runner modified the skill')
+                            require(tree(run / 'wiki') == corpus_hash, 'ランナーが評価用のコーパスを変更した')
+                            require(tree(run / 'skill') == value[variant], 'ランナーがスキルを変更した')
                             rows.append({'task': task['id'], 'split': task['split'], 'repeat': repeat,
                                          'variant': variant, **result, 'output': output})
             manifest(exp)
-            require(tree(exp / 'corpus') == corpus_hash, 'Archived corpus changed during evaluation')
+            require(tree(exp / 'corpus') == corpus_hash, '評価中に、記録したコーパスが変わった')
             totals = {}
             for split in ('validation', 'holdout'):
                 totals[split] = {variant: sum(r['passed'] for r in rows if r['split'] == split and r['variant'] == variant)
@@ -413,7 +420,7 @@ def transition(exp, rollback=False):
     try:
         lock.mkdir()
     except FileExistsError:
-        raise ValueError(f'Skill busy. If its process died, inspect then remove {lock}')
+        raise ValueError(f'スキルを別の処理が使用中である。そのプロセスが終了しているなら、確かめてから {lock} を削除する')
     try:
         return promote(exp, value, rollback)
     finally:
@@ -423,18 +430,18 @@ def transition(exp, rollback=False):
 def promote(exp, value, rollback):
     source = Path(value['skill'])
     records = list(exp.glob('evaluation-*.json'))
-    require(len(records) == 1, 'A completed evaluation is required')
+    require(len(records) == 1, '完了した評価が必要である')
     report = read_json(records[0])
-    require(report['status'] == 'passed', 'Evaluation did not pass; installed skill is unchanged')
-    require(tree(exp / 'corpus') == report['corpus'], 'Archived corpus changed after evaluation')
-    require(report['proposal_sha256'] == digest((exp / 'proposal.json').read_bytes()), 'Proposal changed after evaluation')
+    require(report['status'] == 'passed', '評価に通らなかった。インストール済みのスキルは変えていない')
+    require(tree(exp / 'corpus') == report['corpus'], '評価のあとで、記録したコーパスが変わった')
+    require(report['proposal_sha256'] == digest((exp / 'proposal.json').read_bytes()), '評価のあとで提案が変わった')
     journal = exp / 'transition.json'
     current = read_json(journal) if journal.exists() else {'status': 'proposed'}
     if rollback:
-        require(current['status'] in ('accepted', 'rolling_back', 'rolled_back'), 'Only accepted changes can be rolled back')
+        require(current['status'] in ('accepted', 'rolling_back', 'rolled_back'), 'ロールバックできるのは採用した変更だけである')
         before, after, pending, done = 'candidate', 'baseline', 'rolling_back', 'rolled_back'
     else:
-        require(current['status'] in ('proposed', 'applying', 'accepted'), 'A rolled-back experiment cannot be reapplied')
+        require(current['status'] in ('proposed', 'applying', 'accepted'), 'ロールバックした実験は再び適用できない')
         before, after, pending, done = 'baseline', 'candidate', 'applying', 'accepted'
     actual = tree(source)
     if current['status'] in (pending, done) and actual == value[after]:
@@ -442,13 +449,13 @@ def promote(exp, value, rollback):
         return {'id': value['id'], 'status': done}
     if current['status'] == pending:
         # クラッシュすると、2つのスナップショットが混ざった状態が残ることがある。復旧できるのは、それらとまったく同じファイルの状態だけである。
-        require(set(actual) <= set(value[before]) | set(value[after]), 'Unexpected files during recovery')
+        require(set(actual) <= set(value[before]) | set(value[after]), '復旧中に想定外のファイルが見つかった')
         for name in set(value[before]) | set(value[after]):
             require(actual.get(name) in (value[before].get(name), value[after].get(name)),
-                    'Installed skill changed during recovery')
+                    '復旧中に、インストール済みのスキルが変わった')
     else:
-        require(actual == value[before], 'Installed skill changed; refusing to overwrite concurrent edits')
-    require(current['status'] != done, 'Installed skill no longer matches completed transition')
+        require(actual == value[before], 'インストール済みのスキルが変わっている。同時に行われた編集を上書きしないよう中止した')
+    require(current['status'] != done, 'インストール済みのスキルが、完了した切り替えの状態と一致しない')
     atomic(journal, encode({'status': pending}).encode())
     for name in sorted(set(value[before]) | set(value[after])):
         target = inside(source, name)
@@ -457,7 +464,7 @@ def promote(exp, value, rollback):
             atomic(target, (exp / after / name).read_bytes(), value[after][name]['mode'])
         else:
             target.unlink(missing_ok=True)
-    require(tree(source) == value[after], 'Transition did not reproduce the snapshot')
+    require(tree(source) == value[after], '切り替えたあとのスキルがスナップショットと一致しない')
     atomic(journal, encode({'status': done}).encode())
     event(exp, done, {'skill': str(source)})
     return {'id': value['id'], 'status': done}
@@ -493,13 +500,13 @@ def export_bundle(exp, destination):
     """実行できるスキルと、持ち運べる監査用の証拠を、別々のディレクトリに置く。"""
     records = run_records(exp)
     require((exp / 'selection.json').is_file() and records and records[-1].get('status') == 'completed',
-            'Export requires a completed loop run')
-    require(tree(exp/'corpus') == records[-1]['corpus'], 'Archived corpus changed')
-    require(tree(exp/'runtime') == read_json(exp/'runtime-hashes.json'), 'Archived runtime changed')
+            '書き出すには、完了した評価ループの実行が必要である')
+    require(tree(exp/'corpus') == records[-1]['corpus'], '記録したコーパスが変わった')
+    require(tree(exp/'runtime') == read_json(exp/'runtime-hashes.json'), '記録したランタイムが変わった')
     destination = destination.absolute()
-    require(not destination.exists() and not destination.is_symlink(), 'Export destination must be new')
-    require(not destination.resolve().is_relative_to(exp.resolve()), 'Export cannot be inside its archive')
-    require(tree(exp/'best') == read_json(exp/'selection.json')['skill'], 'Selected skill changed after selection')
+    require(not destination.exists() and not destination.is_symlink(), '書き出し先がすでにある。新しいパスを指定する')
+    require(not destination.resolve().is_relative_to(exp.resolve()), '書き出し先を実験の記録の中にはできない')
+    require(tree(exp/'best') == read_json(exp/'selection.json')['skill'], '選定のあとで、選んだスキルが変わった')
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.export-', dir=destination.parent) as tmp:
         staging = Path(tmp)/'bundle'
@@ -513,9 +520,9 @@ def export_bundle(exp, destination):
 
 def verify_bundle(path):
     manifest = read_json(path/'bundle.json')
-    require(manifest.get('version') == 1, 'Unsupported bundle version')
+    require(manifest.get('version') == 1, '対応していないバンドルのバージョンである')
     hashes = {name:value['sha256'] for name,value in tree(path).items() if name != 'bundle.json'}
-    require(hashes == manifest.get('sha256'), 'Bundle evidence or skill changed')
+    require(hashes == manifest.get('sha256'), 'バンドルの証拠かスキルが変わった')
     return {'status':'verified','files':len(hashes)}
 
 
@@ -523,17 +530,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--wiki', type=Path, default=Path('wiki'))
     sub = parser.add_subparsers(dest='action', required=True)
-    capture_parser = sub.add_parser('capture', help='Save a verified experience as immutable raw JSON')
+    capture_parser = sub.add_parser('capture', help='確かめた経験を、変更できない raw の JSON として保存する')
     capture_parser.add_argument('--raw', type=Path, required=True)
     capture_parser.add_argument('--record', type=Path, required=True)
-    p = sub.add_parser('propose', help='Snapshot one skill and stage an evidence-linked edit')
-    p.add_argument('--target', help='Single existing file; omit for a complete candidate directory')
+    p = sub.add_parser('propose', help='スキルを 1 つスナップショットし、根拠のページと結びつけた編集を用意する')
+    p.add_argument('--target', help='変更する既存のファイル 1 つ。候補がディレクトリ全体なら省く')
     for flag in ('id', 'reason'):
         p.add_argument('--' + flag, required=True)
     p.add_argument('--skill', type=Path, required=True)
     p.add_argument('--candidate', type=Path, required=True)
     p.add_argument('--evidence', action='append', required=True)
-    p = sub.add_parser('evaluate', help='Compare both snapshots through a trusted local runner')
+    p = sub.add_parser('evaluate', help='信頼できるローカルのランナーで、2 つのスナップショットを比べる')
     p.add_argument('id')
     p.add_argument('--suite', type=Path, required=True)
     p.add_argument('--runner', type=Path, required=True)
@@ -544,11 +551,11 @@ def main():
     for action in ('apply', 'rollback', 'show'):
         sub.add_parser(action).add_argument('id')
     sub.add_parser('history')
-    p = sub.add_parser('export', help='Export a completed loop skill with its portable evidence archive')
+    p = sub.add_parser('export', help='完了した評価ループのスキルを、持ち運べる証拠の記録と一緒に書き出す')
     p.add_argument('id')
     p.add_argument('--destination', type=Path, required=True)
-    sub.add_parser('verify-bundle', help='Verify every exported evidence and skill file').add_argument('path', type=Path)
-    args = parser.parse_args()
+    sub.add_parser('verify-bundle', help='書き出した証拠とスキルのファイルをすべて検証する').add_argument('path', type=Path)
+    args = localize_argparse(parser).parse_args()
     try:
         if args.action == 'verify-bundle':
             result = verify_bundle(args.path)
@@ -581,7 +588,7 @@ def main():
         if args.action == 'evaluate' and result.get('status') == 'rejected':
             return 2
     except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as exc:
-        print(f'Error: {exc}', file=sys.stderr)
+        print(f'エラー: {exc}', file=sys.stderr)
         return 1
     return 0
 

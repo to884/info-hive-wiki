@@ -36,7 +36,7 @@ from pathlib import Path
 # スクリプトとして実行したときも、テストから importlib で読み込んだときも、
 # 同じディレクトリの wiki_text を import できるようにする。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from wiki_text import nfc  # noqa: E402
+from wiki_text import localize_argparse, nfc  # noqa: E402
 
 
 EVIDENCE_SNIPPET_LEN = 140
@@ -44,8 +44,8 @@ EVIDENCE_SNIPPET_LEN = 140
 
 def open_db(path: Path) -> sqlite3.Connection:
     if not path.exists():
-        print(f"graph.sqlite not found at {path}.", file=sys.stderr)
-        print("Run wiki_graph_extract.py first.", file=sys.stderr)
+        print(f"graph.sqlite が見つからない: {path}", file=sys.stderr)
+        print("先に wiki_graph_extract.py を実行する。", file=sys.stderr)
         sys.exit(1)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
@@ -92,17 +92,17 @@ def render_edge_row(e: dict) -> str:
     confidence = e.get("confidence") or "-"
     status = e.get("status") or "-"
     src = e.get("source") or "-"
-    pieces.append(f"      via {src}  conf={confidence}  status={status}")
+    pieces.append(f"      ソース: {src}  confidence={confidence}  status={status}")
     if e.get("evidence"):
-        pieces.append(f"      evidence: {truncate(e['evidence'])}")
-    pieces.append(f"      (page: {e['page']})")
+        pieces.append(f"      証拠: {truncate(e['evidence'])}")
+    pieces.append(f"      （ページ: {e['page']}）")
     return "\n".join(pieces)
 
 
 def cmd_neighbors(conn: sqlite3.Connection, args) -> dict:
     node = fetch_node(conn, args.node)
     if not node:
-        print(f"node not found: {args.node}", file=sys.stderr)
+        print(f"ノードが見つからない: {args.node}", file=sys.stderr)
         sys.exit(1)
     out_edges = edges_from(conn, args.node)
     in_edges = edges_to(conn, args.node)
@@ -135,7 +135,7 @@ def cmd_edges(conn: sqlite3.Connection, args) -> dict:
 def cmd_facts(conn: sqlite3.Connection, args) -> dict:
     node = fetch_node(conn, args.about)
     if not node:
-        print(f"node not found: {args.about}", file=sys.stderr)
+        print(f"ノードが見つからない: {args.about}", file=sys.stderr)
         sys.exit(1)
     return {
         "node": node,
@@ -148,10 +148,10 @@ def cmd_path(conn: sqlite3.Connection, args) -> dict:
     src = fetch_node(conn, getattr(args, "from"))
     dst = fetch_node(conn, args.to)
     if not src:
-        print(f"from-node not found: {getattr(args, 'from')}", file=sys.stderr)
+        print(f"--from のノードが見つからない: {getattr(args, 'from')}", file=sys.stderr)
         sys.exit(1)
     if not dst:
-        print(f"to-node not found: {args.to}", file=sys.stderr)
+        print(f"--to のノードが見つからない: {args.to}", file=sys.stderr)
         sys.exit(1)
 
     start, goal = getattr(args, "from"), args.to
@@ -176,37 +176,37 @@ def render(result: dict, command: str) -> str:
     out: list[str] = []
     if command == "neighbors":
         n = result["node"]
-        out.append(f"Node: {n['id']}  ({n['title']})  {n['node_type']}  [{n['path']}]")
-        out.append(f"Neighbors: {len(result['neighbors'])}")
+        out.append(f"ノード: {n['id']}  （{n['title']}）  {n['node_type']}  [{n['path']}]")
+        out.append(f"隣接ノード数: {len(result['neighbors'])}")
         for nb in result["neighbors"]:
             out.append("")
-            out.append(f"  → {nb['node_id']}  ({nb['title']})")
+            out.append(f"  → {nb['node_id']}  （{nb['title']}）")
             for e in nb.get("out", []):
-                out.append(f"      out  [{e['predicate']}]  conf={e.get('confidence') or '-'}  src={e.get('source') or '-'}")
+                out.append(f"      出る  [{e['predicate']}]  confidence={e.get('confidence') or '-'}  ソース: {e.get('source') or '-'}")
             for e in nb.get("in", []):
-                out.append(f"      in   [{e['predicate']}]  from {e['subject']}  src={e.get('source') or '-'}")
+                out.append(f"      入る  [{e['predicate']}]  {e['subject']} から  ソース: {e.get('source') or '-'}")
     elif command == "edges":
-        out.append(f"Edges from {result['subject']}"
-                   + (f" with predicate {result['predicate']}" if result['predicate'] else ""))
+        out.append(f"{result['subject']} から出るエッジ"
+                   + (f"（述語: {result['predicate']}）" if result['predicate'] else ""))
         for e in result["edges"]:
             out.append("")
             out.append(render_edge_row(e))
     elif command == "facts":
         n = result["node"]
-        out.append(f"Facts about {n['id']}  ({n['title']})  [{n['path']}]")
+        out.append(f"{n['id']} についての事実  （{n['title']}）  [{n['path']}]")
         out.append("")
-        out.append(f"Outbound ({len(result['outbound'])}):")
+        out.append(f"出るエッジ（{len(result['outbound'])} 本）:")
         for e in result["outbound"]:
             out.append(render_edge_row(e))
         out.append("")
-        out.append(f"Inbound ({len(result['inbound'])}):")
+        out.append(f"入るエッジ（{len(result['inbound'])} 本）:")
         for e in result["inbound"]:
             out.append(render_edge_row(e))
     elif command == "path":
         if not result["path_nodes"]:
-            out.append(f"No path found from {result['from']} to {result['to']} within depth limit.")
+            out.append(f"深さの上限までに、{result['from']} から {result['to']} への経路は見つからなかった。")
         else:
-            out.append(f"Path from {result['from']} to {result['to']} ({len(result['path_edges'])} hops):")
+            out.append(f"{result['from']} から {result['to']} への経路（{len(result['path_edges'])} ホップ）:")
             for e in result["path_edges"]:
                 out.append("")
                 out.append(render_edge_row(e))
@@ -215,27 +215,28 @@ def render(result: dict, command: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("wiki", type=Path, help="Wiki directory.")
-    parser.add_argument("--db", type=Path, help="Path to graph.sqlite (default: <wiki>/graph/graph.sqlite)")
-    parser.add_argument("--json", action="store_true")
+    parser.add_argument("wiki", type=Path, help="wiki のディレクトリ")
+    parser.add_argument("--db", type=Path, help="graph.sqlite のパス（既定: <wiki>/graph/graph.sqlite）")
+    parser.add_argument("--json", action="store_true", help="テキストの代わりに JSON を出力する。キーは英語のまま")
 
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_n = sub.add_parser("neighbors")
-    p_n.add_argument("--node", required=True)
+    p_n = sub.add_parser("neighbors", help="ノードから 1 ホップ先のノードを一覧にする")
+    p_n.add_argument("--node", required=True, help="起点のノード ID")
 
-    p_e = sub.add_parser("edges")
-    p_e.add_argument("--subject", required=True)
-    p_e.add_argument("--predicate")
+    p_e = sub.add_parser("edges", help="主語から出ているエッジをすべて一覧にする")
+    p_e.add_argument("--subject", required=True, help="主語のノード ID")
+    p_e.add_argument("--predicate", help="述語で絞り込む")
 
-    p_p = sub.add_parser("path")
-    p_p.add_argument("--from", dest="from", required=True)
-    p_p.add_argument("--to", required=True)
-    p_p.add_argument("--max-depth", type=int, default=6)
+    p_p = sub.add_parser("path", help="2 つのノードの間の有向の最短経路を探す")
+    p_p.add_argument("--from", dest="from", required=True, help="起点のノード ID")
+    p_p.add_argument("--to", required=True, help="終点のノード ID")
+    p_p.add_argument("--max-depth", type=int, default=6, help="たどる深さの上限（既定: 6）")
 
-    p_f = sub.add_parser("facts")
-    p_f.add_argument("--about", required=True)
+    p_f = sub.add_parser("facts", help="ノードから出るエッジと入るエッジを出力する")
+    p_f.add_argument("--about", required=True, help="調べるノード ID")
 
+    localize_argparse(parser)
     args = parser.parse_args()
     # グラフのノード ID は NFC で書かれている。macOS のターミナルなどから NFD で渡されても
     # 一致するように、ノード ID の引数を NFC にそろえる。
@@ -245,7 +246,7 @@ def main():
             setattr(args, name, nfc(value))
 
     if not args.wiki.exists():
-        print(f"Wiki directory not found: {args.wiki}", file=sys.stderr)
+        print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
         sys.exit(1)
     db_path = args.db or (args.wiki / "graph" / "graph.sqlite")
     conn = open_db(db_path)

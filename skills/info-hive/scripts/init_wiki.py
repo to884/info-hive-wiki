@@ -30,6 +30,11 @@ import sys
 from pathlib import Path
 from datetime import date
 
+# スクリプトとして実行したときも、テストから importlib で読み込んだときも、
+# 同じディレクトリの wiki_text を import できるようにする。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from wiki_text import display_width, ljust_display, localize_argparse  # noqa: E402
+
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES = SKILL_ROOT / "assets"
@@ -39,43 +44,44 @@ SUBDIRS = ["sources", "entities", "concepts", "synthesis", "graph"]
 
 # --upgrade が、特定のプラグインのバージョンで加わった SCHEMA.md のセクションを
 # 検出するためのマーカー。各項目は (heading_marker, version_label,
-# template_anchor, blurb) である。
+# template_anchor, blurb) である。marker と anchor はテンプレートの英語の見出しや行と一致させるので訳さない。
+# label は利用者に見せる説明なので日本語で書く。
 SCHEMA_SECTION_MARKERS = [
     {
         "marker": "## Skill evolution",
         "version": "3.2.0",
         "anchor": "## Skill evolution",
-        "label": "Optional experience capture and tested skill evolution",
+        "label": "任意の経験の記録と、テストで確かめるスキルの改良",
     },
     {
         "marker": "## Optional graph metadata",
         "version": "0.3.0",
         "anchor": "## Optional graph metadata",
-        "label": "Optional graph metadata (Frontmatter section)",
+        "label": "任意のグラフのメタデータ（Frontmatter の節）",
     },
     {
         "marker": "## Graph layer",
         "version": "0.3.0",
         "anchor": "## Graph layer",
-        "label": "Graph layer (canonical-vs-generated artifact policy)",
+        "label": "グラフ層（正本と生成物の扱いの方針）",
     },
     {
         "marker": "Graph lint + extract",
         "version": "0.3.0",
         "anchor": "- Graph lint + extract: after every ingest that adds typed `graph.relationships`.",
-        "label": "Graph lint + extract cadence (Lint cadence section)",
+        "label": "グラフの lint と抽出の頻度（Lint cadence の節）",
     },
     {
         "marker": "## Retrieval",
         "version": "2.0.0",
         "anchor": "## Retrieval",
-        "label": "Retrieval (section search and cache)",
+        "label": "検索（セクション検索とキャッシュ）",
     },
     {
         "marker": "- Semantic backend: local FastEmbed + sqlite-vec",
         "version": "3.0.0",
         "anchor": "- Semantic backend: local FastEmbed + sqlite-vec",
-        "label": "Local semantic retrieval (FastEmbed + sqlite-vec)",
+        "label": "ローカルの埋め込み検索（FastEmbed と sqlite-vec）",
     },
 ]
 
@@ -111,23 +117,24 @@ def print_schema_upgrade_guidance(schema_path: Path, gaps: list[dict]) -> None:
     template_path = TEMPLATES / "SCHEMA.md.template"
     print()
     print("=" * 64)
+    # commands/upgrade.md がこの行を目印に読むので、英語のまま残す。
     print(f"Upgrade required: {schema_path}")
     print("=" * 64)
     print(
-        "Your SCHEMA.md predates one or more sections or policy markers\n"
-        "introduced by newer plugin versions. Merge the items below by hand.\n"
-        "SCHEMA.md is co-evolved with you — this script never overwrites it."
+        "この SCHEMA.md には、新しいバージョンのプラグインで加わったセクションや方針のマーカーが欠けている。\n"
+        "下の項目を手作業でマージする。\n"
+        "SCHEMA.md はユーザーと一緒に改訂していくものなので、このスクリプトは上書きしない。"
     )
     print()
-    print("Missing sections:")
+    print("欠けているセクション:")
     for m in gaps:
         print(f"  - [{m['version']}] {m['label']}")
     print()
-    print(f"Reference template: {template_path}")
+    print(f"参照するテンプレート: {template_path}")
     print(
-        "Diff your SCHEMA.md against the template and copy the missing\n"
-        "sections in. Or run /wiki:upgrade and Claude will propose the edits\n"
-        "interactively (one section at a time, never silent)."
+        "SCHEMA.md をテンプレートと比べ、欠けているセクションを写す。\n"
+        "/wiki:upgrade を実行すれば、Claude が編集を対話しながら提案する\n"
+        "（1 セクションずつ提案し、黙って書き換えることはない）。"
     )
 
 
@@ -136,15 +143,15 @@ def install_runtime(wiki: Path) -> None:
     uv = shutil.which("uv")
     if not uv:
         print(
-            "Error: uv is required to install the pinned LLM Wiki runtime. "
-            "Install it from https://docs.astral.sh/uv/getting-started/installation/ "
-            "and rerun this command.",
+            "エラー: バージョンを固定した LLM Wiki の実行環境を入れるには uv が必要である。"
+            "https://docs.astral.sh/uv/getting-started/installation/ の手順で uv をインストールし、"
+            "このコマンドを実行し直す。",
             file=sys.stderr,
         )
         raise SystemExit(1)
     setup_script = Path(__file__).resolve().with_name("setup_wiki.py")
     print()
-    print("Installing and verifying the local retrieval runtime...", flush=True)
+    print("ローカルの検索の実行環境をインストールして検証する……", flush=True)
     try:
         subprocess.run(
             [uv, "run", "--script", str(setup_script), "--wiki", str(wiki), "--cache"],
@@ -154,7 +161,7 @@ def install_runtime(wiki: Path) -> None:
         )
     except subprocess.CalledProcessError as exc:
         print(
-            f"Error: local retrieval setup failed with exit code {exc.returncode}.",
+            f"エラー: ローカルの検索の実行環境のセットアップに失敗した（終了コード {exc.returncode}）。",
             file=sys.stderr,
         )
         raise SystemExit(exc.returncode) from exc
@@ -163,16 +170,18 @@ def install_runtime(wiki: Path) -> None:
 def init_wiki(project_root: Path, wiki_dir: str, raw_dir: str, upgrade: bool = False) -> None:
     project_root = project_root.resolve()
     if not project_root.exists():
-        print(f"Error: base directory does not exist: {project_root}", file=sys.stderr)
+        print(f"エラー: 基準のディレクトリがない: {project_root}", file=sys.stderr)
         sys.exit(1)
 
     wiki = project_root / wiki_dir
     raw = project_root / raw_dir
 
-    mode = "Upgrading" if upgrade else "Initializing"
-    print(f"{mode} LLM Wiki in: {project_root}")
-    print(f"  Wiki directory: {wiki}")
-    print(f"  Raw directory:  {raw}")
+    action = "アップグレードする" if upgrade else "初期化する"
+    print(f"LLM Wiki を{action}: {project_root}")
+    labels = [("wiki のディレクトリ:", wiki), ("raw ソースのディレクトリ:", raw)]
+    width = max(display_width(label) for label, _ in labels)
+    for label, path in labels:
+        print(f"  {ljust_display(label, width)} {path}")
     print()
 
     created = []
@@ -212,7 +221,7 @@ def init_wiki(project_root: Path, wiki_dir: str, raw_dir: str, upgrade: bool = F
     for src_name, dst in template_map:
         src = TEMPLATES / src_name
         if not src.exists():
-            print(f"Warning: template missing: {src}", file=sys.stderr)
+            print(f"警告: テンプレートがない: {src}", file=sys.stderr)
             continue
         if copy_template(src, dst):
             created.append(str(dst.relative_to(project_root)))
@@ -221,11 +230,11 @@ def init_wiki(project_root: Path, wiki_dir: str, raw_dir: str, upgrade: bool = F
 
     # 結果を報告する
     if created:
-        print("Created:")
+        print("作成した:")
         for path in created:
             print(f"  + {path}")
     if skipped:
-        print("Already existed (skipped):")
+        print("すでにあったので飛ばした:")
         for path in skipped:
             print(f"  = {path}")
 
@@ -237,24 +246,24 @@ def init_wiki(project_root: Path, wiki_dir: str, raw_dir: str, upgrade: bool = F
             print_schema_upgrade_guidance(wiki / "SCHEMA.md", gaps)
         else:
             print()
-            print("SCHEMA.md is up to date with the current template — no manual merge needed.")
+            print("SCHEMA.md は現在のテンプレートに追いついている。手作業でマージするものはない。")
         return
 
     print()
-    print("Next steps:")
-    print(f"  1. Read {wiki_dir}/SCHEMA.md and customize it for your domain.")
-    print(f"  2. (Optional) Edit {wiki_dir}/graph/ontology.yaml to add domain-specific predicates.")
-    print(f"  3. Drop your first source into {raw_dir}/.")
-    print(f"  4. Ask Claude to ingest it.")
+    print("次にすること:")
+    print(f"  1. {wiki_dir}/SCHEMA.md を読み、扱う分野に合わせて書き換える。")
+    print(f"  2. （任意）{wiki_dir}/graph/ontology.yaml に、分野に固有の述語を加える。")
+    print(f"  3. 最初のソースを {raw_dir}/ に置く。")
+    print("  4. Claude にそのソースの取り込みを頼む。")
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("project_root", type=Path, metavar="BASE_DIR", help="Base directory containing the wiki and raw-source paths (for example a project root or home directory).")
-    parser.add_argument("--wiki-dir", default="wiki", help="Name of the wiki subdirectory (default: wiki).")
-    parser.add_argument("--raw-dir", default="raw", help="Name of the raw sources subdirectory (default: raw).")
+    parser = localize_argparse(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter))
+    parser.add_argument("project_root", type=Path, metavar="BASE_DIR", help="wiki と raw ソースのディレクトリを置く基準のディレクトリ（プロジェクトのルートやホームディレクトリなど）")
+    parser.add_argument("--wiki-dir", default="wiki", help="wiki のサブディレクトリの名前（既定: wiki）")
+    parser.add_argument("--raw-dir", default="raw", help="raw ソースのサブディレクトリの名前（既定: raw）")
     parser.add_argument("--upgrade", action="store_true",
-                        help="Upgrade an existing wiki: add missing files idempotently and surface SCHEMA.md sections to merge by hand.")
+                        help="既存の wiki をアップグレードする。足りないファイルを冪等に加え、手作業でマージすべき SCHEMA.md のセクションを示す")
     args = parser.parse_args()
     init_wiki(args.project_root, args.wiki_dir, args.raw_dir, upgrade=args.upgrade)
 

@@ -306,7 +306,7 @@ class LocalFallbackTests(unittest.TestCase):
             ):
                 payload, stderr = self.run_cmd(wiki)
         self.assertEqual(payload["mode"], "lexical")
-        self.assertIn("local semantic search unavailable (RuntimeError)", stderr)
+        self.assertIn("ローカルの埋め込み検索を使えない（RuntimeError）", stderr)
         self.assertNotIn("private path", stderr)
         self.assertTrue(payload["results"])
 

@@ -369,7 +369,7 @@ def main():
     output = io.StringIO()
     with contextlib.redirect_stdout(output):
         wiki_search.cmd_top_linked(SimpleNamespace(top_linked=10), pages)
-    check("top", "missing-page  (missing-page)  [BROKEN LINK]" in output.getvalue(),
+    check("top", "missing-page  (missing-page)  ［リンク切れ］" in output.getvalue(),
           True, "--top-linked retains broken-link reports", failures)
 
     output = io.StringIO()

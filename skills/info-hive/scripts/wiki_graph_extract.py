@@ -43,8 +43,8 @@ try:
     import yaml
 except ImportError:
     print(
-        "wiki_graph_extract.py requires PyYAML. "
-        "Run it with `uv run --script wiki_graph_extract.py ...`.",
+        "wiki_graph_extract.py には PyYAML が必要である。"
+        "`uv run --script wiki_graph_extract.py ...` で実行する。",
         file=sys.stderr,
     )
     sys.exit(2)
@@ -52,7 +52,7 @@ except ImportError:
 # 同じディレクトリにある共通モジュールを import する。
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
-from wiki_text import canonical_meta, nfc, posix_rel  # noqa: E402
+from wiki_text import canonical_meta, ljust_display, localize_argparse, nfc, posix_rel  # noqa: E402
 
 
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
@@ -201,7 +201,7 @@ def load_ontology(path: Path) -> dict:
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8-sig")) or {}
     except yaml.YAMLError as e:
-        print(f"Ontology parse error ({path}): {e}", file=sys.stderr)
+        print(f"オントロジーを読めない（{path}）: {e}", file=sys.stderr)
         sys.exit(2)
     data.setdefault("node_types", {})
     data.setdefault("predicates", {})
@@ -591,15 +591,16 @@ def write_graphml(out_dir: Path, nodes: list[dict], edges: list[dict]) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("wiki", type=Path, help="Wiki directory.")
-    parser.add_argument("--out", type=Path, help="Output directory (default: <wiki>/graph)")
+    parser.add_argument("wiki", type=Path, help="wiki のディレクトリ")
+    parser.add_argument("--out", type=Path, help="出力ディレクトリ（既定: <wiki>/graph）")
     parser.add_argument("--formats", default=",".join(DEFAULT_FORMATS),
-                        help="Comma-list: jsonl, sqlite, graphml")
-    parser.add_argument("--ontology", type=Path, help="Ontology file (default: <wiki>/graph/ontology.yaml)")
+                        help="出力する形式。jsonl、sqlite、graphml をカンマで区切る（既定: 3 つすべて）")
+    parser.add_argument("--ontology", type=Path, help="オントロジーのファイル（既定: <wiki>/graph/ontology.yaml）")
+    localize_argparse(parser)
     args = parser.parse_args()
 
     if not args.wiki.exists():
-        print(f"Wiki directory not found: {args.wiki}", file=sys.stderr)
+        print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
         sys.exit(1)
 
     out_dir = args.out or (args.wiki / "graph")
@@ -609,7 +610,7 @@ def main():
     formats = [f.strip().lower() for f in args.formats.split(",") if f.strip()]
     unknown = [f for f in formats if f not in DEFAULT_FORMATS]
     if unknown:
-        print(f"Unknown formats: {unknown}. Allowed: {DEFAULT_FORMATS}", file=sys.stderr)
+        print(f"未知の形式: {', '.join(unknown)}。使える形式: {', '.join(DEFAULT_FORMATS)}", file=sys.stderr)
         sys.exit(1)
 
     pages = collect_pages(args.wiki)
@@ -623,12 +624,12 @@ def main():
     if "graphml" in formats:
         write_graphml(out_dir, nodes, edges)
 
-    print(f"Extracted {len(nodes)} nodes, {len(edges)} edges → {out_dir}")
+    print(f"ノード {len(nodes)} 個、エッジ {len(edges)} 本を抽出した → {out_dir}")
     breakdown = defaultdict(int)
     for e in edges:
         breakdown[e["predicate"]] += 1
     for pred, count in sorted(breakdown.items(), key=lambda x: (-x[1], x[0])):
-        print(f"  {pred:20s} {count}")
+        print(f"  {ljust_display(pred, 20)} {count}")
 
 
 if __name__ == "__main__":

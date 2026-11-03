@@ -38,6 +38,7 @@ cd info-hive
 
 ```bash
 uv run --with fastembed==0.8.0 --with sqlite-vec==0.1.9 --with PyYAML==6.0.3 python -m unittest discover -s eval/retrieval -p 'test_*.py'
+python -m unittest discover -s eval/scripts -p 'test_*.py'
 python skills/info-hive/scripts/test_link_resolution.py
 python eval/evolution/test_evolution.py
 python eval/evolution/test_loop.py

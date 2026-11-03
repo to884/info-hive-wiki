@@ -15,6 +15,7 @@ import tempfile
 
 from wiki_evolve import encode, require
 from wiki_evolve_stream import stream_command, parse_native, acp
+from wiki_text import localize_argparse
 
 
 def schema(role, request=None):
@@ -38,7 +39,7 @@ def schema(role, request=None):
         # 配列を使うと、構造化出力のスキーマを移植しやすくなる（任意のオブジェクトのプロパティを使わない）。
         return obj({'files': {'type': 'array', 'items': obj({'path': string, 'content': {'type': ['string', 'null']}})},
                     'reason': string, 'evidence': evidence})
-    raise ValueError('Unknown role')
+    raise ValueError('不明なロールである')
 
 
 def prompt(request):
@@ -79,14 +80,14 @@ def prompt(request):
 
 def parse_codex(lines, answer):
     events = [json.loads(line) for line in lines.splitlines() if line.strip()]
-    require(not any(e.get('type') in ('error', 'turn.failed') for e in events), 'Codex run failed')
+    require(not any(e.get('type') in ('error', 'turn.failed') for e in events), 'Codex の実行が失敗した')
     turns = [e for e in events if e.get('type') == 'turn.completed']
-    require(turns, 'Codex completion missing')
+    require(turns, 'Codex の完了のイベントがない')
     observed = [e for e in events if e.get('type') in ('item.started', 'item.completed')
                 and e.get('item', {}).get('type') in ('command_execution', 'mcp_tool_call', 'web_search', 'file_change')]
     ids = {e['item']['id'] for e in observed}
     require(all(type(t.get('usage', {}).get(k)) is int and t['usage'][k] >= 0
-                for t in turns for k in ('input_tokens', 'output_tokens')), 'Codex token usage missing')
+                for t in turns for k in ('input_tokens', 'output_tokens')), 'Codex のトークンの使用量がない')
     usage = {k: sum(t['usage'][k] for t in turns) for k in ('input_tokens', 'output_tokens')}
     return dict(answer, events=observed, tool_calls=len(ids), cost=None, usage=usage)
 
@@ -95,7 +96,7 @@ def parse_claude(lines):
     events = [json.loads(line) for line in lines.splitlines() if line.strip()]
     results = [e for e in events if e.get('type') == 'result']
     require(len(results) == 1 and results[0].get('subtype') == 'success'
-            and not results[0].get('is_error'), 'Claude completion missing')
+            and not results[0].get('is_error'), 'Claude の完了のイベントがない')
     result = results[0]
     observed, ids = [], set()
     for e in events:
@@ -105,7 +106,7 @@ def parse_claude(lines):
                 if block['type'] == 'tool_use':
                     ids.add(block['id'])
     usage = result.get('usage', {})
-    require('input_tokens' in usage and 'output_tokens' in usage, 'Claude token usage missing')
+    require('input_tokens' in usage and 'output_tokens' in usage, 'Claude のトークンの使用量がない')
     measured = {'input_tokens': usage['input_tokens'] + usage.get('cache_read_input_tokens', 0)
                 + usage.get('cache_creation_input_tokens', 0), 'output_tokens': usage['output_tokens']}
     return dict(result['structured_output'], events=observed, tool_calls=len(ids),
@@ -116,7 +117,7 @@ def execute(agent, request):
     role = request.get('role', 'inference')
     inference = role == 'inference'
     require(request.get('max_usd') is None,
-            'CLI runners cannot guarantee a hard USD limit; use the bounded API runner or max_usd=null')
+            'CLI のランナーでは USD の上限を厳密には守れない。上限つきの API のランナーを使うか、max_usd=null にする')
     with tempfile.TemporaryDirectory(prefix='wiki-agent-') as tmp:
         folder = Path(tmp)
         schema_path, result_path = folder / 'schema.json', folder / 'answer.json'
@@ -166,7 +167,7 @@ def execute(agent, request):
                 command = [agent, 'acp']
                 if agent == 'openclaw' and request.get('runner_options', {}).get('profile'):
                     profile = request['runner_options']['profile']
-                    require(isinstance(profile, str) and profile and not profile.startswith('-'), 'Invalid gateway profile')
+                    require(isinstance(profile, str) and profile and not profile.startswith('-'), 'ゲートウェイのプロファイルが無効である')
                     command[1:1] = ['--profile', profile]
         env = os.environ.copy()
         env['PYTHONDONTWRITEBYTECODE'] = '1'
@@ -179,12 +180,12 @@ def execute(agent, request):
                     permissions['edit'] = 'allow'
             env['OPENCODE_CONFIG_CONTENT'] = json.dumps({'permission': permissions, 'instructions': [], 'mcp': {}})
         if agent == 'hermes':
-            require(':' in request['model'], 'Hermes requires explicit provider:model to prevent provider fallback')
+            require(':' in request['model'], 'Hermes では、別のプロバイダーに切り替わらないよう、provider:model の形でモデルを指定する')
             env['HERMES_IGNORE_RULES'] = '1'
             profile = request.get('runner_options', {}).get('home')
             if profile:
                 require(isinstance(profile, str) and Path(profile).is_absolute() and Path(profile).is_dir(),
-                        'Hermes home must be an existing absolute profile directory')
+                        'Hermes の home には、存在するプロファイルのディレクトリを絶対パスで指定する')
                 env['HERMES_HOME'] = profile
         if agent == 'gemini':
             settings = folder / 'gemini-settings.json'
@@ -216,13 +217,13 @@ def execute(agent, request):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('agent', choices=('claude', 'codex', 'cursor', 'gemini', 'opencode', 'pi', 'omp', 'hermes', 'openclaw'))
-    args = parser.parse_args()
+    args = localize_argparse(parser).parse_args()
     try:
         print(encode(execute(args.agent, json.load(sys.stdin))), end='')
     except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as exc:
-        print(f'Agent runner failed: {type(exc).__name__}: {exc}', file=sys.stderr)
+        print(f'エージェントのランナーが失敗した: {type(exc).__name__}: {exc}', file=sys.stderr)
         return 1
     return 0
 

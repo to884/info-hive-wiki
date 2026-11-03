@@ -169,3 +169,145 @@ def has_fullwidth_link_syntax(link: str) -> bool:
     名前のページへのリンクになる。スクリプトも同じく区切りとしては扱わず、lint で指摘する。
     """
     return FULLWIDTH_PIPE in link or FULLWIDTH_HASH in link
+
+
+# ---------------------------------------------------------------------------
+# ページの大きさと表示幅
+# ---------------------------------------------------------------------------
+
+def char_count(text: str) -> int:
+    """空白（改行を含む）を除いたコードポイントの数。ページの大きさの判定に使う（計画の方針 I）。"""
+    return sum(1 for ch in text if not ch.isspace())
+
+
+def display_width(text: str) -> int:
+    """端末での表示幅。全角（East Asian Width が W か F）の文字を 2 桁と数える。"""
+    width = 0
+    for ch in text:
+        if unicodedata.combining(ch):
+            continue
+        width += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+    return width
+
+
+def ljust_display(text: str, width: int) -> str:
+    """表示幅が width になるまで、右に空白を足す。"""
+    return text + " " * max(0, width - display_width(text))
+
+
+def rjust_display(text: str, width: int) -> str:
+    """表示幅が width になるまで、左に空白を足す。"""
+    return " " * max(0, width - display_width(text)) + text
+
+
+# ---------------------------------------------------------------------------
+# 引用の照合（計画の方針 H）
+# ---------------------------------------------------------------------------
+
+# 日本語の文字。漢字、ひらがな、カタカナ、和文の句読点・括弧、全角の英数字と記号。
+_JA_CHAR = (
+    r"　-〿぀-ゟ゠-ヿㇰ-ㇿ㐀-䶿一-鿿"
+    r"豈-﫿＀-￯\U00020000-\U0003134f"
+)
+_JA_GAP_RE = re.compile(rf"(?<=[{_JA_CHAR}])\s+(?=[{_JA_CHAR}])")
+_SPACE_RE = re.compile(r"\s+")
+
+
+def normalize_quote(text: str) -> str:
+    """引用が本文に含まれるかを比べるための形にする。
+
+    大文字と小文字を区別せず、空白の並びを 1 つの空白にまとめる。日本語の文字どうしの間の
+    改行と空白は取り除く（日本語の文は、行をまたいでも途中に空白を入れない）。英数字の間の
+    空白は残す。空白をすべて除くと「now here」と「nowhere」を同じとみなしてしまうためである。
+    NFKC はかけない。全角と半角の違いも、引用が本文と一致しない理由として残す。
+    """
+    text = _JA_GAP_RE.sub("", text.lower())
+    return _SPACE_RE.sub(" ", text).strip()
+
+
+def quote_in_text(quote: str, text: str) -> bool:
+    """normalize_quote でそろえたうえで、quote が text に含まれていれば True を返す。"""
+    needle = normalize_quote(quote or "")
+    return bool(needle) and needle in normalize_quote(text or "")
+
+
+# ---------------------------------------------------------------------------
+# 日付
+# ---------------------------------------------------------------------------
+
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def is_iso_date(value) -> bool:
+    """value が YYYY-MM-DD の形の、実在する日付なら True を返す。"""
+    if not isinstance(value, str) or not _ISO_DATE_RE.match(value):
+        return False
+    from datetime import date
+
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+# ---------------------------------------------------------------------------
+# argparse の見出し
+# ---------------------------------------------------------------------------
+
+def localize_argparse(parser):
+    """argparse が自動で出す英語（usage:、options: などの見出しと -h の説明）を日本語にする。
+
+    サブコマンドの parser にもたどってかける。parser を返すので、生成した直後にかけてもよい。
+    argparse 自身のエラーメッセージ（"the following arguments are required" など）は英語のまま残る。
+    """
+    import argparse
+
+    parser._optionals.title = "オプション"
+    parser._positionals.title = "引数"
+    for action in parser._actions:
+        if isinstance(action, argparse._HelpAction):
+            action.help = "このヘルプを表示して終わる"
+        elif isinstance(action, argparse._SubParsersAction):
+            for sub in action.choices.values():
+                localize_argparse(sub)
+    base = parser.formatter_class
+    if not getattr(base, "_info_hive_ja", False):
+        def add_usage(self, usage, actions, groups, prefix=None):
+            return base.add_usage(self, usage, actions, groups, "使い方: " if prefix is None else prefix)
+
+        members = {"add_usage": add_usage, "_info_hive_ja": True}
+        # argparse は文字数で折り返すので、全角の文では行が端末の幅を超え、空白のない日本語の
+        # 途中にある識別子が切れることもある。既定の折り返しを使う formatter だけ、表示幅で折り返す。
+        if base._split_lines is argparse.HelpFormatter._split_lines:
+            def _split_lines(self, text, width):
+                text = self._whitespace_matcher.sub(" ", text).strip()
+                return wrap_display(text, width)
+
+            members["_split_lines"] = _split_lines
+        parser.formatter_class = type("JapaneseHelpFormatter", (base,), members)
+    return parser
+
+
+# 行頭に置かない記号（禁則）。直前の行の末尾に付ける。
+_NO_LINE_START = set("、。，．・：；？！）」』】〕〉》”’ー々")
+_ASCII_WORD_RE = re.compile(r"[\x21-\x7e]+|\s+|.", re.DOTALL)
+
+
+def wrap_display(text: str, width: int) -> list[str]:
+    """表示幅で折り返す。英数字の語は途中で切らず、日本語は文字の間で折り返す。"""
+    lines: list[str] = []
+    line = ""
+    for token in _ASCII_WORD_RE.findall(text):
+        if token.isspace():
+            if line:
+                line += " "
+            continue
+        if line and display_width(line + token) > width and token[0] not in _NO_LINE_START:
+            lines.append(line.rstrip())
+            line = token
+        else:
+            line += token
+    if line.strip():
+        lines.append(line.rstrip())
+    return lines

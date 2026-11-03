@@ -20,7 +20,9 @@ from pathlib import Path
 # スクリプトとして実行したときも、テストから importlib で読み込んだときも、
 # 同じディレクトリの wiki_text を import できるようにする。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from wiki_text import canonical_meta, nfc, posix_rel  # noqa: E402
+from wiki_text import (  # noqa: E402
+    canonical_meta, char_count, ljust_display, localize_argparse, nfc, posix_rel, rjust_display,
+)
 
 
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
@@ -69,18 +71,32 @@ def parse_type(text: str) -> str | None:
     return meta.get("type")
 
 
+# ページの大きさの目安（wiki_lint の既定値と同じ）。行数と、空白を除いた文字数の両方で見る。
+SOFT_LINES, HARD_LINES = 400, 800
+SOFT_CHARS, HARD_CHARS = 4000, 8000
+
+
+def size_warning(lines: int, chars: int) -> str:
+    if lines > HARD_LINES or chars > HARD_CHARS:
+        return "  ← ハード上限を超えている"
+    if lines > SOFT_LINES or chars > SOFT_CHARS:
+        return "  ← ソフト上限を超えている"
+    return ""
+
+
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("wiki", nargs="?", type=Path, default=Path("wiki"))
+    parser = localize_argparse(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter))
+    parser.add_argument("wiki", nargs="?", type=Path, default=Path("wiki"), help="wiki のディレクトリ（既定: ./wiki）")
     args = parser.parse_args()
 
     if not args.wiki.exists():
-        print(f"Wiki directory not found: {args.wiki}", file=sys.stderr)
+        print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
         sys.exit(1)
 
     total_pages = 0
     total_lines = 0
     total_words = 0
+    total_chars = 0
     total_links = 0
     pages_by_type = Counter()
     pages_by_dir = Counter()
@@ -108,78 +124,79 @@ def main():
 
         total_pages += 1
         line_count = text.count("\n") + 1
+        # 語数は空白で区切って数えるので、日本語のページではほぼ意味をなさない。文字数も数える。
         word_count = len(text.split())
+        chars = char_count(text)
         total_lines += line_count
         total_words += word_count
+        total_chars += chars
         # wikilink を数える前に frontmatter を取り除く。frontmatter ではパスのないスラッグを使う。
         body = FRONTMATTER_RE.sub("", text, count=1) if text.startswith("---") else text
         links = WIKILINK_RE.findall(body)
         total_links += len(links)
         for link in links:
             most_linked_in[link_stem(link)] += 1
-        page_type = parse_type(text) or "(none)"
+        page_type = parse_type(text) or "(なし)"
         pages_by_type[page_type] += 1
         if len(rel.parts) > 1:
-            pages_by_dir[rel.parts[0]] += 1
+            pages_by_dir[nfc(rel.parts[0])] += 1
         else:
-            pages_by_dir["(root)"] += 1
-        largest.append((line_count, posix_rel(rel.as_posix())))
+            pages_by_dir["(ルート)"] += 1
+        largest.append((chars, line_count, posix_rel(rel.as_posix())))
 
+    # 日本語のページは 1 行が長いので、大きい順は文字数で並べる。
     largest.sort(reverse=True)
 
     print("=" * 60)
-    print(f"Wiki Stats: {args.wiki}")
+    print(f"wiki の統計: {args.wiki}")
     print("=" * 60)
-    print(f"Pages:         {total_pages}")
-    print(f"Total lines:   {total_lines:,}")
-    print(f"Total words:   {total_words:,}")
-    print(f"Total links:   {total_links:,}")
+    print(f"ページ数:       {total_pages}")
+    print(f"総行数:         {total_lines:,}")
+    print(f"総文字数:       {total_chars:,}（空白を除く）")
+    print(f"総語数:         {total_words:,}（空白で区切った数）")
+    print(f"総リンク数:     {total_links:,}")
     if total_pages:
-        print(f"Avg page:      {total_lines // total_pages} lines / {total_words // total_pages} words")
-        print(f"Link density:  {total_links / total_pages:.1f} links per page")
-    print(f"index.md:      {index_lines} lines" + ("  ← shard recommended (>300)" if index_lines > 300 else ""))
+        print(f"1 ページの平均: {total_lines // total_pages} 行、{total_chars // total_pages:,} 文字、{total_words // total_pages} 語")
+        print(f"リンクの密度:   1 ページあたり {total_links / total_pages:.1f} 本")
+    print(f"index.md:       {index_lines} 行" + ("  ← 分割を勧める（300 行超）" if index_lines > 300 else ""))
     print()
 
-    print("Pages by type:")
+    print("type ごとのページ数:")
     for t, n in pages_by_type.most_common():
-        print(f"  {t:15s} {n}")
+        print(f"  {ljust_display(t, 15)} {n}")
     print()
 
-    print("Pages by directory:")
+    print("ディレクトリごとのページ数:")
     for d, n in pages_by_dir.most_common():
-        print(f"  {d:15s} {n}")
+        print(f"  {ljust_display(d, 15)} {n}")
     print()
 
     if largest:
-        print("Largest pages:")
-        for lines, path in largest[:10]:
-            warn = ""
-            if lines > 800:
-                warn = "  ← OVER HARD CAP"
-            elif lines > 400:
-                warn = "  ← over soft cap"
-            print(f"  {lines:5d}  {path}{warn}")
+        print("大きいページ（文字数の多い順）:")
+        print(f"  {rjust_display('文字数', 7)}  {rjust_display('行数', 5)}  パス")
+        for chars, lines, path in largest[:10]:
+            print(f"  {chars:7,d}  {lines:5d}  {path}{size_warning(lines, chars)}")
         print()
 
     if most_linked_in:
-        print("Most-linked-to pages (hubs):")
+        print("被リンクの多いページ（ハブ）:")
         for slug, count in most_linked_in.most_common(10):
             print(f"  {count:4d}  [[{slug}]]")
         print()
 
     # スケーリングについての推奨
-    print("Scaling thresholds:")
+    print("規模のしきい値:")
     if total_pages < 50:
-        print("  → Below first threshold. Flat structure is fine.")
+        print("  → 最初のしきい値より小さい。平らな構成のままでよい。")
     elif total_pages < 150 and index_lines < 300:
-        print("  → Below shard threshold. Continue with single index.md.")
+        print("  → 分割のしきい値より小さい。index.md は 1 つのままでよい。")
     elif (total_pages >= 150 or index_lines >= 300) and not (args.wiki / "indexes").exists():
-        print("  → AT SHARD THRESHOLD. Consider sharding index.md into wiki/indexes/<type>.md.")
-        print("    See references/scaling-playbook.md.")
+        print("  → 分割のしきい値に達した。index.md を wiki/indexes/<type>.md に分けることを検討する。")
+        print("    references/scaling-playbook.md を参照。")
     elif total_pages >= 300:
-        print("  → Past 300 pages. Use scripts/wiki_search.py as a routine fallback.")
+        print("  → 300 ページを超えた。scripts/wiki_search.py をふだんの手段として使う。")
     if total_pages >= 500:
-        print("  → Past 500 pages. Run lint weekly or per-N-ingests.")
+        print("  → 500 ページを超えた。lint を毎週、または数回の取り込みごとに実行する。")
 
 
 if __name__ == "__main__":

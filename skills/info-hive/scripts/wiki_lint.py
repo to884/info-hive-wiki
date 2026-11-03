@@ -18,9 +18,11 @@ frontmatter のキー、「、」で区切ったリストの値、全角の「�
 オプション:
     --soft-cap N        ページサイズのソフト上限の行数（既定: 400）
     --hard-cap N        ページサイズのハード上限の行数（既定: 800）
+    --soft-char-cap N   ページサイズのソフト上限の文字数。空白を除いて数える（既定: 4000）
+    --hard-char-cap N   ページサイズのハード上限の文字数。空白を除いて数える（既定: 8000）
     --required-fm a,b   必須の frontmatter のフィールド（既定: type,title,tags,created,updated）
     --suggest-pages     多くのページに出てくるのに専用のページがない語を挙げる
-    --suggest-min N     --suggest-pages で挙げる最小の出現回数（既定: 5）
+    --suggest-min N     --suggest-pages で挙げる最小の出現ページ数（既定: 5）
     --json              テキストの代わりに JSON を出力する
 
 例:
@@ -42,16 +44,24 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wiki_text import (  # noqa: E402
     canonical_meta,
+    char_count,
     fullwidth_colon_keys,
     has_fullwidth_link_syntax,
     ideographic_comma_values,
+    is_iso_date,
+    localize_argparse,
     nfc,
+    nfkc,
     posix_rel,
 )
 
 
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
+# 日本語のページの候補。カタカナ語は 3 文字以上、漢字の複合語は 3 文字以上の漢字の並びとする。
+# 2 文字の漢字の並びは「方法」「場合」のような一般語が多く、候補として役に立たない。
+KATAKANA_TERM_RE = re.compile(r"[\u30a1-\u30fa\u30fc]{3,}")
+KANJI_COMPOUND_RE = re.compile(r"[\u3005\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]{3,}")
 CAPITALIZED_PHRASE_RE = re.compile(r"\b([A-Z][a-zA-Z0-9]+(?:\s+[A-Z][a-zA-Z0-9]+){0,3})\b")
 
 
@@ -179,6 +189,7 @@ def collect_pages(wiki_root: Path) -> list[dict]:
             "meta": meta,
             "body": body,
             "line_count": line_count,
+            "char_count": char_count(text),
             "links": links,
             "malformed_fm": malformed,
             "alias_conflicts": alias_conflicts,
@@ -197,7 +208,12 @@ def parse_date(s):
         return None
 
 
-def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str], suggest_pages: bool, suggest_min: int) -> dict:
+# ISO 形式（YYYY-MM-DD）を求める frontmatter の日付のフィールド。
+DATE_FIELDS = ("created", "updated", "ingested")
+
+
+def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str], suggest_pages: bool, suggest_min: int,
+         soft_char_cap: int = 4000, hard_char_cap: int = 8000) -> dict:
     findings = {
         "orphans": [],
         "broken_links": [],
@@ -212,6 +228,7 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         "fullwidth_colon_keys": [],
         "ideographic_comma_lists": [],
         "fullwidth_link_syntax": [],
+        "non_iso_dates": [],
         "suggested_pages": [],
         "summary": {},
     }
@@ -277,11 +294,14 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
             if has_fullwidth_link_syntax(link):
                 findings["fullwidth_link_syntax"].append({"from_path": p["rel_path"], "link": link})
 
-        # サイズ超過
-        if p["line_count"] > hard_cap:
-            findings["oversized_hard"].append({"path": p["rel_path"], "lines": p["line_count"]})
-        elif p["line_count"] > soft_cap:
-            findings["oversized_soft"].append({"path": p["rel_path"], "lines": p["line_count"]})
+        # サイズ超過。行数と文字数（空白を除く）の、どちらかが上限を超えたら指摘する（計画の方針 I）。
+        # 日本語のページは 1 行が長いので、行数だけでは大きすぎるページを見落とす。
+        lines, chars = p["line_count"], p["char_count"]
+        size = {"path": p["rel_path"], "lines": lines, "chars": chars}
+        if lines > hard_cap or chars > hard_char_cap:
+            findings["oversized_hard"].append(size)
+        elif lines > soft_cap or chars > soft_char_cap:
+            findings["oversized_soft"].append(size)
 
         # frontmatter
         if p["malformed_fm"]:
@@ -302,6 +322,13 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
             findings["fullwidth_colon_keys"].append({"path": p["rel_path"], "keys": p["fullwidth_colon_keys"]})
         if p.get("ideographic_comma_keys"):
             findings["ideographic_comma_lists"].append({"path": p["rel_path"], "keys": p["ideographic_comma_keys"]})
+
+        # 日付は ISO 形式（YYYY-MM-DD）にする。「2026年11月3日」や「2026/11/03」は、更新の停滞の
+        # 判定や --since の絞り込みで読めない。
+        for field in DATE_FIELDS:
+            value = p["meta"].get(field)
+            if value not in (None, "", []) and not is_iso_date(value):
+                findings["non_iso_dates"].append({"path": p["rel_path"], "key": field, "value": value})
 
         # 更新の停滞: ヒューリスティック。90 日間更新されておらず、かつ最近の取り込みで触れられたページ。
         # 近似: 最終更新が 90 日より前で、よくリンクされている（ハブである）ページを指摘する。
@@ -324,20 +351,24 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
             for m in CAPITALIZED_PHRASE_RE.finditer(p["body"]):
                 phrase = m.group(1).strip()
                 seen.add(phrase)
+            # 半角のカタカナも全角にそろえてから探す。
+            body = nfkc(p["body"])
+            for regex in (KATAKANA_TERM_RE, KANJI_COMPOUND_RE):
+                seen.update(m.group() for m in regex.finditer(body))
             for phrase in seen:
                 phrase_pages[phrase].add(p["slug"])
 
         # 絞り込みに使うタイトルの集合
-        existing_titles = {p["meta"].get("title", "").lower() for p in pages}
-        existing_slugs_normalized = {s.lower().replace("-", " ") for s in all_slugs}
+        existing_titles = {nfkc(p["meta"].get("title", "")).lower() for p in pages}
+        existing_slugs_normalized = {nfkc(s).lower().replace("-", " ") for s in all_slugs}
 
         candidates = []
         for phrase, page_set in phrase_pages.items():
             if len(page_set) < suggest_min:
                 continue
-            if phrase.lower() in existing_titles:
+            if nfkc(phrase).lower() in existing_titles:
                 continue
-            if phrase.lower() in existing_slugs_normalized:
+            if nfkc(phrase).lower() in existing_slugs_normalized:
                 continue
             # セクションの見出しの断片を除く
             if phrase.split()[0] in {"Section", "Where", "Sources", "Tags", "Type", "Title"}:
@@ -361,79 +392,89 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         "fullwidth_colon_keys": len(findings["fullwidth_colon_keys"]),
         "ideographic_comma_lists": len(findings["ideographic_comma_lists"]),
         "fullwidth_link_syntax": len(findings["fullwidth_link_syntax"]),
+        "non_iso_dates": len(findings["non_iso_dates"]),
         "suggested_pages": len(findings["suggested_pages"]),
     }
     return findings
+
+
+def size_text(f: dict) -> str:
+    return f"  - {f['path']}  （{f['lines']} 行、{f['chars']:,} 文字）"
 
 
 def render_text(findings: dict) -> str:
     out = []
     s = findings["summary"]
     out.append("=" * 60)
-    out.append("Wiki Lint Report")
+    out.append("wiki の lint の報告")
     out.append("=" * 60)
-    out.append(f"Total pages scanned: {s['total_pages']}")
+    out.append(f"調べたページ数: {s['total_pages']}")
     out.append("")
 
     sections = [
-        ("orphans", "Orphan pages (no inbound links)", lambda f: f"  - {f['slug']}  ({f['path']})"),
-        ("broken_links", "Broken wikilinks", lambda f: f"  - [[{f['to']}]] referenced from {f['from_path']}"),
-        ("oversized_hard", "OVERSIZE (over hard cap — must split)", lambda f: f"  - {f['path']}  ({f['lines']} lines)"),
-        ("oversized_soft", "Oversize (over soft cap — consider splitting)", lambda f: f"  - {f['path']}  ({f['lines']} lines)"),
-        ("missing_frontmatter", "Missing frontmatter fields", lambda f: f"  - {f['path']}  missing: {', '.join(f['missing'])}"),
-        ("malformed_frontmatter", "Malformed frontmatter", lambda f: f"  - {f['path']}"),
-        ("duplicate_slugs", "Duplicate slugs", lambda f: f"  - {f['slug']}: {', '.join(f['paths'])}"
-         + ("  (names differ only in Unicode normalization)" if f.get("normalization_collision") else "")),
-        ("stale_pages", "Stale pages (well-linked but not updated in 90+ days)", lambda f: f"  - {f['path']}  (updated {f['updated']}, {f['age_days']}d ago, {f['inbound_count']} inbound)"),
-        ("read_errors", "Read errors", lambda f: f"  - {f['path']}: {f['error']}"),
-        ("frontmatter_alias_conflicts", "Frontmatter key set together with its Japanese alias", lambda f: f"  - {f['path']}  {f['key']}: {', '.join(f['keys'])}"),
-        ("fullwidth_colon_keys", "Frontmatter keys followed by a full-width colon", lambda f: f"  - {f['path']}  keys: {', '.join(f['keys'])}"),
-        ("ideographic_comma_lists", "List values separated by an ideographic comma", lambda f: f"  - {f['path']}  keys: {', '.join(f['keys'])}"),
-        ("fullwidth_link_syntax", "Wikilinks with a full-width | or #", lambda f: f"  - [[{f['link']}]] in {f['from_path']}"),
+        ("orphans", "孤立ページ（被リンクがない）", lambda f: f"  - {f['slug']}  （{f['path']}）"),
+        ("broken_links", "リンク切れの wikilink", lambda f: f"  - [[{f['to']}]]  （{f['from_path']} から）"),
+        ("oversized_hard", "大きすぎるページ（ハード上限を超えている。分割する）", size_text),
+        ("oversized_soft", "大きいページ（ソフト上限を超えている。分割を検討する）", size_text),
+        ("missing_frontmatter", "frontmatter に足りないフィールドがある", lambda f: f"  - {f['path']}  不足: {', '.join(f['missing'])}"),
+        ("malformed_frontmatter", "frontmatter を読めない", lambda f: f"  - {f['path']}"),
+        ("duplicate_slugs", "重複したスラッグ", lambda f: f"  - {f['slug']}: {', '.join(f['paths'])}"
+         + ("  （Unicode の正規化の違いだけで名前が異なる）" if f.get("normalization_collision") else "")),
+        ("stale_pages", "更新の止まったページ（よくリンクされているのに 90 日以上更新されていない）",
+         lambda f: f"  - {f['path']}  （更新 {f['updated']}、{f['age_days']} 日前、被リンク {f['inbound_count']}）"),
+        ("read_errors", "読み込めないファイル", lambda f: f"  - {f['path']}: {f['error']}"),
+        ("frontmatter_alias_conflicts", "英語のキーと日本語の別名を両方書いている", lambda f: f"  - {f['path']}  {f['key']}: {', '.join(f['keys'])}"),
+        ("fullwidth_colon_keys", "frontmatter のキーのあとが全角の「：」になっている", lambda f: f"  - {f['path']}  キー: {', '.join(f['keys'])}"),
+        ("ideographic_comma_lists", "リストの値を「、」で区切っている", lambda f: f"  - {f['path']}  キー: {', '.join(f['keys'])}"),
+        ("fullwidth_link_syntax", "wikilink に全角の「｜」か「＃」がある", lambda f: f"  - [[{f['link']}]]  （{f['from_path']}）"),
+        ("non_iso_dates", "日付が YYYY-MM-DD の形になっていない", lambda f: f"  - {f['path']}  {f['key']}: {f['value']}"),
     ]
 
     for key, label, formatter in sections:
         items = findings[key]
         if not items:
             continue
-        out.append(f"{label} ({len(items)}):")
+        out.append(f"{label}（{len(items)} 件）:")
         for item in items[:50]:
             out.append(formatter(item))
         if len(items) > 50:
-            out.append(f"  ... and {len(items) - 50} more")
+            out.append(f"  ……ほか {len(items) - 50} 件")
         out.append("")
 
     if findings["suggested_pages"]:
-        out.append(f"Suggested page candidates ({len(findings['suggested_pages'])}):")
-        out.append("  Phrases appearing in many pages without a dedicated page:")
+        out.append(f"ページの候補（{len(findings['suggested_pages'])} 件）:")
+        out.append("  多くのページに出てくるのに、専用のページがない語:")
         for item in findings["suggested_pages"]:
-            out.append(f"  - \"{item['phrase']}\"  ({item['page_count']} pages)")
+            out.append(f"  - 「{item['phrase']}」  （{item['page_count']} ページ）")
         out.append("")
 
     if all(v == 0 for k, v in s.items() if k != "total_pages"):
-        out.append("No issues found. Wiki is healthy.")
+        out.append("問題は見つからなかった。")
 
     return "\n".join(out)
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("wiki", nargs="?", type=Path, default=Path("wiki"), help="Wiki directory (default: ./wiki).")
-    parser.add_argument("--soft-cap", type=int, default=400, help="Page-size soft cap (lines).")
-    parser.add_argument("--hard-cap", type=int, default=800, help="Page-size hard cap (lines).")
-    parser.add_argument("--required-fm", default="type,title,tags,created,updated", help="Required frontmatter fields, comma-separated.")
-    parser.add_argument("--suggest-pages", action="store_true", help="Surface page candidates.")
-    parser.add_argument("--suggest-min", type=int, default=5, help="Minimum page count for suggestions.")
-    parser.add_argument("--json", action="store_true", help="Emit JSON.")
+    parser = localize_argparse(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter))
+    parser.add_argument("wiki", nargs="?", type=Path, default=Path("wiki"), help="wiki のディレクトリ（既定: ./wiki）")
+    parser.add_argument("--soft-cap", type=int, default=400, help="ページサイズのソフト上限の行数（既定: 400）")
+    parser.add_argument("--hard-cap", type=int, default=800, help="ページサイズのハード上限の行数（既定: 800）")
+    parser.add_argument("--soft-char-cap", type=int, default=4000, help="ページサイズのソフト上限の文字数。空白を除いて数える（既定: 4000）")
+    parser.add_argument("--hard-char-cap", type=int, default=8000, help="ページサイズのハード上限の文字数。空白を除いて数える（既定: 8000）")
+    parser.add_argument("--required-fm", default="type,title,tags,created,updated", help="必須の frontmatter のフィールド。カンマで区切る（既定: type,title,tags,created,updated）")
+    parser.add_argument("--suggest-pages", action="store_true", help="多くのページに出てくるのに専用のページがない語を挙げる")
+    parser.add_argument("--suggest-min", type=int, default=5, help="--suggest-pages で挙げる最小の出現ページ数（既定: 5）")
+    parser.add_argument("--json", action="store_true", help="テキストの代わりに JSON を出力する。キーは英語のまま")
     args = parser.parse_args()
 
     if not args.wiki.exists():
-        print(f"Wiki directory not found: {args.wiki}", file=sys.stderr)
+        print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
         sys.exit(1)
 
     pages = collect_pages(args.wiki)
     required_fm = [f.strip() for f in args.required_fm.split(",") if f.strip()]
-    findings = lint(pages, args.soft_cap, args.hard_cap, required_fm, args.suggest_pages, args.suggest_min)
+    findings = lint(pages, args.soft_cap, args.hard_cap, required_fm, args.suggest_pages, args.suggest_min,
+                    args.soft_char_cap, args.hard_char_cap)
 
     if args.json:
         print(json.dumps(findings, indent=2, default=str, ensure_ascii=False))

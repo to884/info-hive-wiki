@@ -12,6 +12,11 @@ import wiki_evolve as lifecycle
 import wiki_evolve_loop as loop
 import wiki_evolve_agent as agent
 
+# Windows の既定の文字コード（cp932 など）ではなく、UTF-8 で出力する。
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, 'reconfigure'):
+        _stream.reconfigure(encoding='utf-8')
+
 
 def fails(fn, text):
     try:
@@ -19,7 +24,7 @@ def fails(fn, text):
     except ValueError as exc:
         assert text in str(exc), str(exc)
     else:
-        raise AssertionError('Expected rejection: ' + text)
+        raise AssertionError('拒否されるはずだった: ' + text)
 
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -109,16 +114,16 @@ print(json.dumps(o))
     assert (skill / 'SKILL.md').read_text(encoding='utf-8') == 'baseline'
     assert not (skill / 'references/check.md').exists()
     assert not (skill / 'PURPOSE.md').exists()
-    fails(lambda: loop.run(args, state), 'Run ID exists')
+    fails(lambda: loop.run(args, state), 'この実行の ID はすでにある')
     config['budget']['max_calls'] = 1
     config_path.write_text(json.dumps(config), encoding='utf-8')
     args.id = 'budget'
     suite['tasks'][2]['question'] += ' budget-case'
     suite_path.write_text(json.dumps(suite), encoding='utf-8')
-    fails(lambda: loop.run(args, state), 'budget exhausted')
+    fails(lambda: loop.run(args, state), '予算を使い切った')
     assert len(list((state / 'budget').glob('call-start-*.json'))) == 1
     assert not (state / 'budget' / 'selection.json').exists()
-    assert 'budget exhausted' in lifecycle.run_records(state/'budget')[-1]['message']
+    assert '予算を使い切った' in lifecycle.run_records(state/'budget')[-1]['message']
     # 新しいスキルを作成でき、空のディレクトリにロールバックできる。
     config['budget']['max_calls'] = 40
     config_path.write_text(json.dumps(config), encoding='utf-8')
@@ -131,8 +136,8 @@ print(json.dumps(o))
     lifecycle.transition(state / result['proposal'], rollback=True)
     assert lifecycle.tree(args.skill) == {}
     args.id = 'reused-test'
-    fails(lambda: loop.run(args, state), 'already exposed')
-    for mode, message in [('bad-quote', 'failed calibration'), ('judge-tool', 'Judge used tools'), ('outside-write', 'outside the task wiki')]:
+    fails(lambda: loop.run(args, state), 'すでに使われた')
+    for mode, message in [('bad-quote', '較正に失敗した'), ('judge-tool', '判定役がツールを使った'), ('outside-write', None)]:
         args.id, args.skill = mode, skill
         suite['tasks'][2]['question'] += ' ' + mode
         suite_path.write_text(json.dumps(suite), encoding='utf-8')
@@ -170,7 +175,7 @@ print(json.dumps(o))
         config_path.write_text(json.dumps(config), encoding='utf-8')
         measured = loop.run(args, state)
         if mode == 'duplicate-files':
-            assert all('Duplicate' in h['invalid_reason'] for h in measured['history']) and not measured['skill_changed']
+            assert all('重複している' in h['invalid_reason'] for h in measured['history']) and not measured['skill_changed']
         else:
             assert measured['history'][0]['status']=='accepted' and measured['skill_changed']
     # 複数のファイルが混ざった実際の変更途中の状態から復旧し、そのあと関係のない編集を拒否する。
@@ -187,12 +192,12 @@ print(json.dumps(o))
     lifecycle.transition(mixed)
     assert lifecycle.tree(skill) == lifecycle.tree(candidate)
     (skill / 'unrelated.md').write_text('concurrent edit', encoding='utf-8')
-    fails(lambda: lifecycle.transition(mixed, rollback=True), 'concurrent edits')
+    fails(lambda: lifecycle.transition(mixed, rollback=True), '同時に行われた編集')
     (skill / 'unrelated.md').unlink()
     lifecycle.transition(mixed, rollback=True)
     invalid = json.loads(json.dumps(suite))
     invalid['tasks'][2]['question'] = invalid['tasks'][0]['question']
-    fails(lambda: loop.contract(invalid, corpus), 'Repeated question')
+    fails(lambda: loop.contract(invalid, corpus), '同じ質問が')
     # 観測できるイベントには推論を含めず、ツールの出力はそのまま残す。
     parsed = agent.parse_codex('\n'.join(json.dumps(x) for x in [
         {'type':'item.completed','item':{'id':'r','type':'reasoning','text':'private'}},
@@ -206,7 +211,7 @@ print(json.dumps(o))
     assert lifecycle.verify_bundle(bundle)['status'] == 'verified'
     assert (bundle/'skill/PURPOSE.md').is_file() and (bundle/'evidence/patterns.json').is_file()
     (bundle/'skill/SKILL.md').write_text('tampered', encoding='utf-8')
-    fails(lambda: lifecycle.verify_bundle(bundle), 'Bundle evidence or skill changed')
+    fails(lambda: lifecycle.verify_bundle(bundle), 'バンドルの証拠かスキルが変わった')
     (state/'cycle/corpus/source.md').write_text('tampered', encoding='utf-8')
-    fails(lambda: lifecycle.export_bundle(state/'cycle', root/'bad-export'), 'Archived corpus changed')
-print('Complete evolution cycle, isolation, artifacts, budget, full-skill apply/rollback, new skill and adapter parsing: PASS')
+    fails(lambda: lifecycle.export_bundle(state/'cycle', root/'bad-export'), '記録したコーパスが変わった')
+print('評価ループの 1 周、分離、成果物、予算、スキル全体の適用とロールバック、新しいスキル、アダプターの解析: PASS')

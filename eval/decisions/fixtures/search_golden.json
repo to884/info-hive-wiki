@@ -8,7 +8,7 @@
     "eval/retrieval/corpus/wiki",
     "--no-embed"
    ],
-   "stdout": "Top 10 results for: 'kv cache memory'\n\n  [ 11.22] [concept  ] KV Cache\n             concepts/kv-cache.md\n             § KV Cache > Memory growth\n  [ 10.72] [concept  ] KV Cache\n             concepts/kv-cache.md\n             § KV Cache > Paged attention\n  [  3.84] [synthesis] Where the cost lives: training versus inference\n             synthesis/training-vs-inference-cost.md\n             § Where the cost lives: training versus inference > Inference compounds with traffic\n  [  3.48] [entity   ] CUDA\n             entities/cuda.md\n             § CUDA > Memory hierarchy\n  [  3.45] [entity   ] CUDA\n             entities/cuda.md\n             § CUDA > Out-of-memory errors\n  [  2.09] [concept  ] Distributed Training\n             concepts/distributed-training.md\n             § Distributed Training\n  [  2.09] [concept  ] Distributed Training\n             concepts/distributed-training.md\n             § Distributed Training > Activation checkpointing\n  [  2.09] [synthesis] Numeric precision tradeoffs across the stack\n             synthesis/precision-tradeoffs.md\n             § Numeric precision tradeoffs across the stack\n  [  2.03] [entity   ] PyTorch\n             entities/pytorch.md\n             § PyTorch > Fused kernels\n  [  1.97] [concept  ] Quantization\n             concepts/quantization.md\n             § Quantization\n",
+   "stdout": "「kv cache memory」の上位 10 件:\n\n  [ 11.22] [concept  ] KV Cache\n             concepts/kv-cache.md\n             § KV Cache > Memory growth\n  [ 10.72] [concept  ] KV Cache\n             concepts/kv-cache.md\n             § KV Cache > Paged attention\n  [  3.84] [synthesis] Where the cost lives: training versus inference\n             synthesis/training-vs-inference-cost.md\n             § Where the cost lives: training versus inference > Inference compounds with traffic\n  [  3.48] [entity   ] CUDA\n             entities/cuda.md\n             § CUDA > Memory hierarchy\n  [  3.45] [entity   ] CUDA\n             entities/cuda.md\n             § CUDA > Out-of-memory errors\n  [  2.09] [concept  ] Distributed Training\n             concepts/distributed-training.md\n             § Distributed Training\n  [  2.09] [concept  ] Distributed Training\n             concepts/distributed-training.md\n             § Distributed Training > Activation checkpointing\n  [  2.09] [synthesis] Numeric precision tradeoffs across the stack\n             synthesis/precision-tradeoffs.md\n             § Numeric precision tradeoffs across the stack\n  [  2.03] [entity   ] PyTorch\n             entities/pytorch.md\n             § PyTorch > Fused kernels\n  [  1.97] [concept  ] Quantization\n             concepts/quantization.md\n             § Quantization\n",
    "stderr": "",
    "returncode": 0
   },
@@ -47,7 +47,7 @@
     "--granularity",
     "page"
    ],
-   "stdout": "Top 7 results for: 'kv cache memory'\n\n  [  9.73] [concept  ] KV Cache\n             concepts/kv-cache.md\n  [  4.04] [synthesis] Where the cost lives: training versus inference\n             synthesis/training-vs-inference-cost.md\n  [  2.37] [entity   ] CUDA\n             entities/cuda.md\n  [  1.70] [concept  ] Distributed Training\n             concepts/distributed-training.md\n  [  1.24] [entity   ] PyTorch\n             entities/pytorch.md\n  [  1.21] [concept  ] Quantization\n             concepts/quantization.md\n  [  1.19] [synthesis] Numeric precision tradeoffs across the stack\n             synthesis/precision-tradeoffs.md\n",
+   "stdout": "「kv cache memory」の上位 7 件:\n\n  [  9.73] [concept  ] KV Cache\n             concepts/kv-cache.md\n  [  4.04] [synthesis] Where the cost lives: training versus inference\n             synthesis/training-vs-inference-cost.md\n  [  2.37] [entity   ] CUDA\n             entities/cuda.md\n  [  1.70] [concept  ] Distributed Training\n             concepts/distributed-training.md\n  [  1.24] [entity   ] PyTorch\n             entities/pytorch.md\n  [  1.21] [concept  ] Quantization\n             concepts/quantization.md\n  [  1.19] [synthesis] Numeric precision tradeoffs across the stack\n             synthesis/precision-tradeoffs.md\n",
    "stderr": "",
    "returncode": 0
   },
@@ -74,7 +74,7 @@
     "eval/retrieval/corpus/wiki",
     "--no-embed"
    ],
-   "stdout": "Top 1 results for: 'pipeline bubble'\n\n  [ 10.00] [concept  ] Distributed Training\n             concepts/distributed-training.md\n             § Distributed Training > Pipeline parallelism\n",
+   "stdout": "「pipeline bubble」の上位 1 件:\n\n  [ 10.00] [concept  ] Distributed Training\n             concepts/distributed-training.md\n             § Distributed Training > Pipeline parallelism\n",
    "stderr": "",
    "returncode": 0
   },
@@ -113,7 +113,7 @@
     "--granularity",
     "page"
    ],
-   "stdout": "Top 1 results for: 'pipeline bubble'\n\n  [  4.41] [concept  ] Distributed Training\n             concepts/distributed-training.md\n",
+   "stdout": "「pipeline bubble」の上位 1 件:\n\n  [  4.41] [concept  ] Distributed Training\n             concepts/distributed-training.md\n",
    "stderr": "",
    "returncode": 0
   },
@@ -140,7 +140,7 @@
     "eval/retrieval/corpus/wiki",
     "--no-embed"
    ],
-   "stdout": "Top 10 results for: 'attention heads'\n\n  [  9.73] [concept  ] Attention Mechanism\n             concepts/attention-mechanism.md\n             § Attention Mechanism > Multi-head attention\n  [  3.52] [concept  ] Attention Mechanism\n             concepts/attention-mechanism.md\n             § Attention Mechanism > Self-attention versus cross-attention\n  [  3.44] [source   ] Attention Is All You Need\n             sources/attention-paper.md\n             § Attention Is All You Need\n  [  3.10] [source   ] Attention Is All You Need\n             sources/attention-paper.md\n             § Attention Is All You Need > Contribution\n  [  2.73] [concept  ] KV Cache\n             concepts/kv-cache.md\n             § KV Cache > Paged attention\n  [  2.64] [entity   ] PyTorch\n             entities/pytorch.md\n             § PyTorch > Fused kernels\n  [  1.82] [entity   ] Ilya Sutskever\n             entities/ilya-sutskever.md\n             § Ilya Sutskever > Sequence to sequence\n  [  1.59] [concept  ] KV Cache\n             concepts/kv-cache.md\n             § KV Cache\n  [  1.59] [synthesis] Why transformers displaced recurrent networks\n             synthesis/why-transformers-won.md\n             § Why transformers displaced recurrent networks > Constant path length\n  [  1.39] [synthesis] Why transformers displaced recurrent networks\n             synthesis/why-transformers-won.md\n             § Why transformers displaced recurrent networks > Parallelism during training\n",
+   "stdout": "「attention heads」の上位 10 件:\n\n  [  9.73] [concept  ] Attention Mechanism\n             concepts/attention-mechanism.md\n             § Attention Mechanism > Multi-head attention\n  [  3.52] [concept  ] Attention Mechanism\n             concepts/attention-mechanism.md\n             § Attention Mechanism > Self-attention versus cross-attention\n  [  3.44] [source   ] Attention Is All You Need\n             sources/attention-paper.md\n             § Attention Is All You Need\n  [  3.10] [source   ] Attention Is All You Need\n             sources/attention-paper.md\n             § Attention Is All You Need > Contribution\n  [  2.73] [concept  ] KV Cache\n             concepts/kv-cache.md\n             § KV Cache > Paged attention\n  [  2.64] [entity   ] PyTorch\n             entities/pytorch.md\n             § PyTorch > Fused kernels\n  [  1.82] [entity   ] Ilya Sutskever\n             entities/ilya-sutskever.md\n             § Ilya Sutskever > Sequence to sequence\n  [  1.59] [concept  ] KV Cache\n             concepts/kv-cache.md\n             § KV Cache\n  [  1.59] [synthesis] Why transformers displaced recurrent networks\n             synthesis/why-transformers-won.md\n             § Why transformers displaced recurrent networks > Constant path length\n  [  1.39] [synthesis] Why transformers displaced recurrent networks\n             synthesis/why-transformers-won.md\n             § Why transformers displaced recurrent networks > Parallelism during training\n",
    "stderr": "",
    "returncode": 0
   },
@@ -179,7 +179,7 @@
     "--granularity",
     "page"
    ],
-   "stdout": "Top 6 results for: 'attention heads'\n\n  [  6.20] [concept  ] Attention Mechanism\n             concepts/attention-mechanism.md\n  [  2.49] [source   ] Attention Is All You Need\n             sources/attention-paper.md\n  [  1.92] [concept  ] KV Cache\n             concepts/kv-cache.md\n  [  1.74] [entity   ] PyTorch\n             entities/pytorch.md\n  [  1.73] [synthesis] Why transformers displaced recurrent networks\n             synthesis/why-transformers-won.md\n  [  1.21] [entity   ] Ilya Sutskever\n             entities/ilya-sutskever.md\n",
+   "stdout": "「attention heads」の上位 6 件:\n\n  [  6.20] [concept  ] Attention Mechanism\n             concepts/attention-mechanism.md\n  [  2.49] [source   ] Attention Is All You Need\n             sources/attention-paper.md\n  [  1.92] [concept  ] KV Cache\n             concepts/kv-cache.md\n  [  1.74] [entity   ] PyTorch\n             entities/pytorch.md\n  [  1.73] [synthesis] Why transformers displaced recurrent networks\n             synthesis/why-transformers-won.md\n  [  1.21] [entity   ] Ilya Sutskever\n             entities/ilya-sutskever.md\n",
    "stderr": "",
    "returncode": 0
   },
@@ -207,7 +207,7 @@
     "--no-embed"
    ],
    "stdout": "",
-   "stderr": "No matches.\n",
+   "stderr": "一致する結果がない。\n",
    "returncode": 0
   },
   {
@@ -246,7 +246,7 @@
     "page"
    ],
    "stdout": "",
-   "stderr": "No matches.\n",
+   "stderr": "一致する結果がない。\n",
    "returncode": 0
   },
   {
@@ -272,7 +272,7 @@
     "eval/retrieval/corpus/wiki",
     "--no-embed"
    ],
-   "stdout": "Top 5 results for: 'OpenAI GPT-4 release'\n\n  [ 11.56] [entity   ] GPT-4\n             entities/gpt-4.md\n             § GPT-4\n  [ 10.23] [entity   ] OpenAI\n             entities/openai.md\n             § OpenAI\n  [  9.67] [entity   ] GPT-4\n             entities/gpt-4.md\n             § GPT-4 > Multimodal input\n  [  4.65] [entity   ] OpenAI\n             entities/openai.md\n  [  2.28] [entity   ] Ilya Sutskever\n             entities/ilya-sutskever.md\n             § Ilya Sutskever\n",
+   "stdout": "「OpenAI GPT-4 release」の上位 5 件:\n\n  [ 11.56] [entity   ] GPT-4\n             entities/gpt-4.md\n             § GPT-4\n  [ 10.23] [entity   ] OpenAI\n             entities/openai.md\n             § OpenAI\n  [  9.67] [entity   ] GPT-4\n             entities/gpt-4.md\n             § GPT-4 > Multimodal input\n  [  4.65] [entity   ] OpenAI\n             entities/openai.md\n  [  2.28] [entity   ] Ilya Sutskever\n             entities/ilya-sutskever.md\n             § Ilya Sutskever\n",
    "stderr": "",
    "returncode": 0
   },
@@ -311,7 +311,7 @@
     "--granularity",
     "page"
    ],
-   "stdout": "Top 3 results for: 'OpenAI GPT-4 release'\n\n  [ 10.38] [entity   ] GPT-4\n             entities/gpt-4.md\n  [  8.88] [entity   ] OpenAI\n             entities/openai.md\n  [  1.84] [entity   ] Ilya Sutskever\n             entities/ilya-sutskever.md\n",
+   "stdout": "「OpenAI GPT-4 release」の上位 3 件:\n\n  [ 10.38] [entity   ] GPT-4\n             entities/gpt-4.md\n  [  8.88] [entity   ] OpenAI\n             entities/openai.md\n  [  1.84] [entity   ] Ilya Sutskever\n             entities/ilya-sutskever.md\n",
    "stderr": "",
    "returncode": 0
   },

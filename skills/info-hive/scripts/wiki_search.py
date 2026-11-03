@@ -13,7 +13,7 @@ wiki_search.py — wiki のページを対象にした、セクション単位�
 依存パッケージなしで使え、安全な代替手段としても残っている。
 
 使い方:
-    python wiki_search.py "query terms" [options]
+    python wiki_search.py "検索語" [オプション]
 
 オプション:
     --wiki <dir>            wiki のディレクトリ（既定: ./wiki）
@@ -55,7 +55,7 @@ from pathlib import Path
 # スクリプトとして実行したときも、テストから importlib で読み込んだときも、
 # 同じディレクトリの wiki_text を import できるようにする。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from wiki_text import canonical_meta, nfc, normalize_tags, posix_rel  # noqa: E402
+from wiki_text import canonical_meta, ljust_display, localize_argparse, nfc, normalize_tags, posix_rel  # noqa: E402
 
 
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
@@ -199,17 +199,17 @@ def load_parse_cache(cache_path: Path) -> dict:
     try:
         payload = json.loads(cache_path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        print("cache: rebuilding (missing)", file=sys.stderr)
+        print("パースキャッシュを作り直す（ファイルがない）", file=sys.stderr)
         return {}
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        print(f"cache: rebuilding ({exc})", file=sys.stderr)
+        print(f"パースキャッシュを作り直す（{exc}）", file=sys.stderr)
         return {}
     if not isinstance(payload, dict) or payload.get("schema") != PARSE_CACHE_SCHEMA:
-        print("cache: rebuilding (unsupported schema)", file=sys.stderr)
+        print("パースキャッシュを作り直す（対応していない形式）", file=sys.stderr)
         return {}
     files = payload.get("files")
     if not isinstance(files, dict):
-        print("cache: rebuilding (invalid files)", file=sys.stderr)
+        print("パースキャッシュを作り直す（files が不正）", file=sys.stderr)
         return {}
     for rel_path, entry in files.items():
         sections = entry.get("sections") if isinstance(entry, dict) else None
@@ -233,7 +233,7 @@ def load_parse_cache(cache_path: Path) -> dict:
             and all(isinstance(link, str) for link in entry["links"])
             and valid_sections
         ):
-            print(f"cache: rebuilding (invalid entry: {rel_path})", file=sys.stderr)
+            print(f"パースキャッシュを作り直す（不正な項目: {rel_path}）", file=sys.stderr)
             return {}
     return files
 
@@ -558,7 +558,7 @@ def embed_model_spec(name: str | None = None) -> dict:
         return EMBED_MODELS[name]
     except KeyError:
         raise EmbeddingConfigError(
-            f"{EMBED_MODEL_ENV} names an unsupported model; choose one of {', '.join(EMBED_MODELS)}"
+            f"{EMBED_MODEL_ENV} のモデルには対応していない。次のどれかを指定する: {'、'.join(EMBED_MODELS)}"
         ) from None
 
 
@@ -614,8 +614,8 @@ def load_local_embedding_backend():
         from fastembed import TextEmbedding
     except ImportError as exc:
         raise RuntimeError(
-            "local semantic dependencies are missing; use `uv run --script` "
-            "or install fastembed and sqlite-vec"
+            "ローカルの埋め込み検索に必要なパッケージがない。`uv run --script` で実行するか、"
+            "fastembed と sqlite-vec をインストールする"
         ) from exc
 
     cache_dir = Path(
@@ -725,11 +725,12 @@ def sync_vector_index(
     )
     if len(vectors) != len(changed):
         raise ValueError(
-            f"local embedding model returned {len(vectors)} vectors for {len(changed)} sections"
+            f"ローカルの埋め込みモデルが返したベクトルの数（{len(vectors)}）が、"
+            f"セクションの数（{len(changed)}）と合わない"
         )
     if changed:
         print(
-            f"embedding {len(changed)} new or changed sections via {embed_model_name()}...",
+            f"追加・変更された {len(changed)} 件のセクションを {embed_model_name()} で埋め込む……",
             file=sys.stderr,
         )
 
@@ -901,8 +902,11 @@ def decide_gate(args, rows: list[dict], texts: list[str]) -> tuple[list[int], di
         threshold = wiki_decide.QUESTIONS["relevance"]["default_threshold"]
     kept, row_decisions, decision = wiki_decide.gate_pool(client, args.query, rows, texts, threshold, args.top)
     if not args.json:
-        state = "failed open" if decision["failed_open"] else f"kept {decision['kept']} of {decision['pool']}"
-        wiki_decide.note(f"relevance gate {state} ({decision['backend']}, threshold {threshold})")
+        if decision["failed_open"]:
+            state = "関連度のゲートで判定できなかったので、すべての行を残した"
+        else:
+            state = f"関連度のゲートで {decision['pool']} 行のうち {decision['kept']} 行を残した"
+        wiki_decide.note(f"{state}（{decision['backend']}、しきい値 {threshold}）")
     return kept, row_decisions, decision
 
 
@@ -912,13 +916,27 @@ def decision_default_threshold(check: str) -> str:
     try:
         return str(json.loads(path.read_text(encoding="utf-8"))["checks"][check]["default_threshold"])
     except (OSError, ValueError, KeyError):
-        return f"see {path.name}"
+        return f"{path.name} を参照"
 
 
 def gated_json(args, items: list[tuple], rows: list[dict], texts: list[str]) -> tuple[list[tuple], list[dict], dict]:
     kept, row_decisions, decision = decide_gate(args, rows, texts)
     kept_rows = [{**rows[i], "decision": row_decisions[i]} if i in row_decisions else rows[i] for i in kept]
     return [items[i] for i in kept], kept_rows, decision
+
+
+NO_MATCHES = "一致する結果がない。"
+NO_ROWS_PASSED_GATE = "関連度のゲートを通った行がない。--decide を付けずに実行すると、ゲートの前の結果を見られる。"
+
+
+def results_heading(query: str, count: int) -> str:
+    """テキスト出力の見出し行。"""
+    return f"「{query}」の上位 {count} 件:"
+
+
+def type_cell(page_type) -> str:
+    """結果の行の type の欄。全角の文字を 2 桁と数えて、幅を 9 桁にそろえる。"""
+    return ljust_display(str(page_type), 9)
 
 
 def cmd_search(args, pages: list[dict]) -> None:
@@ -929,7 +947,7 @@ def cmd_search(args, pages: list[dict]) -> None:
         if args.json:
             emit_empty_json(args)
         else:
-            print("No pages matched the filters.", file=sys.stderr)
+            print("絞り込みの条件に合うページがない。", file=sys.stderr)
         return
     query_tokens = tokenize(args.query)
     # 記号だけのクエリなどは、語彙側のトークンが 0 個になる。埋め込み検索は意味で当てられる
@@ -939,7 +957,7 @@ def cmd_search(args, pages: list[dict]) -> None:
         if args.json:
             emit_empty_json(args)
         else:
-            print("Empty query.", file=sys.stderr)
+            print("クエリに検索できる語がない。", file=sys.stderr)
         return
 
     if args.granularity == "page":
@@ -951,7 +969,7 @@ def cmd_search(args, pages: list[dict]) -> None:
             if args.json:
                 emit_empty_json(args)
             else:
-                print("No matches.", file=sys.stderr)
+                print(NO_MATCHES, file=sys.stderr)
             return
         if decide:
             rows = [json_result(score, page) for score, page in top]
@@ -960,17 +978,17 @@ def cmd_search(args, pages: list[dict]) -> None:
                 emit_json(args, rows, decision=decision)
                 return
             if not top:
-                print("No rows passed the relevance gate. Run again without --decide to see them.", file=sys.stderr)
+                print(NO_ROWS_PASSED_GATE, file=sys.stderr)
                 return
         if args.json:
             emit_json(args, [json_result(score, page) for score, page in top])
             return
-        print(f"Top {len(top)} results for: {args.query!r}")
+        print(results_heading(args.query, len(top)))
         print()
         for score, page in top:
             title = page["meta"].get("title") or page["slug"]
             page_type = page["meta"].get("type", "?")
-            print(f"  [{score:6.2f}] [{page_type:9}] {title}")
+            print(f"  [{score:6.2f}] [{type_cell(page_type)}] {title}")
             print(f"             {page['rel_path']}")
         return
 
@@ -1024,8 +1042,7 @@ def cmd_search(args, pages: list[dict]) -> None:
         except Exception as exc:
             label = embedding_failure_label(exc)
             print(
-                f"warning: local semantic search unavailable ({label}); "
-                "falling back to lexical",
+                f"警告: ローカルの埋め込み検索を使えない（{label}）。語彙検索だけで続ける",
                 file=sys.stderr,
             )
 
@@ -1044,7 +1061,7 @@ def cmd_search(args, pages: list[dict]) -> None:
         if args.json:
             emit_empty_json(args, mode)
         else:
-            print("No matches.", file=sys.stderr)
+            print(NO_MATCHES, file=sys.stderr)
         return
     if args.json or decide:
         sections_by_page = {page["rel_path"]: page["sections"] for page in filtered}
@@ -1065,15 +1082,15 @@ def cmd_search(args, pages: list[dict]) -> None:
             emit_json(args, rows, mode, decision)
             return
         if not top_sections:
-            print("No rows passed the relevance gate. Run again without --decide to see them.", file=sys.stderr)
+            print(NO_ROWS_PASSED_GATE, file=sys.stderr)
             return
-    print(f"Top {len(top_sections)} results for: {args.query!r}")
+    print(results_heading(args.query, len(top_sections)))
     print()
     for score, section, _retrievers in top_sections:
         page = section["page"]
         title = page["meta"].get("title") or page["slug"]
         page_type = page["meta"].get("type", "?")
-        print(f"  [{score:6.2f}] [{page_type:9}] {title}")
+        print(f"  [{score:6.2f}] [{type_cell(page_type)}] {title}")
         print(f"             {page['rel_path']}")
         if section["heading_path"]:
             print(f"             § {' > '.join(section['heading_path'])}")
@@ -1088,9 +1105,9 @@ def cmd_backlinks(args, pages: list[dict]) -> None:
                for link in page["links"]):
             inbound.append(page)
     if not inbound:
-        print(f"No pages link to [[{target}]].", file=sys.stderr)
+        print(f"[[{target}]] にリンクしているページはない。", file=sys.stderr)
         return
-    print(f"Pages linking to [[{target}]] ({len(inbound)}):")
+    print(f"[[{target}]] にリンクしているページ（{len(inbound)} 件）:")
     for page in inbound:
         title = page["meta"].get("title") or page["slug"]
         print(f"  - {title}  ({page['rel_path']})")
@@ -1106,54 +1123,54 @@ def cmd_top_linked(args, pages: list[dict]) -> None:
                 inbound_count[target] += 1
     top = inbound_count.most_common(args.top_linked)
     if not top:
-        print("No links found in the wiki.", file=sys.stderr)
+        print("wiki に wikilink がない。", file=sys.stderr)
         return
-    print(f"Top {len(top)} most-linked-to pages (hubs):")
+    print(f"被リンクの多いページ（ハブ）の上位 {len(top)} 件:")
     for slug, count in top:
         # タイトルに対応するページを探す
         match = next((p for p in pages if p["slug"] == slug), None)
         title = (match["meta"].get("title") if match else None) or slug
-        marker = "" if match else "  [BROKEN LINK]"
+        marker = "" if match else "  ［リンク切れ］"
         print(f"  {count:4d}  {title}  ({slug}){marker}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("query", nargs="?", default="", help="Query terms.")
-    parser.add_argument("--wiki", type=Path, default=Path("wiki"), help="Wiki directory (default: ./wiki).")
-    parser.add_argument("--top", type=int, default=10, help="Top N results (default: 10).")
-    parser.add_argument("--type", help="Filter by frontmatter type.")
-    parser.add_argument("--tag", action="append", default=[], help="Filter by tag (repeatable).")
-    parser.add_argument("--since", help="Only pages updated on or after YYYY-MM-DD.")
-    parser.add_argument("--backlinks", help="Find pages linking to this slug.")
-    parser.add_argument("--top-linked", type=int, help="Show the N most-linked-to pages.")
+    parser = localize_argparse(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter))
+    parser.add_argument("query", nargs="?", default="", help="検索語")
+    parser.add_argument("--wiki", type=Path, default=Path("wiki"), help="wiki のディレクトリ（既定: ./wiki）")
+    parser.add_argument("--top", type=int, default=10, help="上位 N 件の結果を返す（既定: 10）")
+    parser.add_argument("--type", help="frontmatter の type で絞り込む")
+    parser.add_argument("--tag", action="append", default=[], help="タグで絞り込む（複数指定できる）")
+    parser.add_argument("--since", help="YYYY-MM-DD 以降に更新されたページだけを対象にする")
+    parser.add_argument("--backlinks", help="このスラッグにリンクしているページを探す")
+    parser.add_argument("--top-linked", type=int, help="被リンクの多い N ページを表示する")
     parser.add_argument("--cache", nargs="?", const="AUTO", default=None,
-                        help="Incremental parse cache path (default with no value: wiki/.wiki-cache/search-index.json).")
+                        help="差分で更新するパースキャッシュのパス（値を省くと wiki/.wiki-cache/search-index.json）")
     parser.add_argument("--granularity", choices=("section", "page"), default="section",
-                        help="Search sections (default) or whole pages.")
+                        help="セクション（既定）とページ全体のどちらを検索するか")
     parser.add_argument("--per-page", type=int, default=2,
-                        help="Maximum section results per page (default: 2).")
-    parser.add_argument("--json", action="store_true", help="Emit structured JSON search results.")
-    parser.add_argument("--no-embed", action="store_true", help="Force lexical-only search.")
+                        help="1 ページあたりのセクションの結果の最大数（既定: 2）")
+    parser.add_argument("--json", action="store_true", help="構造化した検索結果を JSON で出力する（キーは英語のまま）")
+    parser.add_argument("--no-embed", action="store_true", help="語彙検索（BM25）だけを使う")
     parser.add_argument("--decide", action="store_true",
-                        help="Keep only rows that the decision model rates relevant. Needs INFO_HIVE_DECISIONS.")
+                        help="判定モデルが関連ありと判定した行だけを残す。INFO_HIVE_DECISIONS が必要")
     parser.add_argument("--decide-pool", type=int, default=20,
-                        help="Rows to score with --decide (default: 20).")
+                        help="--decide で採点する行の数（既定: 20）")
     parser.add_argument("--decide-threshold", type=float, default=None,
-                        help=f"P(relevant) needed to keep a row with --decide "
-                             f"(default: {decision_default_threshold('relevance')}).")
+                        help=f"--decide で行を残すのに必要な P(relevant)"
+                             f"（既定: {decision_default_threshold('relevance')}）")
     args = parser.parse_args()
     cache_path = None
     if args.cache:
         cache_path = args.wiki / ".wiki-cache" / "search-index.json" if args.cache == "AUTO" else Path(args.cache)
 
     if not args.wiki.exists():
-        print(f"Wiki directory not found: {args.wiki}", file=sys.stderr)
+        print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
         sys.exit(1)
 
     pages = collect_pages(args.wiki, cache_path)
     if not pages:
-        print(f"No wiki pages found under {args.wiki}", file=sys.stderr)
+        print(f"wiki のページが見つからない: {args.wiki}", file=sys.stderr)
         sys.exit(0)
 
     if args.backlinks:

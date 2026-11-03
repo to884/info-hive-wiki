@@ -63,7 +63,7 @@ def stream_command(command, text, agent, trace_path=None, env=None):
                 except ValueError:
                     banners.append(line[-1000:])
                     continue  # 起動時のバナーは実行の証拠ではない。
-                require(isinstance(item, dict), 'CLI event must be an object')
+                require(isinstance(item, dict), 'CLI のイベントは JSON のオブジェクトでなければならない')
                 events.append(item)
                 for observed in observable(agent, item):
                     append_trace(trace_path, observed)
@@ -75,7 +75,7 @@ def stream_command(command, text, agent, trace_path=None, env=None):
                 diagnostics = errors.read()[-2000:] + ''.join(banners)[:1500] + ''.join(banners)[-500:]
                 diagnostics += json.dumps([e for e in events if e.get('type') == 'error'])
                 detail = re.sub(r'(?i)(?:sk-[\w-]+|bearer\s+[\w.\-]+)', '[redacted]', diagnostics[-4000:])
-                raise ValueError(f'{agent} exited {code}: {detail}; retained observable trace: {trace_path}')
+                raise ValueError(f'{agent} が終了コード {code} で終わった: {detail}。観測できる記録を残した: {trace_path}')
             return events
         finally:
             if process.poll() is None:
@@ -89,19 +89,19 @@ def answer_json(text):
     if text.startswith('```') and text.endswith('```'):
         text = text.split('\n', 1)[1].rsplit('```', 1)[0].strip()
     result = json.loads(text)
-    require(isinstance(result, dict), 'Structured answer must be an object')
+    require(isinstance(result, dict), '構造化された回答は JSON のオブジェクトでなければならない')
     return result
 
 
 def parse_native(agent, events):
     observed = [o for e in events for o in observable(agent, e)]
     cost, usage = None, {'input_tokens': None, 'output_tokens': None}
-    require(not any(e.get('type') == 'error' for e in events), f'{agent} returned an error')
+    require(not any(e.get('type') == 'error' for e in events), f'{agent} がエラーを返した')
     if agent in ('pi', 'omp'):
         messages = [e['message'] for e in events if e.get('type') == 'message_end'
                     and e.get('message', {}).get('role') == 'assistant']
         require(messages and messages[-1].get('stopReason') not in ('error', 'aborted', 'length'),
-                'Agent completion missing: ' + (messages[-1].get('errorMessage', '') if messages else 'no assistant message'))
+                'エージェントの完了のイベントがない: ' + (messages[-1].get('errorMessage', '') if messages else 'アシスタントのメッセージがない'))
         text = ''.join(c['text'] for c in messages[-1]['content'] if c.get('type') == 'text')
         counts = [m.get('usage', {}) for m in messages]
         if all(all(type(c.get(k)) is int for k in ('input', 'output')) for c in counts):
@@ -112,21 +112,21 @@ def parse_native(agent, events):
         ids = {e['toolCallId'] for e in observed}
     elif agent == 'cursor':
         results = [e for e in events if e.get('type') == 'result']
-        require(len(results) == 1 and results[0].get('subtype') == 'success' and not results[0].get('is_error'), 'Cursor completion missing')
+        require(len(results) == 1 and results[0].get('subtype') == 'success' and not results[0].get('is_error'), 'Cursor の完了のイベントがない')
         text = results[0]['result']
         ids = {e['call_id'] for e in observed}
     elif agent == 'gemini':
         results = [e for e in events if e.get('type') == 'result']
-        require(len(results) == 1 and results[0].get('status') == 'success', 'Gemini completion missing')
+        require(len(results) == 1 and results[0].get('status') == 'success', 'Gemini の完了のイベントがない')
         text = ''.join(e.get('content', '') for e in events if e.get('type') == 'message' and e.get('role') == 'assistant')
         stats = results[0].get('stats', {})
         usage = {k: stats.get(k) for k in usage}
         ids = {e['tool_id'] for e in observed}
     else:
         finished = [e['part'] for e in events if e.get('type') == 'step_finish']
-        require(finished and finished[-1].get('reason') == 'stop', 'OpenCode completion missing')
+        require(finished and finished[-1].get('reason') == 'stop', 'OpenCode の完了のイベントがない')
         texts = [e['part']['text'] for e in events if e.get('type') == 'text']
-        require(texts, 'OpenCode answer missing')
+        require(texts, 'OpenCode の回答がない')
         text = texts[-1]
         if all(isinstance(p.get('tokens'), dict) for p in finished):
             usage = {'input_tokens': sum(p['tokens']['input'] + sum(p['tokens'].get('cache', {}).values()) for p in finished),
@@ -178,9 +178,9 @@ def acp(command, request, text, env=None):
                 elif item.get('method') and 'id' in item:
                     send({'id': item['id'], 'error': {'code': -32601, 'message': 'Client capability unavailable'}})
                 elif item.get('id') == wanted:
-                    require('error' not in item, f'ACP {method} failed: {item.get("error")}')
+                    require('error' not in item, f'ACP の {method} が失敗した: {item.get("error")}')
                     return item['result']
-            raise ValueError('ACP stream ended before completion')
+            raise ValueError('完了する前に ACP のストリームが終わった')
         try:
             info = rpc('initialize', {'protocolVersion': 1, 'clientCapabilities': {},
                        'clientInfo': {'name': 'wiki-evolve', 'version': '3.2.0'}})
@@ -197,7 +197,7 @@ def acp(command, request, text, env=None):
                 patched = json.loads(result.stdout)
                 resolved = patched.get('resolved', {})
                 require(patched.get('ok') is True and '/'.join((resolved.get('modelProvider', ''), resolved.get('model', ''))) == request['model'],
-                        'Gateway did not confirm the requested canonical provider/model')
+                        'ゲートウェイが、指定した provider/model を確認しなかった')
                 append_trace(request.get('trace_path'), {'type': 'model-selected', 'model': request['model'], 'session': sid})
             elif models.get('currentModelId') != request['model']:
                 rpc('session/set_model', {'sessionId': sid, 'modelId': request['model']})
@@ -206,15 +206,15 @@ def acp(command, request, text, env=None):
                 # 新しく作った空のこのセッションを読み込み直し、実際に使われるプロバイダーを確かめる。
                 confirmed = rpc('session/load', {'sessionId': sid, 'cwd': str(Path.cwd()), 'mcpServers': []})
                 require(confirmed.get('models', {}).get('currentModelId') == request['model'],
-                        'Hermes did not resolve the requested provider:model; repair its authentication before inference')
+                        'Hermes が、指定した provider:model を使えなかった。推論の前に Hermes の認証を直す')
             final = rpc('session/prompt', {'sessionId': sid, 'prompt': [{'type': 'text', 'text': text}]})
-            require(final.get('stopReason') == 'end_turn', 'ACP turn did not finish normally')
+            require(final.get('stopReason') == 'end_turn', 'ACP のターンが正常に終わらなかった')
             append_trace(request.get('trace_path'), {'type': 'public-answer', 'text': ''.join(chunks)})
             if not ''.join(chunks).strip():
                 errors.seek(0)
                 detail = errors.read().decode(errors='replace')[-2500:]
                 detail = re.sub(r'(?i)(?:sk-[\w-]+|bearer\s+[\w.\-]+)', '[redacted]', detail)
-                raise ValueError('ACP returned no answer: ' + detail)
+                raise ValueError('ACP が回答を返さなかった: ' + detail)
             measured = final.get('usage') or {}
             return dict(answer_json(''.join(chunks)), events=observed,
                         tool_calls=len({e['toolCallId'] for e in observed}), cost=None,

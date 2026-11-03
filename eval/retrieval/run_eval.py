@@ -49,6 +49,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 SCRIPT = REPO / "skills" / "info-hive" / "scripts" / "wiki_search.py"
+sys.path.insert(0, str(SCRIPT.parent))
+from wiki_text import ljust_display, localize_argparse  # noqa: E402
 
 # 評価セット。コーパスとクエリ集の組。
 # nfd_files に挙げたファイルは、評価のときに一時ディレクトリへ複製し、ファイル名を NFD にする。
@@ -122,7 +124,7 @@ def run_search_bytes(query, granularity="section", filters=None, no_embed=True, 
     proc = subprocess.run(cmd, capture_output=True, cwd=str(REPO))  # デコードせずにバイト列のまま
     if proc.returncode != 0:
         detail = proc.stderr.decode("utf-8", "replace").strip()
-        raise SystemExit(f"search failed for {query!r}: {detail}")
+        raise SystemExit(f"検索に失敗した（{query!r}）: {detail}")
     return proc.stdout
 
 
@@ -235,7 +237,7 @@ def cache_invariant(cache_queries):
 
 
 def print_table(rows):
-    header = "| mode    | " + " | ".join(METRIC_COLUMNS) + " |"
+    header = f"| {ljust_display('方式', 7)} | " + " | ".join(METRIC_COLUMNS) + " |"
     sep = "|" + "|".join(["---------"] + ["----------"] * len(METRIC_COLUMNS)) + "|"
     print(header)
     print(sep)
@@ -308,7 +310,7 @@ def prepare_corpus(spec, tmp):
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(src.read_bytes())
     if nfd_files:
-        raise SystemExit(f"nfd_files not found in {corpus}: {sorted(nfd_files)}")
+        raise SystemExit(f"nfd_files のファイルが {corpus} にない: {sorted(nfd_files)}")
     return dest_root
 
 
@@ -320,30 +322,31 @@ def main():
     parser.add_argument(
         "--gate", action="store_true",
         help=(
-            "Exit 1 if section recall regresses from page mode, or available "
-            "hybrid retrieval regresses section recall/false-positive rate."
+            "セクション単位の recall がページ単位より下がるか、ハイブリッド検索を使えるときに"
+            "その recall か偽陽性率がセクション単位より悪くなると、終了コード 1 で終える"
         ),
     )
     parser.add_argument(
         "--set", choices=sorted(SETS), default="en",
-        help="Evaluation set: en (default) or ja.",
+        help="評価セット。en（既定）か ja",
     )
     parser.add_argument(
         "--save", metavar="PATH",
-        help="Write metrics and per-query results as JSON to PATH.",
+        help="指標とクエリごとの結果を JSON で PATH に保存する",
     )
     parser.add_argument(
         "--baseline", nargs="?", const="AUTO", metavar="PATH",
         help=(
-            "Exit 1 if recall@10 or MRR falls, or fp_rate rises, by more than "
-            f"{BASELINE_TOLERANCE} from the saved baseline "
-            "(default with no value: baselines/<set>.json)."
+            f"保存した基準値と比べて、recall@10 か MRR が {BASELINE_TOLERANCE} を超えて下がるか、"
+            f"fp_rate が同じ幅を超えて上がると、終了コード 1 で終える"
+            "（値を省くと baselines/<set>.json）"
         ),
     )
+    localize_argparse(parser)
     args = parser.parse_args()
 
     if not SCRIPT.exists():
-        raise SystemExit(f"wiki_search.py not found at {SCRIPT}")
+        raise SystemExit(f"wiki_search.py が見つからない: {SCRIPT}")
     queries = json.loads(SETS[args.set]["queries"].read_text(encoding="utf-8"))
     with tempfile.TemporaryDirectory() as tmp:
         CORPUS = prepare_corpus(SETS[args.set], tmp)
@@ -357,19 +360,19 @@ def evaluate(args, queries):
     if hybrid_available():
         modes.append("hybrid")
     else:
-        print("hybrid: skipped (local semantic dependencies unavailable)", file=sys.stderr)
+        print("hybrid: ローカルの埋め込み検索に必要なパッケージがないので飛ばした", file=sys.stderr)
 
     runs = {mode: run_queries(MODES[mode], queries) for mode in modes}
     rows = {mode: aggregate(queries, runs[mode]) for mode in modes}
     print_table(rows)
     if args.save:
         save_report(args.save, args.set, queries, rows, runs)
-        print(f"\nsaved: {Path(args.save).as_posix()}")
+        print(f"\n保存した: {Path(args.save).as_posix()}")
 
     exit_code = 0
 
     cache_ok = cache_invariant(CACHE_QUERIES[args.set])
-    print(f"\ncache: {'OK' if cache_ok else 'MISMATCH'}")
+    print(f"\nキャッシュ: {'一致' if cache_ok else '不一致（--cache で出力が変わった）'}")
     if not cache_ok:
         exit_code = 1  # 不一致なら --gate の有無にかかわらず失敗にする
 
@@ -383,20 +386,20 @@ def evaluate(args, queries):
             if rows["hybrid"]["fp_rate"] > rows["section"]["fp_rate"]:
                 failures.append("hybrid fp_rate > section fp_rate")
         if failures:
-            print(f"gate: FAIL ({'; '.join(failures)})", file=sys.stderr)
+            print(f"ゲート: 不合格（{'、'.join(failures)}）", file=sys.stderr)
             exit_code = 1
         else:
-            compared = "section/page + hybrid" if "hybrid" in rows else "section/page"
-            print(f"gate: PASS ({compared} retrieval quality)")
+            compared = "section/page と hybrid" if "hybrid" in rows else "section/page"
+            print(f"ゲート: 合格（{compared} の検索品質）")
 
     if args.baseline:
         path = BASELINES / f"{args.set}.json" if args.baseline == "AUTO" else Path(args.baseline)
         failures = baseline_failures(rows, json.loads(path.read_text(encoding="utf-8"))["metrics"])
         if failures:
-            print(f"baseline: FAIL ({'; '.join(failures)})", file=sys.stderr)
+            print(f"基準値: 不合格（{'、'.join(failures)}）", file=sys.stderr)
             exit_code = 1
         else:
-            print(f"baseline: PASS ({', '.join(rows)} within {BASELINE_TOLERANCE} of {path.name})")
+            print(f"基準値: 合格（{'、'.join(rows)} は {path.name} から {BASELINE_TOLERANCE} 以内）")
 
     return exit_code
 

@@ -22,6 +22,11 @@ class ReviewedDate(date):
 api.date = ReviewedDate
 from wiki_evolve_stream import parse_native
 
+# Windows の既定の文字コード（cp932 など）ではなく、UTF-8 で出力する。
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, 'reconfigure'):
+        _stream.reconfigure(encoding='utf-8')
+
 
 def fails(fn, phrase):
     try:
@@ -29,7 +34,7 @@ def fails(fn, phrase):
     except ValueError as exc:
         assert phrase in str(exc), str(exc)
     else:
-        raise AssertionError('Expected failure: ' + phrase)
+        raise AssertionError('失敗するはずだった: ' + phrase)
 
 
 answer = {'answer': '42', 'citations': ['source.md'], 'abstain': False}
@@ -138,7 +143,7 @@ for e in events:
             assert '42' in trace.read_text(encoding='utf-8') and 'private' not in trace.read_text(encoding='utf-8'), name
         os.environ['FAKE_MODEL_FALLBACK'] = '1'
         fails(lambda: lifecycle.run_runner([sys.executable, str(SCRIPTS/'wiki_evolve_agent.py'), 'hermes'],
-              dict(request, model='test:model'), root, 10), 'did not resolve')
+              dict(request, model='test:model'), root, 10), 'provider:model を使えなかった')
         del os.environ['FAKE_MODEL_FALLBACK']
         os.environ['FAKE_HANG'] = '1'
         request['trace_path'] = str(root/'interrupted.jsonl')
@@ -150,7 +155,7 @@ for e in events:
         except subprocess.TimeoutExpired:
             pass
         else:
-            raise AssertionError('Runner should have timed out')
+            raise AssertionError('ランナーは時間切れになるはずだった')
         assert json.loads((root/'interrupted.jsonl').read_text(encoding='utf-8'))['item']['command'] == 'cat source.md'
     finally:
         os.environ.clear(); os.environ.update(old)
@@ -158,27 +163,27 @@ for e in events:
     config = {'budget': {'max_calls': 10, 'max_seconds': 10, 'timeout': 5, 'max_usd': 10},
               **{r: {'argv': [sys.executable,str(SCRIPTS/'wiki_evolve_agent.py'),'claude'], 'model': 'sonnet'}
                  for r in ('inference','judge','maintainer','proposer')}}
-    fails(lambda: loop.Calls(config, root), 'Hard USD budgets require')
+    fails(lambda: loop.Calls(config, root), 'USD の厳密な予算を使うには')
     config['budget']['max_usd'] = None
     ledger = loop.Calls(config, root)
     dependency = root/'runtime-helper.py'; dependency.write_text('original', encoding='utf-8')
     ledger.runtime_files[dependency] = lifecycle.digest(dependency.read_bytes())
     dependency.write_text('edited during trial', encoding='utf-8')
-    fails(lambda: ledger.invoke('judge', {}, root), 'runtime changed')
+    fails(lambda: ledger.invoke('judge', {}, root), 'ランタイムが変わった')
     assert ledger.count == 0 and not list(root.glob('call-start-*.json'))
     # 予約できない呼び出しはプロバイダーに届かない。結果が不確かな呼び出しは、引き落とし分を保持したままにする。
     api_request = dict(request, model='claude-sonnet-5', max_usd=.01, trace_path=str(root/'api.jsonl'))
-    fails(lambda: api.execute(dict(api_request, max_usd=float('inf'))), 'finite')
+    fails(lambda: api.execute(dict(api_request, max_usd=float('inf'))), '有限の')
     expires = api.PRICE_EXPIRES
     api.PRICE_EXPIRES = date(2026, 9, 12)
-    fails(lambda: api.reservation('claude-sonnet-5'), 'expired')
+    fails(lambda: api.reservation('claude-sonnet-5'), '期限が切れている')
     api.PRICE_EXPIRES = expires
     sent = []
     def send(body):
         sent.append(body)
         return {'model': 'claude-sonnet-5', 'usage': {'input_tokens': 100, 'output_tokens': 10},
                 'stop_reason': 'tool_use', 'content': [{'type':'tool_use','name':'finish','input':answer}]}
-    fails(lambda: api.execute(api_request, send), 'cannot reserve')
+    fails(lambda: api.execute(api_request, send), '予約できない')
     assert not sent
     api_request['max_usd'] = 3
     result = api.execute(api_request, send)
@@ -227,7 +232,7 @@ for e in events:
         except subprocess.TimeoutExpired:
             pass
         else:
-            raise AssertionError('Detached child test did not time out')
+            raise AssertionError('切り離した子プロセスの試験が時間切れにならなかった')
         status = subprocess.run(['ps','-p',(root/'child.pid').read_text(encoding='utf-8'),'-o','stat='],capture_output=True,text=True,encoding='utf-8').stdout.strip()
-        assert not status or status.startswith('Z'), 'Detached tool survived timeout: '+status
-print('Nine adapter protocols, interrupted durable traces, unknown usage and pre-request dollar reservations: PASS')
+        assert not status or status.startswith('Z'), '切り離したツールが時間切れのあとも残った: '+status
+print('9 種類のアダプターのプロトコル、中断に耐える記録、不明な使用量、リクエスト前の USD の予約: PASS')

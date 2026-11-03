@@ -13,6 +13,17 @@
 - 既定の埋め込みモデルを、英語専用の `BAAI/bge-small-en-v1.5` から多言語の `intfloat/multilingual-e5-small`（fp16 の ONNX、約 0.25 GB）に替えた。クエリとセクションに `query: ` と `passage: ` の接頭辞を付け、コサイン距離の上限を 0.35 から 0.193 にした。既存の `embeddings.sqlite` は、次の検索で自動的に作り直される。環境変数 `INFO_HIVE_EMBED_MODEL` でモデルを選べるようにした。大きいモデルとして `intfloat/multilingual-e5-large`（約 2.24 GB、距離の上限 0.19）も選べる。
 - fastembed を読み込む前に `HF_HUB_DISABLE_SHARED_BLOBS=1` を設定するようにした。huggingface_hub 1.33 の共有の置き場所では、重みを `model.onnx_data` に分けたモデルを onnxruntime 1.31 が読み込めないためである。
 - 語彙側のトークンが 0 個のクエリでも、ハイブリッド検索では埋め込み検索を行うようにした。
+- `wiki_lint.py` は、空白を除いた文字数でもページの大きさを判定するようにした。目安は 4,000 文字、上限は 8,000 文字で（`--soft-char-cap`、`--hard-char-cap`）、行数の上限と、どちらかを超えたら指摘する。`--json` の `oversized_hard`・`oversized_soft` の各項目に `chars` を加えた。
+- `wiki_lint.py --suggest-pages` に、3 文字以上のカタカナ語と、3 文字以上の漢字の複合語を加えた。
+- `wiki_stats.py` に文字数を加え、大きいページを文字数の多い順に並べるようにした。
+- D2 の文分割を「。！？」に対応させ、引用の照合で日本語の文字どうしの間の改行と空白を吸収するようにした。英数字の間の空白は区別する。評価ループの引用と答えの照合も同じ規則にした。
+- 評価ループが wiki に書くページ、index と log の行、`PURPOSE.md` の文面を日本語にした。
+- スクリプトの出力、`--help`、lint の報告を日本語にした。表は全角の文字を 2 桁と数えてそろえる。`--json` のキーは英語のまま残している。
+
+### Added
+
+- `wiki_lint.py` は、`created`・`updated`・`ingested` が `YYYY-MM-DD` の形でなければ `non_iso_dates` として指摘する。
+- `wiki_encoding.py` を加えた。テキストのソースの文字コード（UTF-8、Shift_JIS（CP932）、EUC-JP、ISO-2022-JP など）を判定し、`--output` で UTF-8 に変換したものを別のファイルに書き出す。元のファイルは書き換えない。`/wiki:ingest` の手順に加えた。
 
 ## [4.0.1] - 2026-10-29
 
