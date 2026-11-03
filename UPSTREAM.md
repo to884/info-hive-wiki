@@ -27,7 +27,7 @@ info-hive は、[praneybehl/llm-wiki-plugin](https://github.com/praneybehl/llm-w
 
 ## 取り込み後の主な変更
 
-- プラグイン名を `wiki`、マーケットプレイス名とスキル名を `info-hive` にした。コマンドは `commands/` の直下に移し、`/wiki:query` の形で起動する。
+- プラグイン名を `wiki`、マーケットプレイス名とスキル名を `info-hive` にした。マーケットプレイスの定義は、別のリポジトリ [to884/info-hive-marketplace](https://github.com/to884/info-hive-marketplace) に置く。コマンドは `commands/` の直下に移し、`/wiki:query` の形で起動する。
 - スキルのディレクトリを `skills/llm-wiki/` から `skills/info-hive/` に改名した。
 - 判定レイヤーの環境変数を `LLM_WIKI_DECISIONS*` から `INFO_HIVE_DECISIONS*` に、モデルのキャッシュを `~/.cache/llm-wiki/` から `~/.cache/info-hive/` に変えた。
 

@@ -6,18 +6,20 @@
 
 ## インストール
 
-インストール方法は2通りある。Claude Code には、プラグイン一式（スキル、`/wiki:*` スラッシュコマンド、マーケットプレイスのマニフェスト）が入る。ほかの対応エージェントには、[`skills` CLI](https://github.com/vercel-labs/skills) を使って、同じ [agentskills.io](https://agentskills.io) 形式のスキルをインストールする。全体像は[エージェント対応表](./agents.md)を参照。
+インストール方法は2通りある。Claude Code には、プラグイン一式（スキルと `/wiki:*` スラッシュコマンド）が入る。ほかの対応エージェントには、[`skills` CLI](https://github.com/vercel-labs/skills) を使って、同じ [agentskills.io](https://agentskills.io) 形式のスキルをインストールする。全体像は[エージェント対応表](./agents.md)を参照。
 
 最初に [`uv`](https://docs.astral.sh/uv/getting-started/installation/) をインストールする。前提条件はこれだけで、同梱のツール用に、バージョンを固定した独立した環境を `uv` が作る。
 
 ### Claude Code: プラグイン一式
 
-ネイティブの方法で、スキル、スラッシュコマンド、マニフェストがまとめて入る。
+ネイティブの方法で、スキルとスラッシュコマンドがまとめて入る。プラグインは、マーケットプレイス用のリポジトリ [to884/info-hive-marketplace](https://github.com/to884/info-hive-marketplace) から入れる。
 
 ```bash
-/plugin marketplace add to884/info-hive
+/plugin marketplace add to884/info-hive-marketplace
 /plugin install wiki@info-hive
 ```
+
+マーケットプレイスとプラグインのリポジトリは、どちらも非公開なので、入れるには GitHub の認証情報が要る。HTTPS なら `gh auth login` のあとに `gh auth setup-git` を実行しておく。SSH なら、パスフレーズを聞かれない鍵を用意しておく。
 
 インストールすれば、プラグインはどのプロジェクトでも動く。インストールしただけでは、wiki をどこに置くかは決まらない。
 
@@ -26,7 +28,7 @@
 ### Codex (OpenAI)
 
 ```bash
-npx skills add to884/info-hive -a codex -g
+npx skills add to884/info-hive-wiki -a codex -g
 ```
 
 `/skills`、`$info-hive`、または自然言語で呼び出す。同梱のスクリプトも実行できる。
@@ -34,7 +36,7 @@ npx skills add to884/info-hive -a codex -g
 ### Cursor
 
 ```bash
-npx skills add to884/info-hive -a cursor -g
+npx skills add to884/info-hive-wiki -a cursor -g
 ```
 
 `/info-hive` または自然言語で呼び出す。同梱のスクリプトも実行できる。
@@ -42,7 +44,7 @@ npx skills add to884/info-hive -a cursor -g
 ### Gemini CLI
 
 ```bash
-npx skills add to884/info-hive -a gemini-cli -g
+npx skills add to884/info-hive-wiki -a gemini-cli -g
 ```
 
 `/skills` の管理コマンドまたは自然言語で呼び出す。同梱のスクリプトも実行できる。
@@ -50,7 +52,7 @@ npx skills add to884/info-hive -a gemini-cli -g
 ### OpenCode
 
 ```bash
-npx skills add to884/info-hive -a opencode -g
+npx skills add to884/info-hive-wiki -a opencode -g
 ```
 
 自然言語で依頼すると、エージェントがネイティブの `skill` ツールを通じてスキルを呼び出す。OpenCode は `.claude/skills/` と `~/.claude/skills/` も読むので、Claude Code 向けにインストールしたものもそのまま使える。同梱のスクリプトも実行できる。
@@ -58,7 +60,7 @@ npx skills add to884/info-hive -a opencode -g
 ### OpenClaw
 
 ```bash
-npx skills add to884/info-hive -a openclaw -g
+npx skills add to884/info-hive-wiki -a openclaw -g
 ```
 
 スキルは自動的にユーザーコマンドとして公開される。同梱のスクリプトも実行できる。
@@ -66,7 +68,7 @@ npx skills add to884/info-hive -a openclaw -g
 ### Pi Agent
 
 ```bash
-npx skills add to884/info-hive -a pi -g
+npx skills add to884/info-hive-wiki -a pi -g
 ```
 
 `/skill:info-hive` または自然言語で呼び出す。同梱のスクリプトも実行できる。
@@ -76,9 +78,9 @@ npx skills add to884/info-hive -a pi -g
 OMP は、管理対象のスキルとユーザーのスキルを `~/.omp/agent/skills/` から読み込み、`skill://` で自動的に公開する。OMP はまだ `npx skills` のレジストリに載っていないので、リポジトリをクローンし、スキルへのシンボリックリンクを張ってインストールする。
 
 ```bash
-git clone https://github.com/to884/info-hive.git
+git clone https://github.com/to884/info-hive-wiki.git
 mkdir -p ~/.omp/agent/skills
-ln -s "$(pwd)/info-hive/skills/info-hive" ~/.omp/agent/skills/info-hive
+ln -s "$(pwd)/info-hive-wiki/skills/info-hive" ~/.omp/agent/skills/info-hive
 ```
 
 ### その他のランタイム: クローンしてシンボリックリンクを張る
@@ -86,9 +88,9 @@ ln -s "$(pwd)/info-hive/skills/info-hive" ~/.omp/agent/skills/info-hive
 Hermes Agent をはじめ、まだ `npx skills` のレジストリに載っていない agentskills.io 互換のランタイムでは、エージェントのスキル用ディレクトリにシンボリックリンクを張ればスキルを使える。
 
 ```bash
-git clone https://github.com/to884/info-hive.git
+git clone https://github.com/to884/info-hive-wiki.git
 mkdir -p ~/.hermes/skills
-ln -s "$(pwd)/info-hive/skills/info-hive" ~/.hermes/skills/info-hive
+ln -s "$(pwd)/info-hive-wiki/skills/info-hive" ~/.hermes/skills/info-hive
 ```
 
 wiki そのものは、特定のエージェントに依存しない。中身は markdown ファイルを置いたディレクトリにすぎない。あるエージェントで取り込み、別のエージェントでクエリすることもできる。
