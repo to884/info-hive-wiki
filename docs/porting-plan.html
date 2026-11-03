@@ -348,7 +348,7 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--ru
     <dt>移植元</dt><dd><code>praneybehl/llm-wiki-plugin</code> v4.0.1（コミット <code>2d24ccf</code>、MIT ライセンス）</dd>
     <dt>移植先</dt><dd><code>C:\Works\info-hive</code>（現在は初回コミットの <code>AGENTS.md</code> のみ）</dd>
     <dt>作成日</dt><dd>2026-11-02</dd>
-    <dt>状態</dt><dd>2026-11-02 に質問 10 問の回答を受け、方針 C〜J は確定。方針 C（名前）は、コマンド名の実測結果を受けて同日に決め直した。4 モデルのレビュー（<code>docs/agent-runs/2026-11-02-porting-plan-review/summary.md</code>）の指摘を反映済み。方針 A・B と、見直しとレビューで加えた項目も同日に決定した（<a href="#answers">7 節</a>）。未決の項目はない。P0、P1、P2 は完了した（<a href="#phases">4 節</a>）。</dd>
+    <dt>状態</dt><dd>2026-11-02 に質問 10 問の回答を受け、方針 C〜J は確定。方針 C（名前）は、コマンド名の実測結果を受けて同日に決め直した。4 モデルのレビュー（<code>docs/agent-runs/2026-11-02-porting-plan-review/summary.md</code>）の指摘を反映済み。方針 A・B と、見直しとレビューで加えた項目も同日に決定した（<a href="#answers">7 節</a>）。未決の項目はない。P0、P1、P2、P3 は完了した（<a href="#phases">4 節</a>。P3 は大きいモデルの追加を除く）。</dd>
   </dl>
   <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">表示: 自動</button>
 </header>
@@ -701,7 +701,32 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--ru
       <span class="phase-id">P3</span>
       <div class="phase-body">
         <h3>検索を日本語に対応させる</h3>
+        <p class="phase-status">完了: 2026-11-03（大きいモデルの追加を除く）</p>
         <p class="phase-deps"><strong>前提:</strong> P2（方針 E、F）</p>
+        <p>方針 E のトークン化と、既定の埋め込みモデル <code>intfloat/multilingual-e5-small</code>（Xenova の量子化した ONNX、ダウンロードは約 0.14 GB）を入れた。モデルは環境変数 <code>INFO_HIVE_EMBED_MODEL</code> で切り替えられ、一覧は <code>wiki_search.py</code> の <code>EMBED_MODELS</code> にある。基準値は P3 の値で取り直した。CI では <code>run_eval.py --gate --baseline</code> で、基準値から 0.05 を超えて悪くなっていないかも確かめる。比べた数値は、どれも CI と同じ固定版の依存パッケージ（fastembed 0.8.0、sqlite-vec 0.1.9）で測った。</p>
+        <div class="table-wrap">
+        <table class="wide-table">
+          <thead><tr><th>評価セット・方式</th><th>recall@10</th><th>MRR</th><th>偽陽性率</th><th>P2 の基準（recall@10 / MRR / 偽陽性率）</th></tr></thead>
+          <tbody>
+            <tr><td>日本語・page</td><td>0.972</td><td>0.922</td><td>0</td><td>0.170 / 0.170 / 0</td></tr>
+            <tr><td>日本語・section</td><td>0.972</td><td>0.901</td><td>0</td><td>0.170 / 0.170 / 0</td></tr>
+            <tr><td>日本語・hybrid</td><td>1.000</td><td>0.950</td><td>0</td><td>0.170 / 0.170 / 0</td></tr>
+            <tr><td>英語・page、section</td><td>0.630</td><td>0.630</td><td>0</td><td>0.630 / 0.630 / 0</td></tr>
+            <tr><td>英語・hybrid</td><td>0.963</td><td>0.735</td><td>0</td><td>0.926 / 0.708 / 0</td></tr>
+          </tbody>
+        </table>
+        </div>
+        <ul>
+          <li>トークン化: NFKC → 小文字化 → 文字種の境界で区切り、英数字は語、かな・漢字は bigram、漢字は unigram も加える。英数字だけのテキストのトークンは移植元と同じで、英語の語彙検索の結果は変わらない。中黒 <code>・</code> は区切り、長音符 <code>ー</code> と <code>々</code> は並びに含める。</li>
+          <li>文字 bigram だけでは、日本語の負例 6 問のうち 5 問が何かに当たった（偽陽性率 0.833）。日本語のトークンを含むクエリでは、IDF で重みを付けたクエリの被覆率が 0.25 に満たないページを語彙検索の結果から外すようにした。負例の被覆率は最大 0.24 だった。被覆率はセクションではなくページで測る。セクションで測ると、長い言い換えのクエリ（j10）がどのセクションにも届かず、section が page を下回って <code>--gate</code> が落ちた。英数字だけのクエリには制限をかけない。</li>
+          <li>埋め込みモデル: 第一候補だった <code>paraphrase-multilingual-MiniLM-L12-v2</code>（約 0.25 GB）は、埋め込みだけの recall@10 が日本語 0.340、英語 0.130（距離 0.3〜0.35）にとどまり、ハイブリッドでも語彙検索とほぼ同じだった。<code>multilingual-e5-small</code> は埋め込みだけで日本語 1.000、英語 0.963 だった。fastembed 0.8.0 は e5 系の接頭辞を自動では付けないので、<code>query: </code> と <code>passage: </code> を自分で付ける。</li>
+          <li>しきい値: e5 系は距離が狭い範囲に集まる。正例の正解までの距離は日本語で最大 0.181、英語で最大 0.188、負例の最も近いセクションまでの距離は日本語で最小 0.186、英語で最小 0.192 だったので、上限を 0.185 にした。差は 0.005 程度しかない。評価セットが小さいので、実際の wiki を使いながら見直す。</li>
+          <li>入力の上限: e5-small の上限は 512 トークンで、評価セットのいちばん長いセクション（551 文字）でも 326 トークンだった。長いセクションのクエリ 3 問もすべて当たったので、段落単位の分割は入れない。</li>
+          <li>漢字の unigram: 「税」を含む 8 ページのうち 4 ページは、「消費税」のような複合語の中にしか「税」がない。unigram がないと、単漢字のクエリはこれらに当たらない。日本語のコーパスで、トークン数は 7,627 から 11,247（47% 増）、異なり語数は 1,727 から 2,125（23% 増）になり、語彙検索 1 回の処理は 9 ms から 12 ms になった。ハイブリッドの MRR は bigram だけのとき 1.000 で、unigram を入れると 0.950 に下がる。クエリ側の unigram を 1 文字の漢字の並びだけに限ると MRR は 0.965 に戻るが、語彙検索の recall@10 が 0.972 から 0.929 に下がるので、方針 E のとおり索引とクエリの両方に入れた。</li>
+          <li>SudachiPy（0.7.0、sudachidict_core）: 語彙検索の recall@10 は A 単位 0.950、C 単位 0.922（被覆率の制限あり）、ハイブリッドの MRR は 0.961 と 0.947 で、bigram より明らかに良いとはいえず、処理は約 3 倍遅かった。任意の機能としても追加しない。</li>
+          <li>検索時間: ハイブリッド検索 1 回の大半は fastembed の import（約 4 秒）とモデルの初期化（約 2〜5 秒）で、移植元の bge-small と比べて初回の初期化が約 1.3 秒長い程度だった。27 ページのコーパスで、<code>embeddings.sqlite</code> は約 1.7 MB、<code>search-index.json</code> は約 48 KB だった。</li>
+          <li>大きいモデル: 設定で切り替える仕組みは入れたが、<code>multilingual-e5-large</code>（約 2.24 GB）はしきい値をまだ測っていないので、一覧に入れていない。</li>
+        </ul>
         <ul>
           <li>方針 E のトークン化を <code>wiki_search.py</code> に入れる。</li>
           <li>語彙側のトークンが 0 個でも、埋め込み検索は実行する。</li>
