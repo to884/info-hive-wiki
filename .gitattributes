@@ -1,0 +1,16 @@
+# 改行コードを、どの OS で clone しても LF にそろえる。
+#
+# Windows で core.autocrlf=true のまま clone すると、作業ツリーの改行が CRLF になる。今のスクリプトと
+# テストは CRLF でも動くが、検索のテストはスクリプトの出力をバイト単位で比べ、評価セットは本文の
+# 文字数や節の分け方を前提にしている。どの環境でも同じバイト列で動かすために LF に固定する。
+# eol=lf は core.autocrlf の設定より優先される。BOM はそのまま残る。
+* text=auto eol=lf
+
+# 中身を書き換えてはならないファイル。今はないが、加えたときに改行の変換を受けないようにする。
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.sqlite binary
