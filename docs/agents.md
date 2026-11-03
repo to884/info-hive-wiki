@@ -24,22 +24,22 @@ OpenCode は `.claude/skills/` と `~/.claude/skills/` も読むので、Claude 
 最初に [`uv`](https://docs.astral.sh/uv/getting-started/installation/) をインストールする。どのエージェントも、バージョンを固定した同じローカルの実行環境を呼び出すので、エージェントごとの Python 環境は要らない。
 
 
-**Claude Code** には、プラグイン一式（スキル、スラッシュコマンド、マニフェスト）が入る。
+**Claude Code** には、プラグイン一式（スキルとスラッシュコマンド）が入る。マーケットプレイスは [to884/info-hive-marketplace](https://github.com/to884/info-hive-marketplace) にある。
 
 ```bash
-/plugin marketplace add to884/info-hive
+/plugin marketplace add to884/info-hive-marketplace
 /plugin install wiki@info-hive
 ```
 
 **Codex、Cursor、Gemini CLI、OpenCode、OpenClaw、Pi** では、`skills` CLI でスキルをインストールする。対応表の `--agent` の値に置き換えて使う。
 
 ```bash
-npx skills add to884/info-hive -a codex -g
-npx skills add to884/info-hive -a cursor -g
-npx skills add to884/info-hive -a gemini-cli -g
-npx skills add to884/info-hive -a opencode -g
-npx skills add to884/info-hive -a openclaw -g
-npx skills add to884/info-hive -a pi -g
+npx skills add to884/info-hive-wiki -a codex -g
+npx skills add to884/info-hive-wiki -a cursor -g
+npx skills add to884/info-hive-wiki -a gemini-cli -g
+npx skills add to884/info-hive-wiki -a opencode -g
+npx skills add to884/info-hive-wiki -a openclaw -g
+npx skills add to884/info-hive-wiki -a pi -g
 ```
 
 現在のプロジェクトだけにインストールするには、`-g` を外す。
@@ -47,10 +47,10 @@ npx skills add to884/info-hive -a pi -g
 **OMP ("Oh My Pi")** と **Hermes Agent** は、まだ `npx skills` のレジストリに載っていない。リポジトリをクローンし、エージェントのスキル用ディレクトリにスキルへのシンボリックリンクを張る。OMP は、管理対象のスキルとユーザーのスキルを `~/.omp/agent/skills/` から読み込み、`skill://` で公開する。
 
 ```bash
-git clone https://github.com/to884/info-hive.git
+git clone https://github.com/to884/info-hive-wiki.git
 mkdir -p ~/.omp/agent/skills ~/.hermes/skills
-ln -s "$(pwd)/info-hive/skills/info-hive" ~/.omp/agent/skills/info-hive
-ln -s "$(pwd)/info-hive/skills/info-hive" ~/.hermes/skills/info-hive
+ln -s "$(pwd)/info-hive-wiki/skills/info-hive" ~/.omp/agent/skills/info-hive
+ln -s "$(pwd)/info-hive-wiki/skills/info-hive" ~/.hermes/skills/info-hive
 ```
 
 ## エージェントのメモリファイル

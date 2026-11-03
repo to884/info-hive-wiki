@@ -39,12 +39,14 @@ LLM Wiki がもっとも役立つのは、時間とともに増えていく知�
 
 ### Claude Code: プラグイン一式
 
-ネイティブの方法である。スキル、9個の `/wiki:*` スラッシュコマンド、マーケットプレイスのマニフェストが、1回のインストールでそろう。
+ネイティブの方法である。スキルと9個の `/wiki:*` スラッシュコマンドが、1回のインストールでそろう。プラグインは、マーケットプレイス用のリポジトリ [to884/info-hive-marketplace](https://github.com/to884/info-hive-marketplace) から入れる。
 
 ```
-/plugin marketplace add to884/info-hive
+/plugin marketplace add to884/info-hive-marketplace
 /plugin install wiki@info-hive
 ```
+
+マーケットプレイスとプラグインのリポジトリは、どちらも非公開なので、入れるには GitHub の認証情報が要る。HTTPS なら `gh auth login` のあとに `gh auth setup-git` を実行しておく。SSH なら、パスフレーズを聞かれない鍵を用意しておく。
 
 インストールすると、プラグインはどのプロジェクトでも使える。インストールしただけでは、wiki をどこに置くかは決まらない。
 
@@ -54,10 +56,10 @@ LLM Wiki がもっとも役立つのは、時間とともに増えていく知�
 
 ```bash
 # グローバルにインストールし、すべてのプロジェクトでスキルを使えるようにする
-npx skills add to884/info-hive -a <agent> -g
+npx skills add to884/info-hive-wiki -a <agent> -g
 
 # または、現在のプロジェクトだけにインストールする
-npx skills add to884/info-hive -a <agent>
+npx skills add to884/info-hive-wiki -a <agent>
 ```
 
 | エージェント | `--agent` の値 | 呼び出し方 | スクリプトの実行 |
@@ -76,10 +78,10 @@ OpenCode は `.claude/skills/` と `~/.claude/skills/` も読むので、Claude 
 **Hermes Agent**（Nous Research）、**OMP**（"Oh My Pi"）など、まだ `npx skills` のレジストリにない agentskills.io 互換のランタイムでも、このスキルは使える。リポジトリをクローンし、`skills/info-hive/` をエージェントのスキルディレクトリにシンボリックリンクするかコピーする。Hermes は `~/.hermes/skills/` から読む。OMP は、管理されたスキルとユーザーのスキルを `~/.omp/agent/skills/` から読み、`skill://` で公開する。
 
 ```bash
-git clone https://github.com/to884/info-hive.git
+git clone https://github.com/to884/info-hive-wiki.git
 mkdir -p ~/.hermes/skills ~/.omp/agent/skills
-ln -s "$(pwd)/info-hive/skills/info-hive" ~/.hermes/skills/info-hive
-ln -s "$(pwd)/info-hive/skills/info-hive" ~/.omp/agent/skills/info-hive
+ln -s "$(pwd)/info-hive-wiki/skills/info-hive" ~/.hermes/skills/info-hive
+ln -s "$(pwd)/info-hive-wiki/skills/info-hive" ~/.omp/agent/skills/info-hive
 ```
 
 Claude Code 以外でスキルを使うときに知っておくべきことは次のとおり。

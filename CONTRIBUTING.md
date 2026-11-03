@@ -14,21 +14,22 @@ info-hive は、Praney Behl の [llm-wiki-plugin](https://github.com/praneybehl/
 
 ## 開発環境の準備
 
-フォークをクローンし、ローカルのチェックアウトを指す形で、Claude Code のセッションにプラグインをインストールする。
+フォークをクローンし、ローカルのチェックアウトから Claude Code のセッションにプラグインを読み込む。
 
 ```bash
-git clone https://github.com/<your-fork>/info-hive
-cd info-hive
+git clone https://github.com/<your-fork>/info-hive-wiki
+cd info-hive-wiki
 ```
 
-続いて Claude Code で、ローカルのパスをマーケットプレイスとして追加し、インストールする。
+続いて、`--plugin-dir` にチェックアウトの絶対パスを渡して Claude Code を起動する。プラグインはそのセッションだけ読み込まれ、コミットしていない変更もそのまま使われる。コマンドは `/wiki:*` で起動する。`wiki@info-hive` をインストールしてあっても、そのセッションでは `--plugin-dir` で読み込んだほうが使われる。
 
-```
-/plugin marketplace add /absolute/path/to/info-hive
-/plugin install wiki@info-hive
+```bash
+claude --plugin-dir /absolute/path/to/info-hive-wiki
 ```
 
-変更したら、`/plugin marketplace update` で更新してからインストールし直す。ビルドの手順はない。スキル、コマンド、スクリプトは、ファイルシステムにあるものがそのまま動く。
+このリポジトリには、マーケットプレイスの定義はない。マーケットプレイスは [to884/info-hive-marketplace](https://github.com/to884/info-hive-marketplace) にあり、GitHub の main を配るので、ローカルの変更を試すのには使えない。
+
+変更したら、`/reload-plugins` で読み込み直す。ビルドの手順はない。スキル、コマンド、スクリプトは、ファイルシステムにあるものがそのまま動く。
 
 同梱の Python スクリプトは Python 3.10 以上を対象にする。改善のワークフロー、語彙ベースの検索、lint、stats、グラフのクエリは標準ライブラリだけを使う。実行環境のセットアップ、ハイブリッド検索、グラフのコンパイルは、uv を通じて、バージョンを固定した既存の PEP 723 の依存パッケージを使う。新しい補助の処理には標準ライブラリを優先し、改善のワークフローには依存パッケージを加えない。
 
@@ -63,12 +64,12 @@ uv run --with fastembed==0.8.0 --with sqlite-vec==0.1.9 --with PyYAML==6.0.3 pyt
 
 ```bash
 mkdir /tmp/test-wiki && cd /tmp/test-wiki
-python /path/to/info-hive/skills/info-hive/scripts/init_wiki.py .
+python /path/to/info-hive-wiki/skills/info-hive/scripts/init_wiki.py .
 # wiki/sources/ や wiki/concepts/ などの下に、Markdown のページを手でいくつか作る
 # わざと問題を入れておく（孤立ページ、リンク切れの [[wikilink]]、frontmatter の欠落）
-python /path/to/info-hive/skills/info-hive/scripts/wiki_lint.py wiki/
-python /path/to/info-hive/skills/info-hive/scripts/wiki_stats.py wiki/
-python /path/to/info-hive/skills/info-hive/scripts/wiki_search.py "your query terms"
+python /path/to/info-hive-wiki/skills/info-hive/scripts/wiki_lint.py wiki/
+python /path/to/info-hive-wiki/skills/info-hive/scripts/wiki_stats.py wiki/
+python /path/to/info-hive-wiki/skills/info-hive/scripts/wiki_search.py "your query terms"
 ```
 
 スキル本体（`SKILL.md` や references）を変えたときにもっとも役立つのは、実際に取り込んでみることである。テスト用のプロジェクトの `raw/` に論文や記事を置き、`/wiki:ingest <path>` を実行し、できあがったものを読む。ワークフローがずれて出力の質が落ちているなら、スキルを直す必要がある。
@@ -114,8 +115,8 @@ SemVer に沿ってバージョンを上げる。古い wiki と互換性があ�
 PR を出す前に、次を確かめる。
 
 - [ ] 影響を受ける同梱のスクリプトと、既存の回帰テストが、小さなテスト用の wiki で通る。
-- [ ] `python -c "import json; json.load(open('.claude-plugin/plugin.json', encoding='utf-8')); json.load(open('.claude-plugin/marketplace.json', encoding='utf-8'))"` が成功する。
-- [ ] Claude Code でプラグインを読み込める（`/plugin marketplace add <local-path>`、`/plugin install`、エラーが出ない）。
+- [ ] `python -c "import json; json.load(open('.claude-plugin/plugin.json', encoding='utf-8'))"` が成功する。
+- [ ] Claude Code でプラグインを読み込める（`claude --plugin-dir <local-path>` で起動し、エラーが出ない）。
 - [ ] `CHANGELOG.md` の `[Unreleased]` に変更を書いた。この PR でバージョンを準備する場合は、そのリリースの見出しの下に書いた。
 - [ ] `SKILL.md` の frontmatter や `plugin.json` の説明文を変えた場合、1024 文字未満に収まっている。
 - [ ] SKILL.md の説明文を変えた場合、スキルが呼び出される範囲がはっきり良くなっている（関係する言い回しが増える、呼び出されるべきときに呼び出されないことが減る）。説明文は、Claude がスキルを使うかどうかを決める主な手がかりなので、言葉の選び方が大事である。
@@ -130,14 +131,16 @@ PR を出す前に、次を確かめる。
 
 ### バージョンを書く場所
 
-リリースのバージョンは、JSON の3つのフィールドと、CHANGELOG の見出しに書く。**すべて一緒に上げる**。`claude plugin validate` は、プラグインのマニフェストとマーケットプレイスの項目でバージョンが食い違うと、エラーにする。
+リリースのバージョンは、`plugin.json` の `version` と、CHANGELOG の見出しに書く。**2つを一緒に上げる**。
 
 | 場所 | フィールド | 備考 |
 |----------|-------|-------|
-| `.claude-plugin/plugin.json` | `version` | 正本。Claude Code は、インストールしたバージョンをまずここから読む。 |
-| `.claude-plugin/marketplace.json` | `metadata.version` | マーケットプレイス全体のバージョン。 |
-| `.claude-plugin/marketplace.json` | `plugins[0].version` | プラグインごとの項目。`plugin.json` と一致させる。 |
+| `.claude-plugin/plugin.json` | `version` | 正本。Claude Code は、インストールしたバージョンをここから読む。 |
 | `CHANGELOG.md` | `## [X.Y.Z] - YYYY-MM-DD` の見出しと、`[X.Y.Z]: …/releases/tag/vX.Y.Z` のリンクの行 | 人が読むための記録。 |
+
+マーケットプレイス（[to884/info-hive-marketplace](https://github.com/to884/info-hive-marketplace)）の `wiki` の項目には、`version` を書かない。両方に書くと、2つのリポジトリで同じ値を管理することになる。別のリポジトリを指す項目では、`claude plugin validate` も食い違いを見つけられない。項目に `version` がなければ、Claude Code は `plugin.json` の `version` を使う。
+
+マーケットプレイスは、このリポジトリの main を配る。Claude Code は `version` が変わったかどうかで更新を判定するので、`plugin.json` の `version` を上げない限り、main に push しても利用者には更新が届かない。`version` を上げたコミットが main に入った時点で、それが利用者に配られる。
 
 `skills/info-hive/SKILL.md` には、バージョンのフィールドを**置かない**。スキルのバージョンは、それを含むプラグインの `plugin.json` で決まる。`name` か `description` を変えるとき以外は、SKILL.md の frontmatter に手を付けない。
 
@@ -153,15 +156,13 @@ PR を出す前に、次を確かめる。
 
 ### リリースの手順
 
-1. `CHANGELOG.md` の **`[Unreleased]` の項目を**、新しい `## [X.Y.Z] - YYYY-MM-DD` の見出しの下に**移す**。末尾に `[X.Y.Z]: https://github.com/to884/info-hive/releases/tag/vX.Y.Z` の行を加え、`[Unreleased]: https://github.com/to884/info-hive/compare/vX.Y.Z...HEAD` に更新する。
-2. 次の場所で **`version` を `X.Y.Z` に上げる**。
-   - `.claude-plugin/plugin.json`
-   - `.claude-plugin/marketplace.json`（`metadata.version` と `plugins[0].version` の両方）
+1. `CHANGELOG.md` の **`[Unreleased]` の項目を**、新しい `## [X.Y.Z] - YYYY-MM-DD` の見出しの下に**移す**。末尾に `[X.Y.Z]: https://github.com/to884/info-hive-wiki/releases/tag/vX.Y.Z` の行を加え、`[Unreleased]: https://github.com/to884/info-hive-wiki/compare/vX.Y.Z...HEAD` に更新する。
+2. `.claude-plugin/plugin.json` の **`version` を `X.Y.Z` に上げる**。マーケットプレイスは直さない。
 3. 古い wiki を使っている人が取り逃がす**ファイルやスキーマのセクションをリリースで加える場合**は、`skills/info-hive/scripts/init_wiki.py` を広げる。
    - 新しいテンプレートのファイルを `template_map` に加える（冪等である。`init_wiki.py` は、すでにあるファイルを飛ばす）。
    - SCHEMA.md に新しいセクションを加えるなら、`SCHEMA_SECTION_MARKERS` に目印を加え、`--upgrade` が手作業のマージとして示すようにする。
    - 手作業の手順が変わるなら、`/wiki:upgrade` のスラッシュコマンドを更新する。
-4. **マニフェストを検証する**（バージョンの食い違いとスキーマの誤りを見つける）。
+4. **マニフェストを検証する**（スキーマの誤りを見つける）。
    ```bash
    claude plugin validate .
    ```
@@ -181,7 +182,7 @@ PR を出す前に、次を確かめる。
    タグは単純な `vX.Y.Z` の形にする。`claude plugin tag` コマンドを使うと `wiki--vX.Y.Z` の形のタグができる。これでも Claude Code からのインストールには使えるが、このリポジトリでは `vX.Y.Z` にそろえる。
 8. **GitHub のリリースを作る**。
    ```bash
-   gh release create vX.Y.Z --repo to884/info-hive --title "vX.Y.Z: <要約>" \
+   gh release create vX.Y.Z --repo to884/info-hive-wiki --title "vX.Y.Z: <要約>" \
      --notes "$(cat <<'EOF'
      <リリースノート。ふつうは CHANGELOG の項目を短くしたもの>
      EOF
@@ -191,8 +192,8 @@ PR を出す前に、次を確かめる。
 ### 利用者が新しいバージョンを取り込む方法
 
 - **Claude Code:** `/plugin marketplace update` のあとに `/plugin install wiki@info-hive` を実行する。Claude Code は、解決した `version` をキャッシュしているものと比べ、違っていれば更新する。
-- **`npx skills add` でインストールしたほかのエージェント:** `npx skills update info-hive` を実行するか、最初に使った `npx skills add to884/info-hive -a <agent>` をもう一度実行する。
-- **以前のバージョンで作った既存の wiki:** `/wiki:upgrade` を実行する（コマンドラインからなら `python /path/to/info-hive/skills/info-hive/scripts/init_wiki.py /absolute/path/to/project --upgrade`）。スクリプトのパスと対象のプロジェクトは別にしておく。アップグレードは、ファイルについては冪等で、SCHEMA.md のマージは手順を追って確認しながら進める。
+- **`npx skills add` でインストールしたほかのエージェント:** `npx skills update info-hive` を実行するか、最初に使った `npx skills add to884/info-hive-wiki -a <agent>` をもう一度実行する。
+- **以前のバージョンで作った既存の wiki:** `/wiki:upgrade` を実行する（コマンドラインからなら `python /path/to/info-hive-wiki/skills/info-hive/scripts/init_wiki.py /absolute/path/to/project --upgrade`）。スクリプトのパスと対象のプロジェクトは別にしておく。アップグレードは、ファイルについては冪等で、SCHEMA.md のマージは手順を追って確認しながら進める。
 
 ### リリースのたびに変えなくてよいもの
 
