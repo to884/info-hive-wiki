@@ -110,6 +110,27 @@ NFD_RESOLVE_CASES = [
     (GUIDE, GUIDE, "NFC bare link resolves"),
 ]
 
+# 日本語のスラッグ。英語のスラッグと同じ規則で解決されなければならない。
+JA_BY_PATH = {
+    "concepts/消費税": "消費税",
+    "sources/文字化け障害報告": "文字化け障害報告",
+    "entities/東京都": "東京都",
+}
+JA_BY_SLUG = {"消費税", "文字化け障害報告", "東京都"}
+JA_RESOLVE_CASES = [
+    ("消費税", "消費税", "Japanese bare stem"),
+    ("concepts/消費税", "消費税", "Japanese path-qualified link"),
+    ("消費税#税率の変遷", "消費税", "Japanese heading anchor stripped"),
+    ("消費税|税金", "消費税", "Japanese display alias stripped"),
+    ("sources/文字化け障害報告.md", "文字化け障害報告", "Japanese name with explicit .md"),
+    ("　東京都　", "東京都", "ideographic spaces around the target"),
+    # --- ガード: これらは解決されてはならない ---
+    ("raw/文字化け障害報告", None, "GUARD: out-of-tree Japanese path"),
+    ("entities/消費税", None, "GUARD: wrong directory for a Japanese slug"),
+    ("東京", None, "GUARD: a prefix of a Japanese slug is not the slug"),
+    ("京都", None, "GUARD: a substring of a Japanese slug is not the slug"),
+]
+
 REQUIRED_FM = ["type", "title", "tags", "created", "updated"]
 
 # 一時ディレクトリに作る wiki。ガイド.md だけはファイル名を NFD で作る。
@@ -373,6 +394,14 @@ def main():
             check(label, fn(link, NFD_BY_PATH, NFD_BY_SLUG), expected, why, failures)
     check("stats", wiki_stats.link_stem(f"concepts/{GUIDE_NFD}"), GUIDE,
           "NFD link stem counted as NFC", failures)
+    print()
+
+    print("unicode: Japanese slugs follow the same resolution rules")
+    for label, fn in resolvers:
+        for link, expected, why in JA_RESOLVE_CASES:
+            check(label, fn(link, JA_BY_PATH, JA_BY_SLUG), expected, f"[[{link}]] — {why}", failures)
+    check("stats", wiki_stats.link_stem("concepts/消費税#税率"), "消費税",
+          "Japanese link stem drops prefix and anchor", failures)
     print()
 
     with tempfile.TemporaryDirectory() as tmp:
