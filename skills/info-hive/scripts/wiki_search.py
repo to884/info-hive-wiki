@@ -77,21 +77,24 @@ HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 #   passage_prefix  セクションの前に付ける文字列
 #   custom          fastembed に登録されていないモデルを add_custom_model で登録するための情報
 EMBED_MODELS = {
-    # e5 系は距離が狭い範囲に集まる。0.185 は P3 の評価セットで、正例の正解（日本語は最大 0.181、
-    # 英語は最大 0.188）と負例（日本語は最小 0.186、英語は最小 0.192）を分けた値。
+    # e5 系は距離が狭い範囲に集まる。P3 の評価セットでは、正例の正解までの距離は日本語で最大 0.190、
+    # 英語で最大 0.196、負例の最も近いセクションまでの距離は日本語で最小 0.198、英語で最小 0.200
+    # だった。0.190〜0.197 では成績が変わらないので、その中ほどの 0.193 にした。
+    # 重みは fp16 を使う（約 0.25 GB）。int8 に量子化した版（約 0.14 GB）は、距離が fp16 から
+    # 0.01 程度ずれ、CPU によっても結果が変わって、CI で負例がしきい値をまたいだ。
     "intfloat/multilingual-e5-small": {
-        "max_distance": 0.185,
+        "max_distance": 0.193,
         "query_prefix": "query: ",
         "passage_prefix": "passage: ",
         "custom": {
             "hf": "Xenova/multilingual-e5-small",
-            "model_file": "onnx/model_quantized.onnx",
+            "model_file": "onnx/model_fp16.onnx",
             "dim": 384,
-            "size_in_gb": 0.14,
+            "size_in_gb": 0.25,
             "license": "mit",
         },
     },
-    # 設定で選べる大きいモデル（約 2.24 GB、1024 次元）。正例と負例の距離は分かれず、0.19 は
+    # 設定で選べる大きいモデル（約 2.24 GB、1024 次元、fp32）。正例と負例の距離は分かれず、0.19 は
     # 偽陽性率を 0 に保てる上限。P3 の評価セットでは、日本語の MRR は e5-small より高い（0.975）が、
     # 英語の recall@10 は低く（0.815）、埋め込みは 7 倍ほど遅い。
     "intfloat/multilingual-e5-large": {
@@ -564,6 +567,14 @@ def section_locator(section: dict) -> str:
     return f"{page['rel_path']}\x1f{section['section_index']}"
 
 
+def embed_model_file() -> str:
+    """add_custom_model で登録するモデルの重みのファイル。fastembed に登録済みのモデルでは空文字列。"""
+    try:
+        return embed_model_spec().get("custom", {}).get("model_file", "")
+    except EmbeddingConfigError:
+        return ""
+
+
 def section_content_hash(section: dict) -> str:
     text = f"{embed_model_name()}\n{section['searchable_text']}"
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -635,6 +646,8 @@ def open_vector_index(wiki_root: Path, sqlite_vec, dimension: int) -> sqlite3.Co
         expected = {
             "schema": VECTOR_INDEX_SCHEMA,
             "model": embed_model_name(),
+            # 同じモデル名で重みのファイル（fp16 と int8 など）を替えたときも作り直す。
+            "model_file": embed_model_file(),
             "dimension": str(dimension),
             "input_format": EMBED_INPUT_FORMAT,
         }

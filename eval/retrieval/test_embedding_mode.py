@@ -234,7 +234,13 @@ class EmbedModelSelectionTests(unittest.TestCase):
             meta = dict(connection.execute("SELECT key, value FROM semantic_meta"))
             connection.close()
             self.assertEqual(meta["model"], WIKI_SEARCH.embed_model_name())
+            self.assertEqual(meta["model_file"], WIKI_SEARCH.embed_model_file())
             self.assertEqual(meta["input_format"], WIKI_SEARCH.EMBED_INPUT_FORMAT)
+            with mock.patch.object(WIKI_SEARCH, "embed_model_file", return_value="onnx/other.onnx"):
+                connection = WIKI_SEARCH.open_vector_index(root, sqlite_vec, 2)
+                meta = dict(connection.execute("SELECT key, value FROM semantic_meta"))
+                connection.close()
+            self.assertEqual(meta["model_file"], "onnx/other.onnx")
             with mock.patch.object(WIKI_SEARCH, "embed_model_name", return_value="other/model"):
                 connection = WIKI_SEARCH.open_vector_index(root, sqlite_vec, 2)
                 meta = dict(connection.execute("SELECT key, value FROM semantic_meta"))
