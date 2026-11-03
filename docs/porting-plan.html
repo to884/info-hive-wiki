@@ -348,7 +348,7 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--ru
     <dt>移植元</dt><dd><code>praneybehl/llm-wiki-plugin</code> v4.0.1（コミット <code>2d24ccf</code>、MIT ライセンス）</dd>
     <dt>移植先</dt><dd><code>C:\Works\info-hive</code>（現在は初回コミットの <code>AGENTS.md</code> のみ）</dd>
     <dt>作成日</dt><dd>2026-11-02</dd>
-    <dt>状態</dt><dd>2026-11-02 に質問 10 問の回答を受け、方針 C〜J は確定。方針 C（名前）は、コマンド名の実測結果を受けて同日に決め直した。4 モデルのレビュー（<code>docs/agent-runs/2026-11-02-porting-plan-review/summary.md</code>）の指摘を反映済み。方針 A・B と、見直しとレビューで加えた項目も同日に決定した（<a href="#answers">7 節</a>）。未決の項目はない。P0、P1、P2、P3 は完了した（<a href="#phases">4 節</a>）。</dd>
+    <dt>状態</dt><dd>2026-11-02 に質問 10 問の回答を受け、方針 C〜J は確定。方針 C（名前）は、コマンド名の実測結果を受けて同日に決め直した。4 モデルのレビュー（<code>docs/agent-runs/2026-11-02-porting-plan-review/summary.md</code>）の指摘を反映済み。方針 A・B と、見直しとレビューで加えた項目も同日に決定した（<a href="#answers">7 節</a>）。未決の項目はない。P0〜P4 は完了した（<a href="#phases">4 節</a>）。</dd>
   </dl>
   <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">表示: 自動</button>
 </header>
@@ -745,7 +745,19 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--ru
       <span class="phase-id">P4</span>
       <div class="phase-body">
         <h3>lint・統計・グラフ・判定・評価ループを日本語に合わせる</h3>
+        <p class="phase-status">完了: 2026-11-03</p>
         <p class="phase-deps"><strong>前提:</strong> P1（方針 H、I）</p>
+        <p>照合の規則（<code>normalize_quote</code>、<code>quote_in_text</code>）、文字数、表示幅、ISO 形式の日付の判定、argparse の見出しの日本語化は <code>skills/info-hive/scripts/wiki_text.py</code> にまとめ、lint、統計、判定、評価ループで共有する。テストは <code>eval/scripts/</code>（<code>test_lint_stats.py</code>、<code>test_encoding.py</code>）に置き、CI で動かす。</p>
+        <ul>
+          <li>ページの大きさ: 行数（400・800 行）と、空白を除いた文字数（4,000・8,000 文字）の、どちらかが上限を超えたら指摘する。<code>--json</code> の <code>oversized_*</code> の各項目に <code>chars</code> を加えた。統計は大きいページを文字数の多い順に並べる。</li>
+          <li><code>--suggest-pages</code>: 漢字の複合語は 3 文字以上の漢字の並びにした。日本語の評価用コーパスで 2 文字の並びも試すと、上位が「必要」「方法」「場合」のような一般語で占められた。3 文字以上では「インボイス」「登録番号」「仕入税額控除」「形態素解析」などが挙がる。半角のカタカナは NFKC で全角にそろえて数える。</li>
+          <li>D2 の文分割: 「。！？」のあとで分け、空白がなくても分ける。句点のあとに閉じ括弧が続くときは閉じ括弧のあとで分け、「？！」のように句点が続くときは最後の句点のあとで分ける。</li>
+          <li>照合: 大文字と小文字を区別せず、空白の並びを 1 つにまとめ、日本語の文字（かな、漢字、和文の記号、全角の英数字）どうしの間の改行と空白だけを取り除く。D2、評価ループの <code>grounded_verdict</code> と答えの <code>normalize</code> が同じ規則を使う。P2 で <code>expectedFailure</code> を付けた 2 件のテストは通るようになったので、印を外した。</li>
+          <li>評価ループが書く文面: ソースとパターンのページ、index と log の行、<code>PURPOSE.md</code> を日本語にした。これらを読み返すスクリプトとテストはなかった。log の行の形（<code>- YYYY-MM-DD: …</code>）は、テンプレートの <code>## [YYYY-MM-DD] op | …</code> と違うが、移植元のままにしている。</li>
+          <li>日付: <code>created</code>・<code>updated</code>・<code>ingested</code> が <code>YYYY-MM-DD</code> の形の実在する日付でなければ、<code>non_iso_dates</code> として指摘する。</li>
+          <li>Shift_JIS: <code>wiki_encoding.py</code> を加えた。BOM、ISO-2022-JP、UTF-8、CP932 と EUC-JP の順に判定し、<code>--output</code> で UTF-8 に変換したものを別のファイルに書き出す。元のファイルは書き換えない。CP932 はほとんどどんなバイト列でも読めてしまうので、読めた結果のかな・漢字・ASCII の割合が 8 割に満たなければ判定できないとする。CP932 の「〜」は UTF-8 では「～」（U+FF5E）になる。<code>/wiki:ingest</code> の手順に加えた。</li>
+          <li>出力の日本語化: <code>--help</code>、標準出力と標準エラーのメッセージ、lint・統計・グラフの報告を日本語にした。<code>--json</code> のキー、引数名、判定モデルや評価ループのランナーに渡す文面は英語のまま残す。argparse 自身のエラーメッセージ（<code>the following arguments are required</code> など）も英語のまま残る。</li>
+        </ul>
         <ul>
           <li>統計に文字数（空白を除くコードポイント数）を加える。ページの大きさを、目安 4,000 文字・上限 8,000 文字でも判定する。</li>
           <li><code>--suggest-pages</code> にカタカナ語（3 文字以上）と漢字の複合語を加える。</li>
