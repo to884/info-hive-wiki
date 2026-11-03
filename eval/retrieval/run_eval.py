@@ -24,10 +24,17 @@
   uv run --with fastembed==0.8.0 --with sqlite-vec==0.1.9 \
     python eval/retrieval/run_eval.py          # ハイブリッド検索も含める
   python3 eval/retrieval/run_eval.py --gate   # 回帰ゲートも実行する（CI）
+
+日本語の評価セットは ``ja/`` にあり、``--set ja`` で選ぶ。``--save`` を付けると、
+指標とクエリごとの結果を JSON で保存する（``baselines/`` の基準値の作成に使う）。
+
+  python3 eval/retrieval/run_eval.py --set ja
+  python3 eval/retrieval/run_eval.py --save eval/retrieval/baselines/en.json
 """
 
 import argparse
 import json
+import platform
 import subprocess
 import sys
 import tempfile
@@ -36,8 +43,14 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 SCRIPT = REPO / "skills" / "info-hive" / "scripts" / "wiki_search.py"
-CORPUS = HERE / "corpus" / "wiki"
-QUERIES = HERE / "queries.json"
+
+# 評価セット。コーパスとクエリ集の組。
+SETS = {
+    "en": {"corpus": HERE / "corpus" / "wiki", "queries": HERE / "queries.json"},
+    "ja": {"corpus": HERE / "ja" / "corpus" / "wiki", "queries": HERE / "ja" / "queries.json"},
+}
+# 評価するコーパス。main() で --set に合わせて差し替える。
+CORPUS = SETS["en"]["corpus"]
 
 # 検索モード。wiki_search.py に渡すフラグで表す。
 MODES = {
@@ -49,11 +62,18 @@ MODES = {
 METRIC_COLUMNS = ["recall@5", "recall@10", "mrr", "fp_rate"]
 
 # キャッシュを使っても出力がバイト単位で変わらないことを確かめる、固定した3つのクエリ。
-CACHE_QUERIES = [
-    "attention mechanism",
-    "quantization int8",
-    "tensor parallelism",
-]
+CACHE_QUERIES = {
+    "en": [
+        "attention mechanism",
+        "quantization int8",
+        "tensor parallelism",
+    ],
+    "ja": [
+        "消費税の軽減税率",
+        "RAG 検索拡張生成",
+        "東京",
+    ],
+}
 
 
 def build_cmd(query, granularity, filters, no_embed, cache=None):
@@ -110,15 +130,28 @@ def reciprocal_rank(slugs, expected):
     return 0.0
 
 
-def evaluate_mode(mode_opts, queries):
+def run_queries(mode_opts, queries):
+    """クエリごとに検索し、[{id, kind, slugs}] を返す。"""
+    return [
+        {
+            "id": query["id"],
+            "kind": query["kind"],
+            "slugs": result_slugs(run_search(
+                query["query"], filters=query.get("filters"), **mode_opts,
+            )),
+        }
+        for query in queries
+    ]
+
+
+def aggregate(queries, runs):
+    """クエリごとの結果から指標を計算する。"""
     recall5 = recall10 = mrr = 0.0
     positives = 0
     negatives = 0
     false_positives = 0
-    for query in queries:
-        slugs = result_slugs(run_search(
-            query["query"], filters=query.get("filters"), **mode_opts,
-        ))
+    for query, run in zip(queries, runs):
+        slugs = run["slugs"]
         if query["kind"] == "negative":
             negatives += 1
             if slugs[:5]:
@@ -137,6 +170,21 @@ def evaluate_mode(mode_opts, queries):
     }
 
 
+def aggregate_by_kind(queries, runs):
+    """kind ごとの指標。負例の kind では fp_rate だけが意味を持つ。"""
+    result = {}
+    for kind in sorted({query["kind"] for query in queries}):
+        pairs = [(q, r) for q, r in zip(queries, runs) if q["kind"] == kind]
+        kind_queries = [q for q, _ in pairs]
+        kind_runs = [r for _, r in pairs]
+        result[kind] = {"count": len(pairs), **aggregate(kind_queries, kind_runs)}
+    return result
+
+
+def evaluate_mode(mode_opts, queries):
+    return aggregate(queries, run_queries(mode_opts, queries))
+
+
 def hybrid_available():
     """ローカルの埋め込みバックエンドでハイブリッド検索が行われるときに True を返す。
 
@@ -151,7 +199,7 @@ def hybrid_available():
     return payload.get("mode") == "hybrid"
 
 
-def cache_invariant():
+def cache_invariant(cache_queries):
     """--json の標準出力は、キャッシュなし、コールドキャッシュ、ウォームキャッシュのどれでもバイト単位で同じでなければならない。
 
     1つの一時的なキャッシュのパスに対して3回実行する。1回目はすべてのクエリをキャッシュなしで、
@@ -161,9 +209,9 @@ def cache_invariant():
     """
     with tempfile.TemporaryDirectory() as tmp:
         cache = Path(tmp) / "idx.json"
-        uncached = [run_search_bytes(q, no_embed=True, cache=None) for q in CACHE_QUERIES]
-        cold = [run_search_bytes(q, no_embed=True, cache=cache) for q in CACHE_QUERIES]
-        warm = [run_search_bytes(q, no_embed=True, cache=cache) for q in CACHE_QUERIES]
+        uncached = [run_search_bytes(q, no_embed=True, cache=None) for q in cache_queries]
+        cold = [run_search_bytes(q, no_embed=True, cache=cache) for q in cache_queries]
+        warm = [run_search_bytes(q, no_embed=True, cache=cache) for q in cache_queries]
     return all(u == c == w for u, c, w in zip(uncached, cold, warm))
 
 
@@ -177,7 +225,54 @@ def print_table(rows):
         print(f"| {mode:<7} | {cells} |")
 
 
+def git_commit():
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], capture_output=True, cwd=str(REPO),
+        )
+    except OSError:
+        return None
+    return proc.stdout.decode("utf-8", "replace").strip() or None
+
+
+def installed_version(name):
+    try:
+        from importlib import metadata
+        return metadata.version(name)
+    except Exception:
+        return None
+
+
+def save_report(path, set_name, queries, rows, runs):
+    """指標とクエリごとの結果を JSON で保存する。"""
+    sys.path.insert(0, str(SCRIPT.parent))
+    import wiki_search
+
+    report = {
+        "set": set_name,
+        "commit": git_commit(),
+        "environment": {
+            "python": platform.python_version(),
+            "platform": platform.system(),
+            "fastembed": installed_version("fastembed"),
+            "sqlite-vec": installed_version("sqlite-vec"),
+            "embed_model": wiki_search.LOCAL_EMBED_MODEL if "hybrid" in rows else None,
+        },
+        "queries": len(queries),
+        "metrics": rows,
+        "by_kind": {mode: aggregate_by_kind(queries, runs[mode]) for mode in rows},
+        "per_query": {
+            mode: [{"id": r["id"], "kind": r["kind"], "top10": r["slugs"][:10]} for r in runs[mode]]
+            for mode in rows
+        },
+    }
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+
 def main():
+    global CORPUS
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -188,11 +283,20 @@ def main():
             "hybrid retrieval regresses section recall/false-positive rate."
         ),
     )
+    parser.add_argument(
+        "--set", choices=sorted(SETS), default="en",
+        help="Evaluation set: en (default) or ja.",
+    )
+    parser.add_argument(
+        "--save", metavar="PATH",
+        help="Write metrics and per-query results as JSON to PATH.",
+    )
     args = parser.parse_args()
 
     if not SCRIPT.exists():
         raise SystemExit(f"wiki_search.py not found at {SCRIPT}")
-    queries = json.loads(QUERIES.read_text(encoding="utf-8"))
+    CORPUS = SETS[args.set]["corpus"]
+    queries = json.loads(SETS[args.set]["queries"].read_text(encoding="utf-8"))
 
     modes = ["page", "section"]
     if hybrid_available():
@@ -200,12 +304,16 @@ def main():
     else:
         print("hybrid: skipped (local semantic dependencies unavailable)", file=sys.stderr)
 
-    rows = {mode: evaluate_mode(MODES[mode], queries) for mode in modes}
+    runs = {mode: run_queries(MODES[mode], queries) for mode in modes}
+    rows = {mode: aggregate(queries, runs[mode]) for mode in modes}
     print_table(rows)
+    if args.save:
+        save_report(args.save, args.set, queries, rows, runs)
+        print(f"\nsaved: {Path(args.save).as_posix()}")
 
     exit_code = 0
 
-    cache_ok = cache_invariant()
+    cache_ok = cache_invariant(CACHE_QUERIES[args.set])
     print(f"\ncache: {'OK' if cache_ok else 'MISMATCH'}")
     if not cache_ok:
         exit_code = 1  # 不一致なら --gate の有無にかかわらず失敗にする

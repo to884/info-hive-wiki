@@ -1,0 +1,1054 @@
+{
+  "set": "en",
+  "commit": "4e1913a",
+  "environment": {
+    "python": "3.12.13",
+    "platform": "Windows",
+    "fastembed": "0.8.0",
+    "sqlite-vec": "0.1.9",
+    "embed_model": "BAAI/bge-small-en-v1.5"
+  },
+  "queries": 32,
+  "metrics": {
+    "page": {
+      "recall@5": 0.6296296296296297,
+      "recall@10": 0.6296296296296297,
+      "mrr": 0.6296296296296297,
+      "fp_rate": 0.0
+    },
+    "section": {
+      "recall@5": 0.6296296296296297,
+      "recall@10": 0.6296296296296297,
+      "mrr": 0.6296296296296297,
+      "fp_rate": 0.0
+    },
+    "hybrid": {
+      "recall@5": 0.8148148148148148,
+      "recall@10": 0.9259259259259259,
+      "mrr": 0.7080246913580247,
+      "fp_rate": 0.0
+    }
+  },
+  "by_kind": {
+    "page": {
+      "exact": {
+        "count": 11,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
+        "fp_rate": 0.0
+      },
+      "filter": {
+        "count": 6,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
+        "fp_rate": 0.0
+      },
+      "negative": {
+        "count": 5,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "paraphrase": {
+        "count": 10,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      }
+    },
+    "section": {
+      "exact": {
+        "count": 11,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
+        "fp_rate": 0.0
+      },
+      "filter": {
+        "count": 6,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
+        "fp_rate": 0.0
+      },
+      "negative": {
+        "count": 5,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "paraphrase": {
+        "count": 10,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      }
+    },
+    "hybrid": {
+      "exact": {
+        "count": 11,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
+        "fp_rate": 0.0
+      },
+      "filter": {
+        "count": 6,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
+        "fp_rate": 0.0
+      },
+      "negative": {
+        "count": 5,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "paraphrase": {
+        "count": 10,
+        "recall@5": 0.5,
+        "recall@10": 0.8,
+        "mrr": 0.21166666666666667,
+        "fp_rate": 0.0
+      }
+    }
+  },
+  "per_query": {
+    "page": [
+      {
+        "id": "q01",
+        "kind": "exact",
+        "top10": [
+          "quantization"
+        ]
+      },
+      {
+        "id": "q02",
+        "kind": "exact",
+        "top10": [
+          "kv-cache",
+          "attention-mechanism",
+          "attention-paper"
+        ]
+      },
+      {
+        "id": "q03",
+        "kind": "exact",
+        "top10": [
+          "cuda",
+          "distributed-training",
+          "precision-tradeoffs",
+          "kv-cache",
+          "adam-paper",
+          "lora-paper",
+          "pytorch",
+          "quantization",
+          "tokenization",
+          "mixture-of-experts"
+        ]
+      },
+      {
+        "id": "q04",
+        "kind": "exact",
+        "top10": [
+          "pytorch"
+        ]
+      },
+      {
+        "id": "q05",
+        "kind": "exact",
+        "top10": [
+          "mixture-of-experts",
+          "scaling-laws-paper",
+          "gradient-descent",
+          "quantization"
+        ]
+      },
+      {
+        "id": "q06",
+        "kind": "exact",
+        "top10": [
+          "distributed-training",
+          "adam-paper",
+          "gradient-descent"
+        ]
+      },
+      {
+        "id": "q07",
+        "kind": "exact",
+        "top10": [
+          "cuda",
+          "pytorch"
+        ]
+      },
+      {
+        "id": "q08",
+        "kind": "exact",
+        "top10": [
+          "lora-paper"
+        ]
+      },
+      {
+        "id": "q09",
+        "kind": "exact",
+        "top10": [
+          "chinchilla-paper",
+          "mixture-of-experts",
+          "adam-paper",
+          "gradient-descent",
+          "kv-cache",
+          "tokenization",
+          "gpt-4",
+          "training-vs-inference-cost",
+          "attention-mechanism",
+          "distributed-training"
+        ]
+      },
+      {
+        "id": "q10",
+        "kind": "exact",
+        "top10": [
+          "distributed-training"
+        ]
+      },
+      {
+        "id": "q11",
+        "kind": "exact",
+        "top10": [
+          "tokenization",
+          "lora-paper",
+          "gpt-4"
+        ]
+      },
+      {
+        "id": "q12",
+        "kind": "paraphrase",
+        "top10": [
+          "gpt-4"
+        ]
+      },
+      {
+        "id": "q13",
+        "kind": "paraphrase",
+        "top10": [
+          "cuda",
+          "precision-tradeoffs"
+        ]
+      },
+      {
+        "id": "q14",
+        "kind": "paraphrase",
+        "top10": [
+          "lora-paper",
+          "precision-tradeoffs",
+          "chinchilla-paper",
+          "scaling-laws-paper",
+          "gpt-4",
+          "quantization"
+        ]
+      },
+      {
+        "id": "q15",
+        "kind": "paraphrase",
+        "top10": [
+          "ilya-sutskever",
+          "distributed-training",
+          "scaling-laws-paper",
+          "adam-paper",
+          "chinchilla-paper",
+          "tokenization",
+          "gradient-descent",
+          "kv-cache"
+        ]
+      },
+      {
+        "id": "q16",
+        "kind": "paraphrase",
+        "top10": [
+          "gpt-4"
+        ]
+      },
+      {
+        "id": "q17",
+        "kind": "paraphrase",
+        "top10": [
+          "chinchilla-paper",
+          "distributed-training",
+          "why-transformers-won"
+        ]
+      },
+      {
+        "id": "q18",
+        "kind": "paraphrase",
+        "top10": [
+          "scaling-laws-paper",
+          "kv-cache",
+          "openai",
+          "ilya-sutskever"
+        ]
+      },
+      {
+        "id": "q19",
+        "kind": "paraphrase",
+        "top10": [
+          "training-vs-inference-cost"
+        ]
+      },
+      {
+        "id": "q20",
+        "kind": "paraphrase",
+        "top10": [
+          "kv-cache"
+        ]
+      },
+      {
+        "id": "q21",
+        "kind": "paraphrase",
+        "top10": [
+          "quantization",
+          "lora-paper",
+          "scaling-laws-paper",
+          "precision-tradeoffs",
+          "why-transformers-won",
+          "attention-mechanism",
+          "distributed-training"
+        ]
+      },
+      {
+        "id": "q22",
+        "kind": "filter",
+        "top10": [
+          "attention-mechanism",
+          "kv-cache"
+        ]
+      },
+      {
+        "id": "q23",
+        "kind": "filter",
+        "top10": [
+          "chinchilla-paper",
+          "scaling-laws-paper",
+          "attention-paper",
+          "adam-paper"
+        ]
+      },
+      {
+        "id": "q24",
+        "kind": "filter",
+        "top10": [
+          "quantization",
+          "kv-cache"
+        ]
+      },
+      {
+        "id": "q25",
+        "kind": "filter",
+        "top10": [
+          "mixture-of-experts"
+        ]
+      },
+      {
+        "id": "q26",
+        "kind": "filter",
+        "top10": [
+          "ilya-sutskever"
+        ]
+      },
+      {
+        "id": "q27",
+        "kind": "filter",
+        "top10": [
+          "cuda",
+          "pytorch"
+        ]
+      },
+      {
+        "id": "q28",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "q29",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "q30",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "q31",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "q32",
+        "kind": "negative",
+        "top10": []
+      }
+    ],
+    "section": [
+      {
+        "id": "q01",
+        "kind": "exact",
+        "top10": [
+          "quantization"
+        ]
+      },
+      {
+        "id": "q02",
+        "kind": "exact",
+        "top10": [
+          "kv-cache",
+          "attention-paper",
+          "attention-mechanism",
+          "attention-mechanism",
+          "kv-cache"
+        ]
+      },
+      {
+        "id": "q03",
+        "kind": "exact",
+        "top10": [
+          "cuda",
+          "cuda",
+          "precision-tradeoffs",
+          "kv-cache",
+          "lora-paper",
+          "distributed-training",
+          "kv-cache",
+          "distributed-training",
+          "adam-paper",
+          "precision-tradeoffs"
+        ]
+      },
+      {
+        "id": "q04",
+        "kind": "exact",
+        "top10": [
+          "pytorch"
+        ]
+      },
+      {
+        "id": "q05",
+        "kind": "exact",
+        "top10": [
+          "mixture-of-experts",
+          "quantization",
+          "gradient-descent",
+          "scaling-laws-paper",
+          "scaling-laws-paper"
+        ]
+      },
+      {
+        "id": "q06",
+        "kind": "exact",
+        "top10": [
+          "distributed-training",
+          "adam-paper",
+          "gradient-descent",
+          "distributed-training"
+        ]
+      },
+      {
+        "id": "q07",
+        "kind": "exact",
+        "top10": [
+          "cuda",
+          "pytorch"
+        ]
+      },
+      {
+        "id": "q08",
+        "kind": "exact",
+        "top10": [
+          "lora-paper",
+          "lora-paper"
+        ]
+      },
+      {
+        "id": "q09",
+        "kind": "exact",
+        "top10": [
+          "chinchilla-paper",
+          "gradient-descent",
+          "mixture-of-experts",
+          "adam-paper",
+          "mixture-of-experts",
+          "attention-mechanism",
+          "distributed-training",
+          "tokenization",
+          "gpt-4",
+          "kv-cache"
+        ]
+      },
+      {
+        "id": "q10",
+        "kind": "exact",
+        "top10": [
+          "distributed-training"
+        ]
+      },
+      {
+        "id": "q11",
+        "kind": "exact",
+        "top10": [
+          "tokenization",
+          "gpt-4",
+          "lora-paper"
+        ]
+      },
+      {
+        "id": "q12",
+        "kind": "paraphrase",
+        "top10": [
+          "gpt-4"
+        ]
+      },
+      {
+        "id": "q13",
+        "kind": "paraphrase",
+        "top10": [
+          "cuda",
+          "precision-tradeoffs"
+        ]
+      },
+      {
+        "id": "q14",
+        "kind": "paraphrase",
+        "top10": [
+          "lora-paper",
+          "precision-tradeoffs",
+          "precision-tradeoffs",
+          "chinchilla-paper",
+          "scaling-laws-paper",
+          "lora-paper",
+          "quantization",
+          "chinchilla-paper",
+          "scaling-laws-paper",
+          "gpt-4"
+        ]
+      },
+      {
+        "id": "q15",
+        "kind": "paraphrase",
+        "top10": [
+          "distributed-training",
+          "ilya-sutskever",
+          "distributed-training",
+          "scaling-laws-paper",
+          "gradient-descent",
+          "tokenization",
+          "kv-cache",
+          "chinchilla-paper",
+          "adam-paper"
+        ]
+      },
+      {
+        "id": "q16",
+        "kind": "paraphrase",
+        "top10": [
+          "gpt-4"
+        ]
+      },
+      {
+        "id": "q17",
+        "kind": "paraphrase",
+        "top10": [
+          "distributed-training",
+          "chinchilla-paper",
+          "why-transformers-won",
+          "distributed-training"
+        ]
+      },
+      {
+        "id": "q18",
+        "kind": "paraphrase",
+        "top10": [
+          "scaling-laws-paper",
+          "kv-cache",
+          "scaling-laws-paper",
+          "openai",
+          "ilya-sutskever"
+        ]
+      },
+      {
+        "id": "q19",
+        "kind": "paraphrase",
+        "top10": [
+          "training-vs-inference-cost"
+        ]
+      },
+      {
+        "id": "q20",
+        "kind": "paraphrase",
+        "top10": [
+          "kv-cache",
+          "kv-cache"
+        ]
+      },
+      {
+        "id": "q21",
+        "kind": "paraphrase",
+        "top10": [
+          "quantization",
+          "why-transformers-won",
+          "scaling-laws-paper",
+          "quantization",
+          "distributed-training",
+          "attention-mechanism",
+          "lora-paper",
+          "precision-tradeoffs",
+          "lora-paper",
+          "precision-tradeoffs"
+        ]
+      },
+      {
+        "id": "q22",
+        "kind": "filter",
+        "top10": [
+          "attention-mechanism",
+          "attention-mechanism",
+          "kv-cache",
+          "kv-cache"
+        ]
+      },
+      {
+        "id": "q23",
+        "kind": "filter",
+        "top10": [
+          "chinchilla-paper",
+          "chinchilla-paper",
+          "scaling-laws-paper",
+          "scaling-laws-paper",
+          "attention-paper",
+          "adam-paper"
+        ]
+      },
+      {
+        "id": "q24",
+        "kind": "filter",
+        "top10": [
+          "quantization",
+          "quantization",
+          "kv-cache"
+        ]
+      },
+      {
+        "id": "q25",
+        "kind": "filter",
+        "top10": [
+          "mixture-of-experts",
+          "mixture-of-experts"
+        ]
+      },
+      {
+        "id": "q26",
+        "kind": "filter",
+        "top10": [
+          "ilya-sutskever"
+        ]
+      },
+      {
+        "id": "q27",
+        "kind": "filter",
+        "top10": [
+          "cuda",
+          "cuda",
+          "pytorch"
+        ]
+      },
+      {
+        "id": "q28",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "q29",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "q30",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "q31",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "q32",
+        "kind": "negative",
+        "top10": []
+      }
+    ],
+    "hybrid": [
+      {
+        "id": "q01",
+        "kind": "exact",
+        "top10": [
+          "quantization"
+        ]
+      },
+      {
+        "id": "q02",
+        "kind": "exact",
+        "top10": [
+          "kv-cache",
+          "attention-paper",
+          "attention-mechanism",
+          "attention-mechanism",
+          "kv-cache"
+        ]
+      },
+      {
+        "id": "q03",
+        "kind": "exact",
+        "top10": [
+          "cuda",
+          "cuda",
+          "precision-tradeoffs",
+          "kv-cache",
+          "lora-paper",
+          "distributed-training",
+          "kv-cache",
+          "distributed-training",
+          "adam-paper",
+          "precision-tradeoffs"
+        ]
+      },
+      {
+        "id": "q04",
+        "kind": "exact",
+        "top10": [
+          "pytorch",
+          "distributed-training",
+          "distributed-training"
+        ]
+      },
+      {
+        "id": "q05",
+        "kind": "exact",
+        "top10": [
+          "mixture-of-experts",
+          "quantization",
+          "gradient-descent",
+          "scaling-laws-paper",
+          "scaling-laws-paper"
+        ]
+      },
+      {
+        "id": "q06",
+        "kind": "exact",
+        "top10": [
+          "distributed-training",
+          "adam-paper",
+          "gradient-descent",
+          "distributed-training"
+        ]
+      },
+      {
+        "id": "q07",
+        "kind": "exact",
+        "top10": [
+          "cuda",
+          "precision-tradeoffs",
+          "pytorch"
+        ]
+      },
+      {
+        "id": "q08",
+        "kind": "exact",
+        "top10": [
+          "lora-paper",
+          "lora-paper",
+          "gradient-descent",
+          "adam-paper",
+          "chinchilla-paper",
+          "training-vs-inference-cost",
+          "why-transformers-won",
+          "adam-paper",
+          "scaling-laws-paper",
+          "distributed-training"
+        ]
+      },
+      {
+        "id": "q09",
+        "kind": "exact",
+        "top10": [
+          "chinchilla-paper",
+          "tokenization",
+          "gradient-descent",
+          "tokenization",
+          "mixture-of-experts",
+          "adam-paper",
+          "mixture-of-experts",
+          "attention-mechanism",
+          "distributed-training",
+          "precision-tradeoffs"
+        ]
+      },
+      {
+        "id": "q10",
+        "kind": "exact",
+        "top10": [
+          "distributed-training"
+        ]
+      },
+      {
+        "id": "q11",
+        "kind": "exact",
+        "top10": [
+          "tokenization",
+          "gpt-4",
+          "precision-tradeoffs",
+          "lora-paper",
+          "attention-paper",
+          "tokenization"
+        ]
+      },
+      {
+        "id": "q12",
+        "kind": "paraphrase",
+        "top10": [
+          "gpt-4",
+          "adam-paper",
+          "attention-mechanism",
+          "training-vs-inference-cost",
+          "attention-paper",
+          "attention-paper",
+          "scaling-laws-paper",
+          "adam-paper",
+          "attention-mechanism",
+          "chinchilla-paper"
+        ]
+      },
+      {
+        "id": "q13",
+        "kind": "paraphrase",
+        "top10": [
+          "precision-tradeoffs",
+          "cuda",
+          "gradient-descent",
+          "gradient-descent",
+          "precision-tradeoffs",
+          "distributed-training",
+          "adam-paper",
+          "distributed-training"
+        ]
+      },
+      {
+        "id": "q14",
+        "kind": "paraphrase",
+        "top10": [
+          "precision-tradeoffs",
+          "chinchilla-paper",
+          "scaling-laws-paper",
+          "lora-paper",
+          "lora-paper",
+          "tokenization",
+          "precision-tradeoffs",
+          "tokenization",
+          "adam-paper",
+          "quantization"
+        ]
+      },
+      {
+        "id": "q15",
+        "kind": "paraphrase",
+        "top10": [
+          "distributed-training",
+          "precision-tradeoffs",
+          "ilya-sutskever",
+          "quantization",
+          "distributed-training",
+          "precision-tradeoffs",
+          "scaling-laws-paper",
+          "gradient-descent",
+          "tokenization",
+          "kv-cache"
+        ]
+      },
+      {
+        "id": "q16",
+        "kind": "paraphrase",
+        "top10": [
+          "gpt-4",
+          "gradient-descent",
+          "distributed-training",
+          "precision-tradeoffs",
+          "training-vs-inference-cost",
+          "gradient-descent",
+          "distributed-training",
+          "chinchilla-paper",
+          "adam-paper",
+          "chinchilla-paper"
+        ]
+      },
+      {
+        "id": "q17",
+        "kind": "paraphrase",
+        "top10": [
+          "distributed-training",
+          "gradient-descent",
+          "chinchilla-paper",
+          "precision-tradeoffs",
+          "why-transformers-won",
+          "kv-cache",
+          "distributed-training",
+          "training-vs-inference-cost",
+          "adam-paper",
+          "chinchilla-paper"
+        ]
+      },
+      {
+        "id": "q18",
+        "kind": "paraphrase",
+        "top10": [
+          "scaling-laws-paper",
+          "scaling-laws-paper",
+          "adam-paper",
+          "kv-cache",
+          "distributed-training",
+          "distributed-training",
+          "adam-paper",
+          "openai",
+          "ilya-sutskever",
+          "openai"
+        ]
+      },
+      {
+        "id": "q19",
+        "kind": "paraphrase",
+        "top10": [
+          "training-vs-inference-cost",
+          "precision-tradeoffs",
+          "gradient-descent"
+        ]
+      },
+      {
+        "id": "q20",
+        "kind": "paraphrase",
+        "top10": [
+          "kv-cache",
+          "cuda",
+          "kv-cache",
+          "attention-paper"
+        ]
+      },
+      {
+        "id": "q21",
+        "kind": "paraphrase",
+        "top10": [
+          "scaling-laws-paper",
+          "lora-paper",
+          "lora-paper",
+          "quantization",
+          "why-transformers-won",
+          "chinchilla-paper",
+          "scaling-laws-paper",
+          "adam-paper",
+          "quantization",
+          "gradient-descent"
+        ]
+      },
+      {
+        "id": "q22",
+        "kind": "filter",
+        "top10": [
+          "attention-mechanism",
+          "attention-mechanism",
+          "kv-cache",
+          "kv-cache"
+        ]
+      },
+      {
+        "id": "q23",
+        "kind": "filter",
+        "top10": [
+          "chinchilla-paper",
+          "chinchilla-paper",
+          "scaling-laws-paper",
+          "adam-paper",
+          "scaling-laws-paper",
+          "adam-paper",
+          "attention-paper",
+          "lora-paper",
+          "lora-paper"
+        ]
+      },
+      {
+        "id": "q24",
+        "kind": "filter",
+        "top10": [
+          "quantization",
+          "quantization",
+          "tokenization",
+          "kv-cache",
+          "tokenization"
+        ]
+      },
+      {
+        "id": "q25",
+        "kind": "filter",
+        "top10": [
+          "mixture-of-experts",
+          "mixture-of-experts",
+          "distributed-training"
+        ]
+      },
+      {
+        "id": "q26",
+        "kind": "filter",
+        "top10": [
+          "ilya-sutskever"
+        ]
+      },
+      {
+        "id": "q27",
+        "kind": "filter",
+        "top10": [
+          "cuda",
+          "cuda",
+          "pytorch"
+        ]
+      },
+      {
+        "id": "q28",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "q29",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "q30",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "q31",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "q32",
+        "kind": "negative",
+        "top10": []
+      }
+    ]
+  }
+}

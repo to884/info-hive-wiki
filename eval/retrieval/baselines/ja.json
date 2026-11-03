@@ -1,0 +1,1195 @@
+{
+  "set": "ja",
+  "commit": "4e1913a",
+  "environment": {
+    "python": "3.12.13",
+    "platform": "Windows",
+    "fastembed": "0.8.0",
+    "sqlite-vec": "0.1.9",
+    "embed_model": "BAAI/bge-small-en-v1.5"
+  },
+  "queries": 53,
+  "metrics": {
+    "page": {
+      "recall@5": 0.1702127659574468,
+      "recall@10": 0.1702127659574468,
+      "mrr": 0.1702127659574468,
+      "fp_rate": 0.0
+    },
+    "section": {
+      "recall@5": 0.1702127659574468,
+      "recall@10": 0.1702127659574468,
+      "mrr": 0.1702127659574468,
+      "fp_rate": 0.0
+    },
+    "hybrid": {
+      "recall@5": 0.1702127659574468,
+      "recall@10": 0.1702127659574468,
+      "mrr": 0.1702127659574468,
+      "fp_rate": 0.0
+    }
+  },
+  "by_kind": {
+    "page": {
+      "cross-lingual": {
+        "count": 5,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "exact": {
+        "count": 9,
+        "recall@5": 0.3333333333333333,
+        "recall@10": 0.3333333333333333,
+        "mrr": 0.3333333333333333,
+        "fp_rate": 0.0
+      },
+      "filename": {
+        "count": 2,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "filter": {
+        "count": 6,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "fullwidth": {
+        "count": 3,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "long-section": {
+        "count": 3,
+        "recall@5": 0.3333333333333333,
+        "recall@10": 0.3333333333333333,
+        "mrr": 0.3333333333333333,
+        "fp_rate": 0.0
+      },
+      "mixed": {
+        "count": 4,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
+        "fp_rate": 0.0
+      },
+      "negative": {
+        "count": 6,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "paraphrase": {
+        "count": 8,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "single-kanji": {
+        "count": 3,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "two-char": {
+        "count": 4,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      }
+    },
+    "section": {
+      "cross-lingual": {
+        "count": 5,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "exact": {
+        "count": 9,
+        "recall@5": 0.3333333333333333,
+        "recall@10": 0.3333333333333333,
+        "mrr": 0.3333333333333333,
+        "fp_rate": 0.0
+      },
+      "filename": {
+        "count": 2,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "filter": {
+        "count": 6,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "fullwidth": {
+        "count": 3,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "long-section": {
+        "count": 3,
+        "recall@5": 0.3333333333333333,
+        "recall@10": 0.3333333333333333,
+        "mrr": 0.3333333333333333,
+        "fp_rate": 0.0
+      },
+      "mixed": {
+        "count": 4,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
+        "fp_rate": 0.0
+      },
+      "negative": {
+        "count": 6,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "paraphrase": {
+        "count": 8,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "single-kanji": {
+        "count": 3,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "two-char": {
+        "count": 4,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      }
+    },
+    "hybrid": {
+      "cross-lingual": {
+        "count": 5,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "exact": {
+        "count": 9,
+        "recall@5": 0.3333333333333333,
+        "recall@10": 0.3333333333333333,
+        "mrr": 0.3333333333333333,
+        "fp_rate": 0.0
+      },
+      "filename": {
+        "count": 2,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "filter": {
+        "count": 6,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "fullwidth": {
+        "count": 3,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "long-section": {
+        "count": 3,
+        "recall@5": 0.3333333333333333,
+        "recall@10": 0.3333333333333333,
+        "mrr": 0.3333333333333333,
+        "fp_rate": 0.0
+      },
+      "mixed": {
+        "count": 4,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
+        "fp_rate": 0.0
+      },
+      "negative": {
+        "count": 6,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "paraphrase": {
+        "count": 8,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "single-kanji": {
+        "count": 3,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      },
+      "two-char": {
+        "count": 4,
+        "recall@5": 0.0,
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "fp_rate": 0.0
+      }
+    }
+  },
+  "per_query": {
+    "page": [
+      {
+        "id": "j01",
+        "kind": "exact",
+        "top10": []
+      },
+      {
+        "id": "j02",
+        "kind": "exact",
+        "top10": []
+      },
+      {
+        "id": "j03",
+        "kind": "exact",
+        "top10": []
+      },
+      {
+        "id": "j04",
+        "kind": "exact",
+        "top10": []
+      },
+      {
+        "id": "j05",
+        "kind": "exact",
+        "top10": []
+      },
+      {
+        "id": "j06",
+        "kind": "exact",
+        "top10": []
+      },
+      {
+        "id": "j07",
+        "kind": "exact",
+        "top10": [
+          "文字コード",
+          "文字化け障害報告"
+        ]
+      },
+      {
+        "id": "j08",
+        "kind": "exact",
+        "top10": [
+          "elasticsearch"
+        ]
+      },
+      {
+        "id": "j09",
+        "kind": "exact",
+        "top10": [
+          "heatstroke"
+        ]
+      },
+      {
+        "id": "j10",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j11",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j12",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j13",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j14",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j15",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j16",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j17",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j18",
+        "kind": "two-char",
+        "top10": []
+      },
+      {
+        "id": "j19",
+        "kind": "two-char",
+        "top10": []
+      },
+      {
+        "id": "j20",
+        "kind": "two-char",
+        "top10": []
+      },
+      {
+        "id": "j21",
+        "kind": "two-char",
+        "top10": []
+      },
+      {
+        "id": "j22",
+        "kind": "single-kanji",
+        "top10": []
+      },
+      {
+        "id": "j23",
+        "kind": "single-kanji",
+        "top10": []
+      },
+      {
+        "id": "j24",
+        "kind": "single-kanji",
+        "top10": []
+      },
+      {
+        "id": "j25",
+        "kind": "mixed",
+        "top10": [
+          "rag",
+          "embedding"
+        ]
+      },
+      {
+        "id": "j26",
+        "kind": "mixed",
+        "top10": [
+          "bm25",
+          "全文検索",
+          "rag",
+          "elasticsearch"
+        ]
+      },
+      {
+        "id": "j27",
+        "kind": "mixed",
+        "top10": [
+          "文字化け障害報告",
+          "文字コード",
+          "keigen-zeiritsu",
+          "消費税"
+        ]
+      },
+      {
+        "id": "j28",
+        "kind": "mixed",
+        "top10": [
+          "nta"
+        ]
+      },
+      {
+        "id": "j29",
+        "kind": "cross-lingual",
+        "top10": []
+      },
+      {
+        "id": "j30",
+        "kind": "cross-lingual",
+        "top10": []
+      },
+      {
+        "id": "j31",
+        "kind": "cross-lingual",
+        "top10": []
+      },
+      {
+        "id": "j32",
+        "kind": "cross-lingual",
+        "top10": []
+      },
+      {
+        "id": "j33",
+        "kind": "cross-lingual",
+        "top10": []
+      },
+      {
+        "id": "j34",
+        "kind": "fullwidth",
+        "top10": []
+      },
+      {
+        "id": "j35",
+        "kind": "fullwidth",
+        "top10": []
+      },
+      {
+        "id": "j36",
+        "kind": "fullwidth",
+        "top10": []
+      },
+      {
+        "id": "j37",
+        "kind": "long-section",
+        "top10": []
+      },
+      {
+        "id": "j38",
+        "kind": "long-section",
+        "top10": [
+          "文字化け障害報告",
+          "文字コード"
+        ]
+      },
+      {
+        "id": "j39",
+        "kind": "long-section",
+        "top10": []
+      },
+      {
+        "id": "j40",
+        "kind": "filename",
+        "top10": []
+      },
+      {
+        "id": "j41",
+        "kind": "filename",
+        "top10": []
+      },
+      {
+        "id": "j42",
+        "kind": "filter",
+        "top10": []
+      },
+      {
+        "id": "j43",
+        "kind": "filter",
+        "top10": []
+      },
+      {
+        "id": "j44",
+        "kind": "filter",
+        "top10": []
+      },
+      {
+        "id": "j45",
+        "kind": "filter",
+        "top10": []
+      },
+      {
+        "id": "j46",
+        "kind": "filter",
+        "top10": []
+      },
+      {
+        "id": "j47",
+        "kind": "filter",
+        "top10": []
+      },
+      {
+        "id": "j48",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "j49",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "j50",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "j51",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "j52",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "j53",
+        "kind": "negative",
+        "top10": []
+      }
+    ],
+    "section": [
+      {
+        "id": "j01",
+        "kind": "exact",
+        "top10": []
+      },
+      {
+        "id": "j02",
+        "kind": "exact",
+        "top10": []
+      },
+      {
+        "id": "j03",
+        "kind": "exact",
+        "top10": []
+      },
+      {
+        "id": "j04",
+        "kind": "exact",
+        "top10": []
+      },
+      {
+        "id": "j05",
+        "kind": "exact",
+        "top10": []
+      },
+      {
+        "id": "j06",
+        "kind": "exact",
+        "top10": []
+      },
+      {
+        "id": "j07",
+        "kind": "exact",
+        "top10": [
+          "文字コード",
+          "文字化け障害報告"
+        ]
+      },
+      {
+        "id": "j08",
+        "kind": "exact",
+        "top10": [
+          "elasticsearch"
+        ]
+      },
+      {
+        "id": "j09",
+        "kind": "exact",
+        "top10": [
+          "heatstroke"
+        ]
+      },
+      {
+        "id": "j10",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j11",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j12",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j13",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j14",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j15",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j16",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j17",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j18",
+        "kind": "two-char",
+        "top10": []
+      },
+      {
+        "id": "j19",
+        "kind": "two-char",
+        "top10": []
+      },
+      {
+        "id": "j20",
+        "kind": "two-char",
+        "top10": []
+      },
+      {
+        "id": "j21",
+        "kind": "two-char",
+        "top10": []
+      },
+      {
+        "id": "j22",
+        "kind": "single-kanji",
+        "top10": []
+      },
+      {
+        "id": "j23",
+        "kind": "single-kanji",
+        "top10": []
+      },
+      {
+        "id": "j24",
+        "kind": "single-kanji",
+        "top10": []
+      },
+      {
+        "id": "j25",
+        "kind": "mixed",
+        "top10": [
+          "rag",
+          "embedding",
+          "rag"
+        ]
+      },
+      {
+        "id": "j26",
+        "kind": "mixed",
+        "top10": [
+          "bm25",
+          "bm25",
+          "全文検索",
+          "rag",
+          "elasticsearch"
+        ]
+      },
+      {
+        "id": "j27",
+        "kind": "mixed",
+        "top10": [
+          "文字化け障害報告",
+          "文字コード",
+          "文字コード",
+          "文字化け障害報告",
+          "keigen-zeiritsu",
+          "keigen-zeiritsu",
+          "消費税",
+          "消費税"
+        ]
+      },
+      {
+        "id": "j28",
+        "kind": "mixed",
+        "top10": [
+          "nta"
+        ]
+      },
+      {
+        "id": "j29",
+        "kind": "cross-lingual",
+        "top10": []
+      },
+      {
+        "id": "j30",
+        "kind": "cross-lingual",
+        "top10": []
+      },
+      {
+        "id": "j31",
+        "kind": "cross-lingual",
+        "top10": []
+      },
+      {
+        "id": "j32",
+        "kind": "cross-lingual",
+        "top10": []
+      },
+      {
+        "id": "j33",
+        "kind": "cross-lingual",
+        "top10": []
+      },
+      {
+        "id": "j34",
+        "kind": "fullwidth",
+        "top10": []
+      },
+      {
+        "id": "j35",
+        "kind": "fullwidth",
+        "top10": []
+      },
+      {
+        "id": "j36",
+        "kind": "fullwidth",
+        "top10": []
+      },
+      {
+        "id": "j37",
+        "kind": "long-section",
+        "top10": []
+      },
+      {
+        "id": "j38",
+        "kind": "long-section",
+        "top10": [
+          "文字化け障害報告",
+          "文字化け障害報告",
+          "文字コード"
+        ]
+      },
+      {
+        "id": "j39",
+        "kind": "long-section",
+        "top10": []
+      },
+      {
+        "id": "j40",
+        "kind": "filename",
+        "top10": []
+      },
+      {
+        "id": "j41",
+        "kind": "filename",
+        "top10": []
+      },
+      {
+        "id": "j42",
+        "kind": "filter",
+        "top10": []
+      },
+      {
+        "id": "j43",
+        "kind": "filter",
+        "top10": []
+      },
+      {
+        "id": "j44",
+        "kind": "filter",
+        "top10": []
+      },
+      {
+        "id": "j45",
+        "kind": "filter",
+        "top10": []
+      },
+      {
+        "id": "j46",
+        "kind": "filter",
+        "top10": []
+      },
+      {
+        "id": "j47",
+        "kind": "filter",
+        "top10": []
+      },
+      {
+        "id": "j48",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "j49",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "j50",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "j51",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "j52",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "j53",
+        "kind": "negative",
+        "top10": []
+      }
+    ],
+    "hybrid": [
+      {
+        "id": "j01",
+        "kind": "exact",
+        "top10": []
+      },
+      {
+        "id": "j02",
+        "kind": "exact",
+        "top10": []
+      },
+      {
+        "id": "j03",
+        "kind": "exact",
+        "top10": []
+      },
+      {
+        "id": "j04",
+        "kind": "exact",
+        "top10": []
+      },
+      {
+        "id": "j05",
+        "kind": "exact",
+        "top10": []
+      },
+      {
+        "id": "j06",
+        "kind": "exact",
+        "top10": []
+      },
+      {
+        "id": "j07",
+        "kind": "exact",
+        "top10": [
+          "文字コード",
+          "文字化け障害報告",
+          "tokyo-business-trip",
+          "invoice-system"
+        ]
+      },
+      {
+        "id": "j08",
+        "kind": "exact",
+        "top10": [
+          "elasticsearch"
+        ]
+      },
+      {
+        "id": "j09",
+        "kind": "exact",
+        "top10": [
+          "heatstroke"
+        ]
+      },
+      {
+        "id": "j10",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j11",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j12",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j13",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j14",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j15",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j16",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j17",
+        "kind": "paraphrase",
+        "top10": []
+      },
+      {
+        "id": "j18",
+        "kind": "two-char",
+        "top10": []
+      },
+      {
+        "id": "j19",
+        "kind": "two-char",
+        "top10": []
+      },
+      {
+        "id": "j20",
+        "kind": "two-char",
+        "top10": []
+      },
+      {
+        "id": "j21",
+        "kind": "two-char",
+        "top10": []
+      },
+      {
+        "id": "j22",
+        "kind": "single-kanji",
+        "top10": []
+      },
+      {
+        "id": "j23",
+        "kind": "single-kanji",
+        "top10": []
+      },
+      {
+        "id": "j24",
+        "kind": "single-kanji",
+        "top10": []
+      },
+      {
+        "id": "j25",
+        "kind": "mixed",
+        "top10": [
+          "rag",
+          "embedding",
+          "rag",
+          "keigen-zeiritsu",
+          "熱中症予防ガイド要約",
+          "embedding",
+          "morphological-analysis",
+          "全文検索",
+          "search-study-notes",
+          "全文検索"
+        ]
+      },
+      {
+        "id": "j26",
+        "kind": "mixed",
+        "top10": [
+          "bm25",
+          "bm25",
+          "全文検索",
+          "rag",
+          "熱中症予防ガイド要約",
+          "elasticsearch",
+          "morphological-analysis",
+          "文字コード",
+          "embedding",
+          "全文検索"
+        ]
+      },
+      {
+        "id": "j27",
+        "kind": "mixed",
+        "top10": [
+          "文字コード",
+          "文字化け障害報告",
+          "文字化け障害報告",
+          "文字コード",
+          "keigen-zeiritsu",
+          "keigen-zeiritsu",
+          "消費税",
+          "mecab",
+          "消費税",
+          "全文検索"
+        ]
+      },
+      {
+        "id": "j28",
+        "kind": "mixed",
+        "top10": [
+          "nta",
+          "消費税",
+          "invoice-small-business",
+          "invoice-small-business",
+          "japanese-search-tradeoffs",
+          "invoice-system",
+          "invoice-system",
+          "熱中症予防ガイド要約",
+          "keigen-zeiritsu",
+          "tax-seminar-2025"
+        ]
+      },
+      {
+        "id": "j29",
+        "kind": "cross-lingual",
+        "top10": []
+      },
+      {
+        "id": "j30",
+        "kind": "cross-lingual",
+        "top10": []
+      },
+      {
+        "id": "j31",
+        "kind": "cross-lingual",
+        "top10": []
+      },
+      {
+        "id": "j32",
+        "kind": "cross-lingual",
+        "top10": []
+      },
+      {
+        "id": "j33",
+        "kind": "cross-lingual",
+        "top10": []
+      },
+      {
+        "id": "j34",
+        "kind": "fullwidth",
+        "top10": []
+      },
+      {
+        "id": "j35",
+        "kind": "fullwidth",
+        "top10": []
+      },
+      {
+        "id": "j36",
+        "kind": "fullwidth",
+        "top10": []
+      },
+      {
+        "id": "j37",
+        "kind": "long-section",
+        "top10": []
+      },
+      {
+        "id": "j38",
+        "kind": "long-section",
+        "top10": [
+          "文字化け障害報告",
+          "文字化け障害報告",
+          "文字コード",
+          "熱中症予防ガイド要約",
+          "全文検索",
+          "全文検索",
+          "文字コード",
+          "morphological-analysis",
+          "embedding",
+          "rag"
+        ]
+      },
+      {
+        "id": "j39",
+        "kind": "long-section",
+        "top10": []
+      },
+      {
+        "id": "j40",
+        "kind": "filename",
+        "top10": []
+      },
+      {
+        "id": "j41",
+        "kind": "filename",
+        "top10": []
+      },
+      {
+        "id": "j42",
+        "kind": "filter",
+        "top10": []
+      },
+      {
+        "id": "j43",
+        "kind": "filter",
+        "top10": []
+      },
+      {
+        "id": "j44",
+        "kind": "filter",
+        "top10": []
+      },
+      {
+        "id": "j45",
+        "kind": "filter",
+        "top10": []
+      },
+      {
+        "id": "j46",
+        "kind": "filter",
+        "top10": []
+      },
+      {
+        "id": "j47",
+        "kind": "filter",
+        "top10": []
+      },
+      {
+        "id": "j48",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "j49",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "j50",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "j51",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "j52",
+        "kind": "negative",
+        "top10": []
+      },
+      {
+        "id": "j53",
+        "kind": "negative",
+        "top10": []
+      }
+    ]
+  }
+}
