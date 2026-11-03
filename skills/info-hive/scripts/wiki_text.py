@@ -169,3 +169,83 @@ def has_fullwidth_link_syntax(link: str) -> bool:
     名前のページへのリンクになる。スクリプトも同じく区切りとしては扱わず、lint で指摘する。
     """
     return FULLWIDTH_PIPE in link or FULLWIDTH_HASH in link
+
+
+# ---------------------------------------------------------------------------
+# ページの大きさと表示幅
+# ---------------------------------------------------------------------------
+
+def char_count(text: str) -> int:
+    """空白（改行を含む）を除いたコードポイントの数。ページの大きさの判定に使う（計画の方針 I）。"""
+    return sum(1 for ch in text if not ch.isspace())
+
+
+def display_width(text: str) -> int:
+    """端末での表示幅。全角（East Asian Width が W か F）の文字を 2 桁と数える。"""
+    width = 0
+    for ch in text:
+        if unicodedata.combining(ch):
+            continue
+        width += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+    return width
+
+
+def ljust_display(text: str, width: int) -> str:
+    """表示幅が width になるまで、右に空白を足す。"""
+    return text + " " * max(0, width - display_width(text))
+
+
+def rjust_display(text: str, width: int) -> str:
+    """表示幅が width になるまで、左に空白を足す。"""
+    return " " * max(0, width - display_width(text)) + text
+
+
+# ---------------------------------------------------------------------------
+# 引用の照合（計画の方針 H）
+# ---------------------------------------------------------------------------
+
+# 日本語の文字。漢字、ひらがな、カタカナ、和文の句読点・括弧、全角の英数字と記号。
+_JA_CHAR = (
+    r"　-〿぀-ゟ゠-ヿㇰ-ㇿ㐀-䶿一-鿿"
+    r"豈-﫿＀-￯\U00020000-\U0003134f"
+)
+_JA_GAP_RE = re.compile(rf"(?<=[{_JA_CHAR}])\s+(?=[{_JA_CHAR}])")
+_SPACE_RE = re.compile(r"\s+")
+
+
+def normalize_quote(text: str) -> str:
+    """引用が本文に含まれるかを比べるための形にする。
+
+    大文字と小文字を区別せず、空白の並びを 1 つの空白にまとめる。日本語の文字どうしの間の
+    改行と空白は取り除く（日本語の文は、行をまたいでも途中に空白を入れない）。英数字の間の
+    空白は残す。空白をすべて除くと「now here」と「nowhere」を同じとみなしてしまうためである。
+    NFKC はかけない。全角と半角の違いも、引用が本文と一致しない理由として残す。
+    """
+    text = _JA_GAP_RE.sub("", text.lower())
+    return _SPACE_RE.sub(" ", text).strip()
+
+
+def quote_in_text(quote: str, text: str) -> bool:
+    """normalize_quote でそろえたうえで、quote が text に含まれていれば True を返す。"""
+    needle = normalize_quote(quote or "")
+    return bool(needle) and needle in normalize_quote(text or "")
+
+
+# ---------------------------------------------------------------------------
+# 日付
+# ---------------------------------------------------------------------------
+
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def is_iso_date(value) -> bool:
+    """value が YYYY-MM-DD の形の、実在する日付なら True を返す。"""
+    if not isinstance(value, str) or not _ISO_DATE_RE.match(value):
+        return False
+    from datetime import date
+
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
