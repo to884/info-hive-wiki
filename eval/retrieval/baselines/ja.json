@@ -1,29 +1,29 @@
 {
   "set": "ja",
-  "commit": "4e1913a",
+  "commit": "269d27d",
   "environment": {
     "fastembed": "0.8.0",
     "sqlite-vec": "0.1.9",
-    "embed_model": "BAAI/bge-small-en-v1.5"
+    "embed_model": "intfloat/multilingual-e5-small"
   },
   "queries": 53,
   "metrics": {
     "page": {
-      "recall@5": 0.1702127659574468,
-      "recall@10": 0.1702127659574468,
-      "mrr": 0.1702127659574468,
+      "recall@5": 0.9716312056737588,
+      "recall@10": 0.9716312056737588,
+      "mrr": 0.9219858156028368,
       "fp_rate": 0.0
     },
     "section": {
-      "recall@5": 0.1702127659574468,
-      "recall@10": 0.1702127659574468,
-      "mrr": 0.1702127659574468,
+      "recall@5": 0.9716312056737588,
+      "recall@10": 0.9716312056737588,
+      "mrr": 0.9007092198581559,
       "fp_rate": 0.0
     },
     "hybrid": {
-      "recall@5": 0.1702127659574468,
-      "recall@10": 0.1702127659574468,
-      "mrr": 0.1702127659574468,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 0.9503546099290779,
       "fp_rate": 0.0
     }
   },
@@ -31,44 +31,44 @@
     "page": {
       "cross-lingual": {
         "count": 5,
-        "recall@5": 0.0,
-        "recall@10": 0.0,
-        "mrr": 0.0,
+        "recall@5": 0.8,
+        "recall@10": 0.8,
+        "mrr": 0.7,
         "fp_rate": 0.0
       },
       "exact": {
         "count": 9,
-        "recall@5": 0.3333333333333333,
-        "recall@10": 0.3333333333333333,
-        "mrr": 0.3333333333333333,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 0.9259259259259258,
         "fp_rate": 0.0
       },
       "filename": {
         "count": 2,
-        "recall@5": 0.0,
-        "recall@10": 0.0,
-        "mrr": 0.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
         "fp_rate": 0.0
       },
       "filter": {
         "count": 6,
-        "recall@5": 0.0,
-        "recall@10": 0.0,
-        "mrr": 0.0,
+        "recall@5": 0.9444444444444443,
+        "recall@10": 0.9444444444444443,
+        "mrr": 1.0,
         "fp_rate": 0.0
       },
       "fullwidth": {
         "count": 3,
-        "recall@5": 0.0,
-        "recall@10": 0.0,
-        "mrr": 0.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
         "fp_rate": 0.0
       },
       "long-section": {
         "count": 3,
-        "recall@5": 0.3333333333333333,
-        "recall@10": 0.3333333333333333,
-        "mrr": 0.3333333333333333,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
         "fp_rate": 0.0
       },
       "mixed": {
@@ -87,67 +87,67 @@
       },
       "paraphrase": {
         "count": 8,
-        "recall@5": 0.0,
-        "recall@10": 0.0,
-        "mrr": 0.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 0.875,
         "fp_rate": 0.0
       },
       "single-kanji": {
         "count": 3,
-        "recall@5": 0.0,
-        "recall@10": 0.0,
-        "mrr": 0.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
         "fp_rate": 0.0
       },
       "two-char": {
         "count": 4,
-        "recall@5": 0.0,
-        "recall@10": 0.0,
-        "mrr": 0.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 0.875,
         "fp_rate": 0.0
       }
     },
     "section": {
       "cross-lingual": {
         "count": 5,
-        "recall@5": 0.0,
-        "recall@10": 0.0,
-        "mrr": 0.0,
+        "recall@5": 0.8,
+        "recall@10": 0.8,
+        "mrr": 0.8,
         "fp_rate": 0.0
       },
       "exact": {
         "count": 9,
-        "recall@5": 0.3333333333333333,
-        "recall@10": 0.3333333333333333,
-        "mrr": 0.3333333333333333,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
         "fp_rate": 0.0
       },
       "filename": {
         "count": 2,
-        "recall@5": 0.0,
-        "recall@10": 0.0,
-        "mrr": 0.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
         "fp_rate": 0.0
       },
       "filter": {
         "count": 6,
-        "recall@5": 0.0,
-        "recall@10": 0.0,
-        "mrr": 0.0,
+        "recall@5": 0.9444444444444443,
+        "recall@10": 0.9444444444444443,
+        "mrr": 1.0,
         "fp_rate": 0.0
       },
       "fullwidth": {
         "count": 3,
-        "recall@5": 0.0,
-        "recall@10": 0.0,
-        "mrr": 0.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
         "fp_rate": 0.0
       },
       "long-section": {
         "count": 3,
-        "recall@5": 0.3333333333333333,
-        "recall@10": 0.3333333333333333,
-        "mrr": 0.3333333333333333,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 0.8333333333333334,
         "fp_rate": 0.0
       },
       "mixed": {
@@ -166,67 +166,67 @@
       },
       "paraphrase": {
         "count": 8,
-        "recall@5": 0.0,
-        "recall@10": 0.0,
-        "mrr": 0.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 0.875,
         "fp_rate": 0.0
       },
       "single-kanji": {
         "count": 3,
-        "recall@5": 0.0,
-        "recall@10": 0.0,
-        "mrr": 0.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 0.611111111111111,
         "fp_rate": 0.0
       },
       "two-char": {
         "count": 4,
-        "recall@5": 0.0,
-        "recall@10": 0.0,
-        "mrr": 0.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 0.75,
         "fp_rate": 0.0
       }
     },
     "hybrid": {
       "cross-lingual": {
         "count": 5,
-        "recall@5": 0.0,
-        "recall@10": 0.0,
-        "mrr": 0.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 0.8666666666666666,
         "fp_rate": 0.0
       },
       "exact": {
         "count": 9,
-        "recall@5": 0.3333333333333333,
-        "recall@10": 0.3333333333333333,
-        "mrr": 0.3333333333333333,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
         "fp_rate": 0.0
       },
       "filename": {
         "count": 2,
-        "recall@5": 0.0,
-        "recall@10": 0.0,
-        "mrr": 0.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
         "fp_rate": 0.0
       },
       "filter": {
         "count": 6,
-        "recall@5": 0.0,
-        "recall@10": 0.0,
-        "mrr": 0.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
         "fp_rate": 0.0
       },
       "fullwidth": {
         "count": 3,
-        "recall@5": 0.0,
-        "recall@10": 0.0,
-        "mrr": 0.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
         "fp_rate": 0.0
       },
       "long-section": {
         "count": 3,
-        "recall@5": 0.3333333333333333,
-        "recall@10": 0.3333333333333333,
-        "mrr": 0.3333333333333333,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
         "fp_rate": 0.0
       },
       "mixed": {
@@ -245,23 +245,23 @@
       },
       "paraphrase": {
         "count": 8,
-        "recall@5": 0.0,
-        "recall@10": 0.0,
-        "mrr": 0.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 0.9375,
         "fp_rate": 0.0
       },
       "single-kanji": {
         "count": 3,
-        "recall@5": 0.0,
-        "recall@10": 0.0,
-        "mrr": 0.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 0.7777777777777777,
         "fp_rate": 0.0
       },
       "two-char": {
         "count": 4,
-        "recall@5": 0.0,
-        "recall@10": 0.0,
-        "mrr": 0.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 0.875,
         "fp_rate": 0.0
       }
     }
@@ -271,32 +271,56 @@
       {
         "id": "j01",
         "kind": "exact",
-        "top10": []
+        "top10": [
+          "invoice-system",
+          "invoice-small-business",
+          "消費税",
+          "tax-seminar-2025"
+        ]
       },
       {
         "id": "j02",
         "kind": "exact",
-        "top10": []
+        "top10": [
+          "invoice-system",
+          "nta",
+          "tax-seminar-2025",
+          "消費税",
+          "invoice-small-business",
+          "tokyo-business-trip"
+        ]
       },
       {
         "id": "j03",
         "kind": "exact",
-        "top10": []
+        "top10": [
+          "全文検索"
+        ]
       },
       {
         "id": "j04",
         "kind": "exact",
-        "top10": []
+        "top10": [
+          "heatstroke",
+          "summer-outdoor-safety",
+          "bm25",
+          "search-study-notes",
+          "全文検索"
+        ]
       },
       {
         "id": "j05",
         "kind": "exact",
-        "top10": []
+        "top10": [
+          "yamanote-line"
+        ]
       },
       {
         "id": "j06",
         "kind": "exact",
-        "top10": []
+        "top10": [
+          "keigen-zeiritsu"
+        ]
       },
       {
         "id": "j07",
@@ -323,84 +347,164 @@
       {
         "id": "j10",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "nta",
+          "消費税",
+          "embedding"
+        ]
       },
       {
         "id": "j11",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "keigen-zeiritsu",
+          "tax-seminar-2025"
+        ]
       },
       {
         "id": "j12",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "morphological-analysis",
+          "mecab",
+          "全文検索",
+          "search-study-notes"
+        ]
       },
       {
         "id": "j13",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "heatstroke",
+          "全文検索"
+        ]
       },
       {
         "id": "j14",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "embedding",
+          "rag",
+          "japanese-search-tradeoffs",
+          "morphological-analysis"
+        ]
       },
       {
         "id": "j15",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "mount-fuji",
+          "yamanote-line",
+          "summer-outdoor-safety",
+          "embedding"
+        ]
       },
       {
         "id": "j16",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "文字化け障害報告",
+          "文字コード",
+          "unicode-normalization",
+          "yamanote-line",
+          "熱中症予防ガイド要約",
+          "invoice-system",
+          "全文検索",
+          "search-study-notes"
+        ]
       },
       {
         "id": "j17",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "embedding",
+          "search-study-notes"
+        ]
       },
       {
         "id": "j18",
         "kind": "two-char",
-        "top10": []
+        "top10": [
+          "tokyo-business-trip",
+          "東京都",
+          "ngram",
+          "yamanote-line",
+          "japanese-search-tradeoffs"
+        ]
       },
       {
         "id": "j19",
         "kind": "two-char",
-        "top10": []
+        "top10": [
+          "全文検索",
+          "japanese-search-tradeoffs",
+          "ngram",
+          "rag",
+          "search-study-notes",
+          "morphological-analysis",
+          "embedding",
+          "elasticsearch",
+          "bm25",
+          "nta"
+        ]
       },
       {
         "id": "j20",
         "kind": "two-char",
-        "top10": []
+        "top10": [
+          "keigen-zeiritsu",
+          "消費税",
+          "invoice-system",
+          "tax-seminar-2025"
+        ]
       },
       {
         "id": "j21",
         "kind": "two-char",
-        "top10": []
+        "top10": [
+          "mount-fuji",
+          "summer-outdoor-safety",
+          "yamanote-line"
+        ]
       },
       {
         "id": "j22",
         "kind": "single-kanji",
-        "top10": []
+        "top10": [
+          "消費税",
+          "nta",
+          "invoice-system",
+          "keigen-zeiritsu",
+          "tax-seminar-2025",
+          "invoice-small-business",
+          "ngram",
+          "japanese-search-tradeoffs"
+        ]
       },
       {
         "id": "j23",
         "kind": "single-kanji",
-        "top10": []
+        "top10": [
+          "cancer-screening",
+          "ngram"
+        ]
       },
       {
         "id": "j24",
         "kind": "single-kanji",
-        "top10": []
+        "top10": [
+          "yamanote-line",
+          "tokyo-business-trip"
+        ]
       },
       {
         "id": "j25",
         "kind": "mixed",
         "top10": [
           "rag",
-          "embedding"
+          "embedding",
+          "japanese-search-tradeoffs",
+          "search-study-notes"
         ]
       },
       {
@@ -408,125 +512,181 @@
         "kind": "mixed",
         "top10": [
           "bm25",
-          "全文検索",
-          "rag",
-          "elasticsearch"
+          "unicode-normalization",
+          "rag"
         ]
       },
       {
         "id": "j27",
         "kind": "mixed",
         "top10": [
-          "文字化け障害報告",
           "文字コード",
-          "keigen-zeiritsu",
-          "消費税"
+          "文字化け障害報告"
         ]
       },
       {
         "id": "j28",
         "kind": "mixed",
         "top10": [
-          "nta"
+          "nta",
+          "invoice-system",
+          "tax-seminar-2025",
+          "invoice-small-business",
+          "tokyo-business-trip",
+          "消費税"
         ]
       },
       {
         "id": "j29",
         "kind": "cross-lingual",
-        "top10": []
+        "top10": [
+          "全文検索"
+        ]
       },
       {
         "id": "j30",
         "kind": "cross-lingual",
-        "top10": []
+        "top10": [
+          "elasticsearch"
+        ]
       },
       {
         "id": "j31",
         "kind": "cross-lingual",
-        "top10": []
+        "top10": [
+          "embedding",
+          "nta"
+        ]
       },
       {
         "id": "j32",
         "kind": "cross-lingual",
-        "top10": []
+        "top10": [
+          "morphological-analysis",
+          "rag"
+        ]
       },
       {
         "id": "j33",
         "kind": "cross-lingual",
-        "top10": []
+        "top10": [
+          "bm25"
+        ]
       },
       {
         "id": "j34",
         "kind": "fullwidth",
-        "top10": []
+        "top10": [
+          "bm25",
+          "elasticsearch",
+          "rag",
+          "全文検索"
+        ]
       },
       {
         "id": "j35",
         "kind": "fullwidth",
-        "top10": []
+        "top10": [
+          "rag",
+          "embedding"
+        ]
       },
       {
         "id": "j36",
         "kind": "fullwidth",
-        "top10": []
+        "top10": [
+          "unicode-normalization"
+        ]
       },
       {
         "id": "j37",
         "kind": "long-section",
-        "top10": []
+        "top10": [
+          "search-study-notes",
+          "embedding",
+          "japanese-search-tradeoffs",
+          "文字化け障害報告"
+        ]
       },
       {
         "id": "j38",
         "kind": "long-section",
         "top10": [
-          "文字化け障害報告",
-          "文字コード"
+          "文字化け障害報告"
         ]
       },
       {
         "id": "j39",
         "kind": "long-section",
-        "top10": []
+        "top10": [
+          "search-study-notes",
+          "japanese-search-tradeoffs",
+          "embedding",
+          "文字化け障害報告"
+        ]
       },
       {
         "id": "j40",
         "kind": "filename",
-        "top10": []
+        "top10": [
+          "熱中症予防ガイド要約",
+          "heatstroke"
+        ]
       },
       {
         "id": "j41",
         "kind": "filename",
-        "top10": []
+        "top10": [
+          "文字化け障害報告",
+          "文字コード",
+          "unicode-normalization"
+        ]
       },
       {
         "id": "j42",
         "kind": "filter",
-        "top10": []
+        "top10": [
+          "tax-seminar-2025",
+          "tokyo-business-trip"
+        ]
       },
       {
         "id": "j43",
         "kind": "filter",
-        "top10": []
+        "top10": [
+          "japanese-search-tradeoffs"
+        ]
       },
       {
         "id": "j44",
         "kind": "filter",
-        "top10": []
+        "top10": [
+          "heatstroke",
+          "熱中症予防ガイド要約"
+        ]
       },
       {
         "id": "j45",
         "kind": "filter",
-        "top10": []
+        "top10": [
+          "mecab"
+        ]
       },
       {
         "id": "j46",
         "kind": "filter",
-        "top10": []
+        "top10": [
+          "tokyo-business-trip",
+          "東京都",
+          "yamanote-line"
+        ]
       },
       {
         "id": "j47",
         "kind": "filter",
-        "top10": []
+        "top10": [
+          "embedding"
+        ]
       },
       {
         "id": "j48",
@@ -563,32 +723,71 @@
       {
         "id": "j01",
         "kind": "exact",
-        "top10": []
+        "top10": [
+          "消費税",
+          "invoice-system",
+          "invoice-system",
+          "invoice-small-business",
+          "tax-seminar-2025",
+          "invoice-small-business",
+          "消費税",
+          "tax-seminar-2025"
+        ]
       },
       {
         "id": "j02",
         "kind": "exact",
-        "top10": []
+        "top10": [
+          "invoice-system",
+          "nta",
+          "tax-seminar-2025",
+          "invoice-system",
+          "invoice-small-business",
+          "tax-seminar-2025",
+          "invoice-small-business",
+          "tokyo-business-trip",
+          "消費税",
+          "消費税"
+        ]
       },
       {
         "id": "j03",
         "kind": "exact",
-        "top10": []
+        "top10": [
+          "全文検索",
+          "全文検索"
+        ]
       },
       {
         "id": "j04",
         "kind": "exact",
-        "top10": []
+        "top10": [
+          "heatstroke",
+          "summer-outdoor-safety",
+          "bm25",
+          "summer-outdoor-safety",
+          "heatstroke",
+          "search-study-notes",
+          "全文検索",
+          "bm25",
+          "search-study-notes",
+          "全文検索"
+        ]
       },
       {
         "id": "j05",
         "kind": "exact",
-        "top10": []
+        "top10": [
+          "yamanote-line",
+          "yamanote-line"
+        ]
       },
       {
         "id": "j06",
         "kind": "exact",
-        "top10": []
+        "top10": [
+          "keigen-zeiritsu"
+        ]
       },
       {
         "id": "j07",
@@ -615,85 +814,204 @@
       {
         "id": "j10",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "nta",
+          "消費税",
+          "embedding",
+          "nta",
+          "消費税",
+          "embedding"
+        ]
       },
       {
         "id": "j11",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "keigen-zeiritsu",
+          "tax-seminar-2025",
+          "keigen-zeiritsu",
+          "tax-seminar-2025"
+        ]
       },
       {
         "id": "j12",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "morphological-analysis",
+          "全文検索",
+          "mecab",
+          "mecab",
+          "search-study-notes",
+          "morphological-analysis",
+          "search-study-notes",
+          "全文検索"
+        ]
       },
       {
         "id": "j13",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "heatstroke",
+          "heatstroke",
+          "全文検索",
+          "全文検索"
+        ]
       },
       {
         "id": "j14",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "embedding",
+          "rag",
+          "rag",
+          "japanese-search-tradeoffs",
+          "morphological-analysis",
+          "japanese-search-tradeoffs",
+          "morphological-analysis",
+          "embedding"
+        ]
       },
       {
         "id": "j15",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "mount-fuji",
+          "yamanote-line",
+          "summer-outdoor-safety",
+          "embedding",
+          "mount-fuji",
+          "yamanote-line",
+          "embedding",
+          "summer-outdoor-safety"
+        ]
       },
       {
         "id": "j16",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "文字化け障害報告",
+          "文字コード",
+          "文字コード",
+          "文字化け障害報告",
+          "yamanote-line",
+          "unicode-normalization",
+          "unicode-normalization",
+          "全文検索",
+          "search-study-notes",
+          "invoice-system"
+        ]
       },
       {
         "id": "j17",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "embedding",
+          "embedding",
+          "search-study-notes",
+          "search-study-notes"
+        ]
       },
       {
         "id": "j18",
         "kind": "two-char",
-        "top10": []
+        "top10": [
+          "tokyo-business-trip",
+          "東京都",
+          "tokyo-business-trip",
+          "東京都",
+          "ngram",
+          "yamanote-line",
+          "yamanote-line",
+          "japanese-search-tradeoffs"
+        ]
       },
       {
         "id": "j19",
         "kind": "two-char",
-        "top10": []
+        "top10": [
+          "japanese-search-tradeoffs",
+          "全文検索",
+          "全文検索",
+          "search-study-notes",
+          "ngram",
+          "japanese-search-tradeoffs",
+          "search-study-notes",
+          "rag",
+          "ngram",
+          "elasticsearch"
+        ]
       },
       {
         "id": "j20",
         "kind": "two-char",
-        "top10": []
+        "top10": [
+          "keigen-zeiritsu",
+          "消費税",
+          "keigen-zeiritsu",
+          "invoice-system",
+          "消費税",
+          "tax-seminar-2025",
+          "tax-seminar-2025",
+          "invoice-system"
+        ]
       },
       {
         "id": "j21",
         "kind": "two-char",
-        "top10": []
+        "top10": [
+          "mount-fuji",
+          "summer-outdoor-safety",
+          "summer-outdoor-safety",
+          "mount-fuji",
+          "yamanote-line",
+          "yamanote-line"
+        ]
       },
       {
         "id": "j22",
         "kind": "single-kanji",
-        "top10": []
+        "top10": [
+          "nta",
+          "keigen-zeiritsu",
+          "消費税",
+          "nta",
+          "消費税",
+          "tax-seminar-2025",
+          "invoice-system",
+          "invoice-system",
+          "keigen-zeiritsu",
+          "tax-seminar-2025"
+        ]
       },
       {
         "id": "j23",
         "kind": "single-kanji",
-        "top10": []
+        "top10": [
+          "ngram",
+          "cancer-screening"
+        ]
       },
       {
         "id": "j24",
         "kind": "single-kanji",
-        "top10": []
+        "top10": [
+          "yamanote-line",
+          "yamanote-line",
+          "tokyo-business-trip"
+        ]
       },
       {
         "id": "j25",
         "kind": "mixed",
         "top10": [
           "rag",
+          "rag",
+          "japanese-search-tradeoffs",
           "embedding",
-          "rag"
+          "embedding",
+          "search-study-notes",
+          "japanese-search-tradeoffs",
+          "search-study-notes"
         ]
       },
       {
@@ -701,131 +1019,221 @@
         "kind": "mixed",
         "top10": [
           "bm25",
+          "unicode-normalization",
+          "unicode-normalization",
           "bm25",
-          "全文検索",
           "rag",
-          "elasticsearch"
+          "rag"
         ]
       },
       {
         "id": "j27",
         "kind": "mixed",
         "top10": [
-          "文字化け障害報告",
-          "文字コード",
           "文字コード",
           "文字化け障害報告",
-          "keigen-zeiritsu",
-          "keigen-zeiritsu",
-          "消費税",
-          "消費税"
+          "文字コード",
+          "文字化け障害報告"
         ]
       },
       {
         "id": "j28",
         "kind": "mixed",
         "top10": [
-          "nta"
+          "nta",
+          "invoice-system",
+          "invoice-small-business",
+          "invoice-system",
+          "tax-seminar-2025",
+          "invoice-small-business",
+          "tax-seminar-2025",
+          "nta",
+          "tokyo-business-trip",
+          "消費税"
         ]
       },
       {
         "id": "j29",
         "kind": "cross-lingual",
-        "top10": []
+        "top10": [
+          "全文検索",
+          "全文検索"
+        ]
       },
       {
         "id": "j30",
         "kind": "cross-lingual",
-        "top10": []
+        "top10": [
+          "elasticsearch",
+          "elasticsearch"
+        ]
       },
       {
         "id": "j31",
         "kind": "cross-lingual",
-        "top10": []
+        "top10": [
+          "embedding",
+          "nta",
+          "nta",
+          "embedding"
+        ]
       },
       {
         "id": "j32",
         "kind": "cross-lingual",
-        "top10": []
+        "top10": [
+          "rag",
+          "morphological-analysis",
+          "morphological-analysis",
+          "rag"
+        ]
       },
       {
         "id": "j33",
         "kind": "cross-lingual",
-        "top10": []
+        "top10": [
+          "bm25",
+          "bm25"
+        ]
       },
       {
         "id": "j34",
         "kind": "fullwidth",
-        "top10": []
+        "top10": [
+          "bm25",
+          "bm25",
+          "elasticsearch",
+          "rag",
+          "全文検索"
+        ]
       },
       {
         "id": "j35",
         "kind": "fullwidth",
-        "top10": []
+        "top10": [
+          "rag",
+          "rag",
+          "embedding"
+        ]
       },
       {
         "id": "j36",
         "kind": "fullwidth",
-        "top10": []
+        "top10": [
+          "unicode-normalization"
+        ]
       },
       {
         "id": "j37",
         "kind": "long-section",
-        "top10": []
+        "top10": [
+          "japanese-search-tradeoffs",
+          "embedding",
+          "search-study-notes",
+          "search-study-notes",
+          "japanese-search-tradeoffs",
+          "文字化け障害報告",
+          "embedding",
+          "文字化け障害報告"
+        ]
       },
       {
         "id": "j38",
         "kind": "long-section",
         "top10": [
           "文字化け障害報告",
-          "文字化け障害報告",
-          "文字コード"
+          "文字化け障害報告"
         ]
       },
       {
         "id": "j39",
         "kind": "long-section",
-        "top10": []
+        "top10": [
+          "search-study-notes",
+          "japanese-search-tradeoffs",
+          "embedding",
+          "文字化け障害報告",
+          "search-study-notes",
+          "japanese-search-tradeoffs",
+          "embedding",
+          "文字化け障害報告"
+        ]
       },
       {
         "id": "j40",
         "kind": "filename",
-        "top10": []
+        "top10": [
+          "熱中症予防ガイド要約",
+          "熱中症予防ガイド要約",
+          "heatstroke",
+          "heatstroke"
+        ]
       },
       {
         "id": "j41",
         "kind": "filename",
-        "top10": []
+        "top10": [
+          "文字化け障害報告",
+          "文字化け障害報告",
+          "文字コード",
+          "文字コード",
+          "unicode-normalization",
+          "unicode-normalization"
+        ]
       },
       {
         "id": "j42",
         "kind": "filter",
-        "top10": []
+        "top10": [
+          "tokyo-business-trip",
+          "tax-seminar-2025",
+          "tax-seminar-2025"
+        ]
       },
       {
         "id": "j43",
         "kind": "filter",
-        "top10": []
+        "top10": [
+          "japanese-search-tradeoffs",
+          "japanese-search-tradeoffs"
+        ]
       },
       {
         "id": "j44",
         "kind": "filter",
-        "top10": []
+        "top10": [
+          "heatstroke",
+          "heatstroke",
+          "熱中症予防ガイド要約",
+          "熱中症予防ガイド要約"
+        ]
       },
       {
         "id": "j45",
         "kind": "filter",
-        "top10": []
+        "top10": [
+          "mecab"
+        ]
       },
       {
         "id": "j46",
         "kind": "filter",
-        "top10": []
+        "top10": [
+          "東京都",
+          "tokyo-business-trip",
+          "tokyo-business-trip",
+          "東京都",
+          "yamanote-line",
+          "yamanote-line"
+        ]
       },
       {
         "id": "j47",
         "kind": "filter",
-        "top10": []
+        "top10": [
+          "embedding",
+          "embedding"
+        ]
       },
       {
         "id": "j48",
@@ -862,32 +1270,90 @@
       {
         "id": "j01",
         "kind": "exact",
-        "top10": []
+        "top10": [
+          "消費税",
+          "invoice-system",
+          "tax-seminar-2025",
+          "invoice-system",
+          "invoice-small-business",
+          "消費税",
+          "invoice-small-business",
+          "tax-seminar-2025",
+          "keigen-zeiritsu",
+          "nta"
+        ]
       },
       {
         "id": "j02",
         "kind": "exact",
-        "top10": []
+        "top10": [
+          "invoice-system",
+          "nta",
+          "tax-seminar-2025",
+          "invoice-system",
+          "消費税",
+          "tokyo-business-trip",
+          "invoice-small-business",
+          "invoice-small-business",
+          "tax-seminar-2025",
+          "nta"
+        ]
       },
       {
         "id": "j03",
         "kind": "exact",
-        "top10": []
+        "top10": [
+          "全文検索",
+          "全文検索",
+          "elasticsearch",
+          "elasticsearch",
+          "embedding",
+          "文字化け障害報告",
+          "nta",
+          "morphological-analysis",
+          "search-study-notes",
+          "japanese-search-tradeoffs"
+        ]
       },
       {
         "id": "j04",
         "kind": "exact",
-        "top10": []
+        "top10": [
+          "heatstroke",
+          "heatstroke",
+          "summer-outdoor-safety",
+          "summer-outdoor-safety",
+          "bm25",
+          "熱中症予防ガイド要約",
+          "search-study-notes",
+          "全文検索",
+          "keigen-zeiritsu",
+          "bm25"
+        ]
       },
       {
         "id": "j05",
         "kind": "exact",
-        "top10": []
+        "top10": [
+          "yamanote-line",
+          "yamanote-line"
+        ]
       },
       {
         "id": "j06",
         "kind": "exact",
-        "top10": []
+        "top10": [
+          "keigen-zeiritsu",
+          "keigen-zeiritsu",
+          "全文検索",
+          "nta",
+          "消費税",
+          "elasticsearch",
+          "invoice-small-business",
+          "morphological-analysis",
+          "tax-seminar-2025",
+          "invoice-system"
+        ]
       },
       {
         "id": "j07",
@@ -895,8 +1361,14 @@
         "top10": [
           "文字コード",
           "文字化け障害報告",
-          "tokyo-business-trip",
-          "invoice-system"
+          "elasticsearch",
+          "文字化け障害報告",
+          "rag",
+          "全文検索",
+          "mecab",
+          "japanese-search-tradeoffs",
+          "search-study-notes",
+          "invoice-small-business"
         ]
       },
       {
@@ -916,92 +1388,252 @@
       {
         "id": "j10",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "消費税",
+          "nta",
+          "消費税",
+          "nta",
+          "keigen-zeiritsu",
+          "embedding",
+          "keigen-zeiritsu",
+          "embedding",
+          "invoice-system",
+          "tax-seminar-2025"
+        ]
       },
       {
         "id": "j11",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "keigen-zeiritsu",
+          "tax-seminar-2025",
+          "keigen-zeiritsu",
+          "tax-seminar-2025",
+          "消費税",
+          "消費税",
+          "invoice-system",
+          "nta",
+          "invoice-small-business",
+          "invoice-system"
+        ]
       },
       {
         "id": "j12",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "morphological-analysis",
+          "全文検索",
+          "mecab",
+          "search-study-notes",
+          "search-study-notes",
+          "morphological-analysis",
+          "全文検索",
+          "mecab",
+          "ngram",
+          "rag"
+        ]
       },
       {
         "id": "j13",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "heatstroke",
+          "heatstroke",
+          "全文検索",
+          "全文検索",
+          "熱中症予防ガイド要約",
+          "熱中症予防ガイド要約",
+          "summer-outdoor-safety",
+          "summer-outdoor-safety",
+          "文字化け障害報告",
+          "mount-fuji"
+        ]
       },
       {
         "id": "j14",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "embedding",
+          "rag",
+          "morphological-analysis",
+          "japanese-search-tradeoffs",
+          "rag",
+          "japanese-search-tradeoffs",
+          "morphological-analysis",
+          "embedding",
+          "search-study-notes",
+          "全文検索"
+        ]
       },
       {
         "id": "j15",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "mount-fuji",
+          "mount-fuji",
+          "yamanote-line",
+          "summer-outdoor-safety",
+          "embedding",
+          "yamanote-line",
+          "embedding",
+          "summer-outdoor-safety"
+        ]
       },
       {
         "id": "j16",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "文字化け障害報告",
+          "文字コード",
+          "文字化け障害報告",
+          "unicode-normalization",
+          "全文検索",
+          "文字コード",
+          "unicode-normalization",
+          "search-study-notes",
+          "search-study-notes",
+          "yamanote-line"
+        ]
       },
       {
         "id": "j17",
         "kind": "paraphrase",
-        "top10": []
+        "top10": [
+          "embedding",
+          "search-study-notes",
+          "embedding",
+          "search-study-notes",
+          "rag",
+          "全文検索",
+          "japanese-search-tradeoffs",
+          "ngram",
+          "全文検索",
+          "japanese-search-tradeoffs"
+        ]
       },
       {
         "id": "j18",
         "kind": "two-char",
-        "top10": []
+        "top10": [
+          "東京都",
+          "tokyo-business-trip",
+          "tokyo-business-trip",
+          "東京都",
+          "yamanote-line",
+          "ngram",
+          "全文検索",
+          "文字コード",
+          "nta",
+          "rag"
+        ]
       },
       {
         "id": "j19",
         "kind": "two-char",
-        "top10": []
+        "top10": [
+          "全文検索",
+          "全文検索",
+          "japanese-search-tradeoffs",
+          "ngram",
+          "elasticsearch",
+          "search-study-notes",
+          "rag",
+          "japanese-search-tradeoffs",
+          "search-study-notes",
+          "rag"
+        ]
       },
       {
         "id": "j20",
         "kind": "two-char",
-        "top10": []
+        "top10": [
+          "keigen-zeiritsu",
+          "keigen-zeiritsu",
+          "消費税",
+          "消費税",
+          "invoice-system",
+          "tax-seminar-2025",
+          "tax-seminar-2025",
+          "invoice-system",
+          "nta",
+          "全文検索"
+        ]
       },
       {
         "id": "j21",
         "kind": "two-char",
-        "top10": []
+        "top10": [
+          "summer-outdoor-safety",
+          "mount-fuji",
+          "yamanote-line",
+          "mount-fuji",
+          "summer-outdoor-safety",
+          "rag",
+          "全文検索",
+          "東京都",
+          "yamanote-line",
+          "elasticsearch"
+        ]
       },
       {
         "id": "j22",
         "kind": "single-kanji",
-        "top10": []
+        "top10": [
+          "nta",
+          "keigen-zeiritsu",
+          "消費税",
+          "消費税",
+          "nta",
+          "keigen-zeiritsu",
+          "invoice-system",
+          "tax-seminar-2025",
+          "tax-seminar-2025",
+          "invoice-system"
+        ]
       },
       {
         "id": "j23",
         "kind": "single-kanji",
-        "top10": []
+        "top10": [
+          "cancer-screening",
+          "ngram",
+          "cancer-screening",
+          "heatstroke",
+          "全文検索",
+          "mecab",
+          "消費税",
+          "morphological-analysis",
+          "rag"
+        ]
       },
       {
         "id": "j24",
         "kind": "single-kanji",
-        "top10": []
+        "top10": [
+          "yamanote-line",
+          "yamanote-line",
+          "全文検索",
+          "東京都",
+          "tokyo-business-trip",
+          "東京都",
+          "文字コード",
+          "rag"
+        ]
       },
       {
         "id": "j25",
         "kind": "mixed",
         "top10": [
           "rag",
-          "embedding",
           "rag",
-          "keigen-zeiritsu",
-          "熱中症予防ガイド要約",
+          "japanese-search-tradeoffs",
+          "ngram",
           "embedding",
-          "morphological-analysis",
+          "elasticsearch",
+          "embedding",
           "全文検索",
           "search-study-notes",
-          "全文検索"
+          "文字化け障害報告"
         ]
       },
       {
@@ -1010,14 +1642,14 @@
         "top10": [
           "bm25",
           "bm25",
-          "全文検索",
+          "unicode-normalization",
           "rag",
-          "熱中症予防ガイド要約",
-          "elasticsearch",
-          "morphological-analysis",
-          "文字コード",
-          "embedding",
-          "全文検索"
+          "rag",
+          "unicode-normalization",
+          "文字化け障害報告",
+          "全文検索",
+          "全文検索",
+          "search-study-notes"
         ]
       },
       {
@@ -1026,14 +1658,14 @@
         "top10": [
           "文字コード",
           "文字化け障害報告",
-          "文字化け障害報告",
           "文字コード",
-          "keigen-zeiritsu",
-          "keigen-zeiritsu",
-          "消費税",
-          "mecab",
-          "消費税",
-          "全文検索"
+          "文字化け障害報告",
+          "ngram",
+          "elasticsearch",
+          "全文検索",
+          "unicode-normalization",
+          "ngram",
+          "unicode-normalization"
         ]
       },
       {
@@ -1041,61 +1673,135 @@
         "kind": "mixed",
         "top10": [
           "nta",
+          "invoice-system",
+          "invoice-system",
+          "invoice-small-business",
+          "invoice-small-business",
+          "tax-seminar-2025",
+          "tax-seminar-2025",
+          "nta",
           "消費税",
-          "invoice-small-business",
-          "invoice-small-business",
-          "japanese-search-tradeoffs",
-          "invoice-system",
-          "invoice-system",
-          "熱中症予防ガイド要約",
-          "keigen-zeiritsu",
-          "tax-seminar-2025"
+          "消費税"
         ]
       },
       {
         "id": "j29",
         "kind": "cross-lingual",
-        "top10": []
+        "top10": [
+          "全文検索",
+          "全文検索",
+          "elasticsearch",
+          "elasticsearch",
+          "japanese-search-tradeoffs",
+          "search-study-notes",
+          "search-study-notes",
+          "morphological-analysis",
+          "japanese-search-tradeoffs",
+          "ngram"
+        ]
       },
       {
         "id": "j30",
         "kind": "cross-lingual",
-        "top10": []
+        "top10": [
+          "elasticsearch",
+          "elasticsearch",
+          "文字化け障害報告",
+          "tax-seminar-2025"
+        ]
       },
       {
         "id": "j31",
         "kind": "cross-lingual",
-        "top10": []
+        "top10": [
+          "embedding",
+          "nta",
+          "japanese-search-tradeoffs",
+          "nta",
+          "文字化け障害報告",
+          "全文検索",
+          "embedding",
+          "unicode-normalization"
+        ]
       },
       {
         "id": "j32",
         "kind": "cross-lingual",
-        "top10": []
+        "top10": [
+          "rag",
+          "rag",
+          "morphological-analysis",
+          "全文検索",
+          "morphological-analysis",
+          "ngram",
+          "全文検索",
+          "search-study-notes",
+          "bm25",
+          "japanese-search-tradeoffs"
+        ]
       },
       {
         "id": "j33",
         "kind": "cross-lingual",
-        "top10": []
+        "top10": [
+          "bm25",
+          "bm25",
+          "search-study-notes",
+          "文字化け障害報告",
+          "rag",
+          "tax-seminar-2025",
+          "全文検索",
+          "tax-seminar-2025",
+          "invoice-small-business",
+          "ngram"
+        ]
       },
       {
         "id": "j34",
         "kind": "fullwidth",
-        "top10": []
+        "top10": [
+          "bm25",
+          "bm25",
+          "elasticsearch",
+          "rag",
+          "全文検索"
+        ]
       },
       {
         "id": "j35",
         "kind": "fullwidth",
-        "top10": []
+        "top10": [
+          "rag",
+          "rag",
+          "ngram",
+          "embedding",
+          "mecab",
+          "elasticsearch"
+        ]
       },
       {
         "id": "j36",
         "kind": "fullwidth",
-        "top10": []
+        "top10": [
+          "unicode-normalization",
+          "mecab"
+        ]
       },
       {
         "id": "j37",
         "kind": "long-section",
-        "top10": []
+        "top10": [
+          "search-study-notes",
+          "japanese-search-tradeoffs",
+          "search-study-notes",
+          "embedding",
+          "文字化け障害報告",
+          "japanese-search-tradeoffs",
+          "文字化け障害報告",
+          "embedding",
+          "全文検索",
+          "全文検索"
+        ]
       },
       {
         "id": "j38",
@@ -1104,59 +1810,120 @@
           "文字化け障害報告",
           "文字化け障害報告",
           "文字コード",
-          "熱中症予防ガイド要約",
-          "全文検索",
-          "全文検索",
+          "search-study-notes",
+          "search-study-notes",
+          "tax-seminar-2025",
           "文字コード",
-          "morphological-analysis",
-          "embedding",
-          "rag"
+          "unicode-normalization",
+          "tax-seminar-2025",
+          "invoice-small-business"
         ]
       },
       {
         "id": "j39",
         "kind": "long-section",
-        "top10": []
+        "top10": [
+          "search-study-notes",
+          "文字化け障害報告",
+          "embedding",
+          "search-study-notes",
+          "japanese-search-tradeoffs",
+          "文字化け障害報告",
+          "japanese-search-tradeoffs",
+          "embedding",
+          "bm25",
+          "morphological-analysis"
+        ]
       },
       {
         "id": "j40",
         "kind": "filename",
-        "top10": []
+        "top10": [
+          "熱中症予防ガイド要約",
+          "熱中症予防ガイド要約",
+          "heatstroke",
+          "heatstroke",
+          "summer-outdoor-safety",
+          "summer-outdoor-safety",
+          "全文検索"
+        ]
       },
       {
         "id": "j41",
         "kind": "filename",
-        "top10": []
+        "top10": [
+          "文字化け障害報告",
+          "文字化け障害報告",
+          "文字コード",
+          "文字コード",
+          "unicode-normalization",
+          "unicode-normalization",
+          "全文検索",
+          "heatstroke",
+          "heatstroke",
+          "cancer-screening"
+        ]
       },
       {
         "id": "j42",
         "kind": "filter",
-        "top10": []
+        "top10": [
+          "tax-seminar-2025",
+          "tax-seminar-2025",
+          "tokyo-business-trip",
+          "search-study-notes"
+        ]
       },
       {
         "id": "j43",
         "kind": "filter",
-        "top10": []
+        "top10": [
+          "japanese-search-tradeoffs",
+          "japanese-search-tradeoffs"
+        ]
       },
       {
         "id": "j44",
         "kind": "filter",
-        "top10": []
+        "top10": [
+          "heatstroke",
+          "heatstroke",
+          "熱中症予防ガイド要約",
+          "熱中症予防ガイド要約",
+          "summer-outdoor-safety",
+          "cancer-screening"
+        ]
       },
       {
         "id": "j45",
         "kind": "filter",
-        "top10": []
+        "top10": [
+          "mecab",
+          "elasticsearch",
+          "elasticsearch"
+        ]
       },
       {
         "id": "j46",
         "kind": "filter",
-        "top10": []
+        "top10": [
+          "東京都",
+          "tokyo-business-trip",
+          "tokyo-business-trip",
+          "東京都",
+          "yamanote-line",
+          "yamanote-line"
+        ]
       },
       {
         "id": "j47",
         "kind": "filter",
-        "top10": []
+        "top10": [
+          "embedding",
+          "embedding",
+          "rag",
+          "rag"
+        ]
       },
       {
         "id": "j48",

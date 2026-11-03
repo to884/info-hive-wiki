@@ -1,10 +1,10 @@
 {
   "set": "en",
-  "commit": "4e1913a",
+  "commit": "269d27d",
   "environment": {
     "fastembed": "0.8.0",
     "sqlite-vec": "0.1.9",
-    "embed_model": "BAAI/bge-small-en-v1.5"
+    "embed_model": "intfloat/multilingual-e5-small"
   },
   "queries": 32,
   "metrics": {
@@ -22,8 +22,8 @@
     },
     "hybrid": {
       "recall@5": 0.8148148148148148,
-      "recall@10": 0.9259259259259259,
-      "mrr": 0.7080246913580247,
+      "recall@10": 0.9629629629629629,
+      "mrr": 0.7345679012345678,
       "fp_rate": 0.0
     }
   },
@@ -113,8 +113,8 @@
       "paraphrase": {
         "count": 10,
         "recall@5": 0.5,
-        "recall@10": 0.8,
-        "mrr": 0.21166666666666667,
+        "recall@10": 0.9,
+        "mrr": 0.2833333333333333,
         "fp_rate": 0.0
       }
     }
@@ -696,7 +696,16 @@
         "id": "q01",
         "kind": "exact",
         "top10": [
-          "quantization"
+          "quantization",
+          "scaling-laws-paper",
+          "gradient-descent",
+          "precision-tradeoffs",
+          "precision-tradeoffs",
+          "chinchilla-paper",
+          "lora-paper",
+          "quantization",
+          "adam-paper",
+          "pytorch"
         ]
       },
       {
@@ -704,10 +713,15 @@
         "kind": "exact",
         "top10": [
           "kv-cache",
+          "kv-cache",
+          "attention-mechanism",
           "attention-paper",
           "attention-mechanism",
-          "attention-mechanism",
-          "kv-cache"
+          "quantization",
+          "gradient-descent",
+          "pytorch",
+          "training-vs-inference-cost",
+          "tokenization"
         ]
       },
       {
@@ -716,14 +730,14 @@
         "top10": [
           "cuda",
           "cuda",
+          "distributed-training",
+          "precision-tradeoffs",
+          "lora-paper",
+          "gpt-4",
           "precision-tradeoffs",
           "kv-cache",
-          "lora-paper",
-          "distributed-training",
-          "kv-cache",
-          "distributed-training",
-          "adam-paper",
-          "precision-tradeoffs"
+          "gradient-descent",
+          "pytorch"
         ]
       },
       {
@@ -732,7 +746,14 @@
         "top10": [
           "pytorch",
           "distributed-training",
-          "distributed-training"
+          "distributed-training",
+          "gradient-descent",
+          "cuda",
+          "openai",
+          "chinchilla-paper",
+          "pytorch",
+          "quantization",
+          "tokenization"
         ]
       },
       {
@@ -740,10 +761,12 @@
         "kind": "exact",
         "top10": [
           "mixture-of-experts",
+          "scaling-laws-paper",
+          "scaling-laws-paper",
           "quantization",
           "gradient-descent",
-          "scaling-laws-paper",
-          "scaling-laws-paper"
+          "lora-paper",
+          "lora-paper"
         ]
       },
       {
@@ -752,6 +775,7 @@
         "top10": [
           "distributed-training",
           "adam-paper",
+          "cuda",
           "gradient-descent",
           "distributed-training"
         ]
@@ -761,7 +785,6 @@
         "kind": "exact",
         "top10": [
           "cuda",
-          "precision-tradeoffs",
           "pytorch"
         ]
       },
@@ -771,14 +794,8 @@
         "top10": [
           "lora-paper",
           "lora-paper",
-          "gradient-descent",
           "adam-paper",
-          "chinchilla-paper",
-          "training-vs-inference-cost",
-          "why-transformers-won",
-          "adam-paper",
-          "scaling-laws-paper",
-          "distributed-training"
+          "adam-paper"
         ]
       },
       {
@@ -786,15 +803,15 @@
         "kind": "exact",
         "top10": [
           "chinchilla-paper",
-          "tokenization",
-          "gradient-descent",
-          "tokenization",
           "mixture-of-experts",
-          "adam-paper",
+          "tokenization",
           "mixture-of-experts",
           "attention-mechanism",
-          "distributed-training",
-          "precision-tradeoffs"
+          "gradient-descent",
+          "tokenization",
+          "adam-paper",
+          "precision-tradeoffs",
+          "quantization"
         ]
       },
       {
@@ -810,9 +827,8 @@
         "top10": [
           "tokenization",
           "gpt-4",
-          "precision-tradeoffs",
-          "lora-paper",
           "attention-paper",
+          "lora-paper",
           "tokenization"
         ]
       },
@@ -821,44 +837,41 @@
         "kind": "paraphrase",
         "top10": [
           "gpt-4",
-          "adam-paper",
           "attention-mechanism",
-          "training-vs-inference-cost",
           "attention-paper",
-          "attention-paper",
-          "scaling-laws-paper",
-          "adam-paper",
           "attention-mechanism",
-          "chinchilla-paper"
+          "attention-paper"
         ]
       },
       {
         "id": "q13",
         "kind": "paraphrase",
         "top10": [
-          "precision-tradeoffs",
           "cuda",
           "gradient-descent",
-          "gradient-descent",
           "precision-tradeoffs",
-          "distributed-training",
+          "precision-tradeoffs",
+          "gradient-descent",
           "adam-paper",
-          "distributed-training"
+          "distributed-training",
+          "pytorch",
+          "why-transformers-won",
+          "adam-paper"
         ]
       },
       {
         "id": "q14",
         "kind": "paraphrase",
         "top10": [
+          "lora-paper",
           "precision-tradeoffs",
+          "lora-paper",
+          "precision-tradeoffs",
+          "distributed-training",
+          "tokenization",
+          "quantization",
           "chinchilla-paper",
           "scaling-laws-paper",
-          "lora-paper",
-          "lora-paper",
-          "tokenization",
-          "precision-tradeoffs",
-          "tokenization",
-          "adam-paper",
           "quantization"
         ]
       },
@@ -867,15 +880,15 @@
         "kind": "paraphrase",
         "top10": [
           "distributed-training",
+          "gradient-descent",
           "precision-tradeoffs",
           "ilya-sutskever",
-          "quantization",
+          "training-vs-inference-cost",
           "distributed-training",
           "precision-tradeoffs",
           "scaling-laws-paper",
-          "gradient-descent",
-          "tokenization",
-          "kv-cache"
+          "quantization",
+          "gpt-4"
         ]
       },
       {
@@ -883,15 +896,15 @@
         "kind": "paraphrase",
         "top10": [
           "gpt-4",
-          "gradient-descent",
-          "distributed-training",
+          "pytorch",
           "precision-tradeoffs",
           "training-vs-inference-cost",
-          "gradient-descent",
+          "precision-tradeoffs",
           "distributed-training",
-          "chinchilla-paper",
-          "adam-paper",
-          "chinchilla-paper"
+          "distributed-training",
+          "cuda",
+          "mixture-of-experts",
+          "why-transformers-won"
         ]
       },
       {
@@ -899,15 +912,14 @@
         "kind": "paraphrase",
         "top10": [
           "distributed-training",
-          "gradient-descent",
-          "chinchilla-paper",
-          "precision-tradeoffs",
-          "why-transformers-won",
-          "kv-cache",
           "distributed-training",
-          "training-vs-inference-cost",
+          "chinchilla-paper",
+          "why-transformers-won",
+          "precision-tradeoffs",
           "adam-paper",
-          "chinchilla-paper"
+          "precision-tradeoffs",
+          "cuda",
+          "gradient-descent"
         ]
       },
       {
@@ -915,15 +927,15 @@
         "kind": "paraphrase",
         "top10": [
           "scaling-laws-paper",
-          "scaling-laws-paper",
-          "adam-paper",
+          "openai",
+          "distributed-training",
           "kv-cache",
           "distributed-training",
-          "distributed-training",
-          "adam-paper",
-          "openai",
-          "ilya-sutskever",
-          "openai"
+          "scaling-laws-paper",
+          "cuda",
+          "precision-tradeoffs",
+          "why-transformers-won",
+          "ilya-sutskever"
         ]
       },
       {
@@ -931,8 +943,14 @@
         "kind": "paraphrase",
         "top10": [
           "training-vs-inference-cost",
+          "pytorch",
+          "pytorch",
           "precision-tradeoffs",
-          "gradient-descent"
+          "lora-paper",
+          "adam-paper",
+          "chinchilla-paper",
+          "distributed-training",
+          "precision-tradeoffs"
         ]
       },
       {
@@ -942,23 +960,24 @@
           "kv-cache",
           "cuda",
           "kv-cache",
-          "attention-paper"
+          "cuda",
+          "gpt-4"
         ]
       },
       {
         "id": "q21",
         "kind": "paraphrase",
         "top10": [
+          "lora-paper",
           "scaling-laws-paper",
           "lora-paper",
-          "lora-paper",
+          "distributed-training",
+          "precision-tradeoffs",
+          "precision-tradeoffs",
           "quantization",
           "why-transformers-won",
           "chinchilla-paper",
-          "scaling-laws-paper",
-          "adam-paper",
-          "quantization",
-          "gradient-descent"
+          "quantization"
         ]
       },
       {
@@ -968,7 +987,8 @@
           "attention-mechanism",
           "attention-mechanism",
           "kv-cache",
-          "kv-cache"
+          "kv-cache",
+          "quantization"
         ]
       },
       {
@@ -978,12 +998,9 @@
           "chinchilla-paper",
           "chinchilla-paper",
           "scaling-laws-paper",
-          "adam-paper",
           "scaling-laws-paper",
           "adam-paper",
-          "attention-paper",
-          "lora-paper",
-          "lora-paper"
+          "attention-paper"
         ]
       },
       {
@@ -992,9 +1009,11 @@
         "top10": [
           "quantization",
           "quantization",
+          "kv-cache",
+          "tokenization",
           "tokenization",
           "kv-cache",
-          "tokenization"
+          "distributed-training"
         ]
       },
       {
@@ -1002,14 +1021,15 @@
         "kind": "filter",
         "top10": [
           "mixture-of-experts",
-          "mixture-of-experts",
-          "distributed-training"
+          "mixture-of-experts"
         ]
       },
       {
         "id": "q26",
         "kind": "filter",
         "top10": [
+          "ilya-sutskever",
+          "openai",
           "ilya-sutskever"
         ]
       },
@@ -1019,7 +1039,8 @@
         "top10": [
           "cuda",
           "cuda",
-          "pytorch"
+          "pytorch",
+          "gpt-4"
         ]
       },
       {
