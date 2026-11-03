@@ -11,7 +11,7 @@
 ## 境界のケース
 
 - 日本語のファイル名: `concepts/消費税.md`、`concepts/全文検索.md`、`concepts/文字コード.md`、`entities/東京都.md`、`sources/文字化け障害報告.md`
-- NFD のファイル名: `sources/熱中症予防ガイド要約.md`（濁点を結合文字で書いている）
+- NFD のファイル名: `sources/熱中症予防ガイド要約.md`。リポジトリには NFC の名前で置き、`run_eval.py` が評価のときに一時ディレクトリへ複製して、名前を NFD（濁点を結合文字にした形）に変える
 - BOM 付きのファイル: `sources/文字化け障害報告.md`
 - frontmatter のキーが日本語のページ: `concepts/invoice-system.md`、`entities/mecab.md`
 - 全角英数字: `concepts/unicode-normalization.md`、`concepts/bm25.md`

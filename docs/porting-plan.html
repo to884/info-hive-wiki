@@ -677,7 +677,7 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--ru
         <h3>日本語の評価セットをつくる</h3>
         <p class="phase-status">完了: 2026-11-03</p>
         <p class="phase-deps"><strong>前提:</strong> P1。検索を変える前に、比較の基準を用意する。</p>
-        <p>日本語の評価セットは <code>eval/retrieval/ja/</code>（27 ページ、53 クエリ）に置き、<code>run_eval.py --set ja</code> で評価する。基準値は <code>run_eval.py --save</code> で <code>eval/retrieval/baselines/en.json</code> と <code>ja.json</code> に保存した。指標に加えて、クエリの種類ごとの指標とクエリごとの上位 10 件を含む。測定の環境は Python 3.12、fastembed 0.8.0、sqlite-vec 0.1.9、埋め込みのモデルは <code>BAAI/bge-small-en-v1.5</code> である。</p>
+        <p>日本語の評価セットは <code>eval/retrieval/ja/</code>（27 ページ、53 クエリ）に置き、<code>run_eval.py --set ja</code> で評価する。基準値は <code>run_eval.py --save</code> で <code>eval/retrieval/baselines/en.json</code> と <code>ja.json</code> に保存した。指標に加えて、クエリの種類ごとの指標とクエリごとの上位 10 件を含む。依存パッケージは CI と同じ固定版（fastembed 0.8.0、sqlite-vec 0.1.9）で、埋め込みのモデルは <code>BAAI/bge-small-en-v1.5</code> である。基準値は測った PC に依存させない。OS をまたいで同じ値になることを確かめ、測った PC の情報は記録しない。NFD のファイル名は、macOS の Git で削除と未追跡に見えるのを避けるため、リポジトリには NFC で置き、評価のときに一時ディレクトリで NFD に変える。</p>
         <ul>
           <li>英語: recall@10 は page と section が 0.630、hybrid が 0.926。MRR は section が 0.630、hybrid が 0.708。偽陽性率はどの方式も 0。</li>
           <li>日本語: recall@10 はどの方式も 0.170。当たったのは英数字を含むクエリ（日英混在の 4 問すべてと、<code>Shift_JIS</code>・<code>kuromoji</code>・<code>WBGT</code>・<code>CSV</code> を含む問）だけで、日本語だけのクエリは 0 件だった。偽陽性率は 0。</li>

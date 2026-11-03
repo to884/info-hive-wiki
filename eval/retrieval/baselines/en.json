@@ -2,8 +2,6 @@
   "set": "en",
   "commit": "4e1913a",
   "environment": {
-    "python": "3.12.13",
-    "platform": "Windows",
     "fastembed": "0.8.0",
     "sqlite-vec": "0.1.9",
     "embed_model": "BAAI/bge-small-en-v1.5"

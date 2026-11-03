@@ -34,10 +34,10 @@
 
 import argparse
 import json
-import platform
 import subprocess
 import sys
 import tempfile
+import unicodedata
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -45,9 +45,16 @@ REPO = HERE.parent.parent
 SCRIPT = REPO / "skills" / "info-hive" / "scripts" / "wiki_search.py"
 
 # 評価セット。コーパスとクエリ集の組。
+# nfd_files に挙げたファイルは、評価のときに一時ディレクトリへ複製し、ファイル名を NFD にする。
+# NFD の名前のままリポジトリに入れると、macOS の Git（core.precomposeunicode）では
+# 削除と未追跡の 2 つに見えてしまうので、リポジトリには NFC の名前で置く。
 SETS = {
     "en": {"corpus": HERE / "corpus" / "wiki", "queries": HERE / "queries.json"},
-    "ja": {"corpus": HERE / "ja" / "corpus" / "wiki", "queries": HERE / "ja" / "queries.json"},
+    "ja": {
+        "corpus": HERE / "ja" / "corpus" / "wiki",
+        "queries": HERE / "ja" / "queries.json",
+        "nfd_files": ["sources/熱中症予防ガイド要約.md"],
+    },
 }
 # 評価するコーパス。main() で --set に合わせて差し替える。
 CORPUS = SETS["en"]["corpus"]
@@ -251,9 +258,8 @@ def save_report(path, set_name, queries, rows, runs):
     report = {
         "set": set_name,
         "commit": git_commit(),
+        # 測った PC には依存させず、CI と同じに固定した依存パッケージとモデルだけを記録する。
         "environment": {
-            "python": platform.python_version(),
-            "platform": platform.system(),
             "fastembed": installed_version("fastembed"),
             "sqlite-vec": installed_version("sqlite-vec"),
             "embed_model": wiki_search.LOCAL_EMBED_MODEL if "hybrid" in rows else None,
@@ -269,6 +275,29 @@ def save_report(path, set_name, queries, rows, runs):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+
+def prepare_corpus(spec, tmp):
+    """評価に使うコーパスのパスを返す。nfd_files があれば、tmp に複製して名前を NFD にする。"""
+    corpus = spec["corpus"]
+    nfd_files = set(spec.get("nfd_files", []))
+    if not nfd_files:
+        return corpus
+    dest_root = Path(tmp) / "wiki"
+    for src in sorted(corpus.rglob("*")):
+        rel = src.relative_to(corpus)
+        if not src.is_file() or ".wiki-cache" in rel.parts:
+            continue
+        name = rel.as_posix()
+        if name in nfd_files:
+            name = unicodedata.normalize("NFD", name)
+            nfd_files.discard(rel.as_posix())
+        dest = dest_root / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(src.read_bytes())
+    if nfd_files:
+        raise SystemExit(f"nfd_files not found in {corpus}: {sorted(nfd_files)}")
+    return dest_root
 
 
 def main():
@@ -295,9 +324,15 @@ def main():
 
     if not SCRIPT.exists():
         raise SystemExit(f"wiki_search.py not found at {SCRIPT}")
-    CORPUS = SETS[args.set]["corpus"]
     queries = json.loads(SETS[args.set]["queries"].read_text(encoding="utf-8"))
+    with tempfile.TemporaryDirectory() as tmp:
+        CORPUS = prepare_corpus(SETS[args.set], tmp)
+        exit_code = evaluate(args, queries)
+    sys.exit(exit_code)
 
+
+def evaluate(args, queries):
+    """CORPUS を評価して表を出し、終了コードを返す。"""
     modes = ["page", "section"]
     if hybrid_available():
         modes.append("hybrid")
@@ -334,7 +369,7 @@ def main():
             compared = "section/page + hybrid" if "hybrid" in rows else "section/page"
             print(f"gate: PASS ({compared} retrieval quality)")
 
-    sys.exit(exit_code)
+    return exit_code
 
 
 if __name__ == "__main__":
