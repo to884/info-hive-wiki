@@ -1,7 +1,7 @@
 ---
-type: source
-title: 税務セミナーの記録（2025 年秋）
-tags: [税金, セミナー]
+type: "source"
+title: "税務セミナーの記録（2025 年秋）"
+tags: ["税金", "セミナー"]
 sources: []
 created: 2025-11-20
 updated: 2025-11-20

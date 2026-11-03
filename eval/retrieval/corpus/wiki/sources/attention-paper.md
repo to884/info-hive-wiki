@@ -1,13 +1,13 @@
 ---
-type: source
+type: "source"
 title: "Attention Is All You Need"
-authors: [Ashish Vaswani, Noam Shazeer]
-url: https://arxiv.org/abs/1706.03762
-raw: raw/attention-paper.md
+authors: ["Ashish Vaswani", "Noam Shazeer"]
+url: "https://arxiv.org/abs/1706.03762"
+raw: "raw/attention-paper.md"
 ingested: 2026-01-15
 created: 2026-01-15
 updated: 2026-01-15
-tags: [transformer, attention]
+tags: ["transformer", "attention"]
 ---
 
 # Attention Is All You Need

@@ -1,7 +1,7 @@
 ---
-type: concept
-title: がん検診
-tags: [健康, 医療]
+type: "concept"
+title: "がん検診"
+tags: ["健康", "医療"]
 sources: []
 created: 2026-03-01
 updated: 2026-05-10

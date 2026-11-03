@@ -1,9 +1,9 @@
 ---
-type: source
+type: "source"
 title: "Current pricing, September 2026"
-authors: [Example team]
+authors: ["Example team"]
 raw: "fixture:pricing-current"
-tags: [pilot]
+tags: ["pilot"]
 created: 2026-09-01
 updated: 2026-09-01
 ingested: 2026-09-01

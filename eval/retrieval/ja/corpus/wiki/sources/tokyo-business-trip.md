@@ -1,7 +1,7 @@
 ---
-type: source
-title: 東京出張の報告
-tags: [出張, 交通]
+type: "source"
+title: "東京出張の報告"
+tags: ["出張", "交通"]
 sources: []
 created: 2026-03-18
 updated: 2026-03-19

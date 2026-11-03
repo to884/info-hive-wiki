@@ -1,7 +1,7 @@
 ---
-type: concept
-title: Tokenization
-tags: [preprocessing, text]
+type: "concept"
+title: "Tokenization"
+tags: ["preprocessing", "text"]
 sources: []
 created: 2026-01-17
 updated: 2026-01-19

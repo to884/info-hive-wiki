@@ -1,9 +1,9 @@
 ---
-type: synthesis
+type: "synthesis"
 title: "Where the cost lives: training versus inference"
-question: Does training or inference dominate the lifetime cost of a deployed model?
-tags: [cost, efficiency]
-sources: [chinchilla-paper]
+question: "Does training or inference dominate the lifetime cost of a deployed model?"
+tags: ["cost", "efficiency"]
+sources: ["chinchilla-paper"]
 created: 2026-03-02
 updated: 2026-03-08
 ---

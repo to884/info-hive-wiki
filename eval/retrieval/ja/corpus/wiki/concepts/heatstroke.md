@@ -1,8 +1,8 @@
 ---
-type: concept
-title: 熱中症
-tags: [健康, 夏]
-sources: [熱中症予防ガイド要約]
+type: "concept"
+title: "熱中症"
+tags: ["健康", "夏"]
+sources: ["熱中症予防ガイド要約"]
 created: 2026-04-01
 updated: 2026-06-20
 ---

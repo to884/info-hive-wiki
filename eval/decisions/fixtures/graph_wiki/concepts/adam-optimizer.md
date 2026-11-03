@@ -1,6 +1,6 @@
 ---
-type: concept
-title: Adam optimizer
+type: "concept"
+title: "Adam optimizer"
 ---
 # Adam optimizer
 

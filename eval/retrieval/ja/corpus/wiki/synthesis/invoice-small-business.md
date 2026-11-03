@@ -1,9 +1,9 @@
 ---
-type: synthesis
-title: 小規模事業者にとってのインボイス制度
-question: 小規模な事業者は、インボイスの登録をするべきか
-tags: [税金, 比較]
-sources: [tax-seminar-2025]
+type: "synthesis"
+title: "小規模事業者にとってのインボイス制度"
+question: "小規模な事業者は、インボイスの登録をするべきか"
+tags: ["税金", "比較"]
+sources: ["tax-seminar-2025"]
 created: 2026-03-25
 updated: 2026-04-02
 ---

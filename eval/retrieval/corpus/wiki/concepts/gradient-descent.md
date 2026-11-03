@@ -1,8 +1,8 @@
 ---
-type: concept
-title: Gradient Descent
-tags: [optimization, training]
-sources: [adam-paper]
+type: "concept"
+title: "Gradient Descent"
+tags: ["optimization", "training"]
+sources: ["adam-paper"]
 created: 2026-01-16
 updated: 2026-01-22
 ---

@@ -1,8 +1,8 @@
 ---
-type: concept
-title: Attention Mechanism
-tags: [attention, transformer, inference]
-sources: [attention-paper]
+type: "concept"
+title: "Attention Mechanism"
+tags: ["attention", "transformer", "inference"]
+sources: ["attention-paper"]
 created: 2026-01-15
 updated: 2026-01-20
 ---

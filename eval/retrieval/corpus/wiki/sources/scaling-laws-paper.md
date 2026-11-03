@@ -1,13 +1,13 @@
 ---
-type: source
+type: "source"
 title: "Scaling Laws for Neural Language Models"
-authors: [Jared Kaplan, Sam McCandlish]
-url: https://arxiv.org/abs/2001.08361
-raw: raw/scaling-laws-paper.md
+authors: ["Jared Kaplan", "Sam McCandlish"]
+url: "https://arxiv.org/abs/2001.08361"
+raw: "raw/scaling-laws-paper.md"
 ingested: 2026-01-24
 created: 2026-01-24
 updated: 2026-01-24
-tags: [scaling, training]
+tags: ["scaling", "training"]
 ---
 
 # Scaling Laws for Neural Language Models

@@ -1,11 +1,11 @@
 ---
-type: source
+type: "source"
 title: "Repository links"
-tags: [project]
+tags: ["project"]
 created: 2026-09-13
 updated: 2026-09-13
-authors: [LLM Wiki maintainers]
-raw: raw/links.txt
+authors: ["LLM Wiki maintainers"]
+raw: "raw/links.txt"
 ingested: 2026-09-13
 ---
 

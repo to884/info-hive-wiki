@@ -1,8 +1,8 @@
 ---
-type: concept
-title: N-gram（bigram）
-tags: [検索, 自然言語処理]
-sources: [search-study-notes]
+type: "concept"
+title: "N-gram（bigram）"
+tags: ["検索", "自然言語処理"]
+sources: ["search-study-notes"]
 created: 2026-02-05
 updated: 2026-04-15
 ---

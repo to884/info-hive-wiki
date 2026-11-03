@@ -1,10 +1,10 @@
 ---
-type: entity
-kind: model
-title: GPT-4
-aliases: [GPT4]
-tags: [model, transformer]
-sources: [scaling-laws-paper]
+type: "entity"
+kind: "model"
+title: "GPT-4"
+aliases: ["GPT4"]
+tags: ["model", "transformer"]
+sources: ["scaling-laws-paper"]
 created: 2026-01-20
 updated: 2026-02-06
 ---

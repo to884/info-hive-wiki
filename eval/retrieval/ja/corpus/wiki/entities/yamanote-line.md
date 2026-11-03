@@ -1,9 +1,9 @@
 ---
-type: entity
-kind: place
-title: 山手線
-tags: [交通, 鉄道]
-sources: [tokyo-business-trip]
+type: "entity"
+kind: "place"
+title: "山手線"
+tags: ["交通", "鉄道"]
+sources: ["tokyo-business-trip"]
 created: 2026-01-26
 updated: 2026-03-22
 ---

@@ -1,9 +1,9 @@
 ---
-type: entity
-kind: software
-title: PyTorch
-aliases: [torch]
-tags: [framework, infrastructure]
+type: "entity"
+kind: "software"
+title: "PyTorch"
+aliases: ["torch"]
+tags: ["framework", "infrastructure"]
 sources: []
 created: 2026-01-18
 updated: 2026-02-02

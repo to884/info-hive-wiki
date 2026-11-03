@@ -1,9 +1,9 @@
 ---
-type: source
+type: "source"
 title: "Operations guide"
-authors: [Example team]
+authors: ["Example team"]
 raw: "fixture:operations"
-tags: [pilot]
+tags: ["pilot"]
 created: 2026-09-01
 updated: 2026-09-01
 ingested: 2026-09-01

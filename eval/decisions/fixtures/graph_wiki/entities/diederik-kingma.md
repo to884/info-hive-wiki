@@ -1,7 +1,7 @@
 ---
-type: entity
-kind: person
-title: Diederik Kingma
+type: "entity"
+kind: "person"
+title: "Diederik Kingma"
 graph:
   relationships:
     - predicate: authored

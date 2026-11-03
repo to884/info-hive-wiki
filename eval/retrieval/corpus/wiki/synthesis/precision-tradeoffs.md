@@ -1,9 +1,9 @@
 ---
-type: synthesis
+type: "synthesis"
 title: "Numeric precision tradeoffs across the stack"
-question: How low can numeric precision go before quality suffers?
-tags: [precision, efficiency]
-sources: [lora-paper]
+question: "How low can numeric precision go before quality suffers?"
+tags: ["precision", "efficiency"]
+sources: ["lora-paper"]
 created: 2026-03-03
 updated: 2026-03-09
 ---
