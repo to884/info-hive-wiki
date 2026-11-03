@@ -348,7 +348,7 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--ru
     <dt>移植元</dt><dd><code>praneybehl/llm-wiki-plugin</code> v4.0.1（コミット <code>2d24ccf</code>、MIT ライセンス）</dd>
     <dt>移植先</dt><dd><code>C:\Works\info-hive</code>（現在は初回コミットの <code>AGENTS.md</code> のみ）</dd>
     <dt>作成日</dt><dd>2026-11-02</dd>
-    <dt>状態</dt><dd>2026-11-02 に質問 10 問の回答を受け、方針 C〜J は確定。方針 C（名前）は、コマンド名の実測結果を受けて同日に決め直した。4 モデルのレビュー（<code>docs/agent-runs/2026-11-02-porting-plan-review/summary.md</code>）の指摘を反映済み。方針 A・B と、見直しとレビューで加えた項目も同日に決定した（<a href="#answers">7 節</a>）。未決の項目はない。P0 と P1 は完了した（<a href="#phases">4 節</a>）。</dd>
+    <dt>状態</dt><dd>2026-11-02 に質問 10 問の回答を受け、方針 C〜J は確定。方針 C（名前）は、コマンド名の実測結果を受けて同日に決め直した。4 モデルのレビュー（<code>docs/agent-runs/2026-11-02-porting-plan-review/summary.md</code>）の指摘を反映済み。方針 A・B と、見直しとレビューで加えた項目も同日に決定した（<a href="#answers">7 節</a>）。未決の項目はない。P0、P1、P2 は完了した（<a href="#phases">4 節</a>）。</dd>
   </dl>
   <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">表示: 自動</button>
 </header>
@@ -675,7 +675,15 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--ru
       <span class="phase-id">P2</span>
       <div class="phase-body">
         <h3>日本語の評価セットをつくる</h3>
+        <p class="phase-status">完了: 2026-11-03</p>
         <p class="phase-deps"><strong>前提:</strong> P1。検索を変える前に、比較の基準を用意する。</p>
+        <p>日本語の評価セットは <code>eval/retrieval/ja/</code>（27 ページ、53 クエリ）に置き、<code>run_eval.py --set ja</code> で評価する。基準値は <code>run_eval.py --save</code> で <code>eval/retrieval/baselines/en.json</code> と <code>ja.json</code> に保存した。指標に加えて、クエリの種類ごとの指標とクエリごとの上位 10 件を含む。測定の環境は Python 3.12、fastembed 0.8.0、sqlite-vec 0.1.9、埋め込みのモデルは <code>BAAI/bge-small-en-v1.5</code> である。</p>
+        <ul>
+          <li>英語: recall@10 は page と section が 0.630、hybrid が 0.926。MRR は section が 0.630、hybrid が 0.708。偽陽性率はどの方式も 0。</li>
+          <li>日本語: recall@10 はどの方式も 0.170。当たったのは英数字を含むクエリ（日英混在の 4 問すべてと、<code>Shift_JIS</code>・<code>kuromoji</code>・<code>WBGT</code>・<code>CSV</code> を含む問）だけで、日本語だけのクエリは 0 件だった。偽陽性率は 0。</li>
+          <li>日本語では hybrid も語彙検索と同じ成績になる。トークンが 0 個のクエリは、埋め込み検索に進む前に空の結果を返すためである。P3 の「語彙側のトークンが 0 個でも、埋め込み検索は実行する」で直す。</li>
+          <li>判定のテストのうち、P4 で直す日本語の文分割と、日本語の文字どうしの間の改行の吸収は、<code>unittest.expectedFailure</code> で期待する動作を書いておいた。P4 で直すとテストが「想定外の成功」で落ちるので、そのときに印を外す。</li>
+        </ul>
         <ul>
           <li>先に、トークンが 0 個のクエリでも <code>wiki_search.py --json</code> が空の結果を JSON で返すようにする。今は何も出さずに終わり、<code>run_eval.py</code> が JSON の解析で止まる。</li>
           <li>英語の評価セットで、変更前の絶対値（recall@10、MRR、偽陽性率）を保存する。<code>--gate</code> は方式どうしの相対比較しかしないので、P3 の判定に使う。</li>
