@@ -15,7 +15,7 @@
 
 - **前提条件が整っている:** `uv` と Python 3.10 以上が使える。
 - **セマンティック検索の依存パッケージが整っている:** バージョンを固定した実行環境で、FastEmbed、sqlite-vec、PyYAML を読み込める。
-- **モデルがキャッシュされている:** ローカルの `BAAI/bge-small-en-v1.5` モデルがダウンロード済みである。
+- **モデルがキャッシュされている:** ローカルの `intfloat/multilingual-e5-small` モデルがダウンロード済みである。
 - **wiki が同期されている:** `setup_wiki.py` が `"status": "ready"` を出力し、そのセクション数がベクトル数と一致している。
 
 データベースのファイルがあるだけでは、コーパスが同期されている証拠にはならない。初期化とアップグレードでは必ずセットアップのスクリプトを実行し、スクリプトは差分の同期を行ってから準備完了を報告する。
@@ -40,7 +40,7 @@
 現在の `SCHEMA.md` の検索のブロックには、次のように書く。
 
 ```markdown
-- Semantic backend: local FastEmbed + sqlite-vec (`BAAI/bge-small-en-v1.5`, 384 dimensions). No wiki or query text leaves the machine.
+- Semantic backend: local FastEmbed + sqlite-vec (`intfloat/multilingual-e5-small`, 384 dimensions). No wiki or query text leaves the machine.
 - First semantic use downloads model artifacts to `~/.cache/info-hive/fastembed/`; set `FASTEMBED_CACHE_PATH` to override the model cache.
 - Semantic setup verified: YYYY-MM-DD | not yet built
 ```
@@ -59,7 +59,7 @@ uv run --script skills/info-hive/scripts/setup_wiki.py --wiki wiki --cache
 
 1. JSON が `"status": "ready"` を報告している。
 2. 依存パッケージに、バージョンを固定した FastEmbed、sqlite-vec、PyYAML が並んでいる。
-3. モデルが `BAAI/bge-small-en-v1.5` で、次元数が `384` である。
+3. モデルが `intfloat/multilingual-e5-small` で、次元数が `384` である。`INFO_HIVE_EMBED_MODEL` でモデルを切り替えている場合は、そのモデルが報告されていればよい。
 4. `wiki/.wiki-cache/search-index.json` と `embeddings.sqlite` がある。
 5. `sections` が、`semantic_sections` と `semantic_vectors` の行数と一致している。
 6. セットアップを2回目に実行しても同じ件数が報告され、ベクトル化のバッチが出力されない。
