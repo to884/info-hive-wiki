@@ -33,6 +33,11 @@ import sys
 from collections import deque
 from pathlib import Path
 
+# スクリプトとして実行したときも、テストから importlib で読み込んだときも、
+# 同じディレクトリの wiki_text を import できるようにする。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from wiki_text import nfc  # noqa: E402
+
 
 EVIDENCE_SNIPPET_LEN = 140
 
@@ -232,6 +237,12 @@ def main():
     p_f.add_argument("--about", required=True)
 
     args = parser.parse_args()
+    # グラフのノード ID は NFC で書かれている。macOS のターミナルなどから NFD で渡されても
+    # 一致するように、ノード ID の引数を NFC にそろえる。
+    for name in ("node", "subject", "from", "to", "about"):
+        value = getattr(args, name, None)
+        if isinstance(value, str):
+            setattr(args, name, nfc(value))
 
     if not args.wiki.exists():
         print(f"Wiki directory not found: {args.wiki}", file=sys.stderr)
@@ -254,7 +265,7 @@ def main():
         conn.close()
 
     if args.json:
-        print(json.dumps(result, indent=2, default=str))
+        print(json.dumps(result, indent=2, default=str, ensure_ascii=False))
     else:
         print(render(result, args.command))
 

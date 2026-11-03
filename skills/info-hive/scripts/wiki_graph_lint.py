@@ -38,7 +38,6 @@ PyYAML の固定した依存を持つので、`uv run --script` で実行する�
 
 import argparse
 import json
-import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -58,13 +57,8 @@ except ImportError:
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 import wiki_graph_extract as _extract  # noqa: E402
+from wiki_text import nfc  # noqa: E402
 
-
-FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
-WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
-
-SKIP_TOP_LEVEL_FILES = {"SCHEMA.md", "index.md", "log.md", "README.md"}
-SKIP_TOP_LEVEL_DIRS = {"indexes", "graph", "raw", ".evolution"}
 
 ALLOWED_CONFIDENCE = {"high", "medium", "low"}
 ALLOWED_STATUS = {"current", "historical", "proposed", "disputed", "superseded"}
@@ -72,42 +66,17 @@ IMPLICIT_PREDICATES = {"mentions", "sourced_from", "summarizes_raw"}
 
 
 def parse_frontmatter(text: str) -> tuple[dict, str]:
-    m = FRONTMATTER_RE.match(text)
-    if not m:
-        return {}, text
-    fm_text = m.group(1)
-    body = text[m.end():]
-    try:
-        meta = yaml.safe_load(fm_text) or {}
-    except yaml.YAMLError:
-        meta = {}
-    if not isinstance(meta, dict):
-        meta = {}
-    return meta, body
+    """extract と同じ規則で frontmatter を読む。日本語の別名を英語に直し、参照を NFC にそろえる。"""
+    return _extract.parse_frontmatter(text)
 
 
 def collect_pages(wiki_root: Path) -> list[dict]:
-    pages = []
-    for md_path in sorted(wiki_root.rglob("*.md")):
-        rel = md_path.relative_to(wiki_root)
-        if rel.parts[0] in SKIP_TOP_LEVEL_FILES or rel.parts[0] in SKIP_TOP_LEVEL_DIRS:
-            continue
-        if rel.name.startswith("."):
-            continue
-        try:
-            text = md_path.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
-            continue
-        meta, body = parse_frontmatter(text)
-        pages.append({
-            "path": str(md_path),
-            "rel_path": str(rel).replace("\\", "/"),
-            "slug": md_path.stem,
-            "meta": meta,
-            "body": body,
-            "links": [m.group(1).strip() for m in WIKILINK_RE.finditer(body)],
-        })
-    return pages
+    """extract と同じ規則でページを集める。スラッグ、パス、参照は NFC にそろっている。
+
+    extract と lint が別々にページを読むと、正規化の規則がずれて結果が食い違うので、
+    extract の実装をそのまま使う。
+    """
+    return _extract.collect_pages(wiki_root)
 
 
 def derive_node_type(meta: dict, ontology: dict) -> str | None:
@@ -177,8 +146,10 @@ def lint(pages: list[dict], ontology: dict) -> dict:
     for p in pages:
         nid = derive_node_id(p["meta"], p["slug"], ontology)
         if nid in node_by_id:
-            duplicates[nid].append(p["rel_path"])
-            duplicates[nid].append(node_by_id[nid]["rel_path"])
+            # 報告にはディスク上の実際のパスを使う。NFC にそろえたパスでは、NFD と NFC の
+            # ファイル名の違いだけで重複した2つのページが、同じ1つのパスに見えてしまう。
+            duplicates[nid].append(p.get("disk_rel_path", p["rel_path"]))
+            duplicates[nid].append(node_by_id[nid]["disk_rel_path"])
             continue
         node_type = derive_node_type(p["meta"], ontology) or "concept"
         graph_meta = p["meta"].get("graph") if isinstance(p["meta"].get("graph"), dict) else {}
@@ -186,6 +157,7 @@ def lint(pages: list[dict], ontology: dict) -> dict:
             "id": nid,
             "node_type": node_type,
             "rel_path": p["rel_path"],
+            "disk_rel_path": p.get("disk_rel_path", p["rel_path"]),
             "slug": p["slug"],
             "page_type": p["meta"].get("type"),
             "canonical": bool(graph_meta.get("canonical", False)),
@@ -194,7 +166,12 @@ def lint(pages: list[dict], ontology: dict) -> dict:
         }
 
     for nid, paths in duplicates.items():
-        findings["duplicate_node_ids"].append({"node_id": nid, "paths": sorted(set(paths))})
+        unique_paths = sorted(set(paths))
+        finding = {"node_id": nid, "paths": unique_paths}
+        # NFC にそろえると同じになるパスがあれば、正規化の違いによる重複だと分かるように印を付ける。
+        if len({nfc(path) for path in unique_paths}) < len(unique_paths):
+            finding["unicode_normalization"] = True
+        findings["duplicate_node_ids"].append(finding)
 
     # スラッグをキーにしたソースページ。エッジの `source:` の参照を検証するのに使う。
     source_slugs = {p["slug"] for p in pages if p["meta"].get("type") == "source"}
@@ -419,7 +396,9 @@ def render_text(findings: dict) -> str:
 
     sections = [
         ("duplicate_node_ids", "Duplicate node ids",
-         lambda f: f"  - {f['node_id']}: {', '.join(f['paths'])}"),
+         lambda f: f"  - {f['node_id']}: {', '.join(f['paths'])}"
+                   + ("  (same file name after Unicode NFC normalization)"
+                      if f.get("unicode_normalization") else "")),
         ("unknown_predicates", "Unknown predicates (not in ontology)",
          lambda f: f"  - {f['page']}#rel[{f['index']}]  predicate={f['predicate']!r}"),
         ("broken_object_refs", "Broken object references",
@@ -509,7 +488,7 @@ def main():
               file=sys.stderr)
         sys.exit(1)
     try:
-        ontology = yaml.safe_load(ontology_path.read_text(encoding="utf-8")) or {}
+        ontology = yaml.safe_load(ontology_path.read_text(encoding="utf-8-sig")) or {}
     except yaml.YAMLError as e:
         print(f"Ontology parse error: {e}", file=sys.stderr)
         sys.exit(2)
@@ -523,7 +502,7 @@ def main():
         findings["summary"]["evidence_unsupported"] = len(unsupported)
 
     if args.json:
-        print(json.dumps(findings, indent=2, default=str))
+        print(json.dumps(findings, indent=2, default=str, ensure_ascii=False))
     else:
         print(render_text(findings))
 

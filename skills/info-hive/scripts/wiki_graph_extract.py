@@ -49,6 +49,11 @@ except ImportError:
     )
     sys.exit(2)
 
+# 同じディレクトリにある共通モジュールを import する。
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR))
+from wiki_text import canonical_meta, nfc, posix_rel  # noqa: E402
+
 
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
@@ -61,7 +66,8 @@ def clean_link_target(link: str) -> str:
     target = target.replace("\\", "/").strip().strip("/")
     if target.lower().endswith(".md"):
         target = target[:-3]
-    return target.strip()
+    # スラッグとパスのインデックスは NFC なので、リンクの行き先も NFC にそろえる。
+    return nfc(target.strip())
 
 
 def resolve_link_slug(link: str, by_path: dict, by_slug) -> "str | None":
@@ -92,8 +98,54 @@ DEFAULT_FORMATS = ["jsonl", "sqlite", "graphml"]
 # ---------------------------------------------------------------------------
 
 
+def _nfc_value(value):
+    """文字列なら NFC にそろえ、文字列のリストなら各要素をそろえる。それ以外はそのまま返す。"""
+    if isinstance(value, str):
+        return nfc(value)
+    if isinstance(value, list):
+        return [nfc(v) if isinstance(v, str) else v for v in value]
+    return value
+
+
+def normalize_refs(meta: dict) -> dict:
+    """ノードやページを指す frontmatter の値を NFC にそろえる。
+
+    NFD で入力された ID（macOS のファイル名からコピーしたものなど）が、NFC のスラッグを持つ
+    ページと一致するようにする。対象は graph.node_id、graph.aliases、
+    graph.relationships[] の object・source・contradicts・supersedes、`sources:`、`raw:` である。
+    evidence や notes のような本文の値には手を付けない。
+    """
+    out = dict(meta)
+    for key in ("sources", "raw"):
+        if key in out:
+            out[key] = _nfc_value(out[key])
+    graph_meta = out.get("graph")
+    if isinstance(graph_meta, dict):
+        graph_meta = dict(graph_meta)
+        for key in ("node_id", "aliases"):
+            if key in graph_meta:
+                graph_meta[key] = _nfc_value(graph_meta[key])
+        rels = graph_meta.get("relationships")
+        if isinstance(rels, list):
+            new_rels = []
+            for rel in rels:
+                if isinstance(rel, dict):
+                    rel = dict(rel)
+                    for key in ("object", "source", "contradicts", "supersedes"):
+                        if key in rel:
+                            rel[key] = _nfc_value(rel[key])
+                new_rels.append(rel)
+            graph_meta["relationships"] = new_rels
+        out["graph"] = graph_meta
+    return out
+
+
 def parse_frontmatter(text: str) -> tuple[dict, str]:
-    """PyYAML で YAML の frontmatter を取り出す。(meta, body) を返す。"""
+    """PyYAML で YAML の frontmatter を取り出す。(meta, body) を返す。
+
+    トップレベルのキーと type・kind の値の日本語の別名は英語に直す（`graph:` の中のキーは
+    直さない）。ノードやページを指す値は NFC にそろえる。
+    """
     m = FRONTMATTER_RE.match(text)
     if not m:
         return {}, text
@@ -105,7 +157,8 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
         meta = {}
     if not isinstance(meta, dict):
         meta = {}
-    return meta, body
+    meta, _conflicts = canonical_meta(meta)
+    return normalize_refs(meta), body
 
 
 def collect_pages(wiki_root: Path) -> list[dict]:
@@ -117,15 +170,19 @@ def collect_pages(wiki_root: Path) -> list[dict]:
         if rel.name.startswith("."):
             continue
         try:
-            text = md_path.read_text(encoding="utf-8")
+            # BOM 付きの UTF-8 でも frontmatter を読めるように utf-8-sig で読む。
+            text = md_path.read_text(encoding="utf-8-sig")
         except (UnicodeDecodeError, OSError):
             continue
         meta, body = parse_frontmatter(text)
-        links = [m.group(1).strip() for m in WIKILINK_RE.finditer(body)]
+        links = [nfc(m.group(1).strip()) for m in WIKILINK_RE.finditer(body)]
         pages.append({
             "path": str(md_path),
-            "rel_path": str(rel).replace("\\", "/"),
-            "slug": md_path.stem,
+            # スラッグとパスは NFC にそろえる。lint が重複を報告するときのために、
+            # ディスク上の実際のパスも disk_rel_path に残しておく。
+            "rel_path": posix_rel(str(rel)),
+            "disk_rel_path": str(rel).replace("\\", "/"),
+            "slug": nfc(md_path.stem),
             "meta": meta,
             "body": body,
             "links": links,
@@ -142,7 +199,7 @@ def load_ontology(path: Path) -> dict:
     if not path.exists():
         return {"node_types": {}, "predicates": {}}
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(path.read_text(encoding="utf-8-sig")) or {}
     except yaml.YAMLError as e:
         print(f"Ontology parse error ({path}): {e}", file=sys.stderr)
         sys.exit(2)

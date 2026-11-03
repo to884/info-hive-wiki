@@ -120,7 +120,7 @@ def execute(agent, request):
     with tempfile.TemporaryDirectory(prefix='wiki-agent-') as tmp:
         folder = Path(tmp)
         schema_path, result_path = folder / 'schema.json', folder / 'answer.json'
-        schema_path.write_text(encode(schema(role, request)))
+        schema_path.write_text(encode(schema(role, request)), encoding='utf-8')
         if agent == 'codex':
             command = ['codex', 'exec', '--ignore-user-config', '--ignore-rules', '--ephemeral',
                        '--skip-git-repo-check', '--sandbox',
@@ -191,7 +191,7 @@ def execute(agent, request):
             settings.write_text(json.dumps({'skills': {'enabled': False}, 'context': {'fileName': []},
                 'tools': {'core': (['read_file', 'list_directory', 'search_file_content', 'glob', 'run_shell_command']
                     + (['write_file', 'replace'] if request.get('allow_write') else [])) if inference else []},
-                'mcp': {'excluded': ['*']}}))
+                'mcp': {'excluded': ['*']}}), encoding='utf-8')
             env['GEMINI_CLI_SYSTEM_SETTINGS_PATH'] = str(settings)
         text = prompt(request)
         if agent not in ('claude', 'codex'):
@@ -201,7 +201,7 @@ def execute(agent, request):
         else:
             events = stream_command(command, text, agent, request.get('trace_path'), env)
             lines = '\n'.join(json.dumps(e) for e in events)
-            output = (parse_codex(lines, json.loads(result_path.read_text())) if agent == 'codex' else
+            output = (parse_codex(lines, json.loads(result_path.read_text(encoding='utf-8'))) if agent == 'codex' else
                       parse_claude(lines) if agent == 'claude' else parse_native(agent, events))
             # バージョンの取得はメタデータにすぎない。完了した有料の実行を捨てる理由にしてはならない。
             try:

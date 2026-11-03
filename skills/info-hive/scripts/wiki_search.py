@@ -51,6 +51,11 @@ from collections import Counter, defaultdict
 from datetime import date, datetime
 from pathlib import Path
 
+# スクリプトとして実行したときも、テストから importlib で読み込んだときも、
+# 同じディレクトリの wiki_text を import できるようにする。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from wiki_text import canonical_meta, nfc, normalize_tags, posix_rel  # noqa: E402
+
 
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
@@ -60,10 +65,18 @@ LOCAL_EMBED_MODEL = "BAAI/bge-small-en-v1.5"
 VECTOR_INDEX_SCHEMA = "2"
 VECTOR_INDEX_NAME = "embeddings.sqlite"
 MAX_COSINE_DISTANCE = 0.35
+# 埋め込みに渡す文章の形式。query・passage の接頭辞やセクションの分け方など、
+# 埋め込みの入力が変わるとき（P3 など）に上げる。上げるとベクトルの索引を作り直す。
+EMBED_INPUT_FORMAT = "plain-v1"
+# パースキャッシュの形式。日本語のキーを英語に直すようにしたので 2 に上げた。
+PARSE_CACHE_SCHEMA = 2
 
 
 def parse_frontmatter(text: str) -> tuple[dict, str]:
-    """YAML 風の frontmatter の軽量なパーサー。(metadata, body) を返す。"""
+    """YAML 風の frontmatter の軽量なパーサー。(metadata, body) を返す。
+
+    キーは日本語でもよい。読み込んだあと、日本語の別名のキーと type・kind の値を英語に直す。
+    """
     m = FRONTMATTER_RE.match(text)
     if not m:
         return {}, text
@@ -75,7 +88,7 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
         if not line.strip():
             continue
         # インラインのリスト: tags: [a, b, c]
-        kv = re.match(r"^([a-zA-Z_]+):\s*(.*)$", line)
+        kv = re.match(r"^(\w+):\s*(.*)$", line)
         if kv:
             key, value = kv.group(1), kv.group(2).strip()
             if value.startswith("[") and value.endswith("]"):
@@ -88,6 +101,7 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
                 current_key = key
         elif line.startswith("  - ") and current_key:
             meta[current_key].append(line[4:].strip().strip('"').strip("'"))
+    meta, _conflicts = canonical_meta(meta)
     return meta, body
 
 
@@ -98,11 +112,12 @@ def tokenize(text: str) -> list[str]:
 
 
 def slug_from_path(path: Path, wiki_root: Path) -> str:
-    return path.stem
+    # macOS が NFD で返すファイル名を、リンクと同じ NFC にそろえる。
+    return nfc(path.stem)
 
 
 def extract_wikilinks(body: str) -> list[str]:
-    return [m.group(1).strip() for m in WIKILINK_RE.finditer(body)]
+    return [nfc(m.group(1).strip()) for m in WIKILINK_RE.finditer(body)]
 
 
 def cache_page_body(sections: list[dict]) -> str:
@@ -124,7 +139,7 @@ def load_parse_cache(cache_path: Path) -> dict:
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         print(f"cache: rebuilding ({exc})", file=sys.stderr)
         return {}
-    if not isinstance(payload, dict) or payload.get("schema") != 1:
+    if not isinstance(payload, dict) or payload.get("schema") != PARSE_CACHE_SCHEMA:
         print("cache: rebuilding (unsupported schema)", file=sys.stderr)
         return {}
     files = payload.get("files")
@@ -162,7 +177,7 @@ def write_parse_cache(cache_path: Path, files: dict) -> None:
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(str(cache_path) + ".tmp")
     temporary.write_text(
-        json.dumps({"schema": 1, "files": files}, ensure_ascii=False, sort_keys=True),
+        json.dumps({"schema": PARSE_CACHE_SCHEMA, "files": files}, ensure_ascii=False, sort_keys=True),
         encoding="utf-8",
     )
     os.replace(temporary, cache_path)
@@ -175,14 +190,15 @@ def clean_link_target(link: str) -> str:
     target = target.replace("\\", "/").strip().strip("/")
     if target.lower().endswith(".md"):
         target = target[:-3]
-    return target.strip()
+    # NFD で書かれたリンクも、NFC のスラッグとパスで解決できるようにする。
+    return nfc(target.strip())
 
 
 def build_link_index(pages: list[dict]) -> tuple[dict, set]:
     """wikilink を解決するための (パスからスラッグへの対応, {スラッグ}) を返す。"""
     by_path = {}
     for p in pages:
-        rel = p["rel_path"].replace("\\", "/")
+        rel = posix_rel(p["rel_path"])
         if rel.lower().endswith(".md"):
             rel = rel[:-3]
         by_path[rel] = p["slug"]
@@ -222,7 +238,7 @@ def collect_pages(wiki_root: Path, cache_path: Path | None = None) -> list[dict]
             continue
         if rel.parts[0] in {"indexes", "graph", "raw", ".wiki-cache", ".evolution"}:
             continue
-        rel_path = rel.as_posix()
+        rel_path = posix_rel(rel.as_posix())
         try:
             raw = md_path.read_bytes()
         except OSError:
@@ -236,7 +252,8 @@ def collect_pages(wiki_root: Path, cache_path: Path | None = None) -> list[dict]
             body = cache_page_body(sections)
         else:
             try:
-                text = raw.decode("utf-8")
+                # 先頭に BOM があっても読めるようにする。
+                text = raw.decode("utf-8-sig")
             except UnicodeDecodeError:
                 continue
             meta, body = parse_frontmatter(text)
@@ -380,11 +397,15 @@ def parse_date(s: str | None) -> date | None:
 
 def passes_filters(page: dict, args) -> bool:
     meta = page["meta"]
-    if args.type and meta.get("type") != args.type:
-        return False
+    if args.type:
+        # --type 概念 のように日本語の別名で指定されても、英語の type と比べられるようにする。
+        wanted_type = canonical_meta({"type": args.type})[0]["type"]
+        if meta.get("type") != wanted_type:
+            return False
     if args.tag:
-        page_tags = set(meta.get("tags", []) or [])
-        if not all(t in page_tags for t in args.tag):
+        # 全角の「ＡＩ」と半角の「AI」を同じタグとして比べる。
+        page_tags = set(normalize_tags(meta.get("tags", [])))
+        if not all(t in page_tags for t in normalize_tags(args.tag)):
             return False
     if args.since:
         since = parse_date(args.since)
@@ -448,6 +469,7 @@ def open_vector_index(wiki_root: Path, sqlite_vec, dimension: int) -> sqlite3.Co
             "schema": VECTOR_INDEX_SCHEMA,
             "model": LOCAL_EMBED_MODEL,
             "dimension": str(dimension),
+            "input_format": EMBED_INPUT_FORMAT,
         }
         current = dict(connection.execute("SELECT key, value FROM semantic_meta"))
         if current != expected:
@@ -870,7 +892,7 @@ def cmd_search(args, pages: list[dict]) -> None:
 
 def cmd_backlinks(args, pages: list[dict]) -> None:
     by_path, by_slug = build_link_index(pages)
-    target = link_key(args.backlinks, by_path, by_slug)
+    target = link_key(nfc(args.backlinks), by_path, by_slug)
     inbound = []
     for page in pages:
         if any(link_key(link, by_path, by_slug) == target

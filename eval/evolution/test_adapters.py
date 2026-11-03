@@ -66,7 +66,7 @@ with tempfile.TemporaryDirectory() as tmp:
     root = Path(tmp)
     request = {'role': 'inference', 'model': 'test-model', 'wiki_root': tmp, 'skill_files': {},
                'skill_sha256': 'test', 'question': 'Read source.md', 'max_usd': None}
-    (root / 'source.md').write_text('42')
+    (root / 'source.md').write_text('42', encoding='utf-8')
     fake_body = '''
 import json,os,sys,time
 from pathlib import Path
@@ -93,9 +93,9 @@ if name in ('hermes','openclaw'):
  sys.exit()
 sys.stdin.read()
 if name=='cursor-agent': name='cursor'
-events=json.loads(Path(os.environ['FAKE_STREAMS']).read_text())[name]
+events=json.loads(Path(os.environ['FAKE_STREAMS']).read_text(encoding='utf-8'))[name]
 if '--output-last-message' in sys.argv:
- Path(sys.argv[sys.argv.index('--output-last-message')+1]).write_text('''+repr(text)+''')
+ Path(sys.argv[sys.argv.index('--output-last-message')+1]).write_text('''+repr(text)+''',encoding='utf-8')
 for e in events:
  print(json.dumps(e),flush=True)
  if os.environ.get('FAKE_HANG'): time.sleep(60)
@@ -117,15 +117,15 @@ for e in events:
         maker.variants = {''}
         for name in fake_names:
             # shebang の "python" は、distlib が maker.executable に置き換える。
-            (source / (name+'.py')).write_text('#!python'+fake_body)
+            (source / (name+'.py')).write_text('#!python'+fake_body, encoding='utf-8')
             assert maker.make(name+'.py') == [str(root / (name+'.exe'))], name
     else:
         fake = root / 'fake.py'
-        fake.write_text('#!'+sys.executable+fake_body)
+        fake.write_text('#!'+sys.executable+fake_body, encoding='utf-8')
         fake.chmod(0o755)
         for name in fake_names:
             (root / name).symlink_to(fake)
-    (root / 'streams.json').write_text(json.dumps(streams))
+    (root / 'streams.json').write_text(json.dumps(streams), encoding='utf-8')
     old = dict(os.environ)
     os.environ.update(PATH=str(root)+os.pathsep+os.environ['PATH'], FAKE_STREAMS=str(root/'streams.json'))
     try:
@@ -135,7 +135,7 @@ for e in events:
             request['trace_path'] = str(trace)
             out = lifecycle.run_runner([sys.executable, str(SCRIPTS/'wiki_evolve_agent.py'), name], request, root, 10)
             assert out['answer'] == '42' and out['skill_sha256'] == 'test' and out['tool_calls'] == 1, (name,out)
-            assert '42' in trace.read_text() and 'private' not in trace.read_text(), name
+            assert '42' in trace.read_text(encoding='utf-8') and 'private' not in trace.read_text(encoding='utf-8'), name
         os.environ['FAKE_MODEL_FALLBACK'] = '1'
         fails(lambda: lifecycle.run_runner([sys.executable, str(SCRIPTS/'wiki_evolve_agent.py'), 'hermes'],
               dict(request, model='test:model'), root, 10), 'did not resolve')
@@ -151,7 +151,7 @@ for e in events:
             pass
         else:
             raise AssertionError('Runner should have timed out')
-        assert json.loads((root/'interrupted.jsonl').read_text())['item']['command'] == 'cat source.md'
+        assert json.loads((root/'interrupted.jsonl').read_text(encoding='utf-8'))['item']['command'] == 'cat source.md'
     finally:
         os.environ.clear(); os.environ.update(old)
     # 中身の分からない CLI の USD 設定は、転用評価も含めて、呼び出す前にすべて拒否する。
@@ -161,9 +161,9 @@ for e in events:
     fails(lambda: loop.Calls(config, root), 'Hard USD budgets require')
     config['budget']['max_usd'] = None
     ledger = loop.Calls(config, root)
-    dependency = root/'runtime-helper.py'; dependency.write_text('original')
+    dependency = root/'runtime-helper.py'; dependency.write_text('original', encoding='utf-8')
     ledger.runtime_files[dependency] = lifecycle.digest(dependency.read_bytes())
-    dependency.write_text('edited during trial')
+    dependency.write_text('edited during trial', encoding='utf-8')
     fails(lambda: ledger.invoke('judge', {}, root), 'runtime changed')
     assert ledger.count == 0 and not list(root.glob('call-start-*.json'))
     # 予約できない呼び出しはプロバイダーに届かない。結果が不確かな呼び出しは、引き落とし分を保持したままにする。
@@ -185,7 +185,7 @@ for e in events:
     assert len(sent) == 1 and result['cost'] == .0003
     assert 'temperature' not in sent[0] and sent[0]['thinking'] == {'type':'disabled'}
     assert sent[0]['service_tier'] == 'standard_only' and sent[0]['inference_geo'] == 'global'
-    assert [json.loads(s)['type'] for s in (root/'api.jsonl').read_text().splitlines()] == ['budget-reserved','budget-settled']
+    assert [json.loads(s)['type'] for s in (root/'api.jsonl').read_text(encoding='utf-8').splitlines()] == ['budget-reserved','budget-settled']
     fails(lambda: api.local_tool('write_file', {'path':'source.md','content':'changed'}, api_request), 'Write outside')
     api_request['trace_path'] = str(root/'uncertain.jsonl')
     def uncertain(body):
@@ -194,7 +194,7 @@ for e in events:
         api.execute(api_request, uncertain)
     except OSError:
         pass
-    records = [json.loads(s) for s in (root/'uncertain.jsonl').read_text().splitlines()]
+    records = [json.loads(s) for s in (root/'uncertain.jsonl').read_text(encoding='utf-8').splitlines()]
     assert len(records) == 1 and records[0]['type'] == 'budget-reserved'
     assert loop.command_checks({'required_commands': [['wiki_search.py','--json']]},
         [{'type':'tool_result','content':'wiki_search.py --json'}]) == [False]
@@ -221,13 +221,13 @@ for e in events:
         child_runner = root/'detached.py'
         child_runner.write_text('import subprocess,sys,time\nfrom pathlib import Path\n'
             'p=subprocess.Popen([sys.executable,"-c","import time; time.sleep(60)"],start_new_session=True)\n'
-            'Path("child.pid").write_text(str(p.pid))\ntime.sleep(60)\n')
+            'Path("child.pid").write_text(str(p.pid),encoding="utf-8")\ntime.sleep(60)\n', encoding='utf-8')
         try:
             lifecycle.run_runner([sys.executable,str(child_runner)],{},root,1)
         except subprocess.TimeoutExpired:
             pass
         else:
             raise AssertionError('Detached child test did not time out')
-        status = subprocess.run(['ps','-p',(root/'child.pid').read_text(),'-o','stat='],capture_output=True,text=True).stdout.strip()
+        status = subprocess.run(['ps','-p',(root/'child.pid').read_text(encoding='utf-8'),'-o','stat='],capture_output=True,text=True,encoding='utf-8').stdout.strip()
         assert not status or status.startswith('Z'), 'Detached tool survived timeout: '+status
 print('Nine adapter protocols, interrupted durable traces, unknown usage and pre-request dollar reservations: PASS')

@@ -168,7 +168,7 @@ def capture(args):
     path = folder / (record['id'] + '.json')
     body = encode(record)
     if path.exists():
-        require(not path.is_symlink() and path.read_text() == body, 'Immutable experience ID already exists')
+        require(not path.is_symlink() and path.read_text(encoding='utf-8') == body, 'Immutable experience ID already exists')
     else:
         with path.open('x', encoding='utf-8') as f:
             f.write(body)
@@ -286,8 +286,10 @@ def score(task, output, corpus):
 
 
 def run_runner(argv, request, cwd, timeout):
+    # 子の Python（アダプター）も UTF-8 モードで動かす。アダプターが起動するエージェントにも引き継がれる。
+    env = {**os.environ, "PYTHONUTF8": "1"}
     process = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, text=True, encoding="utf-8", cwd=cwd,
+                               stderr=subprocess.PIPE, text=True, encoding="utf-8", cwd=cwd, env=env,
                                start_new_session=os.name == 'posix')
     try:
         stdout, stderr = process.communicate(encode(request), timeout=timeout)
@@ -571,7 +573,7 @@ def main():
                                   'selection': read_json(exp / 'selection.json') if (exp / 'selection.json').exists() else None,
                                   'trace_directory': str(exp)}
                     elif args.action == 'show':
-                        result = {'proposal': manifest(exp), 'inputs': [read_json(p) for p in exp.glob('inputs-*.json')], 'diff': (exp / 'change.diff').read_text(),
+                        result = {'proposal': manifest(exp), 'inputs': [read_json(p) for p in exp.glob('inputs-*.json')], 'diff': (exp / 'change.diff').read_text(encoding='utf-8'),
                                   'evaluations': [read_json(p) for p in exp.glob('evaluation-*.json')]}
                     else:
                         result = transition(exp, rollback=args.action == 'rollback')
