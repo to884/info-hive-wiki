@@ -464,7 +464,7 @@ def publish_learning(args, rows, patterns, iteration):
             body = previous.rstrip() + f'\n\n## {args.id} の {iteration} 回目の観察\n\n' + body.split('---', 2)[2].lstrip()
         atomic(target, body.replace('—', '-').encode())
     index = args.wiki / 'index.md'
-    old = index.read_text(encoding='utf-8-sig') if index.exists() else '# Wiki Index\n'
+    old = index.read_text(encoding='utf-8-sig') if index.exists() else '# Wiki のインデックス\n'
     links = source_names + [p['page'] for p in patterns.values() if p.get('page')]
     for name in links:
         line = f'- [[{name[:-3]}]]'
@@ -472,7 +472,7 @@ def publish_learning(args, rows, patterns, iteration):
             old = old.rstrip() + '\n' + line + '\n'
     atomic(index, old.encode())
     log = args.wiki / 'log.md'
-    old = log.read_text(encoding='utf-8-sig') if log.exists() else '# Wiki Log\n'
+    old = log.read_text(encoding='utf-8-sig') if log.exists() else '# Wiki のログ\n'
     line = f'- {today}: 評価ループ {args.id} の {iteration} 回目の学習の記録を取り込んだ。'
     if line not in old:
         atomic(log, (old.rstrip() + '\n' + line + '\n').encode())
@@ -665,7 +665,7 @@ def run(args, state):
                         + (best / 'PURPOSE.md').read_text(encoding='utf-8') + '\n'.join(f'- [[{p[:-3]}]]' for p in selected_sources) + '\n選定の根拠: 検証用の課題で成績がはっきり上がった。最終の結果は実験の記録に残している。\n')
                 evidence_path.write_text(body.replace('—', '-'), encoding='utf-8')
                 index = args.wiki / 'index.md'
-                old = index.read_text(encoding='utf-8-sig') if index.exists() else '# Wiki Index\n'
+                old = index.read_text(encoding='utf-8-sig') if index.exists() else '# Wiki のインデックス\n'
                 atomic(index, (old.rstrip() + f'\n- [[concepts/evolution-{args.id}]]\n').encode())
                 proposal_id = slug(args.id + '-selected')
                 propose(SimpleNamespace(id=proposal_id, skill=args.skill, target=None, candidate=best,
