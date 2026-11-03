@@ -478,7 +478,9 @@ def search_candidates(source_query: str, wiki: Path, top: int, no_embed: bool) -
         argv.append("--no-embed")
     uv = shutil.which("uv")
     cmd = [uv, "run", "--quiet", "--script", str(script), *argv] if uv and not no_embed else [sys.executable, str(script), *argv]
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    # 子の Python も UTF-8 モードで動かし、cp932 の既定に左右されないようにする。
+    env = {**os.environ, "PYTHONUTF8": "1"}
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", env=env)
     if proc.returncode != 0 or not proc.stdout.strip():
         return []
     return json.loads(proc.stdout).get("results", [])
@@ -486,7 +488,7 @@ def search_candidates(source_query: str, wiki: Path, top: int, no_embed: bool) -
 
 def cmd_shortlist(args, client: DecisionClient | None) -> int:
     source_path = Path(args.source)
-    text = source_path.read_text(encoding="utf-8")
+    text = source_path.read_text(encoding="utf-8-sig")
     title, body = strip_frontmatter(text)
     title = title or source_path.stem
     t = QUESTIONS["changes"]
@@ -498,7 +500,7 @@ def cmd_shortlist(args, client: DecisionClient | None) -> int:
     for rank, row in enumerate(rows, 1):
         page_file = args.wiki / row["rel_path"]
         try:
-            _, page_body = strip_frontmatter(page_file.read_text(encoding="utf-8"))
+            _, page_body = strip_frontmatter(page_file.read_text(encoding="utf-8-sig"))
         except OSError:
             page_body = row.get("snippet", "")
         candidates.append({"rel_path": row["rel_path"], "title": row["title"], "search_rank": rank, "text": page_body})
@@ -595,14 +597,14 @@ def cmd_contradictions(args, client: DecisionClient | None) -> int:
 
 
 def cmd_screen(args, client: DecisionClient | None) -> int:
-    text = Path(args.file).read_text(encoding="utf-8", errors="replace")
+    text = Path(args.file).read_text(encoding="utf-8-sig", errors="replace")
     threshold = args.threshold if args.threshold is not None else QUESTIONS["orders_agent"]["default_threshold"]
     print(json.dumps(screen_text(client, str(args.file), text, threshold), indent=2, ensure_ascii=False))
     return 0
 
 
 def cmd_ask(args, client: DecisionClient | None) -> int:
-    raw = sys.stdin.read() if args.file in (None, "-") else Path(args.file).read_text(encoding="utf-8")
+    raw = sys.stdin.read() if args.file in (None, "-") else Path(args.file).read_text(encoding="utf-8-sig")
     try:
         request = json.loads(raw)
     except json.JSONDecodeError as exc:

@@ -286,8 +286,10 @@ def score(task, output, corpus):
 
 
 def run_runner(argv, request, cwd, timeout):
+    # 子の Python（アダプター）も UTF-8 モードで動かす。アダプターが起動するエージェントにも引き継がれる。
+    env = {**os.environ, "PYTHONUTF8": "1"}
     process = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, text=True, encoding="utf-8", cwd=cwd,
+                               stderr=subprocess.PIPE, text=True, encoding="utf-8", cwd=cwd, env=env,
                                start_new_session=os.name == 'posix')
     try:
         stdout, stderr = process.communicate(encode(request), timeout=timeout)

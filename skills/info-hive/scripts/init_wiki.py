@@ -23,6 +23,7 @@ SCHEMA.md は決して上書きしない。スキーマはユーザーと一緒�
 """
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -96,7 +97,7 @@ def detect_schema_gaps(schema_path: Path) -> list[dict]:
     """SCHEMA_SECTION_MARKERS のうち、ユーザーの SCHEMA.md にない項目を返す。"""
     if not schema_path.exists():
         return []
-    text = schema_path.read_text(encoding="utf-8")
+    text = schema_path.read_text(encoding="utf-8-sig")
 
     def marker_present(marker: str) -> bool:
         if marker.startswith("## "):
@@ -148,6 +149,8 @@ def install_runtime(wiki: Path) -> None:
         subprocess.run(
             [uv, "run", "--script", str(setup_script), "--wiki", str(wiki), "--cache"],
             check=True,
+            # 子の Python も UTF-8 モードで動かし、cp932 の既定に左右されないようにする。
+            env={**os.environ, "PYTHONUTF8": "1"},
         )
     except subprocess.CalledProcessError as exc:
         print(
