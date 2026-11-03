@@ -2,6 +2,7 @@
 """オフラインの判定テストと評価のスモーク実行に使う、決定的に動く System One のフェイクバックエンド。
 
 `answer(request)` は、トークンの重なりにもとづくヒューリスティックで質問を採点する。
+トークンは英数字の語と、漢字・カタカナの 1 文字である。
 `serve(handler)` は、`/v1/systemone` に応答するローカルの
 HTTP サーバーを 127.0.0.1 で起動する。このフェイクがネットワークに接続することはない。
 """
@@ -30,8 +31,14 @@ ORDER_MARKERS = re.compile(
 )
 
 
+# 漢字とカタカナの 1 文字。ひらがなは助詞や語尾が多く、どの文とも重なるので数えない。
+# 本番の検索と同じトークン化を使うと、検索の誤りを判定のテストで見逃すので、わざと別の簡単な方法にしている。
+CJK_CHAR = re.compile(r"[一-鿿㐀-䶿ァ-ヺー]")
+
+
 def tokens(text: str) -> set[str]:
-    return {t for t in re.findall(r"[a-z0-9]+", text.lower()) if t not in STOP}
+    words = {t for t in re.findall(r"[a-z0-9]+", text.lower()) if t not in STOP}
+    return words | set(CJK_CHAR.findall(text))
 
 
 def overlap(needle: str, haystack: str) -> float:

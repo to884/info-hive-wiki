@@ -28,6 +28,7 @@ jobs:
       - run: python eval/evolution/test_loop.py
       - run: python eval/evolution/test_adapters.py
       - run: python eval/retrieval/run_eval.py --gate
+      - run: python eval/retrieval/run_eval.py --set ja --gate
       - run: python eval/decisions/test_decisions.py
 
   # Linux と同じテストを Windows で動かす。
@@ -73,5 +74,7 @@ jobs:
         run: python eval/evolution/test_adapters.py
       - if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: python eval/retrieval/run_eval.py --gate
+      - if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: python eval/retrieval/run_eval.py --set ja --gate
       - if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: python eval/decisions/test_decisions.py

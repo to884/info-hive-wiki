@@ -1,0 +1,65 @@
+[
+  {"id": "j01", "kind": "exact", "query": "仕入税額控除", "expected": ["消費税"]},
+  {"id": "j02", "kind": "exact", "query": "適格請求書発行事業者の登録番号", "expected": ["invoice-system"]},
+  {"id": "j03", "kind": "exact", "query": "転置インデックス", "expected": ["全文検索"]},
+  {"id": "j04", "kind": "exact", "query": "暑さ指数", "expected": ["heatstroke"]},
+  {"id": "j05", "kind": "exact", "query": "高輪ゲートウェイ駅", "expected": ["yamanote-line"]},
+  {"id": "j06", "kind": "exact", "query": "一体資産", "expected": ["keigen-zeiritsu"]},
+  {"id": "j07", "kind": "exact", "query": "Shift_JIS", "expected": ["文字コード"]},
+  {"id": "j08", "kind": "exact", "query": "kuromoji", "expected": ["elasticsearch"]},
+  {"id": "j09", "kind": "exact", "query": "WBGT", "expected": ["heatstroke"]},
+
+  {"id": "j10", "kind": "paraphrase", "query": "買い物のときに代金に上乗せされる税金の仕組み", "expected": ["消費税"]},
+  {"id": "j11", "kind": "paraphrase", "query": "弁当を持ち帰るか店で食べるかで税金が変わる", "expected": ["keigen-zeiritsu"]},
+  {"id": "j12", "kind": "paraphrase", "query": "文章を単語に区切って品詞を付ける処理", "expected": ["morphological-analysis"]},
+  {"id": "j13", "kind": "paraphrase", "query": "暑い日に体温が上がりすぎて倒れる", "expected": ["heatstroke"]},
+  {"id": "j14", "kind": "paraphrase", "query": "探した資料を言語モデルに渡して答えを作らせる", "expected": ["rag"]},
+  {"id": "j15", "kind": "paraphrase", "query": "日本で一番高い山", "expected": ["mount-fuji"]},
+  {"id": "j16", "kind": "paraphrase", "query": "画面の文字が読めない記号に化ける", "expected": ["文字コード", "文字化け障害報告"]},
+  {"id": "j17", "kind": "paraphrase", "query": "意味の近い文章を数値の並びで探す", "expected": ["embedding"]},
+
+  {"id": "j18", "kind": "two-char", "query": "東京", "expected": ["東京都"]},
+  {"id": "j19", "kind": "two-char", "query": "検索", "expected": ["全文検索"]},
+  {"id": "j20", "kind": "two-char", "query": "税率", "expected": ["keigen-zeiritsu", "消費税"]},
+  {"id": "j21", "kind": "two-char", "query": "登山", "expected": ["mount-fuji"]},
+
+  {"id": "j22", "kind": "single-kanji", "query": "税", "expected": ["消費税"]},
+  {"id": "j23", "kind": "single-kanji", "query": "癌", "expected": ["cancer-screening"]},
+  {"id": "j24", "kind": "single-kanji", "query": "駅", "expected": ["yamanote-line"]},
+
+  {"id": "j25", "kind": "mixed", "query": "RAG の chunk の大きさ", "expected": ["rag"]},
+  {"id": "j26", "kind": "mixed", "query": "BM25 の文書長の正規化", "expected": ["bm25"]},
+  {"id": "j27", "kind": "mixed", "query": "UTF-8 の BOM と Excel", "expected": ["文字コード", "文字化け障害報告"]},
+  {"id": "j28", "kind": "mixed", "query": "e-Tax でインボイスの登録を申請する", "expected": ["nta"]},
+
+  {"id": "j29", "kind": "cross-lingual", "query": "エラスティックサーチで日本語を解析する", "expected": ["elasticsearch"]},
+  {"id": "j30", "kind": "cross-lingual", "query": "シャードの数をあとから変える", "expected": ["elasticsearch"]},
+  {"id": "j31", "kind": "cross-lingual", "query": "コサイン類似度", "expected": ["embedding"]},
+  {"id": "j32", "kind": "cross-lingual", "query": "再ランキングで候補を並べ直す", "expected": ["rag"]},
+  {"id": "j33", "kind": "cross-lingual", "query": "出現頻度と逆文書頻度", "expected": ["bm25"]},
+
+  {"id": "j34", "kind": "fullwidth", "query": "ＢＭ２５", "expected": ["bm25"]},
+  {"id": "j35", "kind": "fullwidth", "query": "ＲＡＧ", "expected": ["rag"]},
+  {"id": "j36", "kind": "fullwidth", "query": "ＮＦＫＣ", "expected": ["unicode-normalization"]},
+
+  {"id": "j37", "kind": "long-section", "query": "入力の上限を超えた部分が切り捨てられて後半が検索に使えない", "expected": ["embedding", "search-study-notes"]},
+  {"id": "j38", "kind": "long-section", "query": "外部に渡す CSV の文字化けの再発防止策", "expected": ["文字化け障害報告"]},
+  {"id": "j39", "kind": "long-section", "query": "手順書の節の長さを測ったら上限の倍近かった", "expected": ["search-study-notes"]},
+
+  {"id": "j40", "kind": "filename", "query": "熱中症予防ガイド", "expected": ["熱中症予防ガイド要約"]},
+  {"id": "j41", "kind": "filename", "query": "文字化け障害", "expected": ["文字化け障害報告"]},
+
+  {"id": "j42", "kind": "filter", "query": "インボイス", "expected": ["tax-seminar-2025", "tokyo-business-trip"], "filters": {"type": "source"}},
+  {"id": "j43", "kind": "filter", "query": "検索", "expected": ["japanese-search-tradeoffs"], "filters": {"type": "synthesis"}},
+  {"id": "j44", "kind": "filter", "query": "熱中症", "expected": ["heatstroke", "熱中症予防ガイド要約", "summer-outdoor-safety"], "filters": {"tag": "健康"}},
+  {"id": "j45", "kind": "filter", "query": "形態素解析", "expected": ["mecab"], "filters": {"type": "entity"}},
+  {"id": "j46", "kind": "filter", "query": "東京", "expected": ["東京都", "yamanote-line", "tokyo-business-trip"], "filters": {"tag": "交通"}},
+  {"id": "j47", "kind": "filter", "query": "埋め込み", "expected": ["embedding"], "filters": {"tag": "ＡＩ"}},
+
+  {"id": "j48", "kind": "negative", "query": "パン生地の発酵と捏ね方", "expected": []},
+  {"id": "j49", "kind": "negative", "query": "住宅ローンの借り換えと金利", "expected": []},
+  {"id": "j50", "kind": "negative", "query": "深海魚と水圧", "expected": []},
+  {"id": "j51", "kind": "negative", "query": "京都の寺院と庭園", "expected": []},
+  {"id": "j52", "kind": "negative", "query": "光合成と葉緑体", "expected": []},
+  {"id": "j53", "kind": "negative", "query": "sourdough bread yeast fermentation", "expected": []}
+]

@@ -2,6 +2,9 @@
 """正規の Python 版検索器における、セクション分割の契約を直接確かめるテスト。"""
 
 import importlib.util
+import json
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -56,6 +59,34 @@ class SplitSectionsContractTest(unittest.TestCase):
         )
         self.assertIn("## Backtick", sections[1]["text"])
         self.assertIn("### Tilde", sections[1]["text"])
+
+
+class EmptyTokenQueryTest(unittest.TestCase):
+    """トークンが 0 個のクエリでも、--json なら空の結果を JSON で返す。"""
+
+    def run_search(self, *extra):
+        corpus = REPO / "eval/retrieval/corpus/wiki"
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPT), "消費税", "--wiki", str(corpus), "--no-embed", *extra],
+            capture_output=True, cwd=str(REPO),
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr.decode("utf-8", "replace"))
+        return proc
+
+    def test_json_returns_empty_results(self):
+        proc = self.run_search("--json")
+        payload = json.loads(proc.stdout.decode("utf-8"))
+        self.assertEqual(payload["query"], "消費税")
+        self.assertEqual(payload["results"], [])
+
+    def test_json_page_granularity_returns_empty_results(self):
+        proc = self.run_search("--json", "--granularity", "page")
+        self.assertEqual(json.loads(proc.stdout.decode("utf-8"))["results"], [])
+
+    def test_text_output_reports_empty_query(self):
+        proc = self.run_search()
+        self.assertEqual(proc.stdout, b"")
+        self.assertIn("Empty query.", proc.stderr.decode("utf-8", "replace"))
 
 
 if __name__ == "__main__":

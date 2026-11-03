@@ -750,7 +750,12 @@ def cmd_search(args, pages: list[dict]) -> None:
         return
     query_tokens = tokenize(args.query)
     if not query_tokens:
-        print("Empty query.", file=sys.stderr)
+        # 日本語だけのクエリは、今のトークン化では 0 個になる。--json では空の結果を返し、
+        # 呼び出し側が JSON を読めるようにする。
+        if args.json:
+            emit_empty_json(args)
+        else:
+            print("Empty query.", file=sys.stderr)
         return
 
     if args.granularity == "page":

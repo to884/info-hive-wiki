@@ -146,6 +146,31 @@ class ReaderTests(unittest.TestCase):
         self.assertFalse(wd.evidence_in_text("values and keys", "The kv cache stores keys and values."))
         self.assertFalse(wd.evidence_in_text("  ", "anything"))
 
+    def test_evidence_in_text_keeps_meaningful_spaces(self):
+        # 空白の有無で意味が変わる英語の引用は、一致させてはならない。P4 で日本語の文字どうしの
+        # 間の空白を吸収するようにしても、英字の間の空白は残す。
+        self.assertFalse(wd.evidence_in_text("now here", "The answer is nowhere to be found."))
+        self.assertFalse(wd.evidence_in_text("nowhere", "We are now here."))
+        self.assertFalse(wd.evidence_in_text("no where", "Nowhere else."))
+
+    def test_evidence_in_text_japanese_exact(self):
+        body = "消費税の標準税率は 10% で、軽減税率は 8% である。"
+        self.assertTrue(wd.evidence_in_text("標準税率は 10%", body))
+        self.assertFalse(wd.evidence_in_text("標準税率は 8%", body))
+
+    @unittest.expectedFailure  # P4: 日本語の文字どうしの間の改行と空白を吸収する
+    def test_evidence_in_text_japanese_line_break(self):
+        body = "消費税は、国内の取引に広く課される\n間接税である。"
+        self.assertTrue(wd.evidence_in_text("広く課される間接税である", body))
+
+    @unittest.expectedFailure  # P4: 句点「。！？」で文を分ける。句点のあとに空白がなくても分ける
+    def test_split_sentences_japanese(self):
+        text = "消費税は間接税である。税率は10%だ！本当に？はい。"
+        self.assertEqual(
+            wd.split_sentences(text),
+            ["消費税は間接税である。", "税率は10%だ！", "本当に？", "はい。"],
+        )
+
 
 class ConfigTests(unittest.TestCase):
     def setUp(self):
@@ -265,6 +290,15 @@ class GateTests(unittest.TestCase):
         self.assertEqual(block["dropped"], 2)
         self.assertFalse(block["failed_open"])
         self.assertIn("relevant", row_decisions[0])
+
+    def test_keeps_relevant_japanese_rows(self):
+        # 偽のバックエンドが日本語の重なりを数えられないと、日本語の行はすべて落とされる。
+        texts = ["消費税の標準税率は10%である"] * 2 + ["富士山の標高は3776mである"] * 2 + ["軽減税率は消費税の一部である"] * 2
+        client = wd.DecisionClient("fake", "fake://", "fake", transport=fake_backend.answer)
+        kept, _, block = wd.gate_pool(client, "消費税の税率", self.rows, texts, 0.5, 3)
+        self.assertEqual(kept, [0, 1, 4])
+        self.assertEqual(block["dropped"], 2)
+        self.assertFalse(block["failed_open"])
 
     def test_fails_open_without_backend(self):
         kept, row_decisions, block = wd.gate_pool(None, "kv cache", self.rows, self.texts, 0.5, 3)

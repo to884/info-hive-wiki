@@ -43,7 +43,15 @@ python eval/evolution/test_evolution.py
 python eval/evolution/test_loop.py
 python eval/evolution/test_adapters.py
 python eval/retrieval/run_eval.py --gate
+python eval/retrieval/run_eval.py --set ja --gate
 python eval/decisions/test_decisions.py
+```
+
+検索の変更では、`eval/retrieval/baselines/` に保存した基準値とも比べる。`--gate` は方式どうしの相対比較しかしないので、英語の成績が全体に下がっても通る。基準値を取り直すときは、ハイブリッド検索の依存パッケージを入れて `--save` を付ける。
+
+```bash
+uv run --with fastembed==0.8.0 --with sqlite-vec==0.1.9 --with PyYAML==6.0.3 python eval/retrieval/run_eval.py --save eval/retrieval/baselines/en.json
+uv run --with fastembed==0.8.0 --with sqlite-vec==0.1.9 --with PyYAML==6.0.3 python eval/retrieval/run_eval.py --set ja --save eval/retrieval/baselines/ja.json
 ```
 
 判定レイヤーのテストは偽のバックエンドを使う。非公開の wiki のテキストを、外部の判定バックエンドに送ってはならない。
