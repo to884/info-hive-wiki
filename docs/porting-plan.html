@@ -250,6 +250,15 @@ td.nowrap { white-space: nowrap; }
 .phase-body h3 { font-size: 1.15rem; }
 .phase-deps { font-size: 0.85rem; color: var(--muted); }
 .phase-deps strong { color: var(--ink); font-weight: 600; }
+.phase-status {
+  justify-self: start;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 2px 10px;
+}
 .checks { list-style: none; padding: 0; }
 .checks li { padding-left: 1.4em; position: relative; }
 .checks li::before {
@@ -339,7 +348,7 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--ru
     <dt>移植元</dt><dd><code>praneybehl/llm-wiki-plugin</code> v4.0.1（コミット <code>2d24ccf</code>、MIT ライセンス）</dd>
     <dt>移植先</dt><dd><code>C:\Works\info-hive</code>（現在は初回コミットの <code>AGENTS.md</code> のみ）</dd>
     <dt>作成日</dt><dd>2026-11-02</dd>
-    <dt>状態</dt><dd>2026-11-02 に質問 10 問の回答を受け、方針 C〜J は確定。方針 C（名前）は、コマンド名の実測結果を受けて同日に決め直した。4 モデルのレビュー（<code>docs/agent-runs/2026-11-02-porting-plan-review/summary.md</code>）の指摘を反映済み。方針 A・B と、見直しとレビューで加えた項目も同日に決定した（<a href="#answers">7 節</a>）。未決の項目はない。</dd>
+    <dt>状態</dt><dd>2026-11-02 に質問 10 問の回答を受け、方針 C〜J は確定。方針 C（名前）は、コマンド名の実測結果を受けて同日に決め直した。4 モデルのレビュー（<code>docs/agent-runs/2026-11-02-porting-plan-review/summary.md</code>）の指摘を反映済み。方針 A・B と、見直しとレビューで加えた項目も同日に決定した（<a href="#answers">7 節</a>）。未決の項目はない。P0 と P1 は完了した（<a href="#phases">4 節</a>）。</dd>
   </dl>
   <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">表示: 自動</button>
 </header>
@@ -618,6 +627,7 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--ru
       <span class="phase-id">P0</span>
       <div class="phase-body">
         <h3>リポジトリの土台をつくる</h3>
+        <p class="phase-status">完了: 2026-11-02、to884/info-hive#1</p>
         <p class="phase-deps"><strong>前提:</strong> なし（方針 A、C、G、J と 7 節の決定）</p>
         <ul>
           <li>取り込む前に、フォークにある未コミットの訳の差分（またはファイルごとのハッシュ）を保存する。</li>
@@ -644,7 +654,9 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--ru
       <span class="phase-id">P1</span>
       <div class="phase-body">
         <h3>文字コードと正規化の土台を直す</h3>
+        <p class="phase-status">完了: 2026-11-03、to884/info-hive#2</p>
         <p class="phase-deps"><strong>前提:</strong> P0（方針 D）</p>
+        <p>共通の処理は <code>skills/info-hive/scripts/wiki_text.py</code> にまとめた。<code>encoding</code> の付け忘れは <code>eval/check_encoding.py</code> が CI で検査する。</p>
         <ul>
           <li>すべての <code>open</code>、<code>read_text</code>、<code>write_text</code> に <code>encoding="utf-8"</code> を付ける。読み込みは BOM を許す <code>utf-8-sig</code> にする。<code>wiki_evolve_loop.py:429</code> の書き込みも含める。</li>
           <li>各スクリプトの入口で標準入力・標準出力・標準エラーを UTF-8 にする。標準入力を読む箇所（<code>wiki_decide.py:640</code>、<code>wiki_evolve_agent.py:223</code>、<code>wiki_evolve_claude.py:44</code>、<code>wiki_evolve_api.py:130</code>）を含める。<code>subprocess</code> は <code>encoding="utf-8"</code> にし、子プロセスに <code>PYTHONUTF8=1</code> を渡す。</li>
