@@ -172,6 +172,186 @@ def has_fullwidth_link_syntax(link: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# frontmatter の解析と書き出し
+# ---------------------------------------------------------------------------
+#
+# 文字列の値は、配列の要素も含めて二重引用符で囲む（要件 §6.3）。日付（YYYY-MM-DD）と数値は
+# 囲まない。値の中の " は \"、\ は \\ と書く。手書きのパーサーが戻す escape はこの 2 つだけで、
+# グラフのスクリプトが使う PyYAML と同じ値になる。引用符の中のカンマで配列を分けず、引用符の
+# 外の「 #」から行末まではコメントとして捨てる。入れ子（graph: など）は読まない。
+
+# 「key: value」の行。キーは日本語でもよい。行頭に空白があるものは入れ子なので読まない。
+_FM_KEY_RE = re.compile(r"^(\w+):\s*(.*)$")
+_FM_ITEM_PREFIX = "  - "
+_FM_NUMBER_RE = re.compile(r"^-?\d+(\.\d+)?$")
+_FM_BARE_WORDS = {"true", "false", "null", "~"}
+
+
+def _fm_unquote(token: str) -> str:
+    """引用符で囲まれた 1 つの値から引用符を外し、\\" と \\\\ を戻す。囲まれていなければそのまま返す。"""
+    if len(token) >= 2 and token[0] == '"' and token[-1] == '"':
+        inner = token[1:-1]
+        out = []
+        i = 0
+        while i < len(inner):
+            ch = inner[i]
+            if ch == "\\" and i + 1 < len(inner) and inner[i + 1] in '"\\':
+                out.append(inner[i + 1])
+                i += 2
+                continue
+            out.append(ch)
+            i += 1
+        return "".join(out)
+    if len(token) >= 2 and token[0] == "'" and token[-1] == "'":
+        return token[1:-1].replace("''", "'")
+    return token
+
+
+def _fm_strip_comment(value: str) -> str:
+    """引用符の外にある「 #」から行末までを捨てる。"""
+    quote = None
+    i = 0
+    while i < len(value):
+        ch = value[i]
+        if quote:
+            if ch == "\\" and quote == '"':
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "#" and (i == 0 or value[i - 1].isspace()):
+            return value[:i].rstrip()
+        i += 1
+    return value.rstrip()
+
+
+def _fm_split_items(inner: str) -> list[str]:
+    """inline の配列の中身を、引用符の中のカンマでは分けずに項目に分ける。項目は引用符つきのまま返す。"""
+    items: list[str] = []
+    buf: list[str] = []
+    quote = None
+    i = 0
+    while i < len(inner):
+        ch = inner[i]
+        if quote:
+            buf.append(ch)
+            if ch == "\\" and quote == '"' and i + 1 < len(inner):
+                buf.append(inner[i + 1])
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+            buf.append(ch)
+        elif ch == ",":
+            items.append("".join(buf).strip())
+            buf = []
+        else:
+            buf.append(ch)
+        i += 1
+    items.append("".join(buf).strip())
+    return [item for item in items if item]
+
+
+def _fm_raw_values(frontmatter_text: str):
+    """frontmatter の各行を (キー, 値の字句の一覧, 入れ子か) に分けて返す。値の字句は引用符つきのまま。"""
+    current_key = None
+    for line in frontmatter_text.split("\n"):
+        if not line.strip():
+            continue
+        kv = _FM_KEY_RE.match(line)
+        if kv:
+            key, value = kv.group(1), _fm_strip_comment(kv.group(2).strip())
+            current_key = None
+            if value.startswith("[") and value.endswith("]"):
+                yield key, _fm_split_items(value[1:-1]), True
+            elif value:
+                yield key, [value], False
+            else:
+                # 値のないキー。続く「  - 」の行をこのキーの配列として読む。
+                current_key = key
+                yield key, [], True
+        elif line.startswith(_FM_ITEM_PREFIX) and current_key:
+            yield current_key, [_fm_strip_comment(line[len(_FM_ITEM_PREFIX):].strip())], True
+
+
+def parse_frontmatter_text(frontmatter_text: str) -> dict:
+    """frontmatter の本文（--- の間）を読み、書かれたままのキーの dict を返す。
+
+    値はすべて文字列か文字列の配列になる。inline の配列、`  - ` で始まるブロックの配列、
+    引用符の中のカンマ、\\" と \\\\ の escape、行末のコメントを扱う。入れ子（graph: など）は
+    読まず、空の配列になる。英語への別名の変換は canonical_meta で別に行う。
+    """
+    meta: dict = {}
+    for key, tokens, is_list in _fm_raw_values(frontmatter_text):
+        values = [_fm_unquote(t) for t in tokens]
+        if is_list:
+            if key in meta and isinstance(meta[key], list):
+                meta[key].extend(values)
+            else:
+                meta[key] = values
+        else:
+            meta[key] = values[0]
+    return meta
+
+
+def _fm_is_quoted(token: str) -> bool:
+    return len(token) >= 2 and token[0] == '"' and token[-1] == '"'
+
+
+def unquoted_string_keys(frontmatter_text: str) -> list[str]:
+    """二重引用符で囲まれていない文字列の値を持つキーを返す。
+
+    日付（YYYY-MM-DD）、数値、true・false・null、空の配列は文字列ではないので除く。
+    入れ子（graph: など）の中は見ない。
+    """
+    found: list[str] = []
+    for key, tokens, _is_list in _fm_raw_values(frontmatter_text):
+        for token in tokens:
+            if _fm_is_quoted(token):
+                continue
+            if is_iso_date(token) or _FM_NUMBER_RE.match(token) or token.lower() in _FM_BARE_WORDS:
+                continue
+            if key not in found:
+                found.append(key)
+            break
+    return found
+
+
+def format_fm_value(value) -> str:
+    """frontmatter に書く値を文字列にする。文字列は二重引用符で囲み、日付と数値は囲まない。"""
+    import json
+    from datetime import date
+
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(format_fm_value(v) for v in value) + "]"
+    text = str(value)
+    if is_iso_date(text):
+        return text
+    return json.dumps(text, ensure_ascii=False)
+
+
+def format_frontmatter(meta: dict) -> str:
+    """dict を frontmatter の文字列（--- を含む）にする。キーの順は dict のまま。"""
+    lines = ["---"]
+    for key, value in meta.items():
+        lines.append(f"{key}: {format_fm_value(value)}")
+    lines.append("---")
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
 # ページの大きさと表示幅
 # ---------------------------------------------------------------------------
 

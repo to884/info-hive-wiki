@@ -55,7 +55,9 @@ from pathlib import Path
 # スクリプトとして実行したときも、テストから importlib で読み込んだときも、
 # 同じディレクトリの wiki_text を import できるようにする。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from wiki_text import canonical_meta, ljust_display, localize_argparse, nfc, normalize_tags, posix_rel  # noqa: E402
+from wiki_text import (  # noqa: E402
+    canonical_meta, ljust_display, localize_argparse, nfc, normalize_tags, parse_frontmatter_text, posix_rel,
+)
 
 
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
@@ -115,8 +117,9 @@ VECTOR_INDEX_NAME = "embeddings.sqlite"
 # 埋め込みの入力が変わるときに上げる。上げるとベクトルの索引を作り直す。
 # prefix-v1: EMBED_MODELS の接頭辞を付ける（P3）。
 EMBED_INPUT_FORMAT = "prefix-v1"
-# パースキャッシュの形式。日本語のキーを英語に直すようにしたので 2 に上げた。
-PARSE_CACHE_SCHEMA = 2
+# パースキャッシュの形式。日本語のキーを英語に直すようにしたので 2 に、frontmatter の解析を
+# wiki_text の共通のパーサー（引用符の中のカンマと行末のコメントを扱う）に替えたので 3 に上げた。
+PARSE_CACHE_SCHEMA = 3
 
 
 def parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -129,26 +132,7 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
         return {}, text
     fm_text = m.group(1)
     body = text[m.end():]
-    meta = {}
-    current_key = None
-    for line in fm_text.split("\n"):
-        if not line.strip():
-            continue
-        # インラインのリスト: tags: [a, b, c]
-        kv = re.match(r"^(\w+):\s*(.*)$", line)
-        if kv:
-            key, value = kv.group(1), kv.group(2).strip()
-            if value.startswith("[") and value.endswith("]"):
-                items = [x.strip().strip('"').strip("'") for x in value[1:-1].split(",") if x.strip()]
-                meta[key] = items
-            elif value:
-                meta[key] = value.strip('"').strip("'")
-            else:
-                meta[key] = []
-                current_key = key
-        elif line.startswith("  - ") and current_key:
-            meta[current_key].append(line[4:].strip().strip('"').strip("'"))
-    meta, _conflicts = canonical_meta(meta)
+    meta, _conflicts = canonical_meta(parse_frontmatter_text(fm_text))
     return meta, body
 
 

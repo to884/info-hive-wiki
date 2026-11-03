@@ -6,6 +6,7 @@ wiki_lint.py — LLM Wiki の構造の健全性をチェックする。
 重複したスラッグと、（--suggest-pages を付けた場合は）多くのページに出てくるのに専用のページがない語を報告する。
 日本語の wiki で起きやすい書き損じとして、英語のキーと日本語の別名の重複、全角の「：」を使った
 frontmatter のキー、「、」で区切ったリストの値、全角の「｜」「＃」を使った wikilink も報告する。
+frontmatter の文字列の値（配列の要素を含む）が二重引用符で囲まれていないページも報告する。
 
 ファイル名、パス、スラッグ、wikilink の行き先は NFC にそろえてから比べる。frontmatter の
 日本語のキー（タイトル、種類など）と type・kind の日本語の値は、英語に直してから検査する。
@@ -52,7 +53,9 @@ from wiki_text import (  # noqa: E402
     localize_argparse,
     nfc,
     nfkc,
+    parse_frontmatter_text,
     posix_rel,
+    unquoted_string_keys,
 )
 
 
@@ -131,25 +134,7 @@ def parse_frontmatter_raw(text: str) -> "tuple[dict, str | None, str, bool]":
         return {}, None, text, True
     fm_text = m.group(1)
     body = text[m.end():]
-    meta = {}
-    current_key = None
-    for line in fm_text.split("\n"):
-        if not line.strip():
-            continue
-        kv = re.match(r"^(\w+):\s*(.*)$", line)
-        if kv:
-            key, value = kv.group(1), kv.group(2).strip()
-            if value.startswith("[") and value.endswith("]"):
-                items = [x.strip().strip('"').strip("'") for x in value[1:-1].split(",") if x.strip()]
-                meta[key] = items
-            elif value:
-                meta[key] = value.strip('"').strip("'")
-            else:
-                meta[key] = []
-                current_key = key
-        elif line.startswith("  - ") and current_key:
-            meta[current_key].append(line[4:].strip().strip('"').strip("'"))
-    return meta, fm_text, body, False
+    return parse_frontmatter_text(fm_text), fm_text, body, False
 
 
 def collect_pages(wiki_root: Path) -> list[dict]:
@@ -195,6 +180,7 @@ def collect_pages(wiki_root: Path) -> list[dict]:
             "alias_conflicts": alias_conflicts,
             "fullwidth_colon_keys": fullwidth_colon_keys(fm_text) if fm_text else [],
             "ideographic_comma_keys": ideographic_comma_values(raw_meta),
+            "unquoted_keys": unquoted_string_keys(fm_text) if fm_text else [],
         })
     return pages
 
@@ -229,6 +215,7 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         "ideographic_comma_lists": [],
         "fullwidth_link_syntax": [],
         "non_iso_dates": [],
+        "unquoted_strings": [],
         "suggested_pages": [],
         "summary": {},
     }
@@ -322,6 +309,9 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
             findings["fullwidth_colon_keys"].append({"path": p["rel_path"], "keys": p["fullwidth_colon_keys"]})
         if p.get("ideographic_comma_keys"):
             findings["ideographic_comma_lists"].append({"path": p["rel_path"], "keys": p["ideographic_comma_keys"]})
+        # 文字列の値は二重引用符で囲む。日付と数値は囲まない。
+        if p.get("unquoted_keys"):
+            findings["unquoted_strings"].append({"path": p["rel_path"], "keys": p["unquoted_keys"]})
 
         # 日付は ISO 形式（YYYY-MM-DD）にする。「2026年11月3日」や「2026/11/03」は、更新の停滞の
         # 判定や --since の絞り込みで読めない。
@@ -393,6 +383,7 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         "ideographic_comma_lists": len(findings["ideographic_comma_lists"]),
         "fullwidth_link_syntax": len(findings["fullwidth_link_syntax"]),
         "non_iso_dates": len(findings["non_iso_dates"]),
+        "unquoted_strings": len(findings["unquoted_strings"]),
         "suggested_pages": len(findings["suggested_pages"]),
     }
     return findings
@@ -428,6 +419,7 @@ def render_text(findings: dict) -> str:
         ("ideographic_comma_lists", "リストの値を「、」で区切っている", lambda f: f"  - {f['path']}  キー: {', '.join(f['keys'])}"),
         ("fullwidth_link_syntax", "wikilink に全角の「｜」か「＃」がある", lambda f: f"  - [[{f['link']}]]  （{f['from_path']}）"),
         ("non_iso_dates", "日付が YYYY-MM-DD の形になっていない", lambda f: f"  - {f['path']}  {f['key']}: {f['value']}"),
+        ("unquoted_strings", "文字列の値が二重引用符で囲まれていない", lambda f: f"  - {f['path']}  キー: {', '.join(f['keys'])}"),
     ]
 
     for key, label, formatter in sections:

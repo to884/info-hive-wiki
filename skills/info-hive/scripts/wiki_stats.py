@@ -21,7 +21,8 @@ from pathlib import Path
 # 同じディレクトリの wiki_text を import できるようにする。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wiki_text import (  # noqa: E402
-    canonical_meta, char_count, ljust_display, localize_argparse, nfc, posix_rel, rjust_display,
+    canonical_meta, char_count, ljust_display, localize_argparse, nfc, parse_frontmatter_text, posix_rel,
+    rjust_display,
 )
 
 
@@ -60,15 +61,9 @@ def parse_type(text: str) -> str | None:
     m = FRONTMATTER_RE.match(text)
     if not m:
         return None
-    fm = m.group(1)
-    meta: dict[str, str] = {}
-    for line in fm.split("\n"):
-        kv = re.match(r"^(\w+):\s*(.*)$", line)
-        if kv:
-            # 同じキーが何度もあれば、これまでどおり最初の行を使う。
-            meta.setdefault(kv.group(1), kv.group(2).strip().strip('"').strip("'"))
-    meta, _conflicts = canonical_meta(meta)
-    return meta.get("type")
+    meta, _conflicts = canonical_meta(parse_frontmatter_text(m.group(1)))
+    value = meta.get("type")
+    return value if isinstance(value, str) else None
 
 
 # ページの大きさの目安（wiki_lint の既定値と同じ）。行数と、空白を除いた文字数の両方で見る。
