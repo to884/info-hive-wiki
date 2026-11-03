@@ -348,7 +348,7 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--ru
     <dt>移植元</dt><dd><code>praneybehl/llm-wiki-plugin</code> v4.0.1（コミット <code>2d24ccf</code>、MIT ライセンス）</dd>
     <dt>移植先</dt><dd><code>C:\Works\info-hive</code>（現在は初回コミットの <code>AGENTS.md</code> のみ）</dd>
     <dt>作成日</dt><dd>2026-11-02</dd>
-    <dt>状態</dt><dd>2026-11-02 に質問 10 問の回答を受け、方針 C〜J は確定。方針 C（名前）は、コマンド名の実測結果を受けて同日に決め直した。4 モデルのレビュー（<code>docs/agent-runs/2026-11-02-porting-plan-review/summary.md</code>）の指摘を反映済み。方針 A・B と、見直しとレビューで加えた項目も同日に決定した（<a href="#answers">7 節</a>）。未決の項目はない。P0〜P4 は完了した（<a href="#phases">4 節</a>）。</dd>
+    <dt>状態</dt><dd>2026-11-02 に質問 10 問の回答を受け、方針 C〜J は確定。方針 C（名前）は、コマンド名の実測結果を受けて同日に決め直した。4 モデルのレビュー（<code>docs/agent-runs/2026-11-02-porting-plan-review/summary.md</code>）の指摘を反映済み。方針 A・B と、見直しとレビューで加えた項目も同日に決定した（<a href="#answers">7 節</a>）。未決の項目はない。P0〜P5 は完了した（<a href="#phases">4 節</a>）。</dd>
   </dl>
   <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">表示: 自動</button>
 </header>
@@ -775,6 +775,7 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--ru
       <span class="phase-id">P5</span>
       <div class="phase-body">
         <h3>エージェント向けの指示を日本語の wiki に合わせて書き直す</h3>
+        <p class="phase-status">完了: 2026-11-03</p>
         <p class="phase-deps"><strong>前提:</strong> P0 で取り込んだ訳（方針 D、I、J）。ページの大きさ、検索、評価ループの説明は P3・P4 の結果を待って確定する。</p>
         <ul>
           <li>SKILL.md、コマンド 9 本、references、テンプレートを、訳文の直しではなく日本語の wiki の運用として書き直す。</li>
@@ -783,6 +784,18 @@ footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--ru
           <li>references に残る英語の例文（<code>ingest-workflow.md</code> の「as established in [[paper-X]]」など）を日本語の例に替える。</li>
           <li>テンプレートの英語の見出しのうち、スクリプトが読む 6 つは残す。読まないもの（<code>## Sources</code> など）は日本語にしてよい。</li>
           <li>オントロジーの述語の説明文を訳す（述語名は残す）。</li>
+        </ul>
+        <p>書き直しでは、次のように決めた。</p>
+        <ul>
+          <li>スラッグ: 題名が日本語のページは日本語のスラッグ、英語の固有名詞や技術用語のページは英語のスラッグを基本にする。英字は小文字にしてハイフンでつなぐ。リンクの照合は大文字と小文字を区別するためである。空白、Windows でファイル名に使えない記号、wikilink の区切りになる記号、全角の「｜」「＃」、全角の英数字、半角のカタカナは使わない。どちらの言語の名前にするか迷う語の扱いは、wiki ごとに <code>SCHEMA.md</code> の「命名」の節で決める。</li>
+          <li>ページの大きさ: 「約 2,000 語」のような語数の目安はやめ、空白を除いた文字数と行数で書く。大きいソースを分割して読む目安は「約 1 万文字（英語なら約 5,000 語）」にした。</li>
+          <li>引用: 本文では「」で囲む。グラフの <code>evidence</code> と、判定・評価ループの根拠はソースの文をそのまま写す。照合の規則（日本語の文字どうしの間の改行は吸収し、全角と半角の違いは吸収しない）を文書に書いた。</li>
+          <li>ログ行: <code>## [YYYY-MM-DD] &lt;操作名&gt; | &lt;説明&gt;</code> の操作名は英語のまま、説明とサブ行（<code>   グラフ: ノード +N、型付きエッジ +M</code>）は日本語にした。評価ループが書く <code>- YYYY-MM-DD: …</code> の行は変えていない。</li>
+          <li>見出し: <code>SCHEMA.md.template</code> は目印の 4 つの見出しだけ英語で残し、ほかは日本語にした。<code>index.md</code>・<code>log.md</code>・<code>page.md</code>・<code>pattern.md</code> などのテンプレートの見出しはすべて日本語にした。評価ループが <code>index.md</code> と <code>log.md</code> を新しく作るときの見出しも、テンプレートに合わせて <code>wiki_evolve_loop.py</code> で変えた。</li>
+          <li>例: グラフの例は、移植元の実在の人物と会社から、架空の日本語の例（<code>person:山田太郎</code>、<code>company:やまだ製作所</code>）に替えた。日本語のスラッグを含むノード ID で、グラフの lint、抽出、クエリが動くことを確かめた。</li>
+          <li><code>/wiki:upgrade</code>: 移植元の llm-wiki で作った wiki から移るときの注意点（埋め込みの索引とパースキャッシュの作り直し、モデルのキャッシュの場所、環境変数の改名、ホスト型 wiki がないこと）を書いた。</li>
+          <li>英語のまま残したもの: 判定モデルに渡す質問（<code>decision-questions.json</code>）と、評価ループのランナーに渡すプロンプト（方針 H）。<code>decision-models.md</code> に、日本語での精度は確かめていないと書いた。</li>
+          <li>利用者向けの <code>README.md</code> と <code>docs/</code> にも、古い埋め込みモデル名、行数だけの上限、英小文字だけのファイル名の記述が残っていたので、合わせて直した。</li>
         </ul>
       </div>
     </li>

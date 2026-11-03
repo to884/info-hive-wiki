@@ -57,7 +57,7 @@ SCHEMA_SECTION_MARKERS = [
         "marker": "## Optional graph metadata",
         "version": "0.3.0",
         "anchor": "## Optional graph metadata",
-        "label": "任意のグラフのメタデータ（Frontmatter の節）",
+        "label": "任意のグラフのメタデータ（frontmatter の graph: キー）",
     },
     {
         "marker": "## Graph layer",
@@ -68,8 +68,8 @@ SCHEMA_SECTION_MARKERS = [
     {
         "marker": "Graph lint + extract",
         "version": "0.3.0",
-        "anchor": "- Graph lint + extract: after every ingest that adds typed `graph.relationships`.",
-        "label": "グラフの lint と抽出の頻度（Lint cadence の節）",
+        "anchor": "- Graph lint + extract:",
+        "label": "グラフの lint と抽出の頻度（lint の頻度の節）",
     },
     {
         "marker": "## Retrieval",
