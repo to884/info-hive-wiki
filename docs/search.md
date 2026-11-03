@@ -116,7 +116,7 @@ uv run --script skills/info-hive/scripts/wiki_search.py "attention" --wiki wiki 
 
 ## 既定のローカルのハイブリッド検索
 
-セクションの検索では、FastEmbed で多言語モデルの `intfloat/multilingual-e5-small`（量子化した ONNX、ダウンロードは約 0.14 GB）を使い、その 384 次元のベクトルを sqlite-vec の仮想テーブルに保存する。e5 系のモデルは `query: ` と `passage: ` の接頭辞を前提に学習しているので、クエリとセクションにそれぞれ付けてから埋め込む。コサイン距離が 0.185 を超えるセクションは、埋め込み検索の結果に含めない。BM25 とセマンティック検索の順位は、Reciprocal Rank Fusion（RRF、`k=60`、重みは等しい）で統合する。API キーや外部のサービスは使わず、wiki のセクションとクエリのテキストがマシンの外に出ることはない。
+セクションの検索では、FastEmbed で多言語モデルの `intfloat/multilingual-e5-small`（fp16 の ONNX、ダウンロードは約 0.25 GB）を使い、その 384 次元のベクトルを sqlite-vec の仮想テーブルに保存する。e5 系のモデルは `query: ` と `passage: ` の接頭辞を前提に学習しているので、クエリとセクションにそれぞれ付けてから埋め込む。コサイン距離が 0.193 を超えるセクションは、埋め込み検索の結果に含めない。BM25 とセマンティック検索の順位は、Reciprocal Rank Fusion（RRF、`k=60`、重みは等しい）で統合する。API キーや外部のサービスは使わず、wiki のセクションとクエリのテキストがマシンの外に出ることはない。
 
 スクリプトは、バージョンを固定した [PEP 723](https://peps.python.org/pep-0723/) の依存関係を宣言している。`uv` で実行すれば、プロジェクトの環境を変えずに、それらのパッケージを使える。
 
@@ -136,6 +136,13 @@ uv run --script skills/info-hive/scripts/wiki_search.py \
 ### 埋め込みモデルを切り替える
 
 環境変数 `INFO_HIVE_EMBED_MODEL` で埋め込みモデルを選べる。選べるのは `wiki_search.py` の `EMBED_MODELS` に載っているモデルだけで、載っていない名前を指定すると、警告を出して語彙ベースの検索に切り替わる。モデルを変えると、`embeddings.sqlite` は次の検索で自動的に作り直される。英語専用のモデルは置いていない。
+
+| モデル | ダウンロード | 次元数 | 距離の上限 | 評価セットでの recall@10（日本語 / 英語） |
+|---|---|---|---|---|
+| `intfloat/multilingual-e5-small`（既定） | 約 0.25 GB | 384 | 0.193 | 1.000 / 0.926 |
+| `intfloat/multilingual-e5-large` | 約 2.24 GB | 1024 | 0.19 | 1.000 / 0.815 |
+
+`multilingual-e5-large` は、評価セットでは日本語の MRR が既定のモデルより少し高い（0.975 と 0.954）が、英語の recall@10 は低く、セクションの埋め込みは 7 倍ほど時間がかかる。重みを `model.onnx_data` に分けて配布しているので、`wiki_search.py` は fastembed を読み込む前に `HF_HUB_DISABLE_SHARED_BLOBS=1` を設定する。huggingface_hub 1.33 の既定では、大きいファイルの実体をキャッシュ全体で共有する置き場所に置くため、onnxruntime 1.31 が `model.onnx_data` を「モデルのディレクトリの外にある」として読み込めない。この設定の前にダウンロードしたモデルで読み込みに失敗するときは、`~/.cache/info-hive/fastembed/` からそのモデルのディレクトリを消して、ダウンロードし直す。
 
 ## 日本語のトークン化
 
