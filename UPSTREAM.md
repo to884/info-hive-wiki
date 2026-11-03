@@ -1,6 +1,6 @@
 # 移植元の記録
 
-info-hive は、[praneybehl/llm-wiki-plugin](https://github.com/praneybehl/llm-wiki-plugin)（MIT ライセンス、作者 Praney Behl）を日本語向けに移植したものである。移植元の履歴は取り込まず、ファイルをコピーして独立させた（[移植計画](docs/porting-plan.html)の方針 A）。
+info-hive は、[praneybehl/llm-wiki-plugin](https://github.com/praneybehl/llm-wiki-plugin)（MIT ライセンス、作者 Praney Behl）を日本語向けに移植したものである。移植元の履歴は取り込まず、ファイルをコピーして独立させた（[移植計画](https://github.com/to884/info-hive-dev/blob/main/docs/porting-plan.html)の方針 A）。
 
 ## 起点
 
@@ -11,7 +11,7 @@ info-hive は、[praneybehl/llm-wiki-plugin](https://github.com/praneybehl/llm-w
 | コミット | `2d24ccfbbd46e77a431ddf2b1b54042d18576217` |
 | 取り込んだ日 | 2026-11-02 |
 
-起点のコミットに、手元のフォーク（`to884/llm-wiki-plugin`）にあった未コミットの日本語訳 94 ファイルを重ねた状態を取り込んだ。訳を入れた各ファイルの SHA-256 は [docs/upstream/translation-hashes.txt](docs/upstream/translation-hashes.txt) に残してある。
+起点のコミットに、手元のフォーク（`to884/llm-wiki-plugin`）にあった未コミットの日本語訳 94 ファイルを重ねた状態を取り込んだ。訳を入れた各ファイルの SHA-256 は 開発用のリポジトリの [docs/upstream/translation-hashes.txt](https://github.com/to884/info-hive-dev/blob/main/docs/upstream/translation-hashes.txt) に残してある。
 
 ## 取り込まなかったもの
 
@@ -23,7 +23,7 @@ info-hive は、[praneybehl/llm-wiki-plugin](https://github.com/praneybehl/llm-w
 | `research/` | 移植元の調査メモで、移植版には当てはまらないため |
 | `eval/decisions/results-fake.json`、`eval/decisions/results-local-d1-2b.json` | 移植元の英語の評価セットでの測定記録。判定レイヤーのしきい値の根拠として移植元で参照できる |
 | `eval/evolution/workflows/build_suite.py`、`eval/evolution/workflows/frozen-runtime.patch` | 移植元の固定コミットを `git show` で読むツールとその入力。スイートを作り直すときは移植元の起点のコミットで実行する |
-| `AGENTS.md` | info-hive 用に書き直したため |
+| `AGENTS.md` | 開発の指示は開発用のリポジトリ（to884/info-hive-dev）に置くため |
 
 ## 取り込み後の主な変更
 
@@ -31,7 +31,7 @@ info-hive は、[praneybehl/llm-wiki-plugin](https://github.com/praneybehl/llm-w
 - スキルのディレクトリを `skills/llm-wiki/` から `skills/info-hive/` に改名した。
 - 判定レイヤーの環境変数を `LLM_WIKI_DECISIONS*` から `INFO_HIVE_DECISIONS*` に、モデルのキャッシュを `~/.cache/llm-wiki/` から `~/.cache/info-hive/` に変えた。
 
-日本語への対応の内容は [移植計画](docs/porting-plan.html) と `CHANGELOG.md` にまとめる。
+日本語への対応の内容は [移植計画](https://github.com/to884/info-hive-dev/blob/main/docs/porting-plan.html) と `CHANGELOG.md` にまとめる。
 
 ## 移植元の修正を取り込む手順
 

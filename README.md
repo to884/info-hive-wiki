@@ -2,7 +2,7 @@
 
 PDF、記事、文字起こし、メモを、AI エージェントが検索し、出典を示し、最新の状態に保てる共有の wiki に変える。ソースは一度追加するだけでよい。あとから質問し、役に立った回答は残しておける。
 
-info-hive は、Praney Behl の [llm-wiki-plugin](https://github.com/praneybehl/llm-wiki-plugin) v4.0.1 を日本語向けに移植したものである。日本語のページ、ファイル名、クエリで、取り込み、検索、lint、統計、グラフ、判定、評価ループが動くように直している。検索は、日本語に対応したトークン化と多言語の埋め込みモデル（`intfloat/multilingual-e5-small`）を使う。進み具合は[移植計画](docs/porting-plan.html)にある。
+info-hive は、Praney Behl の [llm-wiki-plugin](https://github.com/praneybehl/llm-wiki-plugin) v4.0.1 を日本語向けに移植したものである。日本語のページ、ファイル名、クエリで、取り込み、検索、lint、統計、グラフ、判定、評価ループが動くように直している。検索は、日本語に対応したトークン化と多言語の埋め込みモデル（`intfloat/multilingual-e5-small`）を使う。進み具合は、開発用のリポジトリの[移植計画](https://github.com/to884/info-hive-dev/blob/main/docs/porting-plan.html)にある。
 
 Claude Code、Codex、Cursor、Gemini CLI、OpenCode、OpenClaw、Pi、OMP、Hermes で動く。詳しい説明は [docs/](docs/index.md) にある。
 
