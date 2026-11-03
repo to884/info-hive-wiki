@@ -18,6 +18,7 @@ import urllib.request
 from wiki_evolve import encode, finite, inside, require, tree
 from wiki_evolve_agent import prompt, schema
 from wiki_evolve_stream import append_trace
+from wiki_text import localize_argparse
 
 # ファーストパーティのグローバルな標準価格。2026-09-13 に確認した。古くなったら安全側に倒して失敗させる。
 # https://platform.claude.com/docs/en/about-claude/pricing
@@ -30,15 +31,15 @@ MAX_OUTPUT = 8192
 
 
 def reservation(model, output_tokens=MAX_OUTPUT):
-    require(model in PRICES and date.today() <= PRICE_EXPIRES, 'Unverified or expired API pricing; update the reviewed price table')
-    require(type(output_tokens) is int and 1 <= output_tokens <= MAX_OUTPUT, 'Invalid API output limit')
+    require(model in PRICES and date.today() <= PRICE_EXPIRES, 'API の料金が未確認か、確認の期限が切れている。確認済みの料金表を更新する')
+    require(type(output_tokens) is int and 1 <= output_tokens <= MAX_OUTPUT, 'API の出力の上限が無効である')
     inp, out = PRICES[model]
     return (Decimal(CONTEXT_LIMIT) * inp + Decimal(output_tokens) * out) / 1_000_000
 
 
 def post(body):
     key = os.environ.get('ANTHROPIC_API_KEY')
-    require(key, 'ANTHROPIC_API_KEY required for bounded API runner')
+    require(key, '上限つきの API のランナーには ANTHROPIC_API_KEY が必要である')
     request = urllib.request.Request('https://api.anthropic.com/v1/messages',
         data=json.dumps(body).encode(), headers={'x-api-key': key, 'anthropic-version': '2023-06-01',
                                                'content-type': 'application/json'}, method='POST')
@@ -64,7 +65,7 @@ def local_tool(name, args, request):
 
 def execute(request, send=post):
     maximum = request.get('max_usd')
-    require(finite(maximum, 'max_usd') > 0, 'Bounded API runner requires max_usd')
+    require(finite(maximum, 'max_usd') > 0, '上限つきの API のランナーには max_usd が必要である')
     maximum = Decimal(str(maximum))
     model = request['model']
     cap = reservation(model)
@@ -79,29 +80,29 @@ def execute(request, send=post):
     messages = [{'role': 'user', 'content': prompt(request)}]
     spent, observed, usage = Decimal(0), [], {'input_tokens': 0, 'output_tokens': 0}
     for turn in range(32):
-        require(spent + cap <= maximum, 'API budget cannot reserve the next request; no inference sent')
+        require(spent + cap <= maximum, 'API の予算では次のリクエストの分を予約できない。推論は送っていない')
         trace = request.get('trace_path')
         append_trace(trace, {'type': 'budget-reserved', 'turn': turn, 'ceiling_usd': str(cap), 'spent_usd': str(spent)})
         result = send({'model': model, 'max_tokens': MAX_OUTPUT, 'messages': messages, 'tools': tools,
                        'tool_choice': {'type': 'any'}, 'thinking': {'type': 'disabled'}, 'service_tier': 'standard_only',
                        'inference_geo': 'global'})
         measured = result['usage']
-        require(all(type(measured.get(k)) is int and measured[k] >= 0 for k in usage), 'API usage missing')
+        require(all(type(measured.get(k)) is int and measured[k] >= 0 for k in usage), 'API の使用量がない')
         require(measured['input_tokens'] <= CONTEXT_LIMIT and measured['output_tokens'] <= MAX_OUTPUT,
-                'Provider violated documented token limits; stop and audit reservations')
-        require(not measured.get('cache_creation_input_tokens'), 'Unexpected caching surcharge')
+                'プロバイダーが、文書にあるトークンの上限を守らなかった。止めて予約の計算を確かめる')
+        require(not measured.get('cache_creation_input_tokens'), '想定していないキャッシュの追加料金がある')
         amount = (Decimal(measured['input_tokens']) * PRICES[model][0]
                   + Decimal(measured['output_tokens']) * PRICES[model][1]) / 1_000_000
         spent += amount
         for k in usage:
             usage[k] += measured[k]
         append_trace(trace, {'type': 'budget-settled', 'turn': turn, 'cost_usd': str(amount), 'spent_usd': str(spent)})
-        require(result.get('stop_reason') == 'tool_use', 'API output truncated or tool result missing')
+        require(result.get('stop_reason') == 'tool_use', 'API の出力が途中で切れたか、ツールの呼び出しがない')
         blocks = result['content']
         calls = [b for b in blocks if b.get('type') == 'tool_use']
         finish = [b for b in calls if b['name'] == 'finish']
         if finish:
-            require(len(calls) == 1, 'Final result mixed with unfinished tool calls')
+            require(len(calls) == 1, '最終の結果に、終わっていないツールの呼び出しが混ざっている')
             output = finish[0]['input']
             return dict(output, usage=usage, cost=float(spent), events=observed, tool_calls=len(observed) // 2,
                         skill_sha256=request.get('skill_sha256'), actual_models=[result['model']], agent_version='messages-2023-06-01')
@@ -110,7 +111,7 @@ def execute(request, send=post):
         for call in calls:
             observed.append(call)
             append_trace(trace, call)
-            require(request['role'] == 'inference', 'Tools are disabled for this role')
+            require(request['role'] == 'inference', 'このロールではツールを使えない')
             try:
                 value = local_tool(call['name'], call['input'], request)
                 reply = {'type': 'tool_result', 'tool_use_id': call['id'], 'content': value}
@@ -119,9 +120,9 @@ def execute(request, send=post):
             observed.append(reply)
             append_trace(trace, reply)
             replies.append(reply)
-        require(replies, 'API returned no tool calls')
+        require(replies, 'API がツールの呼び出しを返さなかった')
         messages.append({'role': 'user', 'content': replies})
-    raise ValueError('API turn limit exhausted')
+    raise ValueError('API のターンの上限に達した')
 
 
 if __name__ == '__main__':
@@ -129,9 +130,9 @@ if __name__ == '__main__':
     for _stream in (sys.stdin, sys.stdout, sys.stderr):
         if hasattr(_stream, "reconfigure"):
             _stream.reconfigure(encoding="utf-8")
-    argparse.ArgumentParser(description=__doc__).parse_args()
+    localize_argparse(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)).parse_args()
     try:
         print(encode(execute(json.load(sys.stdin))), end='')
     except (ValueError, KeyError, TypeError, OSError) as exc:
-        print(f'Bounded API runner failed: {type(exc).__name__}: {exc}', file=sys.stderr)
+        print(f'上限つきの API のランナーが失敗した: {type(exc).__name__}: {exc}', file=sys.stderr)
         sys.exit(1)

@@ -22,7 +22,7 @@ frontmatter のキー、「、」で区切ったリストの値、全角の「�
     --hard-char-cap N   ページサイズのハード上限の文字数。空白を除いて数える（既定: 8000）
     --required-fm a,b   必須の frontmatter のフィールド（既定: type,title,tags,created,updated）
     --suggest-pages     多くのページに出てくるのに専用のページがない語を挙げる
-    --suggest-min N     --suggest-pages で挙げる最小の出現回数（既定: 5）
+    --suggest-min N     --suggest-pages で挙げる最小の出現ページ数（既定: 5）
     --json              テキストの代わりに JSON を出力する
 
 例:
@@ -49,6 +49,7 @@ from wiki_text import (  # noqa: E402
     has_fullwidth_link_syntax,
     ideographic_comma_values,
     is_iso_date,
+    localize_argparse,
     nfc,
     nfkc,
     posix_rel,
@@ -454,20 +455,20 @@ def render_text(findings: dict) -> str:
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("wiki", nargs="?", type=Path, default=Path("wiki"), help="Wiki directory (default: ./wiki).")
-    parser.add_argument("--soft-cap", type=int, default=400, help="Page-size soft cap (lines).")
-    parser.add_argument("--hard-cap", type=int, default=800, help="Page-size hard cap (lines).")
-    parser.add_argument("--soft-char-cap", type=int, default=4000, help="Page-size soft cap (characters, excluding whitespace).")
-    parser.add_argument("--hard-char-cap", type=int, default=8000, help="Page-size hard cap (characters, excluding whitespace).")
-    parser.add_argument("--required-fm", default="type,title,tags,created,updated", help="Required frontmatter fields, comma-separated.")
-    parser.add_argument("--suggest-pages", action="store_true", help="Surface page candidates.")
-    parser.add_argument("--suggest-min", type=int, default=5, help="Minimum page count for suggestions.")
-    parser.add_argument("--json", action="store_true", help="Emit JSON.")
+    parser = localize_argparse(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter))
+    parser.add_argument("wiki", nargs="?", type=Path, default=Path("wiki"), help="wiki のディレクトリ（既定: ./wiki）")
+    parser.add_argument("--soft-cap", type=int, default=400, help="ページサイズのソフト上限の行数（既定: 400）")
+    parser.add_argument("--hard-cap", type=int, default=800, help="ページサイズのハード上限の行数（既定: 800）")
+    parser.add_argument("--soft-char-cap", type=int, default=4000, help="ページサイズのソフト上限の文字数。空白を除いて数える（既定: 4000）")
+    parser.add_argument("--hard-char-cap", type=int, default=8000, help="ページサイズのハード上限の文字数。空白を除いて数える（既定: 8000）")
+    parser.add_argument("--required-fm", default="type,title,tags,created,updated", help="必須の frontmatter のフィールド。カンマで区切る（既定: type,title,tags,created,updated）")
+    parser.add_argument("--suggest-pages", action="store_true", help="多くのページに出てくるのに専用のページがない語を挙げる")
+    parser.add_argument("--suggest-min", type=int, default=5, help="--suggest-pages で挙げる最小の出現ページ数（既定: 5）")
+    parser.add_argument("--json", action="store_true", help="テキストの代わりに JSON を出力する。キーは英語のまま")
     args = parser.parse_args()
 
     if not args.wiki.exists():
-        print(f"Wiki directory not found: {args.wiki}", file=sys.stderr)
+        print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
         sys.exit(1)
 
     pages = collect_pages(args.wiki)

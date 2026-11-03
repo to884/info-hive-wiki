@@ -19,6 +19,7 @@ from pathlib import Path
 import yaml
 
 import wiki_search
+from wiki_text import localize_argparse  # wiki_search が同じディレクトリを sys.path に加える
 
 
 def prepare(wiki_root: Path, cache_path: Path | None = None) -> dict:
@@ -35,7 +36,7 @@ def prepare(wiki_root: Path, cache_path: Path | None = None) -> dict:
 
     if vector_count != len(locator_ids):
         raise RuntimeError(
-            f"semantic index is inconsistent: {len(locator_ids)} sections, {vector_count} vectors"
+            f"ベクトルの索引が食い違っている: セクションは {len(locator_ids)} 件、ベクトルは {vector_count} 件"
         )
 
     return {
@@ -56,19 +57,19 @@ def prepare(wiki_root: Path, cache_path: Path | None = None) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--wiki", type=Path, default=Path("wiki"), help="Wiki directory (default: ./wiki).")
+    parser = localize_argparse(argparse.ArgumentParser(description=__doc__))
+    parser.add_argument("--wiki", type=Path, default=Path("wiki"), help="wiki のディレクトリ（既定: ./wiki）")
     parser.add_argument(
         "--cache",
         nargs="?",
         const="AUTO",
         default=None,
-        help="Build the incremental parse cache too (default path: wiki/.wiki-cache/search-index.json).",
+        help="差分で更新するパースキャッシュも作る（値を省くと wiki/.wiki-cache/search-index.json）",
     )
     args = parser.parse_args()
 
     if not args.wiki.is_dir():
-        parser.error(f"wiki directory not found: {args.wiki}")
+        parser.error(f"wiki のディレクトリが見つからない: {args.wiki}")
     cache_path = None
     if args.cache:
         cache_path = args.wiki / ".wiki-cache" / "search-index.json" if args.cache == "AUTO" else Path(args.cache)

@@ -249,3 +249,65 @@ def is_iso_date(value) -> bool:
     except ValueError:
         return False
     return True
+
+
+# ---------------------------------------------------------------------------
+# argparse の見出し
+# ---------------------------------------------------------------------------
+
+def localize_argparse(parser):
+    """argparse が自動で出す英語（usage:、options: などの見出しと -h の説明）を日本語にする。
+
+    サブコマンドの parser にもたどってかける。parser を返すので、生成した直後にかけてもよい。
+    argparse 自身のエラーメッセージ（"the following arguments are required" など）は英語のまま残る。
+    """
+    import argparse
+
+    parser._optionals.title = "オプション"
+    parser._positionals.title = "引数"
+    for action in parser._actions:
+        if isinstance(action, argparse._HelpAction):
+            action.help = "このヘルプを表示して終わる"
+        elif isinstance(action, argparse._SubParsersAction):
+            for sub in action.choices.values():
+                localize_argparse(sub)
+    base = parser.formatter_class
+    if not getattr(base, "_info_hive_ja", False):
+        def add_usage(self, usage, actions, groups, prefix=None):
+            return base.add_usage(self, usage, actions, groups, "使い方: " if prefix is None else prefix)
+
+        members = {"add_usage": add_usage, "_info_hive_ja": True}
+        # argparse は文字数で折り返すので、全角の文では行が端末の幅を超え、空白のない日本語の
+        # 途中にある識別子が切れることもある。既定の折り返しを使う formatter だけ、表示幅で折り返す。
+        if base._split_lines is argparse.HelpFormatter._split_lines:
+            def _split_lines(self, text, width):
+                text = self._whitespace_matcher.sub(" ", text).strip()
+                return wrap_display(text, width)
+
+            members["_split_lines"] = _split_lines
+        parser.formatter_class = type("JapaneseHelpFormatter", (base,), members)
+    return parser
+
+
+# 行頭に置かない記号（禁則）。直前の行の末尾に付ける。
+_NO_LINE_START = set("、。，．・：；？！）」』】〕〉》”’ー々")
+_ASCII_WORD_RE = re.compile(r"[\x21-\x7e]+|\s+|.", re.DOTALL)
+
+
+def wrap_display(text: str, width: int) -> list[str]:
+    """表示幅で折り返す。英数字の語は途中で切らず、日本語は文字の間で折り返す。"""
+    lines: list[str] = []
+    line = ""
+    for token in _ASCII_WORD_RE.findall(text):
+        if token.isspace():
+            if line:
+                line += " "
+            continue
+        if line and display_width(line + token) > width and token[0] not in _NO_LINE_START:
+            lines.append(line.rstrip())
+            line = token
+        else:
+            line += token
+    if line.strip():
+        lines.append(line.rstrip())
+    return lines

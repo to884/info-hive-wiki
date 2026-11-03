@@ -35,6 +35,7 @@ sys.path.insert(0, str(HERE))
 import fake_backend  # noqa: E402
 import wiki_decide as wd  # noqa: E402
 import wiki_search as ws  # noqa: E402
+from wiki_text import localize_argparse  # noqa: E402
 
 GRID = [round(x * 0.05, 2) for x in range(1, 20)]
 TOP = 5
@@ -95,7 +96,7 @@ class Recorder:
         except wd.DecisionError as exc:
             self.errors[exc.code] = self.errors.get(exc.code, 0) + 1
             if sum(self.errors.values()) <= 3:
-                wd.note(f"{self.client.backend} failed ({exc.code}: {exc})")
+                wd.note(f"{self.client.backend} の呼び出しが失敗した。{exc.code}: {exc}")
             return None
         self.latencies.append(res["latency_ms"])
         self.models.add(res["model"])
@@ -238,7 +239,7 @@ def run_d2(rec: Recorder) -> dict:
     for case in fixture["cases"]:
         _, body = wd.strip_frontmatter((CORPUS / case["source"]).read_text(encoding="utf-8"))
         if wd.evidence_in_text(case["evidence"], body):
-            raise SystemExit(f"fixture {case['id']} quotes the source verbatim; D2 would not run")
+            raise SystemExit(f"フィクスチャ {case['id']} はソースをそのまま引用している。これでは D2 が動かない")
         sentences = wd.split_sentences(body, t["max_sentences"], t["max_sentence_chars"])
         keys = [f"{t['sentence_key_prefix']}{i + 1}" for i in range(len(sentences))] + [t["none_key"]]
         items.append({"id": case["id"], "gold": case["label"] == "unsupported", "keys": keys})
@@ -294,27 +295,29 @@ def make_client(args) -> wd.DecisionClient:
         return wd.DecisionClient("fake", "fake://", fake_backend.FAKE_MODEL, transport=fake_backend.answer)
     client = wd.client_from_config(args.backend, args.url, args.model, args.timeout)
     if client is None:
-        raise SystemExit("backend is off")
+        raise SystemExit("バックエンドが off になっている")
     return client
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--backend", required=True, choices=("fake", "local", "typesafe", "openrouter", "liquid"))
-    parser.add_argument("--model")
-    parser.add_argument("--url")
-    parser.add_argument("--timeout", type=float, default=30.0)
+    parser.add_argument("--backend", required=True, choices=("fake", "local", "typesafe", "openrouter", "liquid"),
+                        help="判定のバックエンド。fake はオフラインのヒューリスティック")
+    parser.add_argument("--model", help="モデル名（既定: バックエンドの既定）")
+    parser.add_argument("--url", help="バックエンドのベース URL（既定: バックエンドの既定）")
+    parser.add_argument("--timeout", type=float, default=30.0, help="リクエストのタイムアウトの秒数（既定: 30）")
     parser.add_argument("--search", choices=("lexical", "hybrid"), default="lexical",
-                        help="Retriever for D1 pools (hybrid needs uv and the embedding cache).")
-    parser.add_argument("--checks", default="D1,D2,D3,D5")
-    parser.add_argument("--meta", action="append", default=[], help="KEY=VALUE recorded in the results.")
-    parser.add_argument("--out", type=Path)
+                        help="D1 の候補を集める検索の方式。hybrid には uv と埋め込みのキャッシュが必要（既定: lexical）")
+    parser.add_argument("--checks", default="D1,D2,D3,D5", help="実行するチェック。カンマで区切る（既定: D1,D2,D3,D5）")
+    parser.add_argument("--meta", action="append", default=[], help="結果に記録する KEY=VALUE。何度でも指定できる")
+    parser.add_argument("--out", type=Path, help="結果の JSON を書き出すファイル")
+    localize_argparse(parser)
     args = parser.parse_args(argv)
 
     try:
         client = make_client(args)
     except wd.DecisionError as exc:
-        print(f"backend unavailable: {exc}", file=sys.stderr)
+        print(f"バックエンドを使えない: {exc}", file=sys.stderr)
         return 1
     rec = Recorder(client)
     checks = {c.strip().upper() for c in args.checks.split(",") if c.strip()}

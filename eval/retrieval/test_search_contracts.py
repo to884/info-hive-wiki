@@ -167,7 +167,7 @@ class EmptyTokenQueryTest(unittest.TestCase):
     def test_text_output_reports_empty_query(self):
         proc = self.run_search()
         self.assertEqual(proc.stdout, b"")
-        self.assertIn("Empty query.", proc.stderr.decode("utf-8", "replace"))
+        self.assertIn("クエリに検索できる語がない。", proc.stderr.decode("utf-8", "replace"))
 
 
 if __name__ == "__main__":

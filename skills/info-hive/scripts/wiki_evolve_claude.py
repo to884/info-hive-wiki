@@ -28,7 +28,7 @@ def parse_events(lines):
     events = [json.loads(line) for line in lines.splitlines() if line.strip()]
     results = [e for e in events if e.get('type') == 'result']
     if len(results) != 1 or results[0].get('is_error') or results[0].get('subtype') != 'success':
-        raise ValueError('Claude did not complete a structured answer')
+        raise ValueError('Claude が構造化された回答を返さなかった')
     result = results[0]
     output = result['structured_output']
     # 出力された tool-use の ID はそれぞれ1回だけ数える。JSON の出力フォーマッターは除く。
@@ -61,5 +61,5 @@ if __name__ == '__main__':
     try:
         main()
     except (ValueError, KeyError, OSError, subprocess.SubprocessError) as exc:
-        print(f'Claude runner failed: {type(exc).__name__}', file=sys.stderr)
+        print(f'Claude のランナーが失敗した: {type(exc).__name__}', file=sys.stderr)
         sys.exit(1)

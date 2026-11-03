@@ -24,7 +24,7 @@ wiki_decide.py: LLM Wiki 用の任意の型付き判定チェック（標準ラ�
     contradictions [--wiki DIR]    矛盾するセクションの組を見つける（D3）。
     check                          バックエンドへの接続を確かめる。
 
-バックエンドでエラーが起きると、チェックは処理を通す（fail open）。出力にはチェックしていない
+バックエンドでエラーが起きると、チェックは処理を通す（fail-open）。出力にはチェックしていない
 結果をそのまま残し、"failed_open": true を設定し、stderr に注記を出す。
 
 例:
@@ -55,7 +55,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 # 同じディレクトリの wiki_text を import する。スクリプトとして実行したときも、テストから
 # import したときも見つかるようにする。
 sys.path.insert(0, str(SCRIPT_DIR))
-from wiki_text import quote_in_text  # noqa: E402
+from wiki_text import localize_argparse, quote_in_text  # noqa: E402
 QUESTIONS_PATH = SCRIPT_DIR.parent / "assets" / "decision-questions.json"
 
 BACKENDS = {
@@ -116,7 +116,7 @@ class DecisionClient:
     def ask(self, request: dict) -> dict:
         """{"answers", "model", "latency_ms"} を返す。DecisionError を送出する。"""
         if not isinstance(request, dict) or "state" not in request or not isinstance(request.get("questions"), dict):
-            raise DecisionError("bad_request", "request needs state and questions")
+            raise DecisionError("bad_request", "リクエストには state と questions が必要である")
         started = time.monotonic()
         if self.transport is not None:
             raw = self.transport({"model": self.model, **request})
@@ -124,7 +124,7 @@ class DecisionClient:
             raw = self._post(request)
         payload = raw.get("result") if isinstance(raw, dict) and not isinstance(raw.get("answers"), dict) and isinstance(raw.get("result"), dict) else raw
         if not isinstance(payload, dict) or not isinstance(payload.get("answers"), dict):
-            raise DecisionError("invalid_answer", "backend response has no answers object")
+            raise DecisionError("invalid_answer", "バックエンドの応答に answers のオブジェクトがない")
         return {
             "answers": payload["answers"],
             "model": payload.get("model") if isinstance(payload.get("model"), str) else self.model,
@@ -149,20 +149,20 @@ class DecisionClient:
             raise DecisionError(code, f"HTTP {exc.code}: {detail}", exc.code) from None
         except http.client.HTTPException as exc:
             # IncompleteRead、BadStatusLine、RemoteDisconnected などのプロトコルのエラー。
-            raise DecisionError("unavailable", f"bad response from {self.endpoint}: {exc!r}") from None
+            raise DecisionError("unavailable", f"{self.endpoint} の応答が壊れている: {exc!r}") from None
         except (TimeoutError, OSError) as exc:
             reason = getattr(exc, "reason", exc)
             if isinstance(reason, TimeoutError) or "timed out" in str(reason).lower():
-                raise DecisionError("timeout", f"no answer after {self.timeout} s") from None
-            raise DecisionError("unavailable", f"cannot reach {self.endpoint}: {reason}") from None
+                raise DecisionError("timeout", f"{self.timeout} 秒待っても応答がない") from None
+            raise DecisionError("unavailable", f"{self.endpoint} に接続できない: {reason}") from None
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            raise DecisionError("invalid_answer", "backend response is not JSON") from None
+            raise DecisionError("invalid_answer", "バックエンドの応答が JSON でない") from None
 
 
 def note(message: str) -> None:
-    print(f"decisions: {message}", file=sys.stderr)
+    print(f"判定レイヤー: {message}", file=sys.stderr)
 
 
 def client_from_config(
@@ -177,13 +177,13 @@ def client_from_config(
     if name in ("", "off", "none", "0", "false"):
         return None
     if name not in BACKENDS:
-        raise DecisionError("bad_request", f"unknown backend {name!r}; use one of {', '.join(BACKEND_CHOICES)}")
+        raise DecisionError("bad_request", f"未知のバックエンド {name!r}。{', '.join(BACKEND_CHOICES)} のいずれかを使う")
     spec = BACKENDS[name]
     url = url or os.environ.get("INFO_HIVE_DECISIONS_URL") or spec["url"]
     model = model or os.environ.get("INFO_HIVE_DECISIONS_MODEL") or spec["model"]
     key = os.environ.get(spec["key"]) if spec["key"] else None
     if spec["key"] and not key:
-        raise DecisionError("unavailable", f"set {spec['key']} to use the {name} backend")
+        raise DecisionError("unavailable", f"{name} のバックエンドを使うには {spec['key']} を設定する")
     return DecisionClient(name, url, model, key, timeout or DEFAULT_TIMEOUT)
 
 
@@ -196,10 +196,10 @@ def read_choice(answers: dict, name: str, keys: list[str]) -> dict:
     正規化し直す。DecisionError("invalid_answer") を送出する。"""
     answer = answers.get(name) if isinstance(answers, dict) else None
     if not isinstance(answer, dict):
-        raise DecisionError("invalid_answer", f"no answer for {name}")
+        raise DecisionError("invalid_answer", f"{name} の回答がない")
     choice = answer.get("choice")
     if not isinstance(choice, str) or choice not in keys:
-        raise DecisionError("invalid_answer", f"answer for {name} has an unknown choice {choice!r}")
+        raise DecisionError("invalid_answer", f"{name} の回答の選択肢 {choice!r} は未知である")
 
     def number(value) -> float | None:
         if not isinstance(value, (int, float)) or isinstance(value, bool):
@@ -214,21 +214,21 @@ def read_choice(answers: dict, name: str, keys: list[str]) -> dict:
                 continue
             p = number(raw_probs[k])
             if p is None or not math.isfinite(p) or p < 0:
-                raise DecisionError("invalid_answer", f"answer for {name} has a bad probability for {k}: {raw_probs[k]!r}")
+                raise DecisionError("invalid_answer", f"{name} の回答の {k} の確率が無効である: {raw_probs[k]!r}")
             probs[k] = p
         if probs:
             total = sum(probs.values())
             if not math.isfinite(total) or total <= 0:
-                raise DecisionError("invalid_answer", f"answer for {name} has probabilities that sum to {total}")
+                raise DecisionError("invalid_answer", f"{name} の回答の確率の合計が {total} である")
             probs = {k: v / total for k, v in probs.items()}
     confidence = answer.get("confidence")
     if confidence is not None:
         confidence = number(confidence)
         if confidence is None or not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
-            raise DecisionError("invalid_answer", f"answer for {name} has a confidence outside 0 to 1: {answer.get('confidence')!r}")
+            raise DecisionError("invalid_answer", f"{name} の回答の確信度が 0 から 1 の範囲にない: {answer.get('confidence')!r}")
     if not probs:
         if confidence is None:
-            raise DecisionError("invalid_answer", f"answer for {name} has no probabilities")
+            raise DecisionError("invalid_answer", f"{name} の回答に確率がない")
         probs[choice] = confidence
         if len(keys) == 2:
             probs[next(k for k in keys if k != choice)] = 1 - confidence
@@ -300,10 +300,10 @@ def gate_pool(
     started = time.monotonic()
     try:
         if client is None:
-            raise DecisionError("unavailable", "no backend configured (set INFO_HIVE_DECISIONS)")
+            raise DecisionError("unavailable", "バックエンドが設定されていない。INFO_HIVE_DECISIONS で選ぶ")
         scores = score_relevance(client, query, rows, texts)
     except DecisionError as exc:
-        note(f"relevance gate failed open ({exc.code}: {exc})")
+        note(f"関連度のゲートが失敗したので、処理を通す（fail-open）。{exc.code}: {exc}")
         kept = list(range(min(top, len(rows))))
         return kept, {}, block(client, threshold, started, pool=len(rows), kept=len(kept), dropped=0,
                                failed_open=True, error=exc.code)
@@ -449,11 +449,11 @@ def screen_text(client: DecisionClient | None, path: str, text: str, threshold: 
     started = time.monotonic()
     try:
         if client is None:
-            raise DecisionError("unavailable", "no backend configured (set INFO_HIVE_DECISIONS)")
+            raise DecisionError("unavailable", "バックエンドが設定されていない。INFO_HIVE_DECISIONS で選ぶ")
         res = client.ask(screen_request(path, text))
         score = positive_probability(res["answers"], "orders_agent")
     except DecisionError as exc:
-        note(f"screen failed open ({exc.code}: {exc})")
+        note(f"スクリーニングが失敗したので、処理を通す（fail-open）。{exc.code}: {exc}")
         return {"path": path, "score": None, "flagged": False,
                 **block(client, threshold, started, failed_open=True, error=exc.code)}
     return {"path": path, "score": round(score, 4), "flagged": score >= threshold,
@@ -517,11 +517,11 @@ def cmd_shortlist(args, client: DecisionClient | None) -> int:
         candidates.append({"rel_path": row["rel_path"], "title": row["title"], "search_rank": rank, "text": page_body})
     try:
         if client is None:
-            raise DecisionError("unavailable", "no backend configured (set INFO_HIVE_DECISIONS)")
+            raise DecisionError("unavailable", "バックエンドが設定されていない。INFO_HIVE_DECISIONS で選ぶ")
         results = ask_many(client, [changes_request(title, body, c["title"], c["text"]) for c in candidates])
         scores = [positive_probability(r["answers"], "changes") for r in results]
     except DecisionError as exc:
-        note(f"shortlist failed open ({exc.code}: {exc}); pages keep search order")
+        note(f"変更されるページの順位付けが失敗したので、処理を通す（fail-open）。ページは検索の順のまま。{exc.code}: {exc}")
         out = [{k: v for k, v in c.items() if k != "text"} | {"changes": None} for c in candidates]
         print(json.dumps({"source": str(source_path), "candidates": out,
                           "decision": block(client, threshold, started, failed_open=True, error=exc.code)}, indent=2, ensure_ascii=False))
@@ -582,11 +582,11 @@ def cmd_contradictions(args, client: DecisionClient | None) -> int:
     started = time.monotonic()
     try:
         if client is None:
-            raise DecisionError("unavailable", "no backend configured (set INFO_HIVE_DECISIONS)")
+            raise DecisionError("unavailable", "バックエンドが設定されていない。INFO_HIVE_DECISIONS で選ぶ")
         results = ask_many(client, [relation_request(e, a, b) for e, a, b in pairs])
         answers = [read_choice(r["answers"], t["question"], list(t["criteria"])) for r in results]
     except DecisionError as exc:
-        note(f"contradiction screen failed open ({exc.code}: {exc}); no pairs checked")
+        note(f"矛盾のチェックが失敗したので、処理を通す（fail-open）。どの組もチェックしていない。{exc.code}: {exc}")
         print(json.dumps({"pairs": len(pairs), "flagged": [],
                           "decision": block(client, threshold, started, failed_open=True, error=exc.code)}, indent=2, ensure_ascii=False))
         return 0
@@ -619,15 +619,15 @@ def cmd_ask(args, client: DecisionClient | None) -> int:
     try:
         request = json.loads(raw)
     except json.JSONDecodeError as exc:
-        note(f"request is not JSON ({exc})")
+        note(f"リクエストが JSON でない（{exc}）")
         return 2
     if client is None:
-        note("no backend configured (set INFO_HIVE_DECISIONS or --backend)")
+        note("バックエンドが設定されていない。INFO_HIVE_DECISIONS か --backend で選ぶ")
         return 1
     try:
         res = client.ask(request)
     except DecisionError as exc:
-        note(f"{client.backend} failed ({exc.code}: {exc})")
+        note(f"{client.backend} の呼び出しが失敗した。{exc.code}: {exc}")
         return 1
     print(json.dumps({**res, "backend": client.backend}, indent=2, ensure_ascii=False))
     return 0
@@ -652,33 +652,33 @@ def cmd_check(args, client: DecisionClient | None) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--backend", choices=BACKEND_CHOICES, help="Decision backend (default: INFO_HIVE_DECISIONS or off).")
-    parser.add_argument("--model", help="Model name (default: INFO_HIVE_DECISIONS_MODEL or the backend default).")
-    parser.add_argument("--url", help="Backend base URL (default: INFO_HIVE_DECISIONS_URL or the backend default).")
-    parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="Request timeout in seconds (default: 8).")
+    parser.add_argument("--backend", choices=BACKEND_CHOICES, help="判定のバックエンド（既定: INFO_HIVE_DECISIONS の値。未設定なら off）")
+    parser.add_argument("--model", help="モデル名（既定: INFO_HIVE_DECISIONS_MODEL の値か、バックエンドの既定）")
+    parser.add_argument("--url", help="バックエンドのベース URL（既定: INFO_HIVE_DECISIONS_URL の値か、バックエンドの既定）")
+    parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="リクエストのタイムアウトの秒数（既定: 8）")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("ask", help="Send a raw {state, questions} request.")
-    p.add_argument("file", nargs="?", help="Request JSON file (default: stdin).")
+    p = sub.add_parser("ask", help="生の {state, questions} のリクエストを送る")
+    p.add_argument("file", nargs="?", help="リクエストの JSON ファイル（既定: 標準入力）")
 
-    p = sub.add_parser("screen", help="Check if text gives orders to an AI system (D5).")
-    p.add_argument("file")
-    p.add_argument("--threshold", type=float, help="Flag at or above this probability (default: 0.7).")
+    p = sub.add_parser("screen", help="テキストが AI システムに指示を出しているかを調べる（D5）")
+    p.add_argument("file", help="調べるファイル")
+    p.add_argument("--threshold", type=float, help="この確率以上ならフラグを立てる（既定: 0.7）")
 
-    p = sub.add_parser("shortlist", help="Rank wiki pages that a new source changes (D4).")
-    p.add_argument("source")
-    p.add_argument("--wiki", type=Path, default=Path("wiki"))
-    p.add_argument("--top", type=int, default=QUESTIONS["changes"]["pool"], help="Search candidates (default: 30).")
-    p.add_argument("--threshold", type=float, help="Shortlist at or above this probability (default: 0.5).")
-    p.add_argument("--no-embed", action="store_true", help="Use lexical search for candidates.")
+    p = sub.add_parser("shortlist", help="新しいソースが変更する wiki のページを順位付けする（D4）")
+    p.add_argument("source", help="新しいソースのファイル")
+    p.add_argument("--wiki", type=Path, default=Path("wiki"), help="wiki のディレクトリ（既定: ./wiki）")
+    p.add_argument("--top", type=int, default=QUESTIONS["changes"]["pool"], help="検索で集める候補の数（既定: 30）")
+    p.add_argument("--threshold", type=float, help="この確率以上のページを候補に残す（既定: 0.5）")
+    p.add_argument("--no-embed", action="store_true", help="候補を語彙の検索だけで集める")
 
-    p = sub.add_parser("contradictions", help="Find section pairs that contradict (D3).")
-    p.add_argument("--wiki", type=Path, default=Path("wiki"))
-    p.add_argument("--max-pairs", type=int, default=40, help="Most pairs to check (default: 40).")
-    p.add_argument("--threshold", type=float, help="Report at or above this probability (default: 0.5).")
+    p = sub.add_parser("contradictions", help="矛盾するセクションの組を見つける（D3）")
+    p.add_argument("--wiki", type=Path, default=Path("wiki"), help="wiki のディレクトリ（既定: ./wiki）")
+    p.add_argument("--max-pairs", type=int, default=40, help="チェックする組の最大数（既定: 40）")
+    p.add_argument("--threshold", type=float, help="この確率以上の組を報告する（既定: 0.5）")
 
-    sub.add_parser("check", help="Test the backend connection.")
-    return parser
+    sub.add_parser("check", help="バックエンドへの接続を確かめる")
+    return localize_argparse(parser)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -691,7 +691,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         client = None
     if args.command in ("shortlist", "contradictions") and not args.wiki.exists():
-        print(f"Wiki directory not found: {args.wiki}", file=sys.stderr)
+        print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
         return 1
     handlers = {
         "ask": cmd_ask,

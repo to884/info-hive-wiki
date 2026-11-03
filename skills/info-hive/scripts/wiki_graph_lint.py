@@ -46,8 +46,8 @@ try:
     import yaml
 except ImportError:
     print(
-        "wiki_graph_lint.py requires PyYAML. "
-        "Run it with `uv run --script wiki_graph_lint.py ...`.",
+        "wiki_graph_lint.py には PyYAML が必要である。"
+        "`uv run --script wiki_graph_lint.py ...` で実行する。",
         file=sys.stderr,
     )
     sys.exit(2)
@@ -57,7 +57,7 @@ except ImportError:
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 import wiki_graph_extract as _extract  # noqa: E402
-from wiki_text import nfc  # noqa: E402
+from wiki_text import localize_argparse, nfc  # noqa: E402
 
 
 ALLOWED_CONFIDENCE = {"high", "medium", "low"}
@@ -369,9 +369,9 @@ def decide_evidence(pages: list[dict], ontology: dict, threshold: float | None) 
                 })
     failed_open = bool(items) and (client is None or len(errors) == len(items))
     if errors:
-        wd.note(f"evidence check failed for {len(errors)} of {len(items)} edges ({errors[0]}); those edges are not flagged")
+        wd.note(f"証拠のチェックが {len(items)} 本のエッジのうち {len(errors)} 本で失敗した（{errors[0]}）。失敗したエッジは報告しない")
     elif items and client is None:
-        wd.note("evidence check skipped: no backend configured (set INFO_HIVE_DECISIONS)")
+        wd.note("証拠のチェックを飛ばした。バックエンドが設定されていない（INFO_HIVE_DECISIONS で選ぶ）")
     block = {
         "backend": client.backend if client else "off",
         "model": client.model if client else None,
@@ -389,47 +389,47 @@ def render_text(findings: dict) -> str:
     out = []
     s = findings["summary"]
     out.append("=" * 60)
-    out.append("Wiki Graph Lint Report")
+    out.append("wiki のグラフの lint の報告")
     out.append("=" * 60)
-    out.append(f"Pages scanned: {s['pages_scanned']}    Nodes: {s['nodes']}")
+    out.append(f"調べたページ数: {s['pages_scanned']}    ノード数: {s['nodes']}")
     out.append("")
 
     sections = [
-        ("duplicate_node_ids", "Duplicate node ids",
+        ("duplicate_node_ids", "重複したノード ID",
          lambda f: f"  - {f['node_id']}: {', '.join(f['paths'])}"
-                   + ("  (same file name after Unicode NFC normalization)"
+                   + ("  （Unicode の NFC 正規化をすると同じファイル名になる）"
                       if f.get("unicode_normalization") else "")),
-        ("unknown_predicates", "Unknown predicates (not in ontology)",
+        ("unknown_predicates", "未知の述語（オントロジーにない）",
          lambda f: f"  - {f['page']}#rel[{f['index']}]  predicate={f['predicate']!r}"),
-        ("broken_object_refs", "Broken object references",
+        ("broken_object_refs", "目的語の参照を解決できない",
          lambda f: f"  - {f['page']}#rel[{f['index']}]  {f['predicate']} → {f['object']!r}"),
-        ("subject_type_mismatch", "Subject type does not match ontology",
-         lambda f: f"  - {f['page']}#rel[{f['index']}]  {f['predicate']}: subject={f['subject_type']} (allowed: {f['allowed']})"),
-        ("object_type_mismatch", "Object type does not match ontology",
-         lambda f: f"  - {f['page']}#rel[{f['index']}]  {f['predicate']}: object={f['object_type']} (allowed: {f['allowed']})"),
-        ("missing_evidence", "Missing evidence on typed edge",
+        ("subject_type_mismatch", "主語の型がオントロジーと一致しない",
+         lambda f: f"  - {f['page']}#rel[{f['index']}]  {f['predicate']}: 主語の型={f['subject_type']}（許可: {f['allowed']}）"),
+        ("object_type_mismatch", "目的語の型がオントロジーと一致しない",
+         lambda f: f"  - {f['page']}#rel[{f['index']}]  {f['predicate']}: 目的語の型={f['object_type']}（許可: {f['allowed']}）"),
+        ("missing_evidence", "型付きのエッジに evidence がない",
          lambda f: f"  - {f['page']}#rel[{f['index']}]  {f['predicate']} → {f['object']}"),
-        ("missing_source_field", "Missing source on typed edge",
+        ("missing_source_field", "型付きのエッジに source がない",
          lambda f: f"  - {f['page']}#rel[{f['index']}]  {f['predicate']} → {f['object']}"),
-        ("broken_source_refs", "source: does not match any source page",
+        ("broken_source_refs", "source: がどのソースページにも一致しない",
          lambda f: f"  - {f['page']}#rel[{f['index']}]  source={f['source']!r}"),
-        ("invalid_confidence", "Invalid confidence value",
+        ("invalid_confidence", "confidence の値が無効",
          lambda f: f"  - {f['page']}#rel[{f['index']}]  confidence={f['confidence']!r}"),
-        ("invalid_status", "Invalid status value",
+        ("invalid_status", "status の値が無効",
          lambda f: f"  - {f['page']}#rel[{f['index']}]  status={f['status']!r}"),
-        ("duplicate_canonical", "Duplicate canonical nodes",
+        ("duplicate_canonical", "重複した正本のノード",
          lambda f: f"  - {f['node_id']}: {', '.join(f['paths'])}"),
-        ("alias_collisions", "Alias used by multiple canonical nodes",
+        ("alias_collisions", "複数の正本のノードが同じ別名を使っている",
          lambda f: f"  - {f['alias']!r}: {', '.join(f['owners'])}"),
-        ("broken_contradicts", "Broken contradicts reference",
+        ("broken_contradicts", "contradicts の参照を解決できない",
          lambda f: f"  - {f['page']}#rel[{f['index']}]  contradicts={f.get('contradicts')}"),
-        ("broken_supersedes", "Broken supersedes reference",
+        ("broken_supersedes", "supersedes の参照を解決できない",
          lambda f: f"  - {f['page']}#rel[{f['index']}]  supersedes={f.get('supersedes')}"),
-        ("orphan_typed_nodes", "Orphan typed nodes (no inbound or outbound typed edges)",
-         lambda f: f"  - {f['node_id']}  ({f['path']})"),
-        ("evidence_unsupported", "Evidence not supported by the source page (decision model)",
+        ("orphan_typed_nodes", "孤立した型付きノード（型付きのエッジが入ってくることも出ていくこともない）",
+         lambda f: f"  - {f['node_id']}  （{f['path']}）"),
+        ("evidence_unsupported", "ソースページが証拠を裏づけていない（判定モデル）",
          lambda f: f"  - {f['page']}#rel[{f['index']}]  {f['predicate']} → {f['object']}  "
-                   f"(source={f['source']}, choice={f['choice']}, confidence={f['confidence']})"),
+                   f"（source={f['source']}、choice={f['choice']}、confidence={f['confidence']}）"),
     ]
 
     healthy = True
@@ -438,21 +438,22 @@ def render_text(findings: dict) -> str:
         if not items:
             continue
         healthy = False
-        out.append(f"{label} ({len(items)}):")
+        out.append(f"{label}（{len(items)} 件）:")
         for item in items[:50]:
             out.append(formatter(item))
         if len(items) > 50:
-            out.append(f"  ... and {len(items) - 50} more")
+            out.append(f"  ……ほか {len(items) - 50} 件")
         out.append("")
 
     if "evidence_check" in findings:
         check = findings["evidence_check"]
-        state = "failed open" if check["failed_open"] else f"checked {check['checked']} of {check['candidates']} edges"
-        out.append(f"Evidence check ({check['backend']}): {state}.")
+        state = ("実行できなかったので、処理を通した（fail-open）" if check["failed_open"]
+                 else f"{check['candidates']} 本のエッジのうち {check['checked']} 本をチェックした")
+        out.append(f"証拠のチェック（{check['backend']}）: {state}。")
         out.append("")
 
     if healthy:
-        out.append("No graph issues found.")
+        out.append("グラフの問題は見つからなかった。")
     return "\n".join(out)
 
 
@@ -462,35 +463,37 @@ def decision_default_threshold(check: str) -> str:
     try:
         return str(json.loads(path.read_text(encoding="utf-8"))["checks"][check]["default_threshold"])
     except (OSError, ValueError, KeyError):
-        return f"see {path.name}"
+        return f"{path.name} を参照"
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("wiki", nargs="?", type=Path, default=Path("wiki"))
-    parser.add_argument("--ontology", type=Path, help="Ontology file (default: <wiki>/graph/ontology.yaml)")
-    parser.add_argument("--json", action="store_true")
+    parser.add_argument("wiki", nargs="?", type=Path, default=Path("wiki"), help="wiki のディレクトリ（既定: ./wiki）")
+    parser.add_argument("--ontology", type=Path, help="オントロジーのファイル（既定: <wiki>/graph/ontology.yaml）")
+    parser.add_argument("--json", action="store_true", help="テキストの代わりに JSON を出力する。キーは英語のまま")
     parser.add_argument("--decide", action="store_true",
-                        help="Check unquoted edge evidence with the decision model. Needs INFO_HIVE_DECISIONS.")
+                        help="ソースページからの引用になっていないエッジの証拠を、判定モデルでチェックする。"
+                             "使うには INFO_HIVE_DECISIONS の設定が必要")
     parser.add_argument("--decide-threshold", type=float, default=None,
-                        help="Confidence needed to accept a supporting sentence "
-                             f"(default: {decision_default_threshold('evidence')}).")
+                        help="裏づけの文として認めるのに必要な確信度"
+                             f"（既定: {decision_default_threshold('evidence')}）")
+    localize_argparse(parser)
     args = parser.parse_args()
 
     if not args.wiki.exists():
-        print(f"Wiki directory not found: {args.wiki}", file=sys.stderr)
+        print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
         sys.exit(1)
 
     ontology_path = args.ontology or (args.wiki / "graph" / "ontology.yaml")
     if not ontology_path.exists():
-        print(f"Ontology not found: {ontology_path}", file=sys.stderr)
-        print("Did you forget to seed wiki/graph/ontology.yaml? See assets/ontology.yaml.template.",
+        print(f"オントロジーが見つからない: {ontology_path}", file=sys.stderr)
+        print("wiki/graph/ontology.yaml を置いたかを確かめる。ひな形は assets/ontology.yaml.template にある。",
               file=sys.stderr)
         sys.exit(1)
     try:
         ontology = yaml.safe_load(ontology_path.read_text(encoding="utf-8-sig")) or {}
     except yaml.YAMLError as e:
-        print(f"Ontology parse error: {e}", file=sys.stderr)
+        print(f"オントロジーを読めない: {e}", file=sys.stderr)
         sys.exit(2)
 
     pages = collect_pages(args.wiki)

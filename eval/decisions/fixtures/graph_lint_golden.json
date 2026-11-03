@@ -1,11 +1,11 @@
 {
- "note": "Captured from wiki_graph_lint.py before the --decide flag existed. Output without --decide must stay byte-identical.",
+ "note": "wiki_graph_lint.py の --decide を付けない出力を記録したもの。--decide を付けなければ、出力はバイト単位で変わってはならない。P4 で表示を日本語にしたときに取り直した。",
  "cases": [
   {
    "argv": [
     "eval/decisions/fixtures/graph_wiki"
    ],
-   "stdout": "============================================================\nWiki Graph Lint Report\n============================================================\nPages scanned: 4    Nodes: 4\n\nNo graph issues found.\n",
+   "stdout": "============================================================\nwiki のグラフの lint の報告\n============================================================\n調べたページ数: 4    ノード数: 4\n\nグラフの問題は見つからなかった。\n",
    "stderr": "",
    "returncode": 0
   },

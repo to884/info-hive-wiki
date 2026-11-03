@@ -79,10 +79,10 @@ class TemplateTests(unittest.TestCase):
 
     def test_threshold_help_matches_question_file(self):
         out = run("wiki_search.py", "--help").stdout
-        self.assertIn(f"(default: {wd.QUESTIONS['relevance']['default_threshold']})", " ".join(out.split()))
+        self.assertIn(f"既定: {wd.QUESTIONS['relevance']['default_threshold']}", " ".join(out.split()))
         if HAS_YAML:
             out = run("wiki_graph_lint.py", "--help").stdout
-            self.assertIn(f"(default: {wd.QUESTIONS['evidence']['default_threshold']})", " ".join(out.split()))
+            self.assertIn(f"既定: {wd.QUESTIONS['evidence']['default_threshold']}", " ".join(out.split()))
 
 
 class ReaderTests(unittest.TestCase):
@@ -341,7 +341,7 @@ class SearchRegressionTests(FakeServerCase):
         out, err = self.search("--decide")
         self.assertTrue(out["decision"]["failed_open"])
         self.assertEqual(out["results"], plain["results"])
-        self.assertIn("failed open", err)
+        self.assertIn("fail-open", err)
 
     def test_decide_page_granularity(self):
         out, _ = self.search("--granularity", "page", "--decide", "--decide-threshold", "0.99", env=self.local_env())
@@ -349,7 +349,7 @@ class SearchRegressionTests(FakeServerCase):
         self.assertFalse(out["decision"]["failed_open"])
 
 
-@unittest.skipUnless(HAS_YAML, "wiki_graph_lint.py needs PyYAML")
+@unittest.skipUnless(HAS_YAML, "wiki_graph_lint.py には PyYAML が必要")
 class GraphLintTests(FakeServerCase):
     wiki = str(FIXTURES / "graph_wiki")
 
@@ -404,7 +404,7 @@ class CliTests(FakeServerCase):
         self.assertEqual(flagged["threshold"], 0.7)
         self.assertFalse(clean["flagged"])
         self.assertTrue(json.loads(off.stdout)["failed_open"])
-        self.assertIn("failed open", off.stderr)
+        self.assertIn("fail-open", off.stderr)
 
     def test_contradictions(self):
         proc = run("wiki_decide.py", "contradictions", "--wiki", str(CORPUS), "--max-pairs", "10", env=self.local_env())

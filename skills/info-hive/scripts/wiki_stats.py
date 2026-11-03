@@ -20,7 +20,9 @@ from pathlib import Path
 # スクリプトとして実行したときも、テストから importlib で読み込んだときも、
 # 同じディレクトリの wiki_text を import できるようにする。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from wiki_text import canonical_meta, char_count, ljust_display, nfc, posix_rel, rjust_display  # noqa: E402
+from wiki_text import (  # noqa: E402
+    canonical_meta, char_count, ljust_display, localize_argparse, nfc, posix_rel, rjust_display,
+)
 
 
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
@@ -83,7 +85,7 @@ def size_warning(lines: int, chars: int) -> str:
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = localize_argparse(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter))
     parser.add_argument("wiki", nargs="?", type=Path, default=Path("wiki"), help="wiki のディレクトリ（既定: ./wiki）")
     args = parser.parse_args()
 

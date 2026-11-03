@@ -19,62 +19,62 @@ from types import SimpleNamespace
 
 from wiki_evolve import (atomic, copy_tree, digest, encode, event, finite, inside, locked,
                          propose, read_json, require, run_runner, slug, tree, capture)
-from wiki_text import quote_in_text
+from wiki_text import localize_argparse, quote_in_text
 
 
 def contract(suite, corpus):
-    require(suite.get('version') == 2, 'Loop requires suite version 2')
+    require(suite.get('version') == 2, '評価ループにはスイートの version 2 が必要である')
     tasks = suite.get('tasks')
-    require(isinstance(tasks, list) and tasks, 'Tasks required')
+    require(isinstance(tasks, list) and tasks, '課題がない')
     ids, questions, splits = set(), set(), set()
     for task in tasks:
         slug(task.get('id'))
-        require(task['id'] not in ids, 'Duplicate task ID')
+        require(task['id'] not in ids, '課題の ID が重複している')
         ids.add(task['id'])
-        require(task.get('split') in ('train', 'validation', 'test'), 'Use train, validation and test splits')
+        require(task.get('split') in ('train', 'validation', 'test'), 'split には train、validation、test のどれかを使う')
         splits.add(task['split'])
         question = task.get('question')
-        require(isinstance(question, str) and question.strip(), 'Task question required')
-        require(question.strip().casefold() not in questions, 'Repeated question across tasks')
+        require(isinstance(question, str) and question.strip(), '課題の質問がない')
+        require(question.strip().casefold() not in questions, '同じ質問が複数の課題にある')
         questions.add(question.strip().casefold())
-        require(isinstance(task.get('rubric'), str) and task['rubric'].strip(), 'Semantic rubric required')
-        require(type(task.get('abstain')) is bool, 'Expected abstention required')
-        require(isinstance(task.get('sources'), list), 'Expected sources required')
+        require(isinstance(task.get('rubric'), str) and task['rubric'].strip(), '採点の基準（rubric）がない')
+        require(type(task.get('abstain')) is bool, 'abstain の期待値を真偽値で書く')
+        require(isinstance(task.get('sources'), list), '期待するソース（sources）のリストがない')
         for name in task['sources']:
-            require(inside(corpus, name).is_file(), 'Rubric source missing')
-        require(task['abstain'] or task['sources'] or task.get('artifacts'), 'Evidence or artifact checks required')
+            require(inside(corpus, name).is_file(), '採点の基準が参照するソースがない')
+        require(task['abstain'] or task['sources'] or task.get('artifacts'), '根拠のソースか成果物の検査が必要である')
         for pattern in task.get('allow_write', []):
             require(isinstance(pattern, str) and pattern and not pattern.startswith(('/', '.'))
-                    and '..' not in Path(pattern).parts, 'Unsafe write pattern')
+                    and '..' not in Path(pattern).parts, '安全でない書き込みのパターンである')
         for check in task.get('artifacts', []):
             inside(corpus, check['path'])
-            require(check.get('kind') in ('text', 'json', 'contains', 'json_subset', 'jsonl_subset', 'absent'), 'Unknown artifact check')
+            require(check.get('kind') in ('text', 'json', 'contains', 'json_subset', 'jsonl_subset', 'absent'), '成果物の検査の種類が不明である')
             if check['kind'] != 'absent':
-                require('equals' in check, 'Artifact expected value required')
+                require('equals' in check, '成果物の期待値（equals）がない')
             if check['kind'] == 'contains':
                 require(isinstance(check['equals'], list) and check['equals']
-                        and all(isinstance(s, str) and s for s in check['equals']), 'Required text fragments must be nonempty')
+                        and all(isinstance(s, str) and s for s in check['equals']), '必須の文字列の断片は空でない文字列のリストにする')
         for command in task.get('required_commands', []):
             require(isinstance(command, list) and command and all(isinstance(s, str) and s for s in command),
-                    'Required command fragments must be nonempty')
-    require(splits == {'train', 'validation', 'test'}, 'All three independent splits required')
+                    '必須のコマンドの断片は空でない文字列のリストにする')
+    require(splits == {'train', 'validation', 'test'}, '学習用、検証用、最終テスト用の 3 種類の課題がすべて必要である')
     calibration = suite.get('calibration')
-    require(isinstance(calibration, list) and len(calibration) >= 2, 'Judge calibration needs positive and negative cases')
-    require({c.get('passed') for c in calibration} == {True, False}, 'Calibration requires both verdicts')
+    require(isinstance(calibration, list) and len(calibration) >= 2, '判定役の較正には、合格の例と不合格の例が必要である')
+    require({c.get('passed') for c in calibration} == {True, False}, '較正の例には、合格と不合格の両方の判定が必要である')
     for case in calibration:
-        require(type(case.get('passed')) is bool and type(case.get('abstain')) is bool, 'Calibration booleans required')
+        require(type(case.get('passed')) is bool and type(case.get('abstain')) is bool, '較正の例の passed と abstain は真偽値にする')
         for key in ('question', 'rubric', 'answer'):
-            require(isinstance(case.get(key), str), 'Calibration text required')
-        require(isinstance(case.get('sources'), list) and isinstance(case.get('citations'), list), 'Calibration sources required')
+            require(isinstance(case.get(key), str), '較正の例の question、rubric、answer は文字列にする')
+        require(isinstance(case.get('sources'), list) and isinstance(case.get('citations'), list), '較正の例の sources と citations はリストにする')
         for name in case['sources']:
-            require(inside(corpus, name).is_file(), 'Calibration source missing')
+            require(inside(corpus, name).is_file(), '較正の例が参照するソースがない')
     return tasks
 
 
 def grounded_verdict(judge, sources, needs_evidence):
-    require(type(judge.get('passed')) is bool and isinstance(judge.get('reason'), str), 'Judge verdict required')
+    require(type(judge.get('passed')) is bool and isinstance(judge.get('reason'), str), '判定役の判定（passed、reason）がない')
     evidence = judge.get('evidence')
-    require(isinstance(evidence, list), 'Judge evidence required')
+    require(isinstance(evidence, list), '判定役の根拠（evidence）がない')
     # 引用は D2 と同じ規則で照合する（wiki_text.quote_in_text）。日本語の文は行をまたいで
     # 改行が入っていても一致し、英数字の間の空白の有無は区別する。
     valid = all(isinstance(e, dict) and isinstance(e.get('quote'), str) and e['quote']
@@ -90,7 +90,7 @@ def calibrate(suite, corpus, calls, work):
         result = calls.invoke('judge', request, work)
         require(grounded_verdict(result, request['sources'], case['passed'] and bool(request['sources']))
                 and result['passed'] == case['passed'],
-                'Judge failed calibration; revise the rubric or judge before evolving')
+                '判定役が較正に失敗した。評価ループを始める前に、採点の基準か判定役を見直す')
         results.append(result)
     return results
 
@@ -108,33 +108,33 @@ class Calls:
         runtime = config.get('runtime_python')
         if runtime is not None:
             require(isinstance(runtime, str) and Path(runtime).is_absolute() and Path(runtime).is_file(),
-                    'runtime_python must name an existing absolute interpreter path')
+                    'runtime_python には、存在するインタープリターの絶対パスを指定する')
         budget = config['budget']
         for key in ('max_calls', 'max_seconds', 'timeout'):
-            require(finite(budget[key], key) > 0, f'{key} must be positive')
-        require(type(budget['max_calls']) is int, 'Call limit must be an integer')
+            require(finite(budget[key], key) > 0, f'{key} は正の値にする')
+        require(type(budget['max_calls']) is int, '呼び出しの回数の上限（max_calls）は整数にする')
         if budget.get('max_usd') is not None:
-            require(finite(budget['max_usd'], 'max_usd') > 0, 'Positive USD limit required')
+            require(finite(budget['max_usd'], 'max_usd') > 0, 'USD の上限（max_usd）は正の値にする')
         runners = [config[role] for role in ('inference', 'maintainer', 'proposer', 'judge')] + config.get('transfer', [])
         for item in runners:
             require(isinstance(item.get('argv'), list) and item['argv']
-                    and all(isinstance(v, str) and v for v in item['argv']), 'Runner argv required')
-            require(isinstance(item.get('model'), str) and item['model'], 'Model required for each role')
+                    and all(isinstance(v, str) and v for v in item['argv']), 'ランナーの argv がない')
+            require(isinstance(item.get('model'), str) and item['model'], 'ロールごとにモデルを指定する')
             if budget.get('max_usd') is not None:
                 api = Path(__file__).with_name('wiki_evolve_api.py').resolve()
                 require(len(item['argv']) == 2 and Path(item['argv'][1]).resolve() == api,
-                        'Hard USD budgets require wiki_evolve_api.py for every role and transfer runner')
+                        'USD の厳密な予算を使うには、すべてのロールと転用評価のランナーで wiki_evolve_api.py を使う')
                 from wiki_evolve_api import reservation
                 reservation(item['model'])
 
     def invoke(self, role, request, cwd):
         require(all(p.is_file() and digest(p.read_bytes()) == sha for p, sha in self.runtime_files.items()),
-                'Evolution runtime changed during the run; start a fresh trial')
+                '実行中に評価ループのランタイムが変わった。新しく試し直す')
         budget = self.config['budget']
         remaining = budget['max_seconds'] - (time.monotonic() - self.started)
-        require(self.count < budget['max_calls'] and remaining > 0, 'Run call/time budget exhausted')
+        require(self.count < budget['max_calls'] and remaining > 0, '呼び出しの回数か時間の予算を使い切った')
         usd = Decimal(str(budget['max_usd'])) if budget.get('max_usd') is not None else None
-        require(usd is None or (self.cost_known and self.cost < usd), 'Run USD budget exhausted or unavailable')
+        require(usd is None or (self.cost_known and self.cost < usd), 'USD の予算を使い切ったか、費用が分からない')
         self.count += 1
         item = self.config[role]
         request = dict(request, version=2, role=role, model=item['model'],
@@ -148,17 +148,17 @@ class Calls:
         try:
             output = run_runner(item['argv'], request, cwd, min(remaining, budget['timeout']))
             require(all(p.is_file() and digest(p.read_bytes()) == sha for p, sha in self.runtime_files.items()),
-                    'Evolution runtime changed during the call; trial evidence is invalid')
-            require(isinstance(output, dict), 'Runner output must be an object')
+                    '呼び出しの間に評価ループのランタイムが変わった。この試行の証拠は無効である')
+            require(isinstance(output, dict), 'ランナーの出力は JSON のオブジェクトでなければならない')
             if role == 'proposer':
                 self.last_proposal = output
-            require(type(output.get('tool_calls')) is int and output['tool_calls'] >= 0, 'Tool count required')
-            require(role != 'judge' or output['tool_calls'] == 0, 'Judge used tools; blinded comparison invalid')
-            require(isinstance(output.get('events'), list), 'Observable event trace required')
+            require(type(output.get('tool_calls')) is int and output['tool_calls'] >= 0, 'ツールの呼び出しの回数（tool_calls）がない')
+            require(role != 'judge' or output['tool_calls'] == 0, '判定役がツールを使った。盲検の比較として無効である')
+            require(isinstance(output.get('events'), list), '観測できるイベントの記録（events）がない')
             usage = output.get('usage', {})
             for key in ('input_tokens', 'output_tokens'):
                 require(key in usage and (usage[key] is None or type(usage[key]) is int and usage[key] >= 0),
-                        'Token usage must be measured or explicitly null')
+                        'トークンの使用量は、測った値か明示的な null にする')
             if any(usage[key] is None for key in ('input_tokens', 'output_tokens')):
                 self.tokens_known = False
             self.tokens += sum(v for k, v in usage.items() if k in ('input_tokens', 'output_tokens') and v is not None)
@@ -166,9 +166,9 @@ class Calls:
             if amount is None:
                 self.cost_known = False
             else:
-                finite(amount, 'Runner cost')
+                finite(amount, 'ランナーの cost')
                 self.cost += Decimal(str(amount))
-            require(usd is None or (self.cost_known and self.cost <= usd), 'Runner exceeded USD budget or omitted cost')
+            require(usd is None or (self.cost_known and self.cost <= usd), 'ランナーが USD の予算を超えたか、費用を返さなかった')
             event(self.archive, 'call-result', dict(record, output=output))
             return output
         except BaseException as exc:
@@ -269,7 +269,7 @@ def rollout(task, skill, corpus, calls, archive, label):
         if calls.config.get('runtime_python'):
             request['runtime_python'] = calls.config['runtime_python']
         output = calls.invoke('inference', request, work)
-        require(output.get('skill_sha256') == request['skill_sha256'], 'Runner did not attest supplied skill injection')
+        require(output.get('skill_sha256') == request['skill_sha256'], 'ランナーが、渡したスキルを使ったことを示さなかった（skill_sha256 が一致しない）')
         skill_unchanged = tree(work / 'skill') == frozen_skill
         final_workspace = tree(work)
         outside = [name for name in set(original_workspace) | set(final_workspace)
@@ -288,9 +288,9 @@ def rollout(task, skill, corpus, calls, archive, label):
                      'workspace_unchanged': not outside, 'permitted_changes': sorted(changed-set(protected))}
         boundary_ok = not outside and not protected and skill_unchanged
         require(isinstance(output.get('answer'), str) and type(output.get('abstain')) is bool,
-                'Answer and abstention required')
+                '回答（answer）と abstain がない')
         citations = output.get('citations')
-        require(isinstance(citations, list) and all(isinstance(p, str) for p in citations), 'Citations required')
+        require(isinstance(citations, list) and all(isinstance(p, str) for p in citations), '引用（citations）がない')
         valid = True
         for name in citations:
             try:
@@ -369,11 +369,11 @@ def paired_report(scores, alpha=.05):
     """タスクのクラスター単位のブートストラップと、対応のあるランダム化検定。繰り返しは新しいタスクとして扱わない。"""
     baseline, selected = scores['baseline'], scores['selected']
     ids = sorted({r['task'] for r in baseline})
-    require(ids and {r['task'] for r in selected} == set(ids), 'Unpaired final tasks')
+    require(ids and {r['task'] for r in selected} == set(ids), '最終テストの課題が対になっていない')
     differences, metrics = [], {}
     for tid in ids:
         a, b = [r for r in baseline if r['task'] == tid], [r for r in selected if r['task'] == tid]
-        require(len(a) == len(b), 'Unpaired final repeats')
+        require(len(a) == len(b), '最終テストの繰り返しが対になっていない')
         differences.append(sum(r['passed'] for r in b)/len(b) - sum(r['passed'] for r in a)/len(a))
     mean = sum(differences)/len(ids)
     rng = random.Random(0)
@@ -401,14 +401,14 @@ def paired_report(scores, alpha=.05):
 def consolidate(rows, patterns, history, calls, workspace, iteration):
     output = calls.invoke('maintainer', {'experiences': rows, 'patterns': patterns, 'history': history}, workspace)
     updates = output.get('patterns')
-    require(isinstance(updates, list), 'Maintainer must return patterns')
+    require(isinstance(updates, list), 'メンテナーが patterns を返さなかった')
     available = {r['task'] for r in rows}
     for pattern in updates:
         slug(pattern.get('id'))
         require(all(isinstance(pattern.get(k), str) and pattern[k].strip()
-                    for k in ('claim', 'scope', 'counterexamples')), 'Pattern needs claim, scope and counterexamples')
+                    for k in ('claim', 'scope', 'counterexamples')), 'パターンには claim、scope、counterexamples が必要である')
         require(isinstance(pattern.get('evidence'), list) and pattern['evidence']
-                and set(pattern['evidence']) <= available, 'Pattern must cite current observed tasks')
+                and set(pattern['evidence']) <= available, 'パターンは、今回観測した課題を根拠に挙げなければならない')
         prior = patterns.get(pattern['id'], {})
         patterns[pattern['id']] = dict(pattern, iteration=iteration, sources=prior.get('sources', []))
     return patterns
@@ -440,7 +440,7 @@ def publish_learning(args, rows, patterns, iteration):
                 f"課題: {row['question']}\n\n結果: {record['outcome']}\n\n"
                 + row['judge']['reason'] + '\n')
         body = body.replace('—', '-')
-        require(not target.exists() or target.read_text(encoding='utf-8') == body, 'Training source already exists with different content')
+        require(not target.exists() or target.read_text(encoding='utf-8') == body, '学習時の観察のソースが、別の内容ですでにある')
         if not target.exists():
             target.write_text(body, encoding='utf-8')
         source_names.append(source)
@@ -485,11 +485,11 @@ def fingerprint(skill):
 
 def run(args, state):
     archive = state / slug(args.id)
-    require(not archive.exists(), 'Run ID exists; completed and interrupted runs cannot be resumed with exposed tests')
+    require(not archive.exists(), 'この実行の ID はすでにある。最終テストを使ったあとの実行は、完了したものも中断したものも再開できない')
     require(not args.skill.is_symlink() and not args.skill.resolve().is_relative_to(state.resolve()),
-            'Skill must be a working directory outside the experiment archive')
+            'スキルには、実験の記録の外にある作業用のディレクトリを指定する')
     require(not args.skill.exists() or (args.skill / 'SKILL.md').is_file() or not tree(args.skill),
-            'Skill directory must contain SKILL.md or be empty')
+            'スキルのディレクトリには SKILL.md が必要である（空のディレクトリならよい）')
     suite_path = args.suite.resolve()
     suite = read_json(suite_path)
     corpus = inside(suite_path.parent, suite['corpus'])
@@ -499,11 +499,11 @@ def run(args, state):
     test_keys = [digest(encode({'question': t['question'], 'rubric': t['rubric'],
                   'sources': {name: inside(corpus, name).read_text(encoding='utf-8-sig') for name in t['sources']}}).encode())
                  for t in tasks if t['split'] == 'test']
-    require(not any(key in consumed for key in test_keys), 'Final-test tasks already exposed; supply fresh test tasks')
+    require(not any(key in consumed for key in test_keys), '最終テストの課題はすでに使われた。新しい最終テスト用の課題を用意する')
     config = read_json(args.config)
     slug(args.id + '-selected')
-    require(type(config.get('iterations')) is int and config['iterations'] > 0, 'Positive iterations required')
-    require(type(config.get('repeats')) is int and config['repeats'] > 0, 'Positive repeats required')
+    require(type(config.get('iterations')) is int and config['iterations'] > 0, 'iterations は正の整数にする')
+    require(type(config.get('repeats')) is int and config['repeats'] > 0, 'repeats は正の整数にする')
     archive.mkdir()
     calls = Calls(config, archive)
     atomic(archive / 'run-inputs.json', encode({'suite': suite, 'config': config, 'skill': str(args.skill)}).encode())
@@ -552,24 +552,24 @@ def run(args, state):
                     if 'files' in proposal:
                         files = proposal['files']
                         require(isinstance(files, list) and all(isinstance(f, dict) and isinstance(f.get('path'), str) for f in files),
-                                'Proposed files must contain string paths')
-                        require(len({f['path'] for f in files}) == len(files), 'Duplicate proposed file paths')
+                                '提案の files には、文字列の path を書く')
+                        require(len({f['path'] for f in files}) == len(files), '提案のファイルのパスが重複している')
                         changes = {f['path']: f['content'] for f in files}
-                    require(isinstance(changes, dict) and changes, 'Proposer must return nonempty file changes')
-                    require(isinstance(proposal.get('reason'), str) and proposal['reason'].strip(), 'Proposal reason required')
+                    require(isinstance(changes, dict) and changes, 'プロポーザーが、ファイルの変更を返さなかった')
+                    require(isinstance(proposal.get('reason'), str) and proposal['reason'].strip(), '提案の理由（reason）がない')
                     evidence = proposal.get('evidence')
                     require(isinstance(evidence, list) and evidence and set(evidence) <= set(patterns),
-                            'Proposal must cite existing patterns')
+                            '提案は、既存のパターンを根拠に挙げなければならない')
                     for name, body in changes.items():
-                        require(isinstance(name, str), 'Proposed file paths must be strings')
+                        require(isinstance(name, str), '提案のファイルのパスは文字列にする')
                         path = inside(candidate, name)
-                        require(body is None or isinstance(body, str), 'Changed files must contain text or null')
+                        require(body is None or isinstance(body, str), '変更するファイルの中身は、文字列か null にする')
                         if body is None:
                             path.unlink(missing_ok=True)
                         else:
                             path.parent.mkdir(parents=True, exist_ok=True)
                             path.write_text(body, encoding='utf-8')
-                    require((candidate / 'SKILL.md').is_file() and (candidate / 'SKILL.md').read_text(encoding='utf-8-sig').strip(), 'Proposal must retain or create nonempty SKILL.md')
+                    require((candidate / 'SKILL.md').is_file() and (candidate / 'SKILL.md').read_text(encoding='utf-8-sig').strip(), '提案のあとにも、空でない SKILL.md が必要である')
                     purpose = '# 目的\n\n' + proposal['reason'] + '\n\n'
                     for key in evidence:
                         item = patterns[key]
@@ -609,7 +609,7 @@ def run(args, state):
                         if limit is not None:
                             finite(limit, setting)
                             require(all(x is not None for xs in amounts.values() for x in xs),
-                                    'Selection metric unavailable; explicitly omit its ratio limit')
+                                    '選定に使う指標が測れていない。その比率の上限を設定から外す')
                         sums = {v: sum(xs) if all(x is not None for x in xs) else None for v, xs in amounts.items()}
                         metrics[metric] = dict(sums, limit=limit, passed=limit is None or sums['candidate'] <= sums['best'] * limit)
                     critical = [t['id'] for t in split['validation'] if t.get('critical')]
@@ -643,7 +643,7 @@ def run(args, state):
                                      'paired_analysis': paired_report(rows, .05/(1+len(config.get('transfer', []))))})
             finally:
                 calls.config['inference'] = original_inference
-            require(tree(archive / 'corpus') == corpus_hash, 'Archived corpus changed')
+            require(tree(archive / 'corpus') == corpus_hash, '記録したコーパスが変わった')
             report = {'status': 'completed', 'history': history,
                       'test': {v: {'passed': sum(r['passed'] for r in rows), 'total': len(rows)}
                                for v, rows in final.items()}, 'budget': calls.summary(),
@@ -657,7 +657,7 @@ def run(args, state):
                 evidence_dir.mkdir(exist_ok=True)
                 evidence_name = f'concepts/evolution-{args.id}.md'
                 evidence_path = inside(args.wiki, evidence_name)
-                require(not evidence_path.exists(), 'Evolution evidence page already exists')
+                require(not evidence_path.exists(), '評価ループの根拠のページがすでにある')
                 today = time.strftime('%Y-%m-%d')
                 selected_sources = list(dict.fromkeys(p for pattern in patterns.values() for p in pattern.get('sources', [])))
                 body = (f'---\ntitle: "評価ループ {args.id}"\ntype: concept\ntags: [skill-evolution]\n'
@@ -692,18 +692,18 @@ def run(args, state):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     for name in ('wiki', 'skill', 'suite', 'config'):
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--id', required=True)
-    parser.add_argument('--raw', type=Path, help='Immutable experiences; defaults to sibling raw directory')
-    args = parser.parse_args()
+    parser.add_argument('--raw', type=Path, help='変更できない経験の記録を置くディレクトリ（既定: wiki と同じ階層の raw）')
+    args = localize_argparse(parser).parse_args()
     args.wiki, args.skill = args.wiki.resolve(), args.skill.absolute()
     try:
         with locked(args.wiki) as state:
             print(encode(run(args, state)), end='')
     except (ValueError, KeyError, TypeError, OSError) as exc:
-        print(f'Error: {exc}', file=sys.stderr)
+        print(f'エラー: {exc}', file=sys.stderr)
         return 1
     return 0
 

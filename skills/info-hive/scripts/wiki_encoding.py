@@ -34,6 +34,9 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from wiki_text import localize_argparse  # noqa: E402
+
 BOMS = [
     (codecs.BOM_UTF32_LE, "utf-32-le"),
     (codecs.BOM_UTF32_BE, "utf-32-be"),
@@ -111,7 +114,7 @@ def convert(source: Path, output: Path, encoding: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = localize_argparse(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter))
     parser.add_argument("file", type=Path, help="調べるテキストファイル")
     parser.add_argument("--output", type=Path, help="UTF-8 に変換したものを書き出すパス。元のファイルとは別のパスにする")
     parser.add_argument("--force", action="store_true", help="--output のファイルがすでにあれば上書きする")
