@@ -262,7 +262,7 @@ def save_report(path, set_name, queries, rows, runs):
         "environment": {
             "fastembed": installed_version("fastembed"),
             "sqlite-vec": installed_version("sqlite-vec"),
-            "embed_model": wiki_search.LOCAL_EMBED_MODEL if "hybrid" in rows else None,
+            "embed_model": wiki_search.embed_model_name() if "hybrid" in rows else None,
         },
         "queries": len(queries),
         "metrics": rows,

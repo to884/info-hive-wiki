@@ -170,6 +170,63 @@ class VectorIndexTests(unittest.TestCase):
         self.assertEqual(order, [])
 
 
+class RecordingModel:
+    """受け取った文字列を記録する偽のモデル。"""
+
+    def __init__(self):
+        self.passages = []
+        self.queries = []
+
+    def passage_embed(self, texts, batch_size=64):
+        for text in texts:
+            self.passages.append(text)
+            yield [1.0, 0.0]
+
+    def query_embed(self, query):
+        self.queries.append(query)
+        yield [1.0, 0.0]
+
+
+class EmbedModelSelectionTests(unittest.TestCase):
+    def test_default_model_is_multilingual(self):
+        with mock.patch.dict("os.environ", {}, clear=False) as env:
+            env.pop(WIKI_SEARCH.EMBED_MODEL_ENV, None)
+            self.assertEqual(WIKI_SEARCH.embed_model_name(), "intfloat/multilingual-e5-small")
+        for name in WIKI_SEARCH.EMBED_MODELS:
+            self.assertNotIn("-en", name)
+
+    def test_e5_prefixes_are_added(self):
+        model = RecordingModel()
+        with mock.patch.dict("os.environ", {WIKI_SEARCH.EMBED_MODEL_ENV: "intfloat/multilingual-e5-small"}):
+            WIKI_SEARCH.embed_passages(model, ["消費税の仕組み"])
+            WIKI_SEARCH.embed_query(model, "税")
+        self.assertEqual(model.passages, ["passage: 消費税の仕組み"])
+        self.assertEqual(model.queries, ["query: 税"])
+
+    def test_unsupported_model_is_reported_by_name(self):
+        with mock.patch.dict("os.environ", {WIKI_SEARCH.EMBED_MODEL_ENV: "BAAI/bge-small-en-v1.5"}):
+            with self.assertRaises(WIKI_SEARCH.EmbeddingConfigError) as caught:
+                WIKI_SEARCH.embed_model_spec()
+        label = WIKI_SEARCH.embedding_failure_label(caught.exception)
+        self.assertIn(WIKI_SEARCH.EMBED_MODEL_ENV, label)
+        self.assertIn("intfloat/multilingual-e5-small", label)
+
+    @unittest.skipUnless(sqlite_vec, "sqlite-vec is not installed")
+    def test_model_change_rebuilds_vector_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            connection = WIKI_SEARCH.open_vector_index(root, sqlite_vec, 2)
+            meta = dict(connection.execute("SELECT key, value FROM semantic_meta"))
+            connection.close()
+            self.assertEqual(meta["model"], WIKI_SEARCH.embed_model_name())
+            self.assertEqual(meta["input_format"], WIKI_SEARCH.EMBED_INPUT_FORMAT)
+            with mock.patch.object(WIKI_SEARCH, "embed_model_name", return_value="other/model"):
+                connection = WIKI_SEARCH.open_vector_index(root, sqlite_vec, 2)
+                meta = dict(connection.execute("SELECT key, value FROM semantic_meta"))
+                connection.close()
+            self.assertEqual(meta["model"], "other/model")
+
+
 class LocalFallbackTests(unittest.TestCase):
     def make_wiki(self, root):
         concepts = root / "concepts"
@@ -260,6 +317,34 @@ class LocalFallbackTests(unittest.TestCase):
         self.assertEqual(payload["mode"], "lexical")
         self.assertEqual(payload["wiki"], wiki.as_posix())
         self.assertEqual(payload["granularity"], "section")
+        self.assertEqual(payload["results"], [])
+
+    def test_symbol_only_query_still_runs_semantic_search(self):
+        # 語彙側のトークンが 0 個でも、--no-embed でなければ埋め込み検索まで進む。
+        with tempfile.TemporaryDirectory() as tmp:
+            wiki = Path(tmp)
+            self.make_wiki(wiki)
+            locator = "concepts/retrieval.md1"
+            with mock.patch.object(
+                WIKI_SEARCH,
+                "local_semantic_order",
+                return_value=[locator],
+            ) as semantic:
+                payload, _stderr = self.run_cmd(wiki, query="？！")
+        semantic.assert_called_once()
+        self.assertEqual(payload["mode"], "hybrid")
+        self.assertEqual([row["retrievers"] for row in payload["results"]], [["embedding"]])
+
+    def test_symbol_only_query_with_no_embed_returns_empty_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wiki = Path(tmp)
+            self.make_wiki(wiki)
+            with mock.patch.object(
+                WIKI_SEARCH,
+                "local_semantic_order",
+                side_effect=AssertionError("semantic backend should not run"),
+            ):
+                payload, _stderr = self.run_cmd(wiki, no_embed=True, query="？！")
         self.assertEqual(payload["results"], [])
 
     def test_extension_load_failure_closes_database(self):

@@ -47,6 +47,7 @@ import os
 import re
 import sqlite3
 import sys
+import unicodedata
 from collections import Counter, defaultdict
 from datetime import date, datetime
 from pathlib import Path
@@ -59,15 +60,50 @@ from wiki_text import canonical_meta, nfc, normalize_tags, posix_rel  # noqa: E4
 
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
-TOKEN_RE = re.compile(r"[a-z0-9]+")
+# 文字種ごとの並び。英数字は小文字にしたあとの ASCII だけを語とみなす（移植元と同じ）。
+# 漢字には 々 と 〆、CJK 統合漢字の拡張 B 以降（𠮷 など）を含める。
+# カタカナには長音符 ー を含め、中黒 ・ は区切りとして扱う。
+SCRIPT_RUN_RE = re.compile(
+    r"(?P<ascii>[a-z0-9]+)"
+    r"|(?P<kanji>[\u3005\u3006\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U0003134f]+)"
+    r"|(?P<hiragana>[\u3041-\u309f]+)"
+    r"|(?P<katakana>[\u30a1-\u30fa\u30fc-\u30ff\u31f0-\u31ff]+)"
+)
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
-LOCAL_EMBED_MODEL = "BAAI/bge-small-en-v1.5"
+# 使える埋め込みモデル（計画の方針 F）。英語専用のモデルは置かず、多言語モデルだけにする。
+# 大きいモデル（multilingual-e5-large など）は、max_distance を評価セットで測ってから加える。
+#   max_distance    結果に残すコサイン距離の上限。モデルごとに評価セットで測って決める
+#   query_prefix    クエリの前に付ける文字列。e5 系は "query: " と "passage: " を前提に学習している
+#   passage_prefix  セクションの前に付ける文字列
+#   custom          fastembed に登録されていないモデルを add_custom_model で登録するための情報
+EMBED_MODELS = {
+    # e5 系は距離が狭い範囲に集まる。0.185 は P3 の評価セットで、正例の正解（日本語は最大 0.181、
+    # 英語は最大 0.188）と負例（日本語は最小 0.186、英語は最小 0.192）を分けた値。
+    "intfloat/multilingual-e5-small": {
+        "max_distance": 0.185,
+        "query_prefix": "query: ",
+        "passage_prefix": "passage: ",
+        "custom": {
+            "hf": "Xenova/multilingual-e5-small",
+            "model_file": "onnx/model_quantized.onnx",
+            "dim": 384,
+            "size_in_gb": 0.14,
+            "license": "mit",
+        },
+    },
+}
+DEFAULT_EMBED_MODEL = "intfloat/multilingual-e5-small"
+# 日本語のトークンを含むクエリで、BM25 の結果に残すのに必要なクエリの被覆率（lexical_ranking）。
+# P3 の評価セットでは、負例の被覆率は最大 0.24、語彙で当たる正例はほぼ 0.25 以上だった。
+MIN_CJK_QUERY_COVERAGE = 0.25
+# 既定のモデルを置き換える環境変数。EMBED_MODELS にある名前だけを受け付ける。
+EMBED_MODEL_ENV = "INFO_HIVE_EMBED_MODEL"
 VECTOR_INDEX_SCHEMA = "2"
 VECTOR_INDEX_NAME = "embeddings.sqlite"
-MAX_COSINE_DISTANCE = 0.35
 # 埋め込みに渡す文章の形式。query・passage の接頭辞やセクションの分け方など、
-# 埋め込みの入力が変わるとき（P3 など）に上げる。上げるとベクトルの索引を作り直す。
-EMBED_INPUT_FORMAT = "plain-v1"
+# 埋め込みの入力が変わるときに上げる。上げるとベクトルの索引を作り直す。
+# prefix-v1: EMBED_MODELS の接頭辞を付ける（P3）。
+EMBED_INPUT_FORMAT = "prefix-v1"
 # パースキャッシュの形式。日本語のキーを英語に直すようにしたので 2 に上げた。
 PARSE_CACHE_SCHEMA = 2
 
@@ -106,7 +142,25 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
 
 
 def tokenize(text: str) -> list[str]:
-    return TOKEN_RE.findall(text.lower())
+    """検索用のトークンに分ける（計画の方針 E）。
+
+    NFKC で正規化して小文字にしたあと、文字種（英数字、漢字、ひらがな、カタカナ）の境界で区切る。
+    英数字は語単位のまま、かな・漢字は 2 文字ずつ重ねて切り出す（1 文字だけの並びは 1 文字）。
+    「税」のような単漢字のクエリが「消費税」に当たるよう、漢字は 1 文字単位でも加える。
+    """
+    tokens = []
+    for match in SCRIPT_RUN_RE.finditer(unicodedata.normalize("NFKC", text).lower()):
+        run = match.group()
+        if match.lastgroup == "ascii":
+            tokens.append(run)
+            continue
+        if len(run) == 1:
+            tokens.append(run)
+            continue
+        tokens.extend(run[i:i + 2] for i in range(len(run) - 1))
+        if match.lastgroup == "kanji":
+            tokens.extend(run)
+    return tokens
 
 
 
@@ -386,6 +440,60 @@ def bm25_score(query_tokens: list[str], doc_idx: int, idx: dict, k1: float = 1.5
     return score
 
 
+def bm25_idf(term: str, idx: dict) -> float:
+    N = idx["N"]
+    df = idx["df"].get(term, 0)
+    return math.log(1 + (N - df + 0.5) / (df + 0.5))
+
+
+def query_coverage(query_tokens: list[str], doc_idx: int, idx: dict) -> float:
+    """クエリの異なるトークンのうち、文書に現れるものの割合。IDF で重みを付ける。
+
+    索引にないトークンは IDF が大きくなるので、文書に現れない語を含むクエリほど割合が下がる。
+    """
+    terms = list(dict.fromkeys(query_tokens))
+    total = sum(bm25_idf(term, idx) for term in terms)
+    if not total:
+        return 0.0
+    tf = idx["term_freqs"][doc_idx]
+    return sum(bm25_idf(term, idx) for term in terms if tf.get(term)) / total
+
+
+def covered_pages(query_tokens: list[str], pages: list[dict]) -> set[str] | None:
+    """クエリの被覆率が MIN_CJK_QUERY_COVERAGE 以上のページの rel_path を返す。
+
+    かな・漢字の bigram は、関係のない文書とも偶然に一致しやすい。そこで日本語のトークンを含む
+    クエリでは、被覆率の低いページを語彙検索の結果から外す。英数字だけのクエリは語単位で一致を
+    見るので None を返し、移植元と同じ結果のままにする。被覆率はセクションではなくページで測る。
+    セクションで測ると、長い言い換えのクエリがどのセクションにも届かず、ページ単位の検索より
+    当たらなくなるためである。
+    """
+    if all(token.isascii() for token in query_tokens):
+        return None
+    idx = build_bm25(pages)
+    return {
+        page["rel_path"]
+        for i, page in enumerate(pages)
+        if query_coverage(query_tokens, i, idx) >= MIN_CJK_QUERY_COVERAGE
+    }
+
+
+def lexical_ranking(query_tokens: list[str], idx: dict, keep=None) -> list[tuple[float, int]]:
+    """BM25 のスコアが正の文書を、スコアの高い順に (score, index) で返す。
+
+    keep を渡すと、keep(index) が真の文書だけを残す。
+    """
+    ranked = []
+    for i in range(idx["N"]):
+        if keep is not None and not keep(i):
+            continue
+        score = bm25_score(query_tokens, i, idx)
+        if score > 0:
+            ranked.append((score, i))
+    ranked.sort(key=lambda item: -item[0])
+    return ranked
+
+
 def parse_date(s: str | None) -> date | None:
     if not s:
         return None
@@ -417,9 +525,30 @@ def passes_filters(page: dict, args) -> bool:
     return True
 
 
+class EmbeddingConfigError(RuntimeError):
+    """埋め込みモデルの設定の誤り。メッセージにパスやペイロードを含めないので、そのまま表示してよい。"""
+
+
 def embedding_failure_label(exc: Exception) -> str:
     """パスやペイロードを漏らさない、ローカルのバックエンドの安全なエラーラベルを返す。"""
+    if isinstance(exc, EmbeddingConfigError):
+        return f"{type(exc).__name__}: {exc}"
     return type(exc).__name__
+
+
+def embed_model_name() -> str:
+    """使う埋め込みモデルの名前。INFO_HIVE_EMBED_MODEL があればそれを、なければ既定のモデルを返す。"""
+    return os.environ.get(EMBED_MODEL_ENV, "").strip() or DEFAULT_EMBED_MODEL
+
+
+def embed_model_spec(name: str | None = None) -> dict:
+    name = name or embed_model_name()
+    try:
+        return EMBED_MODELS[name]
+    except KeyError:
+        raise EmbeddingConfigError(
+            f"{EMBED_MODEL_ENV} names an unsupported model; choose one of {', '.join(EMBED_MODELS)}"
+        ) from None
 
 
 def section_locator(section: dict) -> str:
@@ -428,8 +557,30 @@ def section_locator(section: dict) -> str:
 
 
 def section_content_hash(section: dict) -> str:
-    text = f"{LOCAL_EMBED_MODEL}\n{section['searchable_text']}"
+    text = f"{embed_model_name()}\n{section['searchable_text']}"
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def register_custom_model(text_embedding_cls, name: str, spec: dict) -> None:
+    """fastembed に登録されていないモデルを登録する。登録済みなら何もしない。"""
+    custom = spec.get("custom")
+    if not custom:
+        return
+    registered = {m["model"].lower() for m in text_embedding_cls.list_supported_models()}
+    if name.lower() in registered:
+        return
+    from fastembed.common.model_description import ModelSource, PoolingType
+
+    text_embedding_cls.add_custom_model(
+        model=name,
+        pooling=PoolingType.MEAN,
+        normalization=True,
+        sources=ModelSource(hf=custom["hf"]),
+        dim=custom["dim"],
+        model_file=custom["model_file"],
+        license=custom.get("license", ""),
+        size_in_gb=custom.get("size_in_gb", 0.0),
+    )
 
 
 def load_local_embedding_backend():
@@ -448,8 +599,10 @@ def load_local_embedding_backend():
             Path.home() / ".cache" / "info-hive" / "fastembed",
         )
     )
-    model = TextEmbedding(model_name=LOCAL_EMBED_MODEL, cache_dir=str(cache_dir))
-    dimension = TextEmbedding.get_embedding_size(LOCAL_EMBED_MODEL)
+    name = embed_model_name()
+    register_custom_model(TextEmbedding, name, embed_model_spec(name))
+    model = TextEmbedding(model_name=name, cache_dir=str(cache_dir))
+    dimension = TextEmbedding.get_embedding_size(name)
     return model, sqlite_vec, dimension
 
 
@@ -467,7 +620,7 @@ def open_vector_index(wiki_root: Path, sqlite_vec, dimension: int) -> sqlite3.Co
         )
         expected = {
             "schema": VECTOR_INDEX_SCHEMA,
-            "model": LOCAL_EMBED_MODEL,
+            "model": embed_model_name(),
             "dimension": str(dimension),
             "input_format": EMBED_INPUT_FORMAT,
         }
@@ -498,14 +651,16 @@ def open_vector_index(wiki_root: Path, sqlite_vec, dimension: int) -> sqlite3.Co
 
 
 def embed_passages(model, texts: list[str]) -> list[list[float]]:
+    # fastembed 0.8.0 は e5 系の接頭辞を自動では付けないので、ここで付ける。
+    prefix = embed_model_spec()["passage_prefix"]
     return [
         [float(value) for value in vector]
-        for vector in model.passage_embed(texts, batch_size=64)
+        for vector in model.passage_embed([prefix + text for text in texts], batch_size=64)
     ]
 
 
 def embed_query(model, text: str) -> list[float]:
-    vector = next(model.query_embed(text))
+    vector = next(model.query_embed(embed_model_spec()["query_prefix"] + text))
     return [float(value) for value in vector]
 
 
@@ -547,7 +702,7 @@ def sync_vector_index(
         )
     if changed:
         print(
-            f"embedding {len(changed)} new or changed sections via {LOCAL_EMBED_MODEL}...",
+            f"embedding {len(changed)} new or changed sections via {embed_model_name()}...",
             file=sys.stderr,
         )
 
@@ -590,6 +745,7 @@ def local_semantic_order(
     wiki_root: Path,
 ) -> list[str]:
     model, sqlite_vec, dimension = load_local_embedding_backend()
+    max_distance = embed_model_spec()["max_distance"]
     connection = open_vector_index(wiki_root, sqlite_vec, dimension)
     try:
         locator_ids = sync_vector_index(connection, sqlite_vec, model, all_sections)
@@ -610,7 +766,7 @@ def local_semantic_order(
                     "WHERE embedding MATCH ? AND k = ? ORDER BY distance",
                     (query_blob, limit),
                 )
-                if distance <= MAX_COSINE_DISTANCE
+                if distance <= max_distance
             ]
         else:
             connection.execute(
@@ -630,7 +786,7 @@ def local_semantic_order(
                     "ORDER BY distance LIMIT ?",
                     (query_blob, limit),
                 )
-                if distance <= MAX_COSINE_DISTANCE
+                if distance <= max_distance
             ]
         by_id = {row_id: locator for locator, row_id in locator_ids.items()}
         return [by_id[row_id] for row_id in ranked_ids]
@@ -749,9 +905,10 @@ def cmd_search(args, pages: list[dict]) -> None:
             print("No pages matched the filters.", file=sys.stderr)
         return
     query_tokens = tokenize(args.query)
-    if not query_tokens:
-        # 日本語だけのクエリは、今のトークン化では 0 個になる。--json では空の結果を返し、
-        # 呼び出し側が JSON を読めるようにする。
+    # 記号だけのクエリなどは、語彙側のトークンが 0 個になる。埋め込み検索は意味で当てられる
+    # ことがあるので先に進む。埋め込みを使わない場合は、どのページにも当たらないのでここで終える。
+    # --json では空の結果を返し、呼び出し側が JSON を読めるようにする。
+    if not query_tokens and (args.no_embed or args.granularity == "page"):
         if args.json:
             emit_empty_json(args)
         else:
@@ -760,9 +917,9 @@ def cmd_search(args, pages: list[dict]) -> None:
 
     if args.granularity == "page":
         idx = build_bm25(filtered)
-        scored = [(bm25_score(query_tokens, i, idx), i) for i in range(len(filtered))]
-        scored.sort(key=lambda item: -item[0])
-        top = [(score, filtered[i]) for score, i in scored[:result_limit(args)] if score > 0]
+        covered = covered_pages(query_tokens, filtered)
+        keep = None if covered is None else (lambda i: filtered[i]["rel_path"] in covered)
+        top = [(score, filtered[i]) for score, i in lexical_ranking(query_tokens, idx, keep)[:result_limit(args)]]
         if not top:
             if args.json:
                 emit_empty_json(args)
@@ -792,9 +949,9 @@ def cmd_search(args, pages: list[dict]) -> None:
 
     sections = collect_sections(filtered)
     idx = build_bm25(sections)
-    bm25_ranked = [(bm25_score(query_tokens, i, idx), i) for i in range(len(sections))]
-    bm25_ranked.sort(key=lambda item: -item[0])
-    bm25_ranked = [item for item in bm25_ranked if item[0] > 0]
+    covered = covered_pages(query_tokens, filtered)
+    keep = None if covered is None else (lambda i: sections[i]["page"]["rel_path"] in covered)
+    bm25_ranked = lexical_ranking(query_tokens, idx, keep)
     ranked = [(score, section_index, ["bm25"]) for score, section_index in bm25_ranked]
     mode = "lexical"
     if not args.no_embed:
