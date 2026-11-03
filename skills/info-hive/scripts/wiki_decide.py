@@ -52,6 +52,10 @@ from pathlib import Path
 from typing import Callable
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+# 同じディレクトリの wiki_text を import する。スクリプトとして実行したときも、テストから
+# import したときも見つかるようにする。
+sys.path.insert(0, str(SCRIPT_DIR))
+from wiki_text import quote_in_text  # noqa: E402
 QUESTIONS_PATH = SCRIPT_DIR.parent / "assets" / "decision-questions.json"
 
 BACKENDS = {
@@ -317,17 +321,24 @@ def gate_pool(
 
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 BLOCK_PREFIX_RE = re.compile(r"^(#{1,6}\s+|>\s?|[-*+]\s+|\d+[.)]\s+)")
-SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+")
-
-
-def normalize_for_match(text: str) -> str:
-    return re.sub(r"\s+", " ", text.lower()).strip()
+# 文の終わり。英語の文は「.!?」のあとの空白で分ける。日本語の文は「。！？」のあとで分け、
+# 空白がなくても分ける（日本語は文のあいだに空白を入れない）。句点のあとに閉じ括弧が続くとき
+# （「……である。」）は閉じ括弧のあとで分け、「？！」のように句点が続くときは最後の句点のあとで分ける。
+JA_CLOSERS = "」』）〉》】〕"
+SENTENCE_END_RE = re.compile(
+    r"(?<=[.!?])\s+"
+    rf"|(?<=[。！？])(?![。！？{JA_CLOSERS}])\s*"
+    rf"|(?<=[。！？][{JA_CLOSERS}])(?![{JA_CLOSERS}])\s*"
+)
 
 
 def evidence_in_text(evidence: str, body: str) -> bool:
-    """大文字と小文字、空白を無視して、`evidence` が `body` に含まれていれば True を返す。"""
-    needle = normalize_for_match(evidence or "")
-    return bool(needle) and needle in normalize_for_match(body)
+    """`evidence` が `body` に含まれていれば True を返す。
+
+    大文字と小文字を区別せず、空白の並びを 1 つにまとめ、日本語の文字どうしの間の改行と空白は
+    取り除いて比べる（計画の方針 H、wiki_text.normalize_quote）。英数字の間の空白は残す。
+    """
+    return quote_in_text(evidence, body)
 
 
 def split_sentences(text: str, max_sentences: int = 60, max_chars: int = 300) -> list[str]:

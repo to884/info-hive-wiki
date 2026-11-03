@@ -19,6 +19,7 @@ from types import SimpleNamespace
 
 from wiki_evolve import (atomic, copy_tree, digest, encode, event, finite, inside, locked,
                          propose, read_json, require, run_runner, slug, tree, capture)
+from wiki_text import quote_in_text
 
 
 def contract(suite, corpus):
@@ -74,8 +75,10 @@ def grounded_verdict(judge, sources, needs_evidence):
     require(type(judge.get('passed')) is bool and isinstance(judge.get('reason'), str), 'Judge verdict required')
     evidence = judge.get('evidence')
     require(isinstance(evidence, list), 'Judge evidence required')
+    # 引用は D2 と同じ規則で照合する（wiki_text.quote_in_text）。日本語の文は行をまたいで
+    # 改行が入っていても一致し、英数字の間の空白の有無は区別する。
     valid = all(isinstance(e, dict) and isinstance(e.get('quote'), str) and e['quote']
-                and e.get('source') in sources and e['quote'] in sources[e['source']] for e in evidence)
+                and e.get('source') in sources and quote_in_text(e['quote'], sources[e['source']]) for e in evidence)
     return bool(valid and (not needs_evidence or evidence))
 
 
@@ -431,10 +434,10 @@ def publish_learning(args, rows, patterns, iteration):
         source = f'sources/{name}.md'
         target = inside(args.wiki, source)
         target.parent.mkdir(exist_ok=True)
-        body = (f'---\ntitle: "Training observation {name}"\ntype: source\ntags: [skill-evolution]\n'
-                f'created: {today}\nupdated: {today}\nauthors: ["Evolution runner"]\n'
+        body = (f'---\ntitle: "学習時の観察 {name}"\ntype: source\ntags: [skill-evolution]\n'
+                f'created: {today}\nupdated: {today}\nauthors: ["評価ループ"]\n'
                 f'raw: {json.dumps(receipt["raw"], ensure_ascii=False)}\ningested: {today}\n---\n\n'
-                f"Task: {row['question']}\n\nOutcome: {record['outcome']}\n\n"
+                f"課題: {row['question']}\n\n結果: {record['outcome']}\n\n"
                 + row['judge']['reason'] + '\n')
         body = body.replace('—', '-')
         require(not target.exists() or target.read_text(encoding='utf-8') == body, 'Training source already exists with different content')
@@ -450,7 +453,7 @@ def publish_learning(args, rows, patterns, iteration):
         target.parent.mkdir(exist_ok=True)
         body = (f'---\ntitle: {json.dumps(key.replace("-", " "), ensure_ascii=False)}\ntype: concept\ntags: [skill-evolution]\n'
                 f'created: {today}\nupdated: {today}\nsources: {json.dumps(pattern["sources"], ensure_ascii=False)}\n---\n\n'
-                f"{pattern['claim']}\n\nScope: {pattern['scope']}\n\nCounterexamples: {pattern['counterexamples']}\n\n"
+                f"{pattern['claim']}\n\n適用範囲: {pattern['scope']}\n\n反例: {pattern['counterexamples']}\n\n"
                 + '\n'.join(f'- [[{name[:-3]}]]' for name in source_names) + '\n')
         if target.exists():
             previous = target.read_text(encoding='utf-8')
@@ -458,10 +461,10 @@ def publish_learning(args, rows, patterns, iteration):
             # 置換文字列にバックスラッシュが入っても re がエスケープとして解釈しないよう、関数で渡す。
             sources_line = 'sources: ' + json.dumps(pattern['sources'], ensure_ascii=False)
             previous = re.sub(r'^sources:.*$', lambda _: sources_line, previous, count=1, flags=re.M)
-            body = previous.rstrip() + f'\n\n## Observation from {args.id}, iteration {iteration}\n\n' + body.split('---', 2)[2].lstrip()
+            body = previous.rstrip() + f'\n\n## {args.id} の {iteration} 回目の観察\n\n' + body.split('---', 2)[2].lstrip()
         atomic(target, body.replace('—', '-').encode())
     index = args.wiki / 'index.md'
-    old = index.read_text(encoding='utf-8-sig') if index.exists() else '# Index\n'
+    old = index.read_text(encoding='utf-8-sig') if index.exists() else '# Wiki Index\n'
     links = source_names + [p['page'] for p in patterns.values() if p.get('page')]
     for name in links:
         line = f'- [[{name[:-3]}]]'
@@ -469,8 +472,8 @@ def publish_learning(args, rows, patterns, iteration):
             old = old.rstrip() + '\n' + line + '\n'
     atomic(index, old.encode())
     log = args.wiki / 'log.md'
-    old = log.read_text(encoding='utf-8-sig') if log.exists() else '# Log\n'
-    line = f'- {today}: Captured training iteration {iteration} from evolution {args.id}.'
+    old = log.read_text(encoding='utf-8-sig') if log.exists() else '# Wiki Log\n'
+    line = f'- {today}: 評価ループ {args.id} の {iteration} 回目の学習の記録を取り込んだ。'
     if line not in old:
         atomic(log, (old.rstrip() + '\n' + line + '\n').encode())
 
@@ -567,10 +570,10 @@ def run(args, state):
                             path.parent.mkdir(parents=True, exist_ok=True)
                             path.write_text(body, encoding='utf-8')
                     require((candidate / 'SKILL.md').is_file() and (candidate / 'SKILL.md').read_text(encoding='utf-8-sig').strip(), 'Proposal must retain or create nonempty SKILL.md')
-                    purpose = '# Purpose\n\n' + proposal['reason'] + '\n\n'
+                    purpose = '# 目的\n\n' + proposal['reason'] + '\n\n'
                     for key in evidence:
                         item = patterns[key]
-                        purpose += f"## {key}\n\n{item['claim']}\n\nScope: {item['scope']}\n\nCounterexamples: {item['counterexamples']}\n\nEvidence: run {item.get('run', args.id)}, iteration {item['iteration']}, tasks {', '.join(item['evidence'])}.\n\n"
+                        purpose += f"## {key}\n\n{item['claim']}\n\n適用範囲: {item['scope']}\n\n反例: {item['counterexamples']}\n\n根拠: 実行 {item.get('run', args.id)}、{item['iteration']} 回目、課題 {'、'.join(item['evidence'])}。\n\n"
                     (candidate / 'PURPOSE.md').write_text(purpose, encoding='utf-8')
                     candidate_hash = fingerprint(candidate)
                 except (ValueError, TypeError, KeyError, FileExistsError, IsADirectoryError, NotADirectoryError) as exc:
@@ -657,16 +660,16 @@ def run(args, state):
                 require(not evidence_path.exists(), 'Evolution evidence page already exists')
                 today = time.strftime('%Y-%m-%d')
                 selected_sources = list(dict.fromkeys(p for pattern in patterns.values() for p in pattern.get('sources', [])))
-                body = (f'---\ntitle: "Evolution {args.id}"\ntype: concept\ntags: [skill-evolution]\n'
+                body = (f'---\ntitle: "評価ループ {args.id}"\ntype: concept\ntags: [skill-evolution]\n'
                         f'created: {today}\nupdated: {today}\nsources: {json.dumps(selected_sources, ensure_ascii=False)}\n---\n\n'
-                        + (best / 'PURPOSE.md').read_text(encoding='utf-8') + '\n'.join(f'- [[{p[:-3]}]]' for p in selected_sources) + '\nSelection evidence: strict validation improvement. Final results remain in the experiment archive.\n')
+                        + (best / 'PURPOSE.md').read_text(encoding='utf-8') + '\n'.join(f'- [[{p[:-3]}]]' for p in selected_sources) + '\n選定の根拠: 検証用の課題で成績がはっきり上がった。最終の結果は実験の記録に残している。\n')
                 evidence_path.write_text(body.replace('—', '-'), encoding='utf-8')
                 index = args.wiki / 'index.md'
-                old = index.read_text(encoding='utf-8-sig') if index.exists() else '# Index\n'
+                old = index.read_text(encoding='utf-8-sig') if index.exists() else '# Wiki Index\n'
                 atomic(index, (old.rstrip() + f'\n- [[concepts/evolution-{args.id}]]\n').encode())
                 proposal_id = slug(args.id + '-selected')
                 propose(SimpleNamespace(id=proposal_id, skill=args.skill, target=None, candidate=best,
-                                        wiki=args.wiki, evidence=[evidence_name], reason='Selected by bounded evolution validation'), state)
+                                        wiki=args.wiki, evidence=[evidence_name], reason='上限を決めた評価ループの検証で選ばれた'), state)
                 exp = state / proposal_id
                 copy_tree(archive / 'corpus', exp / 'corpus')
                 # テストは報告であり、もう1つの選定のゲートではない。適用するかはレビュアーが決める。

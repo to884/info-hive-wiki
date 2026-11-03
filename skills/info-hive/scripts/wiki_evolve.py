@@ -34,6 +34,9 @@ import sys
 import tempfile
 import uuid
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from wiki_text import normalize_quote  # noqa: E402
+
 IGNORED = {'.git', '__pycache__', '.wiki-cache', '.evolution', 'node_modules', '.wiki-evolve-lock'}
 
 
@@ -257,7 +260,11 @@ def suite_contract(suite, corpus):
 
 
 def normalize(text):
-    return ' '.join(text.casefold().split())
+    """答えの照合に使う形。D2 と同じ規則（wiki_text.normalize_quote）にそろえる。
+
+    日本語の文字どうしの間の改行と空白は取り除き、英数字の間の空白は残す。
+    """
+    return normalize_quote(text.casefold())
 
 
 def score(task, output, corpus):

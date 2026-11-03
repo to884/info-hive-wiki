@@ -158,12 +158,10 @@ class ReaderTests(unittest.TestCase):
         self.assertTrue(wd.evidence_in_text("標準税率は 10%", body))
         self.assertFalse(wd.evidence_in_text("標準税率は 8%", body))
 
-    @unittest.expectedFailure  # P4: 日本語の文字どうしの間の改行と空白を吸収する
     def test_evidence_in_text_japanese_line_break(self):
         body = "消費税は、国内の取引に広く課される\n間接税である。"
         self.assertTrue(wd.evidence_in_text("広く課される間接税である", body))
 
-    @unittest.expectedFailure  # P4: 句点「。！？」で文を分ける。句点のあとに空白がなくても分ける
     def test_split_sentences_japanese(self):
         text = "消費税は間接税である。税率は10%だ！本当に？はい。"
         self.assertEqual(
