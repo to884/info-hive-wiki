@@ -71,7 +71,7 @@ SCRIPT_RUN_RE = re.compile(
 )
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 # 使える埋め込みモデル（計画の方針 F）。英語専用のモデルは置かず、多言語モデルだけにする。
-# 大きいモデル（multilingual-e5-large など）は、max_distance を評価セットで測ってから加える。
+# モデルを加えるときは、max_distance を評価セットで測ってから加える。
 #   max_distance    結果に残すコサイン距離の上限。モデルごとに評価セットで測って決める
 #   query_prefix    クエリの前に付ける文字列。e5 系は "query: " と "passage: " を前提に学習している
 #   passage_prefix  セクションの前に付ける文字列
@@ -90,6 +90,14 @@ EMBED_MODELS = {
             "size_in_gb": 0.14,
             "license": "mit",
         },
+    },
+    # 設定で選べる大きいモデル（約 2.24 GB、1024 次元）。正例と負例の距離は分かれず、0.19 は
+    # 偽陽性率を 0 に保てる上限。P3 の評価セットでは、日本語の MRR は e5-small より高い（0.975）が、
+    # 英語の recall@10 は低く（0.815）、埋め込みは 7 倍ほど遅い。
+    "intfloat/multilingual-e5-large": {
+        "max_distance": 0.19,
+        "query_prefix": "query: ",
+        "passage_prefix": "passage: ",
     },
 }
 DEFAULT_EMBED_MODEL = "intfloat/multilingual-e5-small"
@@ -584,6 +592,12 @@ def register_custom_model(text_embedding_cls, name: str, spec: dict) -> None:
 
 
 def load_local_embedding_backend():
+    # huggingface_hub 1.33 は、大きいファイルをキャッシュ全体で共有する置き場所（blobs/<2 文字>/）に置く。
+    # 重みを model.onnx_data に分けたモデル（multilingual-e5-large など）では、model.onnx と
+    # model.onnx_data の実体が別のディレクトリになり、onnxruntime 1.31 は「外部データがモデルの
+    # ディレクトリの外にある」として読み込みを拒否する。共有をやめ、モデルごとに置かせる。
+    # huggingface_hub は import のときにこの値を読むので、fastembed より先に設定する。
+    os.environ.setdefault("HF_HUB_DISABLE_SHARED_BLOBS", "1")
     try:
         import sqlite_vec
         from fastembed import TextEmbedding

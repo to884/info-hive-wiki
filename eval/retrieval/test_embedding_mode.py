@@ -211,6 +211,21 @@ class EmbedModelSelectionTests(unittest.TestCase):
         self.assertIn(WIKI_SEARCH.EMBED_MODEL_ENV, label)
         self.assertIn("intfloat/multilingual-e5-small", label)
 
+    def test_backend_disables_shared_hf_blobs_before_import(self):
+        # model.onnx_data を持つモデルを onnxruntime が読めるよう、fastembed より先に設定する。
+        import sys
+        with mock.patch.dict("os.environ", {}, clear=False) as env,                 mock.patch.dict(sys.modules, {"fastembed": None}):
+            env.pop("HF_HUB_DISABLE_SHARED_BLOBS", None)
+            with self.assertRaises(RuntimeError):
+                WIKI_SEARCH.load_local_embedding_backend()
+            self.assertEqual(env.get("HF_HUB_DISABLE_SHARED_BLOBS"), "1")
+
+    def test_every_model_has_measured_settings(self):
+        for name, spec in WIKI_SEARCH.EMBED_MODELS.items():
+            self.assertTrue(0 < spec["max_distance"] < 1, name)
+            self.assertIn("query_prefix", spec)
+            self.assertIn("passage_prefix", spec)
+
     @unittest.skipUnless(sqlite_vec, "sqlite-vec is not installed")
     def test_model_change_rebuilds_vector_index(self):
         with tempfile.TemporaryDirectory() as tmp:
