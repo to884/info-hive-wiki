@@ -1,5 +1,5 @@
 ---
-type: source
+type: "source"
 title: "Adam: A Method for Stochastic Optimization"
 ---
 # Adam: A Method for Stochastic Optimization

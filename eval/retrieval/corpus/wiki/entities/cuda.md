@@ -1,9 +1,9 @@
 ---
-type: entity
-kind: platform
-title: CUDA
-aliases: [CUDA Toolkit]
-tags: [gpu, infrastructure]
+type: "entity"
+kind: "platform"
+title: "CUDA"
+aliases: ["CUDA Toolkit"]
+tags: ["gpu", "infrastructure"]
 sources: []
 created: 2026-01-19
 updated: 2026-02-04

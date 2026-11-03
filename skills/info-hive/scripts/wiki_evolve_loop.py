@@ -19,7 +19,7 @@ from types import SimpleNamespace
 
 from wiki_evolve import (atomic, copy_tree, digest, encode, event, finite, inside, locked,
                          propose, read_json, require, run_runner, slug, tree, capture)
-from wiki_text import localize_argparse, quote_in_text
+from wiki_text import format_fm_value, format_frontmatter, localize_argparse, quote_in_text
 
 
 def contract(suite, corpus):
@@ -434,9 +434,9 @@ def publish_learning(args, rows, patterns, iteration):
         source = f'sources/{name}.md'
         target = inside(args.wiki, source)
         target.parent.mkdir(exist_ok=True)
-        body = (f'---\ntitle: "学習時の観察 {name}"\ntype: source\ntags: [skill-evolution]\n'
-                f'created: {today}\nupdated: {today}\nauthors: ["評価ループ"]\n'
-                f'raw: {json.dumps(receipt["raw"], ensure_ascii=False)}\ningested: {today}\n---\n\n'
+        body = (format_frontmatter({'title': f'学習時の観察 {name}', 'type': 'source', 'tags': ['skill-evolution'],
+                                    'created': today, 'updated': today, 'authors': ['評価ループ'],
+                                    'raw': receipt['raw'], 'ingested': today}) + '\n'
                 f"課題: {row['question']}\n\n結果: {record['outcome']}\n\n"
                 + row['judge']['reason'] + '\n')
         body = body.replace('—', '-')
@@ -451,15 +451,15 @@ def publish_learning(args, rows, patterns, iteration):
         pattern['page'] = 'concepts/evolution-pattern-' + key + '.md'
         target = args.wiki / 'concepts' / ('evolution-pattern-' + key + '.md')
         target.parent.mkdir(exist_ok=True)
-        body = (f'---\ntitle: {json.dumps(key.replace("-", " "), ensure_ascii=False)}\ntype: concept\ntags: [skill-evolution]\n'
-                f'created: {today}\nupdated: {today}\nsources: {json.dumps(pattern["sources"], ensure_ascii=False)}\n---\n\n'
+        body = (format_frontmatter({'title': key.replace('-', ' '), 'type': 'concept', 'tags': ['skill-evolution'],
+                                    'created': today, 'updated': today, 'sources': pattern['sources']}) + '\n'
                 f"{pattern['claim']}\n\n適用範囲: {pattern['scope']}\n\n反例: {pattern['counterexamples']}\n\n"
                 + '\n'.join(f'- [[{name[:-3]}]]' for name in source_names) + '\n')
         if target.exists():
             previous = target.read_text(encoding='utf-8')
             previous = re.sub(r'^updated:.*$', 'updated: ' + today, previous, count=1, flags=re.M)
             # 置換文字列にバックスラッシュが入っても re がエスケープとして解釈しないよう、関数で渡す。
-            sources_line = 'sources: ' + json.dumps(pattern['sources'], ensure_ascii=False)
+            sources_line = 'sources: ' + format_fm_value(pattern['sources'])
             previous = re.sub(r'^sources:.*$', lambda _: sources_line, previous, count=1, flags=re.M)
             body = previous.rstrip() + f'\n\n## {args.id} の {iteration} 回目の観察\n\n' + body.split('---', 2)[2].lstrip()
         atomic(target, body.replace('—', '-').encode())
@@ -660,8 +660,8 @@ def run(args, state):
                 require(not evidence_path.exists(), '評価ループの根拠のページがすでにある')
                 today = time.strftime('%Y-%m-%d')
                 selected_sources = list(dict.fromkeys(p for pattern in patterns.values() for p in pattern.get('sources', [])))
-                body = (f'---\ntitle: "評価ループ {args.id}"\ntype: concept\ntags: [skill-evolution]\n'
-                        f'created: {today}\nupdated: {today}\nsources: {json.dumps(selected_sources, ensure_ascii=False)}\n---\n\n'
+                body = (format_frontmatter({'title': f'評価ループ {args.id}', 'type': 'concept', 'tags': ['skill-evolution'],
+                                            'created': today, 'updated': today, 'sources': selected_sources}) + '\n'
                         + (best / 'PURPOSE.md').read_text(encoding='utf-8') + '\n'.join(f'- [[{p[:-3]}]]' for p in selected_sources) + '\n選定の根拠: 検証用の課題で成績がはっきり上がった。最終の結果は実験の記録に残している。\n')
                 evidence_path.write_text(body.replace('—', '-'), encoding='utf-8')
                 index = args.wiki / 'index.md'

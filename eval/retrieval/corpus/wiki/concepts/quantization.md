@@ -1,8 +1,8 @@
 ---
-type: concept
-title: Quantization
-tags: [efficiency, inference, precision]
-sources: [lora-paper]
+type: "concept"
+title: "Quantization"
+tags: ["efficiency", "inference", "precision"]
+sources: ["lora-paper"]
 created: 2026-02-01
 updated: 2026-02-10
 ---

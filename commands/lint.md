@@ -9,7 +9,7 @@ argument-hint: "[--suggest-pages]"
 
 0. `<WIKI_ROOT>` は、ユーザーが明示したパス、もっとも近いプロジェクトの指示、グローバルなエージェントの指示の順に探し、どれにもなければ現在のプロジェクトの `wiki/` とする。指示が別の wiki を指定しているときに、`${PWD}/wiki` を前提にしてはならない。
 1. このセッションでまだ読んでいなければ、最初に `<WIKI_ROOT>/SCHEMA.md` を読む。追加の lint ルールが定義されていることがある。
-2. 構造の lint スクリプトを実行する: `python "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_lint.py" "<WIKI_ROOT>"`。ユーザーが求めた場合は `--suggest-pages` を付ける。このスクリプトは、孤立ページ、リンク切れの wikilink、大きすぎるページ（空白を除いて 4,000 文字か 400 行を超えると警告、8,000 文字か 800 行を超えると要分割）、frontmatter の欠落、更新の止まったページ、重複したスラッグを検出する。日本語で書いた wiki に特有の誤りとして、frontmatter の全角の「：」、「、」で区切ったリスト、英語と日本語の別名の重複、`YYYY-MM-DD` でない日付、wikilink の中の全角の「｜」と「＃」も指摘する。
+2. 構造の lint スクリプトを実行する: `python "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_lint.py" "<WIKI_ROOT>"`。ユーザーが求めた場合は `--suggest-pages` を付ける。このスクリプトは、孤立ページ、リンク切れの wikilink、大きすぎるページ（空白を除いて 4,000 文字か 400 行を超えると警告、8,000 文字か 800 行を超えると要分割）、frontmatter の欠落、更新の止まったページ、重複したスラッグを検出する。日本語で書いた wiki に特有の誤りとして、frontmatter の全角の「：」、「、」で区切ったリスト、英語と日本語の別名の重複、`YYYY-MM-DD` でない日付、wikilink の中の全角の「｜」と「＃」、二重引用符で囲まれていない文字列の値も指摘する。
 2b. `<WIKI_ROOT>/graph/ontology.yaml` がある場合は、`uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_graph_lint.py" "<WIKI_ROOT>"` も実行する。型付きエッジの検出結果（未知の述語、証拠の欠落、リンク切れの目的語の参照、エイリアスの衝突）も、構造の検出結果と同じように仕分ける。つまり、修正案を示し、黙って適用しない。承認された修正を適用したら、`uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_graph_extract.py" "<WIKI_ROOT>"` の実行を提案する。
 3. 構造の検出結果をユーザーと一緒に1件ずつ確認し、それぞれに修正案を示す。黙って修正を適用してはならない。1件ずつ、またはまとめての承認を待つ。
 4. 内容の確認を行う。最近更新されたページと、もっとも多くリンクされているハブページを読む（`python "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_search.py" "" --wiki "<WIKI_ROOT>" --top-linked 10` で見つけられる）。古いページとの矛盾、張られていない相互参照、多くのページで言及されているのに専用のページがないコンセプトを探す。

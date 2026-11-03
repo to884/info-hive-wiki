@@ -1,9 +1,9 @@
 ---
-type: source
+type: "source"
 title: "Historical pricing, July 2026"
-authors: [Example team]
+authors: ["Example team"]
 raw: "fixture:pricing-old"
-tags: [pilot]
+tags: ["pilot"]
 created: 2026-09-01
 updated: 2026-09-01
 ingested: 2026-09-01

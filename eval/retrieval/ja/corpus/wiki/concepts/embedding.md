@@ -1,8 +1,8 @@
 ---
-type: concept
-title: 埋め込み（ベクトル表現）
-tags: [AI, 検索]
-sources: [search-study-notes]
+type: "concept"
+title: "埋め込み（ベクトル表現）"
+tags: ["AI", "検索"]
+sources: ["search-study-notes"]
 created: 2026-02-12
 updated: 2026-04-22
 ---

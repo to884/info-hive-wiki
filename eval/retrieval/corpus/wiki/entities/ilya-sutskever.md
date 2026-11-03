@@ -1,9 +1,9 @@
 ---
-type: entity
-kind: person
-title: Ilya Sutskever
-aliases: [Sutskever]
-tags: [researcher, people]
+type: "entity"
+kind: "person"
+title: "Ilya Sutskever"
+aliases: ["Sutskever"]
+tags: ["researcher", "people"]
 sources: []
 created: 2026-01-21
 updated: 2026-02-08

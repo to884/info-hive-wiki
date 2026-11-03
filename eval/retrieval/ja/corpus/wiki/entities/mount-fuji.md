@@ -1,8 +1,8 @@
 ---
-type: entity
-kind: place
-title: 富士山
-tags: [地域, 自然]
+type: "entity"
+kind: "place"
+title: "富士山"
+tags: ["地域", "自然"]
 sources: []
 created: 2026-03-05
 updated: 2026-06-01

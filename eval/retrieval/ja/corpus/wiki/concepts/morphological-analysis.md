@@ -1,8 +1,8 @@
 ---
-type: concept
-title: 形態素解析
-tags: [自然言語処理, 検索]
-sources: [search-study-notes]
+type: "concept"
+title: "形態素解析"
+tags: ["自然言語処理", "検索"]
+sources: ["search-study-notes"]
 created: 2026-02-03
 updated: 2026-04-12
 ---

@@ -1,7 +1,7 @@
 ---
-type: concept
-title: Unicode 正規化
-tags: [文字コード, 自然言語処理]
+type: "concept"
+title: "Unicode 正規化"
+tags: ["文字コード", "自然言語処理"]
 sources: []
 created: 2026-01-22
 updated: 2026-03-18

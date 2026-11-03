@@ -1,8 +1,8 @@
 ---
-type: concept
-title: Distributed Training
-tags: [training, scaling, infrastructure]
-sources: [scaling-laws-paper]
+type: "concept"
+title: "Distributed Training"
+tags: ["training", "scaling", "infrastructure"]
+sources: ["scaling-laws-paper"]
 created: 2026-02-06
 updated: 2026-02-18
 ---

@@ -1,9 +1,9 @@
 ---
-type: synthesis
+type: "synthesis"
 title: "Why transformers displaced recurrent networks"
-question: Why did transformers replace recurrent networks for sequence modeling?
-tags: [transformer, comparison]
-sources: [attention-paper, scaling-laws-paper]
+question: "Why did transformers replace recurrent networks for sequence modeling?"
+tags: ["transformer", "comparison"]
+sources: ["attention-paper", "scaling-laws-paper"]
 created: 2026-03-01
 updated: 2026-03-05
 ---

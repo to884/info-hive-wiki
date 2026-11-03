@@ -1,12 +1,12 @@
 ---
-type: concept
-kind: experience-pattern
+type: "concept"
+kind: "experience-pattern"
 title: "再利用できるパターンを 1 つ書く"
-tags: [agent-experience]
+tags: ["agent-experience"]
 sources: []
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
-status: hypothesis
+status: "hypothesis"
 ---
 
 観測した問題、またはうまくいった方法と、それを適用できる範囲を書く。

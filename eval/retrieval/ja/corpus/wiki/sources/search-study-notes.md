@@ -1,7 +1,7 @@
 ---
-type: source
-title: 社内勉強会「日本語の検索」メモ
-tags: [検索, 勉強会]
+type: "source"
+title: "社内勉強会「日本語の検索」メモ"
+tags: ["検索", "勉強会"]
 sources: []
 created: 2026-02-20
 updated: 2026-02-20

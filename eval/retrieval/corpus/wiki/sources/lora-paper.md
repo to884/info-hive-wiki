@@ -1,13 +1,13 @@
 ---
-type: source
+type: "source"
 title: "LoRA: Low-Rank Adaptation of Large Language Models"
-authors: [Edward Hu, Yelong Shen]
-url: https://arxiv.org/abs/2106.09685
-raw: raw/lora-paper.md
+authors: ["Edward Hu", "Yelong Shen"]
+url: "https://arxiv.org/abs/2106.09685"
+raw: "raw/lora-paper.md"
 ingested: 2026-02-01
 created: 2026-02-01
 updated: 2026-02-01
-tags: [efficiency, fine-tuning]
+tags: ["efficiency", "fine-tuning"]
 ---
 
 # LoRA: Low-Rank Adaptation of Large Language Models

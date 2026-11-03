@@ -1,13 +1,13 @@
 ---
-type: source
+type: "source"
 title: "Adam: A Method for Stochastic Optimization"
-authors: [Diederik Kingma, Jimmy Ba]
-url: https://arxiv.org/abs/1412.6980
-raw: raw/adam-paper.md
+authors: ["Diederik Kingma", "Jimmy Ba"]
+url: "https://arxiv.org/abs/1412.6980"
+raw: "raw/adam-paper.md"
 ingested: 2026-01-16
 created: 2026-01-16
 updated: 2026-01-16
-tags: [optimization, training]
+tags: ["optimization", "training"]
 ---
 
 # Adam: A Method for Stochastic Optimization

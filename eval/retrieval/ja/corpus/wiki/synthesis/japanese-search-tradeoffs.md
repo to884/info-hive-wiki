@@ -1,9 +1,9 @@
 ---
-type: synthesis
-title: 日本語検索の方式の比較
-question: 社内 wiki の日本語のページを検索するには、どの方式を組み合わせればよいか
-tags: [検索, 比較]
-sources: [search-study-notes]
+type: "synthesis"
+title: "日本語検索の方式の比較"
+question: "社内 wiki の日本語のページを検索するには、どの方式を組み合わせればよいか"
+tags: ["検索", "比較"]
+sources: ["search-study-notes"]
 created: 2026-04-28
 updated: 2026-05-05
 ---

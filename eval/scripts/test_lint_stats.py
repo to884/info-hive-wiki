@@ -27,7 +27,7 @@ WIKI_TEXT = load("wiki_text")
 
 def page(title, body, created="2026-11-01", updated="2026-11-02", extra=""):
     return (
-        f"---\ntype: concept\ntitle: {title}\ntags: [テスト]\n"
+        f'---\ntype: "concept"\ntitle: "{title}"\ntags: ["テスト"]\n'
         f"created: {created}\nupdated: {updated}\n{extra}---\n\n{body}\n"
     )
 
@@ -111,6 +111,32 @@ class DateTests(unittest.TestCase):
         finally:
             wiki.close()
         self.assertEqual([f["key"] for f in findings["non_iso_dates"]], ["created"])
+
+
+class QuotingTests(unittest.TestCase):
+    def test_unquoted_strings_are_reported(self):
+        wiki = WikiFixture({
+            "concepts/a.md": "---\ntype: concept\ntitle: 引用符なし\ntags: [a]\ncreated: 2026-11-01\nupdated: 2026-11-01\n---\n\n本文\n",
+            "concepts/b.md": page("引用符あり", "本文"),
+        })
+        try:
+            findings = wiki.lint()
+        finally:
+            wiki.close()
+        self.assertEqual(findings["unquoted_strings"], [{"path": "concepts/a.md", "keys": ["type", "title", "tags"]}])
+        self.assertEqual(findings["summary"]["unquoted_strings"], 1)
+
+    def test_quoted_comma_and_comment_are_parsed(self):
+        wiki = WikiFixture({
+            "sources/a.md": page("出典", "本文", extra='authors: ["Kingma, D.", "Ba, J."]\nurl: "https://x.test/?a=1#f" # 元のページ\n'),
+        })
+        try:
+            pages = WIKI_LINT.collect_pages(wiki.root)
+        finally:
+            wiki.close()
+        meta = pages[0]["meta"]
+        self.assertEqual(meta["authors"], ["Kingma, D.", "Ba, J."])
+        self.assertEqual(meta["url"], "https://x.test/?a=1#f")
 
 
 class SuggestPagesTests(unittest.TestCase):

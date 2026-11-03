@@ -1,6 +1,6 @@
 ---
-type: concept
-title: Dropout
+type: "concept"
+title: "Dropout"
 ---
 # Dropout
 

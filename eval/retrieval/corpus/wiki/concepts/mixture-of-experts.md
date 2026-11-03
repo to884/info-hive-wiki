@@ -1,7 +1,7 @@
 ---
-type: concept
-title: Mixture of Experts
-tags: [efficiency, architecture, scaling]
+type: "concept"
+title: "Mixture of Experts"
+tags: ["efficiency", "architecture", "scaling"]
 sources: []
 created: 2026-02-03
 updated: 2026-02-12

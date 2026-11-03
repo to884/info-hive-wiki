@@ -1,8 +1,8 @@
 ---
-type: concept
-title: RAG
-tags: [AI, 検索]
-sources: [search-study-notes]
+type: "concept"
+title: "RAG"
+tags: ["AI", "検索"]
+sources: ["search-study-notes"]
 created: 2026-02-10
 updated: 2026-04-20
 ---

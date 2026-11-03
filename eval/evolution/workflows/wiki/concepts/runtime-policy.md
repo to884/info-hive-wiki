@@ -1,10 +1,10 @@
 ---
-type: concept
+type: "concept"
 title: "Runtime policy (deliberately stale evaluation seed)"
-tags: [project]
+tags: ["project"]
 created: 2026-09-13
 updated: 2026-09-13
-sources: [retrieval]
+sources: ["retrieval"]
 ---
 
 # Runtime policy

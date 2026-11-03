@@ -1,9 +1,9 @@
 ---
-type: entity
-kind: product
-title: Elasticsearch
-tags: [検索, ソフトウェア]
-sources: [search-study-notes]
+type: "entity"
+kind: "product"
+title: "Elasticsearch"
+tags: ["検索", "ソフトウェア"]
+sources: ["search-study-notes"]
 created: 2026-02-15
 updated: 2026-04-25
 ---

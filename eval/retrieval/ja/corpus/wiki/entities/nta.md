@@ -1,9 +1,9 @@
 ---
-type: entity
-kind: organization
-title: 国税庁
-tags: [税金, 行政]
-sources: [tax-seminar-2025]
+type: "entity"
+kind: "organization"
+title: "国税庁"
+tags: ["税金", "行政"]
+sources: ["tax-seminar-2025"]
 created: 2026-01-18
 updated: 2026-03-10
 ---

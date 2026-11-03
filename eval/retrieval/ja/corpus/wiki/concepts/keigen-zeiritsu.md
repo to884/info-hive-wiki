@@ -1,8 +1,8 @@
 ---
-type: concept
-title: 軽減税率
-tags: [税金, 制度]
-sources: [tax-seminar-2025]
+type: "concept"
+title: "軽減税率"
+tags: ["税金", "制度"]
+sources: ["tax-seminar-2025"]
 created: 2026-01-12
 updated: 2026-02-20
 ---

@@ -8,6 +8,7 @@
 
 ### Changed
 
+- frontmatter の文字列の値は、配列の要素も含めて二重引用符で囲む決まりにした（`type: "source"`、`tags: ["税制", "間接税"]`）。日付と数値は囲まない。lint・検索・統計の frontmatter の解析を `wiki_text.py` の共通のパーサーにまとめ、引用符の中のカンマで配列を分けず、引用符の外の行末コメントを捨て、`\"` と `\\` を戻すようにした。評価ループが書くページとテンプレートも引用符つきにした。検索のパースキャッシュは自動で作り直される。
 - リポジトリを `to884/info-hive` から `to884/info-hive-wiki` に移した。旧リポジトリはアーカイブする。
 - マーケットプレイスの定義（`.claude-plugin/marketplace.json`）を、別のリポジトリ [to884/info-hive-marketplace](https://github.com/to884/info-hive-marketplace) に移した。マーケットプレイス名は `info-hive` のままで、`/plugin install wiki@info-hive` で入れる。
 - 旧リポジトリをマーケットプレイスとして追加していた場合は、`/plugin marketplace remove info-hive` のあとに `/plugin marketplace add to884/info-hive-marketplace` と `/plugin install wiki@info-hive` を実行し直す。
@@ -38,6 +39,7 @@
 ### Added
 
 - `wiki_lint.py` は、`created`・`updated`・`ingested` が `YYYY-MM-DD` の形でなければ `non_iso_dates` として指摘する。
+- `wiki_lint.py` は、二重引用符で囲まれていない文字列の値を `unquoted_strings` として指摘する。
 - `wiki_encoding.py` を加えた。テキストのソースの文字コード（UTF-8、Shift_JIS（CP932）、EUC-JP、ISO-2022-JP など）を判定し、`--output` で UTF-8 に変換したものを別のファイルに書き出す。元のファイルは書き換えない。`/wiki:ingest` の手順に加えた。
 
 ## [4.0.1] - 2026-10-29

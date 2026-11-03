@@ -1,9 +1,9 @@
 ---
-type: entity
-kind: company
-title: OpenAI
-aliases: [Open AI]
-tags: [company, lab]
+type: "entity"
+kind: "company"
+title: "OpenAI"
+aliases: ["Open AI"]
+tags: ["company", "lab"]
 sources: []
 created: 2026-01-22
 updated: 2026-02-09

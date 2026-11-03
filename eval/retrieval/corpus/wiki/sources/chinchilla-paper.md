@@ -1,13 +1,13 @@
 ---
-type: source
+type: "source"
 title: "Training Compute-Optimal Large Language Models"
-authors: [Jordan Hoffmann, Sebastian Borgeaud]
-url: https://arxiv.org/abs/2203.15556
-raw: raw/chinchilla-paper.md
+authors: ["Jordan Hoffmann", "Sebastian Borgeaud"]
+url: "https://arxiv.org/abs/2203.15556"
+raw: "raw/chinchilla-paper.md"
 ingested: 2026-02-11
 created: 2026-02-11
 updated: 2026-02-11
-tags: [scaling, compute]
+tags: ["scaling", "compute"]
 ---
 
 # Training Compute-Optimal Large Language Models

@@ -71,11 +71,11 @@ wiki にクエリに関係する内容がない場合は、そうはっきり伝
 
 ```yaml
 ---
-type: synthesis
+type: "synthesis"
 question: "元の質問（そのまま、または軽く整えたもの）"
 asked: 2026-04-15
-sources_consulted: [page-1, page-2, page-3]
-tags: [...]
+sources_consulted: ["page-1", "page-2", "page-3"]
+tags: ["..."]
 ---
 ```
 

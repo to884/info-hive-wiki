@@ -1,9 +1,9 @@
 ---
-type: synthesis
-title: 夏の屋外活動の安全
-question: 夏に屋外で活動するとき、何に気をつければよいか
-tags: [健康, 夏]
-sources: [熱中症予防ガイド要約]
+type: "synthesis"
+title: "夏の屋外活動の安全"
+question: "夏に屋外で活動するとき、何に気をつければよいか"
+tags: ["健康", "夏"]
+sources: ["熱中症予防ガイド要約"]
 created: 2026-06-15
 updated: 2026-06-22
 ---
