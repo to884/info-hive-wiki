@@ -1,5 +1,5 @@
 ---
-type: <source|entity|concept|synthesis>
+type: "<source|entity|concept|synthesis>"
 title: ""
 tags: []
 sources: []

@@ -27,6 +27,7 @@ argument-hint: "[--global] [--wiki-dir <name>] [--raw-dir <name>]"
    - 判定レイヤーの環境変数は `LLM_WIKI_DECISIONS*` から `INFO_HIVE_DECISIONS*` に変わった。古い名前は読まない。
    - ホスト型 wiki（`/wiki:migrate`、`/wiki:init --hosted`、`wiki_remote.py`）は info-hive にはない。ホスト型 wiki に移した wiki は、ローカルのフォルダーに戻してからアップグレードする。
    - プロバイダーを使っていた旧来の `embeddings.jsonl` キャッシュ（llm-wiki の v2 系）は無視される。削除を提案してよいが、既存のファイルなのでユーザーの承認を得てから削除する。
+   - frontmatter の文字列の値は二重引用符で囲む決まりになった。既存のページはそのまま読めるが、lint が `unquoted_strings` として指摘する。`init_wiki.py` は既存の `.page-template.md` を上書きしないので、テンプレートの `type` と `tags` の例を引用符つきに直すことを提案する。
 
    **検索について伝えること**:
    - セクション検索の既定は、ローカルのハイブリッド検索である。FastEmbed と sqlite-vec による埋め込み検索の結果を、RRF で BM25 の結果と統合する。API キー、リモートのエンドポイント、プロバイダーへの同意、クエリごとの課金はない。
