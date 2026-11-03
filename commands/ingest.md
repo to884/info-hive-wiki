@@ -11,13 +11,13 @@ argument-hint: "<ソースのパス、URL、または説明>"
 
 0. `<WIKI_ROOT>` と `<RAW_ROOT>` は、ユーザーが明示したパス、もっとも近いプロジェクトの指示、グローバルなエージェントの指示の順に探し、どれにもなければ現在のプロジェクトの `wiki/` と `raw/` とする。指示が別の wiki を指定しているときに `${PWD}/wiki` を前提にしてはならず、2つの wiki を黙って混ぜてもならない。
 1. このセッションでまだ読んでいなければ、最初に `<WIKI_ROOT>/SCHEMA.md` を読む。既定の規約がここで上書きされていることがある。
-2. raw ソースがまだ `<RAW_ROOT>/` にない場合は、そこに置く。ファイル名はスラッグ化したものにする。
+2. raw ソースがまだ `<RAW_ROOT>/` にない場合は、そこに置く。ファイル名は `skills/info-hive/references/page-conventions.md` の命名の規則で付け、ソースの要約ページのスラッグとそろえる。日本語の題名なら日本語のファイル名でよい（`インボイス制度の手引き-2023.pdf`）。
    テキストのソース（`.txt`、`.md`、`.csv` など）は、読む前に `python "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_encoding.py" "<ソースのパス>"` で文字コードを確かめる。`encoding` が `utf-8` か `utf-8-sig` でなければ（Shift_JIS は `cp932` と出る）、`--output "<RAW_ROOT>/<スラッグ>.utf8.<拡張子>"` を付けて UTF-8 に変換し、変換したファイルを読む。元のファイルは書き換えずに残し、要約ページの出典には元のファイルと変換したファイルの両方を書く。終了コードが 2（判定できない）なら、ユーザーに文字コードを確かめる。
-3. ソースを読む。大きい場合（約 5000 語を超える、または長い PDF）は分割して読む。コンテキストウィンドウの約 25% を超えるなら、全体を一度にコンテキストに読み込んではならない。
+3. ソースを読む。大きい場合（約 1 万文字を超える、英語なら約 5,000 語を超える、または長い PDF）は分割して読む。コンテキストウィンドウの約 25% を超えるなら、全体を一度にコンテキストに読み込んではならない。
 4. wiki に何かを書く前に、要点をユーザーと簡単に話し合う。目立つ点、既存のページとつながる点、意外な点を挙げる。
 5. wiki を調べて、このソースが関係する既存のページを洗い出す。候補のページはそれぞれ読んで確かめる。
-6. `<WIKI_ROOT>/sources/` にソースの要約ページを書く。関係するエンティティやコンセプトのページは、`str_replace` で必要な箇所だけを更新する。新しいエンティティやコンセプトには新しいページを作り、それぞれに少なくとも1つの被リンクを付ける。インデックスを更新し、`log.md` に1行追記する。
-7. `<WIKI_ROOT>/graph/ontology.yaml` があり、今回の取り込みで型付きの `graph.relationships[]` を追加した、または追加できる場合は、ソースが明示的に裏づけている場合に限って型付きのエッジを追加する（述語、ソースページのスラッグ、証拠となる引用、確信度、ステータスを付ける）。次に `uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_graph_lint.py" "<WIKI_ROOT>"` を実行し、検出結果をユーザーと一緒に仕分けてから、`uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_graph_extract.py" "<WIKI_ROOT>"` を実行する。`log.md` の取り込みの行の下に、`   graph: +N nodes, +M typed edges` というサブ行を追記する。
+6. `<WIKI_ROOT>/sources/` にソースの要約ページを書く。関係するエンティティやコンセプトのページは、`str_replace` で必要な箇所だけを更新する。新しいエンティティやコンセプトには新しいページを作り、それぞれに少なくとも1つの被リンクを付ける。インデックスを更新し、`log.md` に `## [YYYY-MM-DD] ingest | <ソースの題名>` の形で1行追記する。操作名の `ingest` は英語のまま書く。
+7. `<WIKI_ROOT>/graph/ontology.yaml` があり、今回の取り込みで型付きの `graph.relationships[]` を追加した、または追加できる場合は、ソースが明示的に裏づけている場合に限って型付きのエッジを追加する（述語、ソースページのスラッグ、証拠となる引用、確信度、ステータスを付ける）。次に `uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_graph_lint.py" "<WIKI_ROOT>"` を実行し、検出結果をユーザーと一緒に仕分けてから、`uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_graph_extract.py" "<WIKI_ROOT>"` を実行する。`log.md` の取り込みの行の下に、`   グラフ: ノード +N、型付きエッジ +M` というサブ行を追記する。
 8. 作業が終わったら、何をしたかをユーザーに伝える。更新したページ、作成したページ、指摘した矛盾、追って調べる価値のある点を報告する。
 
 wiki がまだない場合は、プロジェクトをまたいで使う個人用の wiki なら `/wiki:init --global`、プロジェクト用の wiki なら `/wiki:init` を提案する。

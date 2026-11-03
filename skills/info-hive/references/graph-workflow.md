@@ -1,6 +1,6 @@
 # グラフのワークフロー
 
-グラフ層は、Markdown の wiki の上に任意で作る**コンパイル済みのインデックス**である。wiki を置き換えるものではない。`wiki/graph/` の下に wiki と並べて置き、いつでも Markdown から作り直せる。目的は、出所の裏づけを持つ型付きの関係を機械でクエリできるようにしつつ、正本は Markdown のままにすることである。
+グラフ層は、Markdown の wiki の上に任意で作るコンパイル済みのインデックスである。wiki を置き換えるものではない。`wiki/graph/` の下に wiki と並べて置き、いつでも Markdown から作り直せる。目的は、出所の裏づけを持つ型付きの関係を機械でクエリできるようにしつつ、正本は Markdown のままにすることである。
 
 `wiki/graph/ontology.yaml` がない場合、その wiki はグラフ層を導入する前のものである。extract、lint、query は実行せず、オントロジーのファイルをでっち上げてもならない。グラフ層の追加を提案するか、グラフ層なしで進める。
 
@@ -8,37 +8,43 @@
 
 extract で得られるエッジは、次の3種類である。
 
-1. ページの frontmatter の `graph.relationships[]` で宣言した**型付きの意味のエッジ**。例: `founded`、`proposed`、`depends_on`。それぞれ、明示的な `source`（ソースページのスラッグ）、`evidence` の引用、`confidence`（high/medium/low）、`status`（current/historical/proposed/disputed/superseded）を持つ。extract がこれらを作り出すことはない。
-2. **`mentions` エッジ**。本文の `[[wikilink]]` 1つにつき1本できる（ページごとに重複は除く）。確信度は `low` である。目的のページを早く見つけるのには役立つが、型付きの関係の証拠として引用してはならない。
-3. **`sourced_from`** エッジ。ソースページ以外のページの frontmatter にある `sources:` リストのスラッグ1つにつき1本でき、ソースページを指す。**`summarizes_raw`** エッジ。ソースページの `raw:` フィールド1つにつき1本でき、raw ファイルのパスを（文字列リテラルの）目的語とする。
+1. ページの frontmatter の `graph.relationships[]` で宣言した型付きの意味のエッジ。例: `founded`、`proposed`、`depends_on`。それぞれ、明示的な `source`（ソースページのスラッグ）、`evidence` の引用、`confidence`（high/medium/low）、`status`（current/historical/proposed/disputed/superseded）を持つ。extract がこれらを作り出すことはない。
+2. `mentions` エッジ。本文の `[[wikilink]]` 1つにつき1本できる（ページごとに重複は除く）。確信度は `low` である。目的のページを早く見つけるのには役立つが、型付きの関係の証拠として引用してはならない。
+3. `sourced_from` エッジと `summarizes_raw` エッジ。`sourced_from` は、ソースページ以外のページの frontmatter にある `sources:` リストのスラッグ1つにつき1本でき、ソースページを指す。`summarizes_raw` は、ソースページの `raw:` フィールド1つにつき1本でき、raw ファイルのパスを（文字列リテラルの）目的語とする。
 
 ## frontmatter のスキーマ
 
+例の人物と会社は架空のものである。
+
 ```yaml
 graph:
-  node_id: person:praney-behl       # 任意。既定は <node_type>:<slug>
+  node_id: person:山田太郎            # 任意。既定は <node_type>:<slug>
   node_type: person                  # 任意。既定はオントロジーを使って type/kind から決まる
   canonical: true                    # 複数のスラッグが同じエンティティの別名になっているとき、正本に印を付ける
-  aliases: [Praney, praney@example.com]
+  aliases: [山田, やまだたろう, yamada@example.com]
   relationships:
     - predicate: founded
-      object: company:seedblocks
-      source: praney-founder-context-dump
-      evidence: "Solo technical founder and sole director..."
+      object: company:やまだ製作所
+      source: 山田太郎インタビュー
+      evidence: "2015 年に、やまだ製作所を一人で立ち上げた。"
       confidence: high
       status: current
       # 任意:
-      # valid_from: 2025-01-15
+      # valid_from: 2015-04-01
       # valid_to: 2026-03-01
       # notes: "..."
-      # raw_ref: "raw/founder-dump.md#L42"
+      # raw_ref: "raw/山田太郎インタビュー.md#L42"
       # contradicts: <node-id-or-edge-id>
       # supersedes: <node-id-or-edge-id>
 ```
 
 関係に必須のフィールドは、`predicate`、`object`、`source`、`evidence`、`confidence`、`status` である。
 
-`node_id` の形式は `<node_type>:<slug>` である。既定値は、オントロジーの `maps_from` ブロックを使って、ページの `type`/`kind` から決まる。`decision`、`claim`、`raw` は明示的にだけ使うノードの種類である。wiki のページを持たないので、エッジの目的語としてだけ現れる。型付きエッジがこれらのどれかを指していると、`wiki_graph_lint.py` は「リンク切れの目的語の参照」として指摘する。この指摘は、(a) そのページを作るか、(b) `explicit_only: true` を付けてオントロジーに追加し、lint が引き続きその参照を指摘することを受け入れるまで続く。
+`evidence` には、ソースの文をそのまま写す（言い換えない、訳さない）。英語のソースは英語のまま引く。引用は 1 文か、文の一部にとどめる。`--decide` を付けた lint は、引用がソースページの本文にあるかを照合する。照合では、大文字と小文字の違いと、日本語の文字どうしの間の改行や空白は吸収するが、英数字の間の空白は残し、全角と半角の違いは吸収しない。ソースが全角の「ＡＩ」なら、引用も「ＡＩ」と書く。
+
+`node_id` の形式は `<node_type>:<slug>` である。既定値は、オントロジーの `maps_from` ブロックを使って、ページの `type`/`kind` から決まる。スラッグが日本語なら、ノード ID も `concept:消費税` や `organization:国税庁` のように日本語を含む。lint、extract、query はこれをそのまま扱い、NFC にそろえてから照合する。英語の固有名詞のページは `person:andrej-karpathy` のように英小文字のスラッグのままでよい。
+
+`decision`、`claim`、`raw` は明示的にだけ使うノードの種類である。wiki のページを持たないので、エッジの目的語としてだけ現れる。型付きエッジがこれらのどれかを指していると、`wiki_graph_lint.py` は「リンク切れの目的語の参照」として指摘する。この指摘は、(a) そのページを作るか、(b) `explicit_only: true` を付けてオントロジーに追加し、lint が引き続きその参照を指摘することを受け入れるまで続く。
 
 ## オントロジー
 
@@ -55,7 +61,7 @@ graph:
 
 - 特定のソースが、その関係を明示的に述べている。
 - 証拠として引用できる文がある。
-- その述語が、あとのクエリで意味を持つ（「誰が何を創業したか」「Stephanie は何を提案したか」）。
+- その述語が、あとのクエリで意味を持つ（「誰が何を創業したか」「山田太郎は何を提案したか」）。
 
 次の場合は、ふつうの `[[wikilink]]` を使う。
 
@@ -75,22 +81,22 @@ uv run --script scripts/wiki_graph_lint.py wiki/
 uv run --script scripts/wiki_graph_extract.py wiki/
 
 # グラフをたどる。
-python scripts/wiki_graph_query.py wiki/ neighbors --node product:konvy
-python scripts/wiki_graph_query.py wiki/ edges    --subject person:stephanie-emmanouel
-python scripts/wiki_graph_query.py wiki/ path     --from person:praney-behl --to product:konvy
-python scripts/wiki_graph_query.py wiki/ facts    --about product:konvy
+python scripts/wiki_graph_query.py wiki/ neighbors --node company:やまだ製作所
+python scripts/wiki_graph_query.py wiki/ edges    --subject person:山田太郎
+python scripts/wiki_graph_query.py wiki/ path     --from person:山田太郎 --to concept:消費税
+python scripts/wiki_graph_query.py wiki/ facts    --about company:やまだ製作所
 ```
 
 `--json` は、lint と query のどちらのコマンドでも使える。
 
 ## 取り込みのワークフローとの組み合わせ
 
-標準の取り込みのワークフローの手順 6 のあと（必要な箇所だけの更新と、ソースページの作成のあと）に、次のことを行う。
+標準の取り込みのワークフローの手順 6 のあと（必要な箇所だけの更新と、ソースの要約ページの作成のあと）に、次のことを行う。
 
 1. 取り込むページに新しい型付きエッジを追加した場合は、`wiki_graph_lint.py` を実行する。extract の前に、検出結果をユーザーと一緒に仕分ける。
 2. `wiki_graph_extract.py` を実行して、コンパイル済みの成果物を更新する。
-3. `log.md` の取り込みの項目の下に、次のサブ行を追記する。
-   `   graph: +N nodes, +M typed edges (predicates: founded, contains_product, ...)`
+3. `log.md` の取り込みの行の下に、次のサブ行を追記する。
+   `   グラフ: ノード +N、型付きエッジ +M（述語: founded、contains_product、...）`
 
 取り込むページに `graph.relationships[]` がなく、新しいページも作らなかった場合は、どちらもスキップする。グラフ層は変わらないからである。
 
@@ -99,11 +105,11 @@ python scripts/wiki_graph_query.py wiki/ facts    --about product:konvy
 ユーザーの質問が関係を問うものらしい場合（「X とつながっているものは？」「Y を提案したのは誰？」「A から B への経路をたどって」）は、次のようにする。
 
 1. いつもどおりインデックスを読む。
-2. `wiki/graph/graph.sqlite` があり、最新のログの項目より新しい場合は、候補のページの周りにある型付きエッジをクエリする。`neighbors`、`edges`、`facts` がもっとも役に立つ。
+2. `wiki/graph/graph.sqlite` があり、`log.md` にある最新の `ingest` の行より新しい場合は、候補のページの周りにある型付きエッジをクエリする。`neighbors`、`edges`、`facts` がもっとも役に立つ。
 3. 関係するノードやエッジの元になっている wiki ページを読む。重要な主張については、グラフの行だけをもとに答えてはならない。`evidence` フィールドは手がかりであって、正本ではない。
 4. 引用には、グラフの行ではなく wiki ページへの `[[wikilinks]]` を使う。
 
-`graph.sqlite` が古い（`log.md` にある最新の取り込みより古い）場合は、先に作り直してからクエリする。
+`graph.sqlite` が古い（`log.md` にある最新の `ingest` の行より古い）場合は、先に作り直してからクエリする。
 
 ## 生成される成果物の扱い
 
@@ -112,15 +118,15 @@ python scripts/wiki_graph_query.py wiki/ facts    --about product:konvy
 | `wiki/graph/ontology.yaml` | 正本。手で編集する | git で管理する |
 | `wiki/graph/nodes.jsonl` | 生成物 | 任意。`wiki/graph/.gitignore` では無視していない。PR でグラフの差分を見たいなら git で管理する |
 | `wiki/graph/edges.jsonl` | 生成物 | 上と同じ |
-| `wiki/graph/graph.sqlite` | 生成物 | 既定で **gitignore** する（大きいバイナリーのため） |
-| `wiki/graph/graph.graphml` | 生成物 | 既定で **gitignore** する |
+| `wiki/graph/graph.sqlite` | 生成物 | 既定で gitignore する（大きいバイナリーのため） |
+| `wiki/graph/graph.graphml` | 生成物 | 既定で gitignore する |
 
 初期化で作られる `wiki/graph/.gitignore` は、`graph.sqlite` と `graph.graphml` を無視する。チームで別の方針にしたいなら、このファイルを編集する。
 
 ## 避けるべきパターン
 
-- **証拠のない型付きエッジ。** グラフ層の意味がまったくなくなる。lint が指摘するので、指摘を黙らせてはならない。
-- **`nodes.jsonl`、`edges.jsonl`、`graph.sqlite` を手で編集する。** Markdown を編集し、作り直す。
-- **型付きエッジを「合わせる」ために、オントロジーの項目をでっち上げる。** オントロジーは分野の実態を表すべきもので、無理に作ったエッジを取り繕うためのものではない。適切な `subject_types`/`object_types` を付けて述語を追加するか、`mentions` を使う。
-- **回答の中で、グラフの行を証拠として扱う。** 必ず wiki ページを引用する。グラフは、どの wiki ページを読むべきかを教えてくれただけである。
-- **取り込みのあとで、作り直すのを忘れる。** グラフが気づかないうちに wiki とずれていく。取り込んだら extract を実行する、と習慣にしておく。
+- 証拠のない型付きエッジ。グラフ層の意味がまったくなくなる。lint が指摘するので、指摘を黙らせてはならない。
+- `nodes.jsonl`、`edges.jsonl`、`graph.sqlite` を手で編集する。Markdown を編集し、作り直す。
+- 型付きエッジを「合わせる」ために、オントロジーの項目をでっち上げる。オントロジーは分野の実態を表すべきもので、無理に作ったエッジを取り繕うためのものではない。適切な `subject_types`/`object_types` を付けて述語を追加するか、`mentions` を使う。
+- 回答の中で、グラフの行を証拠として扱う。必ず wiki ページを引用する。グラフは、どの wiki ページを読むべきかを教えてくれただけである。
+- 取り込みのあとで、作り直すのを忘れる。グラフが気づかないうちに wiki とずれていく。取り込んだら extract を実行する、と習慣にしておく。

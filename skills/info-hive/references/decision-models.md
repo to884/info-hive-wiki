@@ -4,6 +4,8 @@
 
 判定レイヤーは既定では無効で、なくても wiki は同じように動く。ユーザーが求めた場合にだけ有効にする。
 
+判定モデルに渡す質問文（`assets/decision-questions.json`）は英語のままで、日本語の wiki でどれだけ正しく判定できるかはまだ確かめていない（移植計画の方針 H）。評価用のフィクスチャも英語だけである。日本語の wiki で有効にすると、関係のある結果を誤って捨てるおそれがある。
+
 ## 規則
 
 - 判定がページを書き込むことも、書き込みを止めることもない。読み取りの処理は fail-open で動く。書き込み時のチェックは、lint の検出結果を出すか、フラグを立てるだけである。
@@ -23,6 +25,19 @@
 | D5 信頼できないテキストの洗い出し | `wiki_decide.py screen` | このテキストは AI システムに指示を出しているか？ | 出力の `flagged` が true になる。ページの書き込みは止めない。 |
 
 評価に合格していないチェックは実験的なものである。その結果は事実ではなく、手がかりとして使う。
+
+### D2 の照合と文の分け方
+
+グラフの lint は、型付きエッジの `evidence` がソースの要約ページの本文に含まれているかを先に照合する。含まれていれば、判定モデルを呼ばずに裏づけありとする（`confidence` は 1.0）。照合の規則は次のとおりで、評価ループで判定役の引用を確かめるとき（`grounded_verdict`）も同じ規則を使う（`scripts/wiki_text.py` の `quote_in_text`）。
+
+- 大文字と小文字を区別せず、空白の並びを 1 つにまとめる。
+- 日本語の文字（かな、漢字、和文の記号、全角の英数字）どうしの間の改行と空白は取り除く。行をまたいだ日本語の文も一致する。
+- 英数字の間の空白は残す。空白をすべて除くと、「now here」と「nowhere」を同じとみなしてしまうためである。
+- NFKC はかけない。全角と半角の違いは吸収しないので、ソースが全角の「ＡＩ」なら `evidence` も「ＡＩ」と書く。
+
+このため、`evidence` にはソースの文をそのまま写す。言い換えたり訳したりせず、1 文か文の一部にとどめる。
+
+照合で見つからないエッジだけを判定モデルに渡す。そのとき、ソースの要約ページの本文を文に分け、番号を付けて渡す。英語の文は「.!?」とそのあとの空白で分け、日本語の文は「。！？」のあとで分ける（空白がなくても分ける）。句点のあとに閉じ括弧（」』）〉》】〕）が続くときは閉じ括弧のあとで分け、「？！」のように句点が続くときは最後の句点のあとで分ける。コードブロックは除く。渡すのは最大 60 文で、1 文は 300 文字で切る（`decision-questions.json` の `max_sentences` と `max_sentence_chars`）。
 
 ## バックエンド
 
@@ -54,14 +69,14 @@ python scripts/wiki_decide.py check                   # バックエンドを試
 チェックは次のように使う。
 
 ```bash
-uv run --script scripts/wiki_search.py "query" --json --decide [--decide-pool 20] [--decide-threshold 0.65]
+uv run --script scripts/wiki_search.py "軽減税率の対象" --json --decide [--decide-pool 20] [--decide-threshold 0.65]
 uv run --script scripts/wiki_graph_lint.py wiki/ --decide [--decide-threshold 0.55]
 python scripts/wiki_decide.py contradictions --wiki wiki/ [--max-pairs 40]
 python scripts/wiki_decide.py shortlist raw/<source-file> --wiki wiki/ [--top 30]
 python scripts/wiki_decide.py screen <file>
 ```
 
-`wiki_decide.py` のグローバルなフラグは、`--backend`、`--model`、`--url`、`--timeout` である。閾値のフラグは、各サブコマンドの `--help` を参照。`--decide` を付けると、検索の JSON にトップレベルの `decision` ブロックと、各行の `decision` フィールドが加わる。`--decide` を付けなければ、出力は変わらない。
+`wiki_decide.py` のグローバルなフラグは、`--backend`、`--model`、`--url`、`--timeout` である。閾値のフラグは、各サブコマンドの `--help` で確かめる。`--decide` を付けると、検索の JSON にトップレベルの `decision` ブロックと、各行の `decision` フィールドが加わる。`--decide` を付けなければ、出力は変わらない。
 
 ## 使う前に評価する
 
@@ -72,4 +87,4 @@ python eval/decisions/run_eval.py --backend fake            # ネットワーク
 python eval/decisions/run_eval.py --backend local --out results.json
 ```
 
-バックエンドごとに分けて報告する。閾値は、取り分けておいた分割のデータだけをもとに決める。
+バックエンドごとに分けて報告する。閾値を決めるチェックでは、`run_eval.py` がフィクスチャを調整用（`tune`）と確認用（`test`）に分ける。閾値は調整用のデータだけで決め、確認用のデータで成績を確かめる。
