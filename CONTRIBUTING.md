@@ -42,12 +42,12 @@ python skills/info-hive/scripts/test_link_resolution.py
 python eval/evolution/test_evolution.py
 python eval/evolution/test_loop.py
 python eval/evolution/test_adapters.py
-python eval/retrieval/run_eval.py --gate
-python eval/retrieval/run_eval.py --set ja --gate
+python eval/retrieval/run_eval.py --gate --baseline
+python eval/retrieval/run_eval.py --set ja --gate --baseline
 python eval/decisions/test_decisions.py
 ```
 
-検索の変更では、`eval/retrieval/baselines/` に保存した基準値とも比べる。`--gate` は方式どうしの相対比較しかしないので、英語の成績が全体に下がっても通る。基準値を取り直すときは、ハイブリッド検索の依存パッケージを入れて `--save` を付ける。
+検索の変更では、`eval/retrieval/baselines/` に保存した基準値とも比べる。`--gate` は方式どうしの相対比較しかしないので、英語の成績が全体に下がっても通る。`--baseline` を付けると、recall@10 と MRR が基準値から 0.05 を超えて下がるか、偽陽性率が 0.05 を超えて上がったときに失敗する。検索の品質を意図して変えたときは、変えた理由を記録したうえで基準値を取り直す。基準値を取り直すときは、ハイブリッド検索の依存パッケージを入れて `--save` を付ける。
 
 ```bash
 uv run --with fastembed==0.8.0 --with sqlite-vec==0.1.9 --with PyYAML==6.0.3 python eval/retrieval/run_eval.py --save eval/retrieval/baselines/en.json

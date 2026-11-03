@@ -46,7 +46,7 @@ def prepare(wiki_root: Path, cache_path: Path | None = None) -> dict:
             "pyyaml": version("pyyaml"),
             "sqlite-vec": version("sqlite-vec"),
         },
-        "model": wiki_search.LOCAL_EMBED_MODEL,
+        "model": wiki_search.embed_model_name(),
         "dimension": dimension,
         "pages": len(pages),
         "sections": len(locator_ids),

@@ -30,6 +30,12 @@
 
   python3 eval/retrieval/run_eval.py --set ja
   python3 eval/retrieval/run_eval.py --save eval/retrieval/baselines/en.json
+
+``--gate`` は方式どうしの相対比較しかしない。``--baseline`` を付けると、保存した基準値
+（既定は ``baselines/<set>.json``）とも比べ、recall@10 と MRR が ``BASELINE_TOLERANCE`` を
+超えて下がるか、偽陽性率が同じ幅を超えて上がると失敗にする。
+
+  python3 eval/retrieval/run_eval.py --set ja --gate --baseline
 """
 
 import argparse
@@ -67,6 +73,12 @@ MODES = {
 }
 
 METRIC_COLUMNS = ["recall@5", "recall@10", "mrr", "fp_rate"]
+
+# 保存した基準値（--save で作る）。--baseline で比べる。
+BASELINES = HERE / "baselines"
+# 基準値から許す悪化の幅。英語のクエリ 1 問ぶん（正例 27 問なので約 0.037）の揺れは許し、
+# 2 問以上の悪化は落とす。日本語は正例 47 問なので、1 問で約 0.021 になる。
+BASELINE_TOLERANCE = 0.05
 
 # キャッシュを使っても出力がバイト単位で変わらないことを確かめる、固定した3つのクエリ。
 CACHE_QUERIES = {
@@ -262,7 +274,7 @@ def save_report(path, set_name, queries, rows, runs):
         "environment": {
             "fastembed": installed_version("fastembed"),
             "sqlite-vec": installed_version("sqlite-vec"),
-            "embed_model": wiki_search.LOCAL_EMBED_MODEL if "hybrid" in rows else None,
+            "embed_model": wiki_search.embed_model_name() if "hybrid" in rows else None,
         },
         "queries": len(queries),
         "metrics": rows,
@@ -320,6 +332,14 @@ def main():
         "--save", metavar="PATH",
         help="Write metrics and per-query results as JSON to PATH.",
     )
+    parser.add_argument(
+        "--baseline", nargs="?", const="AUTO", metavar="PATH",
+        help=(
+            "Exit 1 if recall@10 or MRR falls, or fp_rate rises, by more than "
+            f"{BASELINE_TOLERANCE} from the saved baseline "
+            "(default with no value: baselines/<set>.json)."
+        ),
+    )
     args = parser.parse_args()
 
     if not SCRIPT.exists():
@@ -369,7 +389,34 @@ def evaluate(args, queries):
             compared = "section/page + hybrid" if "hybrid" in rows else "section/page"
             print(f"gate: PASS ({compared} retrieval quality)")
 
+    if args.baseline:
+        path = BASELINES / f"{args.set}.json" if args.baseline == "AUTO" else Path(args.baseline)
+        failures = baseline_failures(rows, json.loads(path.read_text(encoding="utf-8"))["metrics"])
+        if failures:
+            print(f"baseline: FAIL ({'; '.join(failures)})", file=sys.stderr)
+            exit_code = 1
+        else:
+            print(f"baseline: PASS ({', '.join(rows)} within {BASELINE_TOLERANCE} of {path.name})")
+
     return exit_code
+
+
+def baseline_failures(rows, baseline):
+    """保存した基準値と比べ、許容幅を超えて悪くなった指標を返す。
+
+    基準値にない方式（依存パッケージがなく hybrid を測れなかった場合など）は比べない。
+    """
+    failures = []
+    for mode, metrics in rows.items():
+        saved = baseline.get(mode)
+        if not saved:
+            continue
+        for metric in ("recall@10", "mrr"):
+            if metrics[metric] < saved[metric] - BASELINE_TOLERANCE:
+                failures.append(f"{mode} {metric} {metrics[metric]:.3f} < {saved[metric]:.3f}")
+        if metrics["fp_rate"] > saved["fp_rate"] + BASELINE_TOLERANCE:
+            failures.append(f"{mode} fp_rate {metrics['fp_rate']:.3f} > {saved['fp_rate']:.3f}")
+    return failures
 
 
 if __name__ == "__main__":

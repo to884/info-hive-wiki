@@ -129,7 +129,7 @@ wiki が約 150 ページを超えるか、`index.md` が 300 行を超えたら
 ## Retrieval
 
 - 検索は、既定でセクション単位のハイブリッド検索である: `uv run --script skills/info-hive/scripts/wiki_search.py "query" --json`。
-- Semantic backend: local FastEmbed + sqlite-vec（`BAAI/bge-small-en-v1.5`、384 次元）。wiki やクエリのテキストがマシンの外に出ることはない。
+- Semantic backend: local FastEmbed + sqlite-vec（`intfloat/multilingual-e5-small`、384 次元）。wiki やクエリのテキストがマシンの外に出ることはない。
 - セマンティック検索を初めて使うときに、モデルのファイルを `~/.cache/info-hive/fastembed/` にダウンロードする。モデルのキャッシュの場所を変えるには `FASTEMBED_CACHE_PATH` を設定する。
 - `wiki/.wiki-cache/` には、作り直せる検索用のファイルを置く。`search-index.json`（パースキャッシュ）と `embeddings.sqlite`（セクションのメタデータと sqlite-vec のベクトル）である。削除してかまわない。手で編集してはならない。gitignore の対象である。
 - ベクトルのインデックスは内容のハッシュで管理する。新しいセクションと変更されたセクションだけをベクトル化し直し、削除されたセクションは取り除き、モデルやスキーマが変わったときは自動で作り直す。
