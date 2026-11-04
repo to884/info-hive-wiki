@@ -5,9 +5,9 @@ wiki_help.py — wiki プラグインのコマンドの一覧を、説明と引�
 `commands/*.md` の frontmatter から `description`、`argument-hint`、`argument-description` を読み、
 コマンドごとに 3 行の Markdown の箇条書きにする。`/wiki:help` から呼び、書式付きで表示する。
 
-    - **`/wiki:init`** `[--global] [--wiki-dir <name>] [--raw-dir <name>]`
-      - 個人用のグローバルな LLM Wiki、またはこのプロジェクトの LLM Wiki を初期化する。
-      - `--global` を付けると ...（argument-description の文）
+    - **`/wiki:init`** `[--user] [--wiki-dir <name>] [--raw-dir <name>]`
+      - ユーザースコープの LLM Wiki、またはこのプロジェクトの LLM Wiki を初期化する。
+      - `--user` を付けると ...（argument-description の文）
     - **`/wiki:stats`**
       - wiki の規模、構成、リンク密度と、スケーリングのどの閾値に達しているかを表示する。
       - 引数はない。

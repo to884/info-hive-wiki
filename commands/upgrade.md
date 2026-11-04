@@ -1,15 +1,17 @@
 ---
-description: 既存のグローバルまたはプロジェクトの LLM Wiki を、現在のプラグインのバージョンにアップグレードする。
-argument-hint: "[--global] [--wiki-dir <name>] [--raw-dir <name>]"
-argument-description: "`--global` を付けると個人用のグローバルな wiki を対象にし、付けなければ現在のプロジェクトの wiki を対象にする。`--wiki-dir` と `--raw-dir` は、既定と違うディレクトリ名で作った wiki を指すときに使う。"
+description: 既存のユーザースコープまたはプロジェクトの LLM Wiki を、現在のプラグインのバージョンにアップグレードする。
+argument-hint: "[--user] [--wiki-dir <name>] [--raw-dir <name>]"
+argument-description: "`--user` を付けるとユーザースコープの wiki を対象にし、付けなければ現在のプロジェクトの wiki を対象にする。`--wiki-dir` と `--raw-dir` は、既定と違うディレクトリ名で作った wiki を指すときに使う。"
 ---
 
 選んだ wiki を、現在のプラグインのバージョンにアップグレードする。`info-hive` スキルを使う。
 
 引数（あれば）: $ARGUMENTS
 
-1. `<WIKI_ROOT>` と `<RAW_ROOT>` は、`--global`、明示されたパス、もっとも近いプロジェクトの指示、グローバルなエージェントの指示の順に探し、どれにもなければ現在のプロジェクトの `wiki/` と `raw/` とする。wiki があることを確認する。ない場合は、代わりに対応する `/wiki:init --global` か `/wiki:init` を提案する。
-2. ベースディレクトリと、特定したルートとちょうど一致する wiki と raw の相対パスを指定して、`init_wiki.py` を実行する。標準のグローバル構成（`~/info-hive/wiki/` と `~/info-hive/raw/`）では `python "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/init_wiki.py" "<absolute-home-directory>/info-hive" --upgrade` を使う。以前の既定（`~/wiki/` と `~/wiki/raw/`）で作った wiki は `"<absolute-home-directory>" --wiki-dir wiki --raw-dir wiki/raw --upgrade` のまま使い、移動はしない。プロジェクトの既定の構成では、プロジェクトルートの絶対パスに `--upgrade` を付ける。プラグインのディレクトリに対して実行してはならない。実行環境の JSON が `"status": "ready"` を示していない限り、アップグレードの完了を報告してはならない。
+`--global` は `--user` に改名して受け付けなくなったので、`--global` が渡されたら何も実行せず、`--user` を使うように伝えて止める。
+
+1. `<WIKI_ROOT>` と `<RAW_ROOT>` は、`--user`、明示されたパス、もっとも近いプロジェクトの指示、グローバルなエージェントの指示の順に探し、どれにもなければ現在のプロジェクトの `wiki/` と `raw/` とする。wiki があることを確認する。ない場合は、代わりに対応する `/wiki:init --user` か `/wiki:init` を提案する。
+2. ベースディレクトリと、特定したルートとちょうど一致する wiki と raw の相対パスを指定して、`init_wiki.py` を実行する。ユーザースコープの標準の構成（`~/info-hive/wiki/` と `~/info-hive/raw/`）では `python "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/init_wiki.py" "<absolute-home-directory>/info-hive" --upgrade` を使う。以前の既定（`~/wiki/` と `~/wiki/raw/`）で作った wiki は `"<absolute-home-directory>" --wiki-dir wiki --raw-dir wiki/raw --upgrade` のまま使い、移動はしない。プロジェクトの既定の構成では、プロジェクトルートの絶対パスに `--upgrade` を付ける。プラグインのディレクトリに対して実行してはならない。実行環境の JSON が `"status": "ready"` を示していない限り、アップグレードの完了を報告してはならない。
 3. スクリプトの "Upgrade required: <SCHEMA.md>" の出力を読む。そこに挙がっている、SCHEMA.md に欠けているセクションごとに、次のことを行う。
    - `skills/info-hive/assets/SCHEMA.md.template` を開き、見出しが一致するセクションを探す。
    - そのセクションの内容をユーザーに示し、`str_replace` でユーザーの SCHEMA.md に追記することを提案する。セクションごとに承認を待つ。SCHEMA.md はユーザーと一緒に改訂してきたものなので、黙って変更してはならない。
@@ -37,7 +39,7 @@ argument-description: "`--global` を付けると個人用のグローバルな 
    - `python "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_search.py" "<検索語>" --wiki "<WIKI_ROOT>" --no-embed` を使うと、依存パッケージを使わない語彙ベースの BM25 に固定できる。パッケージがない、モデルの初期化でエラーが出た、sqlite-vec を読み込めなかった、といった場合も語彙ベースの検索に切り替わり、クエリの出力は壊れない。
    - 検索はセクション単位で、セクションの見出し（`§` の行）を表示する。ページ単位の語彙ベースの順位付けにするには `--granularity page` を指定する。
    - スクリプトが「ローカルの埋め込み検索（FastEmbed と sqlite-vec）」の欠落を報告した場合は、現在のテンプレートの `- Semantic backend: local FastEmbed + sqlite-vec` の行を、内容を示して承認を得たうえで、既存の `## Retrieval` セクションにマージする。llm-wiki の SCHEMA.md にこの行があっても、モデル名が `BAAI/bge-small-en-v1.5` のままなら、`intfloat/multilingual-e5-small` に直すことを提案する。
-5. 選んだ wiki について、グローバルまたはプロジェクトのエージェントのメモリに書かれた記述が古い `/wiki:init` で設定されたもので、グラフ層に触れていない場合は、次のような1行の案内を追加するかをユーザーに聞く。
+5. 選んだ wiki について、ユーザースコープまたはプロジェクトのエージェントのメモリに書かれた記述が古い `/wiki:init` で設定されたもので、グラフ層に触れていない場合は、次のような1行の案内を追加するかをユーザーに聞く。
 
    > 関係を問う質問では、`info-hive` スキルの `wiki_graph_query.py` で `wiki/graph/graph.sqlite` も参照できる。
 
