@@ -115,13 +115,13 @@ wiki の型付きグラフ層をコンパイル、lint、またはクエリす�
 /wiki:help
 ```
 
-`wiki_help.py` が `commands/*.md` の frontmatter（`description`、`argument-hint`、`argument-description`）を読み、コマンドごとに 3 行の箇条書きにする。1 行目はコマンド名と引数の書式、2 行目は説明、3 行目は引数の説明である。引数のないコマンドは「引数はない。」と出る。一覧は frontmatter から作るので、コマンドを足したり変えたりしたときに別に直す場所はない。
+`wiki_help.py` が `commands/*.md` の frontmatter（`description`、`argument-hint`、`argument-description`）を読み、コマンドごとに 3 行の Markdown の箇条書きにする。1 行目はコマンド名と引数の書式、2 行目は説明、3 行目は引数の説明である。コマンド名は太字のインラインコード、引数の書式はインラインコードにするので、`<質問>` の山かっこや `|` も崩れずに表示される。引数のないコマンドは「引数はない。」と出る。`/wiki:help` は、この出力をコードブロックに入れずに書式付きで示す。一覧は frontmatter から作るので、コマンドを足したり変えたりしたときに別に直す場所はない。
 
-```text
-- /wiki:query: <質問>
+```markdown
+- **`/wiki:query`** `<質問>`
   - LLM Wiki に問い合わせ、蓄積した知識から出典つきで質問に答える。
   - wiki に問い合わせる質問。日本語の質問は分かち書きせずにそのまま書く。
-- /wiki:stats
+- **`/wiki:stats`**
   - wiki の規模、構成、リンク密度と、スケーリングのどの閾値に達しているかを表示する。
   - 引数はない。
 ```

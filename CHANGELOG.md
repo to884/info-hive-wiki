@@ -6,6 +6,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `/wiki:help` の一覧を、コードブロックのプレーンテキストではなく、書式付きの Markdown で表示するようにした。コマンド名は太字のインラインコード、引数の書式はインラインコードにするので、`<質問>` の山かっこや `|` も崩れない。`--json` の出力は変わらない。
+
 ## [0.1.0] - 2026-11-04
 
 移植元 praneybehl/llm-wiki-plugin v4.0.1 を日本語の wiki 向けに移植した、最初のリリース。移植元のバージョンごとの変更履歴は [docs/upstream-changelog.md](docs/upstream-changelog.md) にある。
