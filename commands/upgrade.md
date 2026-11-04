@@ -1,6 +1,7 @@
 ---
 description: 既存のグローバルまたはプロジェクトの LLM Wiki を、現在のプラグインのバージョンにアップグレードする。
 argument-hint: "[--global] [--wiki-dir <name>] [--raw-dir <name>]"
+argument-description: "`--global` を付けると個人用のグローバルな wiki を対象にし、付けなければ現在のプロジェクトの wiki を対象にする。`--wiki-dir` と `--raw-dir` は、既定と違うディレクトリ名で作った wiki を指すときに使う。"
 ---
 
 選んだ wiki を、現在のプラグインのバージョンにアップグレードする。`info-hive` スキルを使う。
@@ -8,7 +9,7 @@ argument-hint: "[--global] [--wiki-dir <name>] [--raw-dir <name>]"
 引数（あれば）: $ARGUMENTS
 
 1. `<WIKI_ROOT>` と `<RAW_ROOT>` は、`--global`、明示されたパス、もっとも近いプロジェクトの指示、グローバルなエージェントの指示の順に探し、どれにもなければ現在のプロジェクトの `wiki/` と `raw/` とする。wiki があることを確認する。ない場合は、代わりに対応する `/wiki:init --global` か `/wiki:init` を提案する。
-2. ベースディレクトリと、特定したルートとちょうど一致する wiki と raw の相対パスを指定して、`init_wiki.py` を実行する。標準のグローバル構成では `python "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/init_wiki.py" "<absolute-home-directory>" --wiki-dir wiki --raw-dir wiki/raw --upgrade` を使う。プロジェクトの既定の構成では、プロジェクトルートの絶対パスに `--upgrade` を付ける。プラグインのディレクトリに対して実行してはならない。実行環境の JSON が `"status": "ready"` を示していない限り、アップグレードの完了を報告してはならない。
+2. ベースディレクトリと、特定したルートとちょうど一致する wiki と raw の相対パスを指定して、`init_wiki.py` を実行する。標準のグローバル構成（`~/info-hive/wiki/` と `~/info-hive/raw/`）では `python "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/init_wiki.py" "<absolute-home-directory>/info-hive" --upgrade` を使う。以前の既定（`~/wiki/` と `~/wiki/raw/`）で作った wiki は `"<absolute-home-directory>" --wiki-dir wiki --raw-dir wiki/raw --upgrade` のまま使い、移動はしない。プロジェクトの既定の構成では、プロジェクトルートの絶対パスに `--upgrade` を付ける。プラグインのディレクトリに対して実行してはならない。実行環境の JSON が `"status": "ready"` を示していない限り、アップグレードの完了を報告してはならない。
 3. スクリプトの "Upgrade required: <SCHEMA.md>" の出力を読む。そこに挙がっている、SCHEMA.md に欠けているセクションごとに、次のことを行う。
    - `skills/info-hive/assets/SCHEMA.md.template` を開き、見出しが一致するセクションを探す。
    - そのセクションの内容をユーザーに示し、`str_replace` でユーザーの SCHEMA.md に追記することを提案する。セクションごとに承認を待つ。SCHEMA.md はユーザーと一緒に改訂してきたものなので、黙って変更してはならない。

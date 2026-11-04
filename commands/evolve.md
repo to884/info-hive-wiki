@@ -1,6 +1,7 @@
 ---
 description: 根拠にもとづくスキルの改善案を作成・評価・適用し、必要に応じてロールバックする。
 argument-hint: "<スキルと改善の目的 | history | show/apply/rollback 実験 ID>"
+argument-description: "改善したいスキルと目的を書くと改善のサイクルを回す。`history` は過去の試行の一覧、`show <実験 ID>` は内容の確認、`apply <実験 ID>` は承認済みの候補の適用、`rollback <実験 ID>` は元に戻す。"
 ---
 
 `info-hive` スキルを使い、作業を始める前に `references/evolution-workflow.md` を読むこと。

@@ -16,9 +16,13 @@ SCHEMA.md は決して上書きしない。スキーマはユーザーと一緒�
 使い方:
     python init_wiki.py <base-dir> [--wiki-dir wiki] [--raw-dir raw] [--upgrade]
 
+<base-dir> がまだなく、その親のディレクトリがあれば、初期化では <base-dir> を作る（~/info-hive の初回など）。
+親もないときは、パスの誤りとみなして止める。アップグレードでは <base-dir> が必要である。
+
 例:
     python init_wiki.py .
     python init_wiki.py . --upgrade
+    python init_wiki.py ~/info-hive
     python init_wiki.py ~/research --wiki-dir kb --raw-dir sources
 """
 
@@ -169,9 +173,16 @@ def install_runtime(wiki: Path) -> None:
 
 def init_wiki(project_root: Path, wiki_dir: str, raw_dir: str, upgrade: bool = False) -> None:
     project_root = project_root.resolve()
+    created_base = False
     if not project_root.exists():
-        print(f"エラー: 基準のディレクトリがない: {project_root}", file=sys.stderr)
-        sys.exit(1)
+        # 初回のグローバル構成（~/info-hive など）では、基準のディレクトリ自体がまだない。
+        # 親のディレクトリがあれば作る。親もないときはパスの誤りとみなして止める。
+        # アップグレードは既存の wiki が対象なので、基準のディレクトリがなければ止める。
+        if upgrade or not project_root.parent.is_dir():
+            print(f"エラー: 基準のディレクトリがない: {project_root}", file=sys.stderr)
+            sys.exit(1)
+        project_root.mkdir()
+        created_base = True
 
     wiki = project_root / wiki_dir
     raw = project_root / raw_dir
@@ -182,6 +193,8 @@ def init_wiki(project_root: Path, wiki_dir: str, raw_dir: str, upgrade: bool = F
     width = max(display_width(label) for label, _ in labels)
     for label, path in labels:
         print(f"  {ljust_display(label, width)} {path}")
+    if created_base:
+        print(f"  基準のディレクトリがなかったので作った: {project_root}")
     print()
 
     created = []
@@ -259,7 +272,7 @@ def init_wiki(project_root: Path, wiki_dir: str, raw_dir: str, upgrade: bool = F
 
 def main():
     parser = localize_argparse(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter))
-    parser.add_argument("project_root", type=Path, metavar="BASE_DIR", help="wiki と raw ソースのディレクトリを置く基準のディレクトリ（プロジェクトのルートやホームディレクトリなど）")
+    parser.add_argument("project_root", type=Path, metavar="BASE_DIR", help="wiki と raw ソースのディレクトリを置く基準のディレクトリ（プロジェクトのルートや ~/info-hive など）。初期化では、なければ作る（親のディレクトリが必要）")
     parser.add_argument("--wiki-dir", default="wiki", help="wiki のサブディレクトリの名前（既定: wiki）")
     parser.add_argument("--raw-dir", default="raw", help="raw ソースのサブディレクトリの名前（既定: raw）")
     parser.add_argument("--upgrade", action="store_true",

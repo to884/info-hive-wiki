@@ -74,7 +74,7 @@ python /path/to/info-hive-wiki/skills/info-hive/scripts/wiki_search.py "your que
 
 スキル本体（`SKILL.md` や references）を変えたときにもっとも役立つのは、実際に取り込んでみることである。テスト用のプロジェクトの `raw/` に論文や記事を置き、`/wiki:ingest <path>` を実行し、できあがったものを読む。ワークフローがずれて出力の質が落ちているなら、スキルを直す必要がある。
 
-スラッシュコマンドを変えたときは、新しいプロジェクトにプラグインをインストールし、コマンドを最初から最後まで実行して確かめる。
+スラッシュコマンドを変えたときは、新しいプロジェクトにプラグインをインストールし、コマンドを最初から最後まで実行して確かめる。引数のあるコマンドを足したり変えたりしたときは、frontmatter の `argument-hint` と `argument-description` もそろえて書き、`/wiki:help`（`python skills/info-hive/scripts/wiki_help.py`）の出力を確かめる。
 
 ## スキルの文章の書き方
 

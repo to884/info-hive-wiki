@@ -31,7 +31,7 @@ info-hive は、[praneybehl/llm-wiki-plugin](https://github.com/praneybehl/llm-w
 - スキルのディレクトリを `skills/llm-wiki/` から `skills/info-hive/` に改名した。
 - 判定レイヤーの環境変数を `LLM_WIKI_DECISIONS*` から `INFO_HIVE_DECISIONS*` に、モデルのキャッシュを `~/.cache/llm-wiki/` から `~/.cache/info-hive/` に変えた。
 
-日本語への対応の内容は [移植計画](https://github.com/to884/info-hive-dev/blob/main/docs/porting-plan.html) と `CHANGELOG.md` にまとめる。
+日本語への対応の内容は [移植計画](https://github.com/to884/info-hive-dev/blob/main/docs/porting-plan.html) と `CHANGELOG.md` にまとめる。移植元の v0.1.0 から v4.0.1 までの変更履歴の日本語訳は [docs/upstream-changelog.md](docs/upstream-changelog.md) に残している。
 
 ## 移植元の修正を取り込む手順
 

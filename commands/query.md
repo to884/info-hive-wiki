@@ -1,6 +1,7 @@
 ---
 description: LLM Wiki に問い合わせ、蓄積した知識から出典つきで質問に答える。
 argument-hint: "<質問>"
+argument-description: "wiki に問い合わせる質問。日本語の質問は分かち書きせずにそのまま書く。"
 ---
 
 `info-hive` スキルのクエリワークフローに従い、wiki をもとに次の質問に答える。

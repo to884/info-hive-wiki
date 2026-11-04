@@ -1,6 +1,7 @@
 ---
 description: wiki の型付きグラフ層をコンパイル、lint、またはクエリする。
 argument-hint: "extract | lint | neighbors --node <id> | edges --subject <id> | path --from <id> --to <id> | facts --about <id>"
+argument-description: "最初の語でサブコマンドを選ぶ。`extract` はグラフをコンパイルし、`lint` は型付きエッジを検証する。`neighbors --node <id>`、`edges --subject <id> [--predicate <p>]`、`path --from <id> --to <id> [--max-depth N]`、`facts --about <id>` はコンパイル済みのグラフに問い合わせる。"
 ---
 
 `info-hive` スキルのグラフワークフローに従い、wiki に対してグラフ層の操作を実行する。
