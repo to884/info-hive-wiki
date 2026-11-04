@@ -57,22 +57,27 @@ class RenderTests(unittest.TestCase):
         self.assertEqual([c["name"] for c in commands], ["query", "stats", "alpha", "zeta"])
         self.assertEqual(
             WIKI_HELP.render(commands),
-            "- /wiki:query: <質問>\n"
+            "- **`/wiki:query`** `<質問>`\n"
             "  - 質問に答える。\n"
             "  - wiki に問い合わせる質問。\n"
-            "- /wiki:stats\n"
+            "- **`/wiki:stats`**\n"
             "  - 規模を表示する。\n"
             "  - 引数はない。\n"
-            "- /wiki:alpha\n"
+            "- **`/wiki:alpha`**\n"
             "  - 固定順の後ろの先頭。\n"
             "  - 引数はない。\n"
-            "- /wiki:zeta: <x>\n"
+            "- **`/wiki:zeta`** `<x>`\n"
             "  - 後ろに並ぶ。\n"
             "  - （引数の説明は未記入）\n",
         )
         self.assertEqual(len(warnings), 2)
         self.assertTrue(any("broken.md" in w and "frontmatter" in w for w in warnings))
         self.assertTrue(any("zeta.md" in w and "argument-description" in w for w in warnings))
+
+    def test_code_span_survives_backticks(self):
+        self.assertEqual(WIKI_HELP.code_span("<x>"), "`<x>`")
+        self.assertEqual(WIKI_HELP.code_span("a `b` c"), "``a `b` c``")
+        self.assertEqual(WIKI_HELP.code_span("`b`"), "`` `b` ``")
 
     def test_plugin_name_comes_from_manifest(self):
         self.assertEqual(WIKI_HELP.plugin_name(self.root), "wiki")
@@ -102,8 +107,8 @@ class RealCommandsTests(unittest.TestCase):
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
-        heads = [line for line in result.stdout.splitlines() if line.startswith("- /wiki:")]
-        self.assertEqual([h.split(":")[1].split(" ")[0] for h in heads], self.EXPECTED)
+        heads = [line for line in result.stdout.splitlines() if line.startswith("- **`/wiki:")]
+        self.assertEqual([h.split("`")[1].split(":")[1] for h in heads], self.EXPECTED)
         # どのコマンドも 3 行（名前、説明、引数の説明）になっている。
         self.assertEqual(len(result.stdout.splitlines()), 3 * len(self.EXPECTED))
 

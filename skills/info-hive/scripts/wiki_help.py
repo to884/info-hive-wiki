@@ -3,12 +3,12 @@
 wiki_help.py — wiki プラグインのコマンドの一覧を、説明と引数つきで表示する。
 
 `commands/*.md` の frontmatter から `description`、`argument-hint`、`argument-description` を読み、
-コマンドごとに 3 行の箇条書きにする。`/wiki:help` から呼ぶ。
+コマンドごとに 3 行の Markdown の箇条書きにする。`/wiki:help` から呼び、書式付きで表示する。
 
-    - /wiki:init: [--global] [--wiki-dir <name>] [--raw-dir <name>]
+    - **`/wiki:init`** `[--global] [--wiki-dir <name>] [--raw-dir <name>]`
       - 個人用のグローバルな LLM Wiki、またはこのプロジェクトの LLM Wiki を初期化する。
       - `--global` を付けると ...（argument-description の文）
-    - /wiki:stats
+    - **`/wiki:stats`**
       - wiki の規模、構成、リンク密度と、スケーリングのどの閾値に達しているかを表示する。
       - 引数はない。
 
@@ -110,16 +110,31 @@ def collect_commands(root: Path, plugin: str) -> tuple[list[dict], list[str]]:
     return commands, warnings
 
 
+def code_span(text: str) -> str:
+    """Markdown のインラインコードにする。中のバッククォートより長い区切りを使う。"""
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    fence = "`" * (longest + 1)
+    # 区切りと同じ文字で始まる・終わるときは、間に空白を入れる（CommonMark の規則）。
+    if text.startswith("`") or text.endswith("`"):
+        text = f" {text} "
+    return f"{fence}{text}{fence}"
+
+
 def render(commands: list[dict]) -> str:
-    """コマンドごとに 3 行の箇条書きにする。末尾は改行で終わる。"""
+    """コマンドごとに 3 行の Markdown の箇条書きにする。末尾は改行で終わる。
+
+    コマンド名は太字のインラインコード、引数の書式はインラインコードにする。
+    `<質問>` のような山かっこや `|` が、HTML のタグや表の区切りとして解釈されないようにするためである。
+    """
     lines: list[str] = []
     for c in commands:
+        head = f"- **{code_span(c['command'])}**"
         if c["argument_hint"]:
-            lines.append(f"- {c['command']}: {c['argument_hint']}")
+            lines.append(f"{head} {code_span(c['argument_hint'])}")
             lines.append(f"  - {c['description']}")
             lines.append(f"  - {c['argument_description'] or MISSING_ARGUMENT_DESCRIPTION}")
         else:
-            lines.append(f"- {c['command']}")
+            lines.append(head)
             lines.append(f"  - {c['description']}")
             lines.append(f"  - {NO_ARGUMENTS}")
     return "\n".join(lines) + ("\n" if lines else "")
