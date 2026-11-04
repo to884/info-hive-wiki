@@ -175,7 +175,7 @@ def init_wiki(project_root: Path, wiki_dir: str, raw_dir: str, upgrade: bool = F
     project_root = project_root.resolve()
     created_base = False
     if not project_root.exists():
-        # 初回のグローバル構成（~/info-hive など）では、基準のディレクトリ自体がまだない。
+        # 初回のユーザースコープの構成（~/info-hive など）では、基準のディレクトリ自体がまだない。
         # 親のディレクトリがあれば作る。親もないときはパスの誤りとみなして止める。
         # アップグレードは既存の wiki が対象なので、基準のディレクトリがなければ止める。
         if upgrade or not project_root.parent.is_dir():

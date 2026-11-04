@@ -65,7 +65,7 @@ flowchart TD
    python "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/init_wiki.py" "<absolute-project-root>" --upgrade
    ```
 
-   標準の個人用グローバル構成の場合:
+   ユーザースコープの標準の構成の場合:
 
    ```bash
    python "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/init_wiki.py" "<absolute-home-directory>/info-hive" --upgrade

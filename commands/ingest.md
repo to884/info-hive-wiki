@@ -21,4 +21,4 @@ argument-description: "取り込むソース。ファイルのパス、URL、ま
 7. `<WIKI_ROOT>/graph/ontology.yaml` があり、今回の取り込みで型付きの `graph.relationships[]` を追加した、または追加できる場合は、ソースが明示的に裏づけている場合に限って型付きのエッジを追加する（述語、ソースページのスラッグ、証拠となる引用、確信度、ステータスを付ける）。次に `uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_graph_lint.py" "<WIKI_ROOT>"` を実行し、検出結果をユーザーと一緒に仕分けてから、`uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_graph_extract.py" "<WIKI_ROOT>"` を実行する。`log.md` の取り込みの行の下に、`   グラフ: ノード +N、型付きエッジ +M` というサブ行を追記する。
 8. 作業が終わったら、何をしたかをユーザーに伝える。更新したページ、作成したページ、指摘した矛盾、追って調べる価値のある点を報告する。
 
-wiki がまだない場合は、プロジェクトをまたいで使う個人用の wiki なら `/wiki:init --global`、プロジェクト用の wiki なら `/wiki:init` を提案する。
+wiki がまだない場合は、プロジェクトをまたいで使うユーザースコープの wiki なら `/wiki:init --user`、プロジェクト用の wiki なら `/wiki:init` を提案する。
