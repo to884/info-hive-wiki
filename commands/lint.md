@@ -1,6 +1,7 @@
 ---
 description: LLM Wiki の構造と内容の両面で健全性をチェックする。
 argument-hint: "[--suggest-pages]"
+argument-description: "`--suggest-pages` を付けると、独立したページにすべきコンセプトの候補も挙げる。"
 ---
 
 `info-hive` スキルの lint ワークフローに従い、wiki に lint をかける。

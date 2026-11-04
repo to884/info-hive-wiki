@@ -1,6 +1,7 @@
 ---
 description: ソース（論文、記事、文字起こし、PDF、メモ）を LLM Wiki に取り込む。
 argument-hint: "<ソースのパス、URL、または説明>"
+argument-description: "取り込むソース。ファイルのパス、URL、またはソースの説明（論文、記事、文字起こし、PDF、メモなど）を書く。"
 ---
 
 `info-hive` スキルの取り込みワークフローに従い、ソースを wiki に取り込む。

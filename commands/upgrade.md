@@ -1,6 +1,7 @@
 ---
 description: 既存のグローバルまたはプロジェクトの LLM Wiki を、現在のプラグインのバージョンにアップグレードする。
 argument-hint: "[--global] [--wiki-dir <name>] [--raw-dir <name>]"
+argument-description: "`--global` を付けると個人用のグローバルな wiki を対象にし、付けなければ現在のプロジェクトの wiki を対象にする。`--wiki-dir` と `--raw-dir` は、既定と違うディレクトリ名で作った wiki を指すときに使う。"
 ---
 
 選んだ wiki を、現在のプラグインのバージョンにアップグレードする。`info-hive` スキルを使う。

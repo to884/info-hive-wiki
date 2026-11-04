@@ -1,6 +1,7 @@
 ---
 description: 個人用のグローバルな LLM Wiki、またはこのプロジェクトの LLM Wiki を初期化する。
 argument-hint: "[--global] [--wiki-dir <name>] [--raw-dir <name>]"
+argument-description: "`--global` を付けると `~/wiki/` と `~/wiki/raw/` に個人用の wiki を作り、付けなければ現在のプロジェクトの `wiki/` と `raw/` に作る。`--wiki-dir` と `--raw-dir` で、それぞれのディレクトリ名を変えられる。"
 ---
 
 新しい LLM Wiki を初期化する。`info-hive` スキルを使う。

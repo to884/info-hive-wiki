@@ -1,6 +1,7 @@
 ---
 description: 検証済みのタスクの経験を記録し、再利用できる教訓として wiki にまとめる。
 argument-hint: "<タスクの成果物、または経験の記録>"
+argument-description: "記録するタスクの成果物、または経験の記録（何をして、何が起きたか）。"
 ---
 
 `info-hive` スキルを使い、`references/evolution-workflow.md` を読むこと。

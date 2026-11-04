@@ -6,6 +6,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `/wiki:help` を追加した。`commands/*.md` の frontmatter から、コマンド名・引数・説明・引数の説明の一覧を `wiki_help.py` で生成して表示する。引数の説明は、各コマンドの frontmatter に足した `argument-description` に書く。
+
 ### Changed
 
 - frontmatter の文字列の値は、配列の要素も含めて二重引用符で囲む決まりにした（`type: "source"`、`tags: ["税制", "間接税"]`）。日付と数値は囲まない。lint・検索・統計の frontmatter の解析を `wiki_text.py` の共通のパーサーにまとめ、引用符の中のカンマで配列を分けず、引用符の外の行末コメントを捨て、`\"` と `\\` を戻すようにした。評価ループが書くページとテンプレートも引用符つきにした。検索のパースキャッシュは自動で作り直される。
