@@ -19,7 +19,7 @@ Claude Code のプラグインには、10個の `/wiki:*` スラッシュコマ�
 
 ## `/wiki:init`
 
-新しい LLM Wiki を作る。`--global` を付けると `~/wiki/` に作り、raw ソースは `~/wiki/raw/` に置く。付けなければ、現在のプロジェクトの `wiki/` と `raw/` に作る。オプションの `--wiki-dir` と `--raw-dir` で、これらの既定値を変えられる。
+新しい LLM Wiki を作る。`--global` を付けると `~/info-hive/wiki/` に作り、raw ソースは `~/info-hive/raw/` に置く。付けなければ、現在のプロジェクトの `wiki/` と `raw/` に作る。オプションの `--wiki-dir` と `--raw-dir` で、これらの既定値を変えられる。
 
 ```bash
 /wiki:init

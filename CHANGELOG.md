@@ -12,6 +12,7 @@
 
 ### Changed
 
+- `/wiki:init --global` の既定を、`~/wiki/` と `~/wiki/raw/` から `~/info-hive/wiki/` と `~/info-hive/raw/` に変えた。標準のグローバル構成の初期化とアップグレードは、ベースディレクトリに `~/info-hive` を渡すだけでよい（`--wiki-dir` と `--raw-dir` は既定の `wiki` と `raw`）。以前の既定で作った wiki は移動せず、今までどおり `--wiki-dir wiki --raw-dir wiki/raw` で指す。
 - frontmatter の文字列の値は、配列の要素も含めて二重引用符で囲む決まりにした（`type: "source"`、`tags: ["税制", "間接税"]`）。日付と数値は囲まない。lint・検索・統計の frontmatter の解析を `wiki_text.py` の共通のパーサーにまとめ、引用符の中のカンマで配列を分けず、引用符の外の行末コメントを捨て、`\"` と `\\` を戻すようにした。評価ループが書くページとテンプレートも引用符つきにした。検索のパースキャッシュは自動で作り直される。
 - リポジトリを `to884/info-hive` から `to884/info-hive-wiki` に移した。旧リポジトリはアーカイブする。
 - マーケットプレイスの定義（`.claude-plugin/marketplace.json`）を、別のリポジトリ [to884/info-hive-marketplace](https://github.com/to884/info-hive-marketplace) に移した。マーケットプレイス名は `info-hive` のままで、`/plugin install wiki@info-hive` で入れる。

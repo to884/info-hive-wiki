@@ -68,6 +68,12 @@ flowchart TD
    標準の個人用グローバル構成の場合:
 
    ```bash
+   python "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/init_wiki.py" "<absolute-home-directory>/info-hive" --upgrade
+   ```
+
+   以前の既定（`~/wiki/` と `~/wiki/raw/`）で作った wiki は移動せず、ベースディレクトリとサブディレクトリをそのまま指定する:
+
+   ```bash
    python "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/init_wiki.py" "<absolute-home-directory>" --wiki-dir wiki --raw-dir wiki/raw --upgrade
    ```
 

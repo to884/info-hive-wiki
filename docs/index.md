@@ -51,7 +51,7 @@ flowchart LR
 2. 最初のソース（PDF、記事、文字起こし）を**取り込む**。
 
    ```bash
-   /wiki:ingest ~/wiki/raw/your-source.pdf
+   /wiki:ingest ~/info-hive/raw/your-source.pdf
    ```
 
 3. 蓄積した知識に、出典つきで**問い合わせる**。

@@ -6,15 +6,15 @@
 同時に行われた編集があれば拒否する。ローカルのランナーは信頼された実行ファイルであり、サンドボックスではない。
 
 例:
-  python wiki_evolve.py capture --raw ~/wiki/raw --record experience.json
-  python wiki_evolve.py --wiki ~/wiki propose --id query-v1 --skill ./my-skill \
+  python wiki_evolve.py capture --raw ~/info-hive/raw --record experience.json
+  python wiki_evolve.py --wiki ~/info-hive/wiki propose --id query-v1 --skill ./my-skill \
     --target references/query.md --candidate /tmp/query.md \
     --evidence concepts/stale-decisions.md --reason '置き換わった決定を見分ける'
-  python wiki_evolve.py --wiki ~/wiki evaluate query-v1 --suite suite.json \
+  python wiki_evolve.py --wiki ~/info-hive/wiki evaluate query-v1 --suite suite.json \
     --runner runner.json --model model-version --tools tool-versions
-  python wiki_evolve.py --wiki ~/wiki apply query-v1
-  python wiki_evolve.py --wiki ~/wiki rollback query-v1
-  python wiki_evolve.py --wiki ~/wiki history
+  python wiki_evolve.py --wiki ~/info-hive/wiki apply query-v1
+  python wiki_evolve.py --wiki ~/info-hive/wiki rollback query-v1
+  python wiki_evolve.py --wiki ~/info-hive/wiki history
 """
 
 import argparse
