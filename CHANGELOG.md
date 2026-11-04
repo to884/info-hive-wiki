@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-04
+
 ### Changed
 
 - **互換性のない変更:** `/wiki:init` と `/wiki:upgrade` の `--global` を `--user` に改名した。`--global` は受け付けず、渡されたときは何も実行せずに `--user` を使うよう伝える。作られる場所（`~/info-hive/wiki/` と `~/info-hive/raw/`）は変わらない。文書の「個人用のグローバルな wiki」も「ユーザースコープの wiki」に改めた。エージェントのグローバルな指示と、スキルのグローバルなインストールの呼び方は変えていない。
@@ -61,5 +63,6 @@
 - 移植元の調査メモ `research/` と、移植元の英語の評価セットでの測定記録（`eval/decisions/results-*.json`）は取り込んでいない。
 - Paperclip 連携は移植元の v4.0.0 で削除されており、info-hive にもない。
 
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/to884/info-hive-wiki/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.1.0
