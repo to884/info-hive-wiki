@@ -48,15 +48,21 @@ def require_ontology(wiki: Path, override: Path | None = None) -> Path:
     return path
 
 
+DISABLED_HINT = (
+    "グラフ層を導入する前の wiki なので、何もしない。グラフを使うには、"
+    "assets/ontology.yaml.template を <wiki>/graph/ontology.yaml に置く"
+    "（/wiki:upgrade でも置ける）。"
+)
+
+
+def disabled_message(exc: GraphLayerDisabled) -> str:
+    """グラフ層がないことを伝える文面。CLI の 3 つの入口と MCP のツールで同じものを使う。"""
+    return f"{exc}\n{DISABLED_HINT}"
+
+
 def report_disabled(exc: GraphLayerDisabled) -> None:
     """グラフ層がないことを、3 つの入口で同じ文面で標準エラーに書く。"""
-    print(str(exc), file=sys.stderr)
-    print(
-        "グラフ層を導入する前の wiki なので、何もしない。グラフを使うには、"
-        "assets/ontology.yaml.template を <wiki>/graph/ontology.yaml に置く"
-        "（/wiki:upgrade でも置ける）。",
-        file=sys.stderr,
-    )
+    print(disabled_message(exc), file=sys.stderr)
 
 
 def temp_path_for(target: Path) -> Path:

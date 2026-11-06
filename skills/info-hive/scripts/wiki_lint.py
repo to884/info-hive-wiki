@@ -270,6 +270,8 @@ def parse_date(s):
 
 # ISO 形式（YYYY-MM-DD）を求める frontmatter の日付のフィールド。
 DATE_FIELDS = ("created", "updated", "ingested")
+# 必須の frontmatter のフィールドの既定値（--required-fm と MCP の lint ツールが使う）。
+DEFAULT_REQUIRED_FM = ("type", "title", "tags", "created", "updated")
 
 
 def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str], suggest_pages: bool, suggest_min: int,
@@ -539,7 +541,7 @@ def main():
     parser.add_argument("--hard-cap", type=int, default=200, help="ページサイズのハード上限の行数（既定: 200）")
     parser.add_argument("--soft-char-cap", type=int, default=10000, help="ページサイズのソフト上限の文字数。空白を除いて数える（既定: 10000）")
     parser.add_argument("--hard-char-cap", type=int, default=25000, help="ページサイズのハード上限の文字数。空白を除いて数える（既定: 25000）")
-    parser.add_argument("--required-fm", default="type,title,tags,created,updated", help="必須の frontmatter のフィールド。カンマで区切る（既定: type,title,tags,created,updated）")
+    parser.add_argument("--required-fm", default=",".join(DEFAULT_REQUIRED_FM), help="必須の frontmatter のフィールド。カンマで区切る（既定: type,title,tags,created,updated）")
     parser.add_argument("--suggest-pages", action="store_true", help="多くのページに出てくるのに専用のページがない語を挙げる")
     parser.add_argument("--suggest-min", type=int, default=5, help="--suggest-pages で挙げる最小の出現ページ数（既定: 5）")
     parser.add_argument("--json", action="store_true", help="テキストの代わりに JSON を出力する。キーは英語のまま")

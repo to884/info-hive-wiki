@@ -5,13 +5,18 @@ wiki_stats.py — wiki の規模、構成、リンク密度の簡単な集計。
 インデックスを分割する時期や、ページを分割する時期を決めるのに役立つ。
 
 使い方:
-    python wiki_stats.py [<wiki-dir>]
+    python wiki_stats.py [<wiki-dir>] [--json]
+
+オプション:
+    --json   テキストの代わりに JSON を出力する。キーは英語のまま
 
 例:
     python wiki_stats.py wiki/
+    python wiki_stats.py wiki/ --json
 """
 
 import argparse
+import json
 import re
 import sys
 from collections import Counter
@@ -72,25 +77,41 @@ SOFT_LINES, HARD_LINES = 100, 200
 SOFT_CHARS, HARD_CHARS = 10000, 25000
 
 
-def size_warning(lines: int, chars: int) -> str:
+# 大きいページとハブを、いくつまで挙げるか。
+TOP_N = 10
+
+
+def size_level(lines: int, chars: int) -> "str | None":
     if lines > HARD_LINES or chars > HARD_CHARS:
-        return "  ← ハード上限を超えている"
+        return "hard"
     if lines > SOFT_LINES or chars > SOFT_CHARS:
-        return "  ← ソフト上限を超えている"
-    return ""
+        return "soft"
+    return None
 
 
-def main():
-    parser = localize_argparse(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter))
-    parser.add_argument("wiki", nargs="?", type=Path, default=None, help=wiki_workspace.WIKI_DEFAULT_HELP)
-    args = parser.parse_args()
-    if args.wiki is None:
-        args.wiki = wiki_workspace.default_wiki_or_exit()
+def scale_advice(total_pages: int, index_lines: int, has_indexes: bool) -> list[dict]:
+    """規模のしきい値についての推奨。code は機械が読む識別子で、英語のまま残す。"""
+    advice = []
+    if total_pages < 50:
+        advice.append({"code": "flat", "message": "最初のしきい値より小さい。平らな構成のままでよい。"})
+    elif total_pages < 150 and index_lines < 300:
+        advice.append({"code": "single_index", "message": "分割のしきい値より小さい。index.md は 1 つのままでよい。"})
+    elif (total_pages >= 150 or index_lines >= 300) and not has_indexes:
+        advice.append({"code": "split_index",
+                       "message": "分割のしきい値に達した。index.md を wiki/indexes/<type>.md に分けることを検討する。",
+                       "reference": "references/scaling-playbook.md"})
+    elif total_pages >= 300:
+        advice.append({"code": "use_search",
+                       "message": "300 ページを超えた。scripts/wiki_search.py をふだんの手段として使う。"})
+    if total_pages >= 500:
+        advice.append({"code": "lint_weekly",
+                       "message": "500 ページを超えた。lint を毎週、または数回の取り込みごとに実行する。"})
+    return advice
 
-    if not args.wiki.exists():
-        print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
-        sys.exit(1)
 
+def compute_stats(wiki: Path) -> dict:
+    """wiki の規模、構成、リンク密度を集計して返す。キーは英語のまま（--json と MCP の stats が使う）。"""
+    wiki = Path(wiki)
     total_pages = 0
     total_lines = 0
     total_words = 0
@@ -102,8 +123,8 @@ def main():
     most_linked_in = Counter()
     index_lines = 0
 
-    for md_path in args.wiki.rglob("*.md"):
-        rel = md_path.relative_to(args.wiki)
+    for md_path in wiki.rglob("*.md"):
+        rel = md_path.relative_to(wiki)
         try:
             # 先頭に BOM があっても読めるようにする。
             text = md_path.read_text(encoding="utf-8-sig")
@@ -147,56 +168,98 @@ def main():
     # 日本語のページは 1 行が長いので、大きい順は文字数で並べる。
     largest.sort(reverse=True)
 
-    print("=" * 60)
-    print(f"wiki の統計: {args.wiki}")
-    print("=" * 60)
-    print(f"ページ数:       {total_pages}")
-    print(f"総行数:         {total_lines:,}")
-    print(f"総文字数:       {total_chars:,}（空白を除く）")
-    print(f"総語数:         {total_words:,}（空白で区切った数）")
-    print(f"総リンク数:     {total_links:,}")
+    average = None
     if total_pages:
-        print(f"1 ページの平均: {total_lines // total_pages} 行、{total_chars // total_pages:,} 文字、{total_words // total_pages} 語")
-        print(f"リンクの密度:   1 ページあたり {total_links / total_pages:.1f} 本")
-    print(f"index.md:       {index_lines} 行" + ("  ← 分割を勧める（300 行超）" if index_lines > 300 else ""))
-    print()
+        average = {"lines": total_lines // total_pages, "chars": total_chars // total_pages,
+                   "words": total_words // total_pages, "links": round(total_links / total_pages, 1)}
+    return {
+        "wiki": str(wiki),
+        "pages": total_pages,
+        "lines": total_lines,
+        "chars": total_chars,
+        "words": total_words,
+        "links": total_links,
+        "average": average,
+        "index_lines": index_lines,
+        "pages_by_type": dict(pages_by_type.most_common()),
+        "pages_by_dir": dict(pages_by_dir.most_common()),
+        "largest": [{"path": path, "chars": chars, "lines": lines, "size": size_level(lines, chars)}
+                    for chars, lines, path in largest[:TOP_N]],
+        "most_linked": [{"slug": slug, "count": count} for slug, count in most_linked_in.most_common(TOP_N)],
+        "advice": scale_advice(total_pages, index_lines, (wiki / "indexes").exists()),
+    }
 
-    print("type ごとのページ数:")
-    for t, n in pages_by_type.most_common():
-        print(f"  {ljust_display(t, 15)} {n}")
-    print()
 
-    print("ディレクトリごとのページ数:")
-    for d, n in pages_by_dir.most_common():
-        print(f"  {ljust_display(d, 15)} {n}")
-    print()
+SIZE_NOTES = {"hard": "  ← ハード上限を超えている", "soft": "  ← ソフト上限を超えている", None: ""}
 
-    if largest:
-        print("大きいページ（文字数の多い順）:")
-        print(f"  {rjust_display('文字数', 7)}  {rjust_display('行数', 5)}  パス")
-        for chars, lines, path in largest[:10]:
-            print(f"  {chars:7,d}  {lines:5d}  {path}{size_warning(lines, chars)}")
-        print()
 
-    if most_linked_in:
-        print("被リンクの多いページ（ハブ）:")
-        for slug, count in most_linked_in.most_common(10):
-            print(f"  {count:4d}  [[{slug}]]")
-        print()
+def render_text(stats: dict) -> str:
+    out = []
+    out.append("=" * 60)
+    out.append(f"wiki の統計: {stats['wiki']}")
+    out.append("=" * 60)
+    out.append(f"ページ数:       {stats['pages']}")
+    out.append(f"総行数:         {stats['lines']:,}")
+    out.append(f"総文字数:       {stats['chars']:,}（空白を除く）")
+    out.append(f"総語数:         {stats['words']:,}（空白で区切った数）")
+    out.append(f"総リンク数:     {stats['links']:,}")
+    average = stats["average"]
+    if average:
+        out.append(f"1 ページの平均: {average['lines']} 行、{average['chars']:,} 文字、{average['words']} 語")
+        out.append(f"リンクの密度:   1 ページあたり {stats['links'] / stats['pages']:.1f} 本")
+    index_lines = stats["index_lines"]
+    out.append(f"index.md:       {index_lines} 行" + ("  ← 分割を勧める（300 行超）" if index_lines > 300 else ""))
+    out.append("")
+
+    out.append("type ごとのページ数:")
+    for t, n in stats["pages_by_type"].items():
+        out.append(f"  {ljust_display(t, 15)} {n}")
+    out.append("")
+
+    out.append("ディレクトリごとのページ数:")
+    for d, n in stats["pages_by_dir"].items():
+        out.append(f"  {ljust_display(d, 15)} {n}")
+    out.append("")
+
+    if stats["largest"]:
+        out.append("大きいページ（文字数の多い順）:")
+        out.append(f"  {rjust_display('文字数', 7)}  {rjust_display('行数', 5)}  パス")
+        for page in stats["largest"]:
+            out.append(f"  {page['chars']:7,d}  {page['lines']:5d}  {page['path']}{SIZE_NOTES[page['size']]}")
+        out.append("")
+
+    if stats["most_linked"]:
+        out.append("被リンクの多いページ（ハブ）:")
+        for hub in stats["most_linked"]:
+            out.append(f"  {hub['count']:4d}  [[{hub['slug']}]]")
+        out.append("")
 
     # スケーリングについての推奨
-    print("規模のしきい値:")
-    if total_pages < 50:
-        print("  → 最初のしきい値より小さい。平らな構成のままでよい。")
-    elif total_pages < 150 and index_lines < 300:
-        print("  → 分割のしきい値より小さい。index.md は 1 つのままでよい。")
-    elif (total_pages >= 150 or index_lines >= 300) and not (args.wiki / "indexes").exists():
-        print("  → 分割のしきい値に達した。index.md を wiki/indexes/<type>.md に分けることを検討する。")
-        print("    references/scaling-playbook.md を参照。")
-    elif total_pages >= 300:
-        print("  → 300 ページを超えた。scripts/wiki_search.py をふだんの手段として使う。")
-    if total_pages >= 500:
-        print("  → 500 ページを超えた。lint を毎週、または数回の取り込みごとに実行する。")
+    out.append("規模のしきい値:")
+    for item in stats["advice"]:
+        out.append(f"  → {item['message']}")
+        if item.get("reference"):
+            out.append(f"    {item['reference']} を参照。")
+    return "\n".join(out)
+
+
+def main():
+    parser = localize_argparse(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter))
+    parser.add_argument("wiki", nargs="?", type=Path, default=None, help=wiki_workspace.WIKI_DEFAULT_HELP)
+    parser.add_argument("--json", action="store_true", help="テキストの代わりに JSON を出力する。キーは英語のまま")
+    args = parser.parse_args()
+    if args.wiki is None:
+        args.wiki = wiki_workspace.default_wiki_or_exit()
+
+    if not args.wiki.exists():
+        print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
+        sys.exit(1)
+
+    stats = compute_stats(args.wiki)
+    if args.json:
+        print(json.dumps(stats, indent=2, ensure_ascii=False))
+    else:
+        print(render_text(stats))
 
 
 if __name__ == "__main__":

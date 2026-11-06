@@ -44,16 +44,28 @@ import wiki_graph_common as common  # noqa: E402
 
 
 EVIDENCE_SNIPPET_LEN = 140
+COMMANDS = ("neighbors", "edges", "path", "facts")
+
+
+class QueryError(ValueError):
+    """問い合わせに答えられない（DB やノードがない）。CLI は終了コード 1 で止まり、MCP はツールのエラーにする。"""
 
 
 def open_db(path: Path) -> sqlite3.Connection:
+    """graph.sqlite を読み取り専用で開く。問い合わせは DB を書き換えない。"""
+    path = Path(path)
     if not path.exists():
-        print(f"graph.sqlite が見つからない: {path}", file=sys.stderr)
-        print("先に wiki_graph_extract.py を実行する。", file=sys.stderr)
-        sys.exit(1)
-    conn = sqlite3.connect(path)
+        raise QueryError(f"graph.sqlite が見つからない: {path}\n先に wiki_graph_extract.py を実行する。")
+    conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def require_node(conn: sqlite3.Connection, node_id: str, label: str = "ノード") -> dict:
+    node = fetch_node(conn, node_id)
+    if not node:
+        raise QueryError(f"{label}が見つからない: {node_id}")
+    return node
 
 
 def fetch_node(conn: sqlite3.Connection, node_id: str) -> dict | None:
@@ -103,13 +115,10 @@ def render_edge_row(e: dict) -> str:
     return "\n".join(pieces)
 
 
-def cmd_neighbors(conn: sqlite3.Connection, args) -> dict:
-    node = fetch_node(conn, args.node)
-    if not node:
-        print(f"ノードが見つからない: {args.node}", file=sys.stderr)
-        sys.exit(1)
-    out_edges = edges_from(conn, args.node)
-    in_edges = edges_to(conn, args.node)
+def cmd_neighbors(conn: sqlite3.Connection, node_id: str) -> dict:
+    node = require_node(conn, node_id)
+    out_edges = edges_from(conn, node_id)
+    in_edges = edges_to(conn, node_id)
 
     neighbors: dict[str, dict] = {}
     for e in out_edges:
@@ -131,41 +140,31 @@ def cmd_neighbors(conn: sqlite3.Connection, args) -> dict:
     }
 
 
-def cmd_edges(conn: sqlite3.Connection, args) -> dict:
-    es = edges_from(conn, args.subject, args.predicate)
-    return {"subject": args.subject, "predicate": args.predicate, "edges": es}
+def cmd_edges(conn: sqlite3.Connection, subject: str, predicate: str | None = None) -> dict:
+    es = edges_from(conn, subject, predicate)
+    return {"subject": subject, "predicate": predicate, "edges": es}
 
 
-def cmd_facts(conn: sqlite3.Connection, args) -> dict:
-    node = fetch_node(conn, args.about)
-    if not node:
-        print(f"ノードが見つからない: {args.about}", file=sys.stderr)
-        sys.exit(1)
+def cmd_facts(conn: sqlite3.Connection, about: str) -> dict:
+    node = require_node(conn, about)
     return {
         "node": node,
-        "outbound": edges_from(conn, args.about),
-        "inbound": edges_to(conn, args.about),
+        "outbound": edges_from(conn, about),
+        "inbound": edges_to(conn, about),
     }
 
 
-def cmd_path(conn: sqlite3.Connection, args) -> dict:
-    src = fetch_node(conn, getattr(args, "from"))
-    dst = fetch_node(conn, args.to)
-    if not src:
-        print(f"--from のノードが見つからない: {getattr(args, 'from')}", file=sys.stderr)
-        sys.exit(1)
-    if not dst:
-        print(f"--to のノードが見つからない: {args.to}", file=sys.stderr)
-        sys.exit(1)
+def cmd_path(conn: sqlite3.Connection, start: str, goal: str, max_depth: int = 6) -> dict:
+    require_node(conn, start, "--from のノード")
+    require_node(conn, goal, "--to のノード")
 
-    start, goal = getattr(args, "from"), args.to
     queue = deque([(start, [start], [])])
     visited = {start}
     while queue:
         node, node_path, edge_path = queue.popleft()
         if node == goal:
             return {"from": start, "to": goal, "path_nodes": node_path, "path_edges": edge_path}
-        if len(node_path) - 1 >= args.max_depth:
+        if len(node_path) - 1 >= max_depth:
             continue
         for e in edges_from(conn, node):
             nxt = e["object"]
@@ -217,6 +216,43 @@ def render(result: dict, command: str) -> str:
     return "\n".join(out)
 
 
+def run_query(wiki: Path, command: str, *, node: str | None = None, subject: str | None = None,
+              predicate: str | None = None, start: str | None = None, goal: str | None = None,
+              max_depth: int = 6, about: str | None = None, db: Path | None = None) -> dict:
+    """1 つの問い合わせを実行して結果を返す。CLI と MCP の graph ツールが使う。
+
+    db を省くと、extract、lint と同じくオントロジーの有無でグラフ層が有効かを決め、なければ
+    wiki_graph_common.GraphLayerDisabled を送出する。オントロジーを消した wiki に古い graph.sqlite が
+    残っていても、それには答えない。db を明示したときは、その DB を使う（extract --out で別の場所に
+    作った場合など）。DB やノードがなければ QueryError を送出する。
+    """
+    wiki = Path(wiki)
+    if command not in COMMANDS:
+        raise QueryError(f"未知の問い合わせ: {command}。使えるのは {', '.join(COMMANDS)}")
+    # グラフのノード ID は NFC で書かれている。macOS のターミナルなどから NFD で渡されても
+    # 一致するように、ノード ID を NFC にそろえる。
+    node, subject, start, goal, about = (nfc(v) if isinstance(v, str) else v
+                                         for v in (node, subject, start, goal, about))
+    required = {"neighbors": ("node", node), "edges": ("subject", subject), "facts": ("about", about)}
+    if command in required and not required[command][1]:
+        raise QueryError(f"{command} には {required[command][0]} が要る")
+    if command == "path" and not (start and goal):
+        raise QueryError("path には from と to が要る")
+    if db is None:
+        common.require_ontology(wiki)
+    conn = open_db(Path(db) if db else wiki / "graph" / "graph.sqlite")
+    try:
+        if command == "neighbors":
+            return cmd_neighbors(conn, node)
+        if command == "edges":
+            return cmd_edges(conn, subject, predicate)
+        if command == "path":
+            return cmd_path(conn, start, goal, max_depth)
+        return cmd_facts(conn, about)
+    finally:
+        conn.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("wiki", type=Path, help="wiki のディレクトリ")
@@ -242,41 +278,22 @@ def main():
 
     localize_argparse(parser)
     args = parser.parse_args()
-    # グラフのノード ID は NFC で書かれている。macOS のターミナルなどから NFD で渡されても
-    # 一致するように、ノード ID の引数を NFC にそろえる。
-    for name in ("node", "subject", "from", "to", "about"):
-        value = getattr(args, name, None)
-        if isinstance(value, str):
-            setattr(args, name, nfc(value))
 
     if not args.wiki.exists():
         print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
         sys.exit(1)
-    # 既定の DB を使うときは、extract、lint と同じくオントロジーの有無でグラフ層が有効かを決める。
-    # オントロジーを消した wiki に古い graph.sqlite が残っていても、それには答えない。
-    # --db で DB を明示したときは、その DB を使う（extract --out で別の場所に作った場合など）。
-    if args.db is None:
-        try:
-            common.require_ontology(args.wiki)
-        except common.GraphLayerDisabled as exc:
-            common.report_disabled(exc)
-            sys.exit(common.EXIT_GRAPH_DISABLED)
-    db_path = args.db or (args.wiki / "graph" / "graph.sqlite")
-    conn = open_db(db_path)
     try:
-        if args.command == "neighbors":
-            result = cmd_neighbors(conn, args)
-        elif args.command == "edges":
-            result = cmd_edges(conn, args)
-        elif args.command == "path":
-            result = cmd_path(conn, args)
-        elif args.command == "facts":
-            result = cmd_facts(conn, args)
-        else:
-            parser.print_help()
-            sys.exit(1)
-    finally:
-        conn.close()
+        result = run_query(args.wiki, args.command, node=getattr(args, "node", None),
+                           subject=getattr(args, "subject", None), predicate=getattr(args, "predicate", None),
+                           start=getattr(args, "from", None), goal=getattr(args, "to", None),
+                           max_depth=getattr(args, "max_depth", 6), about=getattr(args, "about", None),
+                           db=args.db)
+    except common.GraphLayerDisabled as exc:
+        common.report_disabled(exc)
+        sys.exit(common.EXIT_GRAPH_DISABLED)
+    except QueryError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(1)
 
     if args.json:
         print(json.dumps(result, indent=2, default=str, ensure_ascii=False))

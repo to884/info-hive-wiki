@@ -8,7 +8,9 @@
 
 ### Added
 
-- 検索のためのローカルの MCP サーバーを追加した（`.mcp.json`、`wiki_mcp_relay.py`、`wiki_mcp_server.py`）。ホストは stdio の中継を起動し、中継は 127.0.0.1 で待ち受けるサーバーを 1 つだけ起動して使う。サーバーはセッションをまたいで残り、要求がない状態が 15 分続くと止まる。起動ごとのトークンと Host ヘッダーを確かめ、応答は JSON で返す。ツールは `query`、`get_page`、`list_index`、`index_chunks`。wiki の Markdown を書き換えるツールは持たない。仕組みと置き場所は `references/mcp-server.md` に書いた。
+- 検索のためのローカルの MCP サーバーを追加した（`.mcp.json`、`wiki_mcp_relay.py`、`wiki_mcp_server.py`）。ホストは stdio の中継を起動し、中継は 127.0.0.1 で待ち受けるサーバーを 1 つだけ起動して使う。サーバーはセッションをまたいで残り、要求がない状態が 15 分続くと止まる。起動ごとのトークンと Host ヘッダーを確かめ、応答は JSON で返す。ツールは `query`、`get_page`、`list_index`、`lint`、`stats`、`graph`、`index_chunks`。wiki の Markdown を書き換えるツールは持たない。仕組みと置き場所は `references/mcp-server.md` に書いた。
+- MCP のツール `lint`、`stats`、`graph` を追加した。`wiki_lint.py`、`wiki_stats.py`、`wiki_graph_query.py` の関数をサーバーの中で呼び、CLI の `--json` と同じ結果を返す。`lint` は、オントロジーがあれば `wiki_graph_lint.py` の検査の結果も `graph` に入れる（判定モデルの `--decide` は含めない）。オントロジーがないときは、CLI と同じ文面で `disabled` を返す。`stats` は、索引のセクションの数、埋め込みの進み具合、埋め込みモデル、サーバーのコードの版も返す。`graph` は `graph.sqlite` を読み取り専用で開く。グラフの lint のために、サーバーの依存に PyYAML 6.0.3 を足した。
+- `wiki_stats.py` に `--json` を追加した。キーは英語のまま。テキストの出力は変えていない。
 - サーバーの検索の基盤（`wiki_index.py`）を追加した。埋め込みは cl-nagoya/ruri-v3-130m の ONNX、ベクトル索引は usearch、語彙検索は Tantivy の BM25（wiki の bigram のトークン）で、RRF（k 30、語彙の重み 0.5、候補は片側 200 件）で融合する。索引は wiki の外（Windows は `%LOCALAPPDATA%\info-hive\index\`、macOS と Linux は XDG の data ディレクトリ）に置き、更新の途中で止まっても次に開いたときにそろえ直す。初回は wiki 全体を埋め込むので時間がかかる。そのあいだは埋め込みを裏で進め、語彙検索と埋め込み済みの分で答える。
 - rag がチャンクを渡すための `index_chunks` を追加した。collection ごとに wiki とは別の索引に入れ、文書ごとに古い世代の行を消す。語彙検索のトークンは呼び出し側が作る。
 - コマンド（`/wiki:query` など）は、この版ではまだ今の CLI（`wiki_search.py`）を使う。CLI は MCP が使えないときの戻り道として残す。
