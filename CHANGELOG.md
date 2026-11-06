@@ -9,17 +9,22 @@
 ### Added
 
 - Web ページの取り込みを追加した。`/wiki:ingest <URL>` で、新しいスクリプト `wiki_fetch.py`（標準ライブラリだけ）がページを取得し、本文を Markdown にして `raw/<スラッグ>.md` に、本文の画像を `raw/assets/<スラッグ>/` に保存する。frontmatter に URL、取得日時、原文の HTML の SHA-256、原文の言語を記録し、同じ内容の再取得では何も書かない。内容が違えば別版のスラッグを提案する。エージェントは残った雑音を削り、日本語でなければ段落ごとに訳して `translated_by` に表示名を入れ、画像の直後に `> <表示名> 補足: ` の説明を書く。手順は `commands/ingest.md` と `references/ingest-workflow.md` の「Web ページ」に書いた（ADR-0004）。
+- 知識ページの図表の決まりを `page-conventions.md` の「図表」に書いた。流れや関係は mermaid の図、比較は表、mermaid で描けない図だけ svg を `wiki/assets/` に置き、図表の直後に `> <表示名> 補足: ` の説明を置く（ADR-0005）。取り込みとクエリの手順にも、図表を足す場面を書いた。
+- `init_wiki.py`（`--upgrade` を含む）が `wiki/assets/` を作るようにした。
+- lint に `missing_assets` を足した。本文の画像の参照先がないか wiki の外を指すときに指摘する。参照先はページのファイルの位置から解決し、wiki のルートを基準に書いた誤り（`assets/x.svg`）には正しい相対パスを添える。
 - 作業領域の設定（`.info-hive/workspace.json`）を読む `scripts/wiki_workspace.py` を追加した。カレントディレクトリから親へさかのぼって案内のファイル `.info-hive.json` と設定を探し、サブモジュールの `.git` では止まらない。`..` と絶対パスを拒否し、未知のキーは警告にして残す。
 - グラフの 3 つのスクリプトが共有する `scripts/wiki_graph_common.py` を追加した。
 
 ### Changed
 
+- lint と統計のページの大きさから、コードフェンス（mermaid を含む）の中身と画像だけの行を除いた。`--suggest-pages` も、図のソースと画像の alt を語の候補にしない。`wiki/assets/` の中のファイルはページとして数えない。
 - `setup_wiki.py`、`wiki_graph_lint.py`、`wiki_stats.py`、`wiki_decide.py`（`shortlist`、`contradictions`）、`wiki_evolve.py` は、`--wiki`（または位置引数の `<wiki>`）を省くと、作業領域の設定の `dirs.wiki` を使うようにした。設定がなければ従来どおり `./wiki` を使う。設定が壊れているときは理由を書いて終了コード 1 で止まる。`wiki_lint.py` と `wiki_search.py` はまだ `./wiki` のままである。
 - オントロジー（`graph/ontology.yaml`）がないときの扱いを、`wiki_graph_extract.py`、`wiki_graph_lint.py`、`wiki_graph_query.py` でそろえた。どれも何も書き出さずに、同じ文面を標準エラーに書いて終了コード 1 で止まる。以前の extract は空のオントロジーで続け、`graph/` と生成物を作っていた。query は、オントロジーがなければ古い `graph.sqlite` が残っていても答えない（`--db` で DB を明示したときを除く）。
 - グラフの手順の正本を `references/graph-workflow.md` にまとめた。取り込み、問い合わせ、lint の手順と `/wiki:graph` は、呼ぶ時点と結果の扱いだけを書き、規約はそこを参照する。
 
 ### Fixed
 
+- ADR-0005 の当初の案では svg を `assets/<スラッグ>-NN.svg` と参照するとしていたが、`wiki/<種類>/` のページからはそのパスで表示されない。参照を `../assets/<スラッグ>-NN.svg` に改めた。
 - extract を省く条件の記述を直した。以前は「型付きの関係も新しいページもない取り込みでは extract を省く」と書いていたが、extract は本文の wikilink、`sources:`、`raw:` からもエッジを作るので、ページを書き換えたら必ず extract を実行する。
 - `wiki_graph_extract.py` は、`graph.sqlite` を先に消してから作り直していたので、途中で止まると問い合わせができなくなっていた。成果物を同じディレクトリの一時ファイルに書いてから置き換えるようにした。Windows でほかのプロセスが DB を開いているときは、少し待ってやり直し、置き換えられなければ前の DB を残してエラーで止まる。`graph/.gitignore` のひな形は一時ファイル（`*.tmp`）を無視する。
 

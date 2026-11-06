@@ -14,3 +14,6 @@
 *.ico binary
 *.pdf binary
 *.sqlite binary
+
+# 知識ページの図（wiki/assets/*.svg）は文字のファイルとして差分を取る。* の行と同じく LF にそろえる。
+*.svg text eol=lf

@@ -44,7 +44,7 @@ SKILL_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES = SKILL_ROOT / "assets"
 
 
-SUBDIRS = ["sources", "entities", "concepts", "synthesis", "graph"]
+SUBDIRS = ["sources", "entities", "concepts", "synthesis", "graph", "assets"]
 
 # --upgrade が、特定のプラグインのバージョンで加わった SCHEMA.md のセクションを
 # 検出するためのマーカー。各項目は (heading_marker, version_label,
