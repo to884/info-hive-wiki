@@ -491,3 +491,76 @@ def wrap_display(text: str, width: int) -> list[str]:
     if line.strip():
         lines.append(line.rstrip())
     return lines
+
+
+# ---------------------------------------------------------------------------
+# 図表（コードフェンスと画像の行）
+# ---------------------------------------------------------------------------
+
+# ``` か ~~~ でフェンスが始まる。リストの項目（`- `、`1. `）と引用（`> `）の中のフェンスも読む。
+# 閉じるのは、同じ文字で、開いたときと同じ長さ以上の並びのあとに空白とタブしかない行である。
+_CONTAINER_PREFIX = r"[ \t]*(?:>[ \t]?)*[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?"
+_FENCE_RE = re.compile(r"^(" + _CONTAINER_PREFIX + r")(`{3,}|~{3,})(.*)$")
+_QUOTE_MARKS_RE = re.compile(r"^[ \t]*((?:>[ \t]?)*)")
+_FENCE_CLOSE_RE = re.compile(r"^[ \t]*(?:>[ \t]?)*[ \t]*(`{3,}|~{3,})[ \t]*$")
+
+# 標準の Markdown の画像。alt の中の 1 段の [ ]、<...> で囲んだ参照先（空白を含めてよい）、
+# 1 段の ( ) を含む参照先、"…"・'…'・(…) のタイトルを読む。\! で escape したものは画像ではない。
+IMAGE_PATTERN = (
+    r"(?<!\\)!\[(?:[^\[\]\n]|\[[^\[\]\n]*\])*\]"
+    r"\(\s*(?:<([^<>\n]*)>|((?:[^\s()<>]|\([^\s()]*\))+))"
+    r"""(?:\s+(?:"[^"\n]*"|'[^'\n]*'|\([^()\n]*\)))?\s*\)"""
+)
+IMAGE_RE = re.compile(IMAGE_PATTERN)
+# 画像だけの行。1 行に画像を並べたものも含む。
+_IMAGE_ONLY_LINE_RE = re.compile(r"^\s*(?:" + IMAGE_PATTERN + r"\s*)+$")
+# インラインのコード。開きと閉じのバッククォートの数がそろうものだけをコードとみなす。
+CODE_SPAN_RE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
+
+
+def image_target(match: "re.Match") -> str:
+    """IMAGE_RE の一致から参照先を取り出す。"""
+    return match.group(1) if match.group(1) is not None else match.group(2)
+
+
+def _quote_depth(line: str) -> int:
+    return _QUOTE_MARKS_RE.match(line).group(1).count(">")
+
+
+def lines_outside_fences(text: str) -> list[str]:
+    """コードフェンスの外の行だけを返す。フェンスの開きと閉じの行も除く。
+
+    引用（> ）やリストの項目の中で開いたフェンスは、その引用や項目が終わったところでも閉じる。
+    引用なら > の数が減った行、項目なら項目の字下げより浅い文字のある行で終わる。
+    """
+    out: list[str] = []
+    fence = None
+    depth = indent = 0
+    for line in text.split("\n"):
+        if fence is not None:
+            ended = (depth > 0 and _quote_depth(line) < depth) or (
+                depth == 0 and indent > 0 and line.strip() and len(line) - len(line.lstrip(" \t")) < indent)
+            if not ended:
+                m = _FENCE_CLOSE_RE.match(line)
+                if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
+                    fence = None
+                continue
+            fence = None
+        m = _FENCE_RE.match(line)
+        if m and not (m.group(2)[0] == "`" and "`" in m.group(3)):
+            fence = m.group(2)
+            prefix = m.group(1)
+            depth = prefix.count(">")
+            indent = len(prefix) if depth == 0 and prefix.strip() else 0
+            continue
+        out.append(line)
+    return out
+
+
+def strip_fences_and_images(text: str) -> str:
+    """コードフェンス（mermaid を含む）の中身と、画像だけの行を除く。
+
+    ページの大きさの判定に使う。上限は本文の文章の密度を見るためのもので、図のソースの長さは
+    数えない（ADR-0005）。図の直後の説明（「> … 補足: 」）は文章なので残す。
+    """
+    return "\n".join(line for line in lines_outside_fences(text) if not _IMAGE_ONLY_LINE_RE.match(line))
