@@ -62,6 +62,7 @@ sys.path.insert(0, str(SCRIPT_DIR))
 import wiki_graph_extract as _extract  # noqa: E402
 import wiki_graph_common as common  # noqa: E402
 from wiki_text import localize_argparse, nfc  # noqa: E402
+import wiki_workspace  # noqa: E402
 
 
 ALLOWED_CONFIDENCE = {"high", "medium", "low"}
@@ -472,7 +473,7 @@ def decision_default_threshold(check: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("wiki", nargs="?", type=Path, default=Path("wiki"), help="wiki のディレクトリ（既定: ./wiki）")
+    parser.add_argument("wiki", nargs="?", type=Path, default=None, help=wiki_workspace.WIKI_DEFAULT_HELP)
     parser.add_argument("--ontology", type=Path, help="オントロジーのファイル（既定: <wiki>/graph/ontology.yaml）")
     parser.add_argument("--json", action="store_true", help="テキストの代わりに JSON を出力する。キーは英語のまま")
     parser.add_argument("--decide", action="store_true",
@@ -483,6 +484,8 @@ def main():
                              f"（既定: {decision_default_threshold('evidence')}）")
     localize_argparse(parser)
     args = parser.parse_args()
+    if args.wiki is None:
+        args.wiki = wiki_workspace.default_wiki_or_exit()
 
     if not args.wiki.exists():
         print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
