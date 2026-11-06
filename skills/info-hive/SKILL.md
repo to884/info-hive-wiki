@@ -50,7 +50,9 @@ uv run --script scripts/wiki_graph_extract.py wiki/   # nodes.jsonl、edges.json
 python scripts/wiki_graph_query.py wiki/ neighbors --node product:konvy
 ```
 
-`wiki/graph/ontology.yaml` がない場合は、グラフ層を導入する前の wiki である。3 つのスクリプトは何も書き出さずに終了コード 1 で止まる。グラフの手順は飛ばし、オントロジーをでっち上げてはならない。
+問い合わせと lint は、MCP のツール `graph` と `lint` が使えればそちらで行う（「MCP のツールと CLI の使い分け」）。上のコマンドは CLI の形である。extract はいつも CLI で実行する。
+
+`wiki/graph/ontology.yaml` がない場合は、グラフ層を導入する前の wiki である。3 つのスクリプトは何も書き出さずに終了コード 1 で止まり、ツールの `lint` は `graph.state` に `disabled` を返し、`graph` はエラーを返す。グラフの手順は飛ばし、オントロジーをでっち上げてはならない。
 
 ## 保存の範囲とディレクトリ構成
 
@@ -100,13 +102,34 @@ LLM Wiki のパターンでもっとも大きな失敗は、wiki そのものが
 
 **書き直さず、必要な箇所だけを編集する。** ページを更新するとき（新しく取り込んだソースが既存のエンティティに触れているので相互参照を追加する、など）は、`str_replace` で関係するセクションだけを変更する。ページ全体を書き直すと、遅く、トークンを多く使い、以前の細かいニュアンスを失うおそれがある。
 
-**被リンクはスクリプトで探す。** あるページを参照しているページをすべて見つけるときは、ページを読んで言及を探さず、`python scripts/wiki_search.py "" --wiki wiki/ --backlinks <slug>` を実行する。このスクリプトは、`[[slug]]`、`[[dir/slug]]`、`[[slug|表示名]]` のどの書き方も、NFC にそろえてから解決する。手作業で探すなら `grep -rl "\[\[消費税" wiki/` のようにするが、表示名や見出しの付いたリンクと、macOS の NFD のファイル名は取りこぼすことがある。
+**被リンクはスクリプトで探す。** あるページを参照しているページをすべて見つけるときは、ページを読んで言及を探さず、`python scripts/wiki_search.py "" --wiki wiki/ --backlinks <slug>` を実行する（MCP のツールにはこの機能がない）。このスクリプトは、`[[slug]]`、`[[dir/slug]]`、`[[slug|表示名]]` のどの書き方も、NFC にそろえてから解決する。手作業で探すなら `grep -rl "\[\[消費税" wiki/` のようにするが、表示名や見出しの付いたリンクと、macOS の NFD のファイル名は取りこぼすことがある。
 
 **ソースは分割して取り込む。** 大きい raw ソース（長い PDF、書籍の章、長い文字起こし）は、取り込みのときに全体を一度に読み込まず、分割して読む。取り込みのワークフローがこれを扱う。`references/ingest-workflow.md` を参照。
 
-**大きい wiki には検索スクリプトを使う。** wiki が約 300 ページを超えると、あいまいなクエリでは、インデックスを引くだけでは適切なページが見つからないことがある。`scripts/wiki_search.py` を使うと、セクション単位のハイブリッド検索を、任意の frontmatter のフィルターと、構造化された `--json` の証拠の行つきで実行できる。既定の経路では、ローカルで多言語の埋め込みモデル `intfloat/multilingual-e5-small`（約 0.25 GB）を FastEmbed で実行し、生成したベクトルを sqlite-vec で `wiki/.wiki-cache/embeddings.sqlite` に保存し、セマンティック検索と BM25 の順位を RRF で統合する。BM25 も日本語に対応している。かなと漢字は2文字ずつ重ねて切り出し、漢字は1文字単位でも索引に入れるので、「税」のような1文字のクエリも「消費税」を含むページに当たる。日本語のクエリは、分かち書きせずにそのまま渡せばよい。初期化とアップグレードでは、`uv` を通じて `scripts/setup_wiki.py` を実行し、バージョンを固定した FastEmbed、sqlite-vec、PyYAML をインストールし、モデルをキャッシュし、すべてのセクションを同期してから、セットアップの完了を報告する。wiki やクエリのテキストがマシンの外に出ることはない。依存パッケージを使わない BM25 にするには、`python scripts/wiki_search.py "クエリ" --no-embed` で PEP 723 による依存解決を通さずに実行する。モデルの選び方とトークン化の詳細は、リポジトリの `docs/search.md` にある。
+**大きい wiki には検索を使う。** wiki が約 300 ページを超えると、あいまいなクエリでは、インデックスを引くだけでは適切なページが見つからないことがある。検索は、まず MCP のツール `query` で行う（「MCP のツールと CLI の使い分け」）。埋め込みは cl-nagoya/ruri-v3-130m、ベクトル索引は usearch、語彙検索は Tantivy で、索引は wiki の外に置く。戻り道の `scripts/wiki_search.py` を使うと、セクション単位のハイブリッド検索を、任意の frontmatter のフィルターと、構造化された `--json` の証拠の行つきで実行できる。既定の経路では、ローカルで多言語の埋め込みモデル `intfloat/multilingual-e5-small`（約 0.25 GB）を FastEmbed で実行し、生成したベクトルを sqlite-vec で `wiki/.wiki-cache/embeddings.sqlite` に保存し、セマンティック検索と BM25 の順位を RRF で統合する。BM25 も日本語に対応している。かなと漢字は2文字ずつ重ねて切り出し、漢字は1文字単位でも索引に入れるので、「税」のような1文字のクエリも「消費税」を含むページに当たる。日本語のクエリは、分かち書きせずにそのまま渡せばよい。初期化とアップグレードでは、`uv` を通じて `scripts/setup_wiki.py` を実行し、バージョンを固定した FastEmbed、sqlite-vec、PyYAML をインストールし、モデルをキャッシュし、すべてのセクションを同期してから、セットアップの完了を報告する。wiki やクエリのテキストがマシンの外に出ることはない。依存パッケージを使わない BM25 にするには、`python scripts/wiki_search.py "クエリ" --no-embed` で PEP 723 による依存解決を通さずに実行する。モデルの選び方とトークン化の詳細は、リポジトリの `docs/search.md` にある。
 
 閾値と移行の手順を含むスケーリングの詳しい手引きは、`references/scaling-playbook.md` を読む。
+
+## MCP のツールと CLI の使い分け
+
+wiki のプラグインは、ローカルの MCP サーバー（`wiki`）を持つ。検索、ページの読み出し、lint、統計、グラフの問い合わせは、まずこのサーバーのツールで行い、使えないときだけ `scripts/` の CLI に戻る。サーバーは埋め込みモデルと索引を読み込んだまま常駐するので、CLI より速い。仕組みとツールの引数は `references/mcp-server.md` にある。
+
+| 用途 | MCP のツール | CLI（戻り道） |
+| --- | --- | --- |
+| 検索 | `query` | `wiki_search.py --json` |
+| 構造の lint とグラフの lint | `lint` | `wiki_lint.py`、`wiki_graph_lint.py` |
+| 統計、被リンクの多いページ | `stats`（`most_linked`） | `wiki_stats.py`、`wiki_search.py --top-linked` |
+| グラフの問い合わせ | `graph` | `wiki_graph_query.py` |
+
+- ツール名は接続に表示されたものを使う。Claude Code では `mcp__plugin_wiki_wiki__query` のような名前になる。
+- `wiki` には `<WIKI_ROOT>` の絶対パスを渡す。サーバーは呼び出し元と別のディレクトリで動くので、相対パスは使えない。
+- 次のときは CLI を使う。
+  - このセッションに wiki のツールがない（プラグインの MCP が無効、ホストが MCP に対応していない）。
+  - ツールの呼び出しがつながらない、または返らない。初めて使うときは、サーバーが依存（約 1 GB）とモデル（約 530 MB）を取得するので、数分かかることがある。CLI に戻ったときは、サーバーを準備していることと、次からは速くなることをユーザーに伝える。
+  - CLI にしかない機能が要る。`wiki_search.py` の `--backlinks`、`--granularity page`、`--no-embed`、判定レイヤーの `--decide`（検索とグラフの lint）がこれに当たる。
+- ツールが結果を返したら、0 件でも、同じ検索を CLI でやり直さない。結果の `warning` に理由が入っている、または `index.state` が `embedding` のときも同じである。このときサーバーの語彙検索は wiki 全体を対象にしており、意味の検索だけが埋め込み済みの分に限られる。CLI の `--no-embed` は語彙検索だけなので、やり直しても新しい情報は得られない。結果をそのまま使い、意味の検索が一部だけだったことを回答に添える。
+- グラフの作り直し（`wiki_graph_extract.py`）は wiki の `graph/` に書き込むので、ツールにはない。いつも CLI で実行する。
+- ツールは wiki の Markdown を書き換えない。lint の検出結果を直すときも、編集案をユーザーに示してから、エージェントがページを編集する。
 
 ## 新しい wiki を初期化する
 
@@ -134,11 +157,11 @@ PDF を取り込み、`rag` MCP サーバーが使える場合は、先に `refe
 
 ## クエリのワークフロー（概要）
 
-詳しい内容は `references/query-workflow.md` にある。wiki をもとにクエリに答えるには、最初に `index.md`（または該当する分割済みのファイル）を読み、1行の要約から候補のページを見つけ、そのページ（と、そこに挙がっている被リンクのうち関係がありそうなもの）を読み、使ったページへの `[[wikilink]]` を出典として付けて回答をまとめる。今後のクエリで役立つように、まとめた回答を `synthesis/` に保存することを提案する。インデックスから適切な候補が見つからない場合は、`uv run --script <skill-root>/scripts/wiki_search.py "検索語" --wiki <absolute-wiki-root>` を実行して、ローカルのハイブリッド検索で順位付けした結果を得る。依存パッケージを使わない語彙ベースの BM25 にしたいときだけ `--no-embed` を付ける。インストールしたスキルのパスと、対象の wiki のパスは明示する。wiki にその話題の内容が足りないようなら、話をでっち上げず、そうはっきり伝え、取り込むべき候補として挙げる。
+詳しい内容は `references/query-workflow.md` にある。wiki をもとにクエリに答えるには、最初に `index.md`（または該当する分割済みのファイル）を読み、1行の要約から候補のページを見つけ、そのページ（と、そこに挙がっている被リンクのうち関係がありそうなもの）を読み、使ったページへの `[[wikilink]]` を出典として付けて回答をまとめる。今後のクエリで役立つように、まとめた回答を `synthesis/` に保存することを提案する。インデックスから適切な候補が見つからない場合は、MCP のツール `query` に `wiki=<wiki の絶対パス>` と検索語を渡して、ローカルのハイブリッド検索で順位付けした結果を得る。ツールが使えないときは、`uv run --script <skill-root>/scripts/wiki_search.py "検索語" --wiki <absolute-wiki-root> --json` を実行する。依存パッケージを使わない語彙ベースの BM25 にしたいときだけ、`python` で直接実行して `--no-embed` を付ける。インストールしたスキルのパスと、対象の wiki のパスは明示する。wiki にその話題の内容が足りないようなら、話をでっち上げず、そうはっきり伝え、取り込むべき候補として挙げる。
 
 ## lint のワークフロー（概要）
 
-詳しい内容は `references/lint-workflow.md` にある。lint は、操作のたびではなく、一定の頻度（N 回の取り込みごと、または週1回）で行うのがよい。付属の `python scripts/wiki_lint.py` は、構造上の問題を自動で見つける。孤立ページ、リンク切れの `[[wikilinks]]`、大きすぎるページ（文字数か行数で判定する）、frontmatter の欠落や形式の誤り（全角の「：」、「、」で区切ったリスト、`YYYY-MM-DD` でない日付など）、`updated` の日付が古いページである。`--suggest-pages` を付けると、多くのページに出てくるのに専用のページがない語（3文字以上のカタカナ語や漢字の複合語、大文字で始まる英語の句）も挙げる。そのあと、LLM が必要な内容面のチェックを行う。最近更新されたページを読んで古い主張との矛盾を探し、言及されているのに専用のページがないコンセプトを洗い出し、Web 検索や新しいソースで補うとよい不足をユーザーに提案する。lint の検出結果は、すでに済ませたこととしてではなく、ユーザーが承認する編集案として必ず示す。wiki はユーザーのものであり、黙って書き換えると信頼が損なわれる。
+詳しい内容は `references/lint-workflow.md` にある。lint は、操作のたびではなく、一定の頻度（N 回の取り込みごと、または週1回）で行うのがよい。MCP のツール `lint`（使えなければ `python scripts/wiki_lint.py`）は、構造上の問題を自動で見つける。孤立ページ、リンク切れの `[[wikilinks]]`、大きすぎるページ（文字数か行数で判定する）、frontmatter の欠落や形式の誤り（全角の「：」、「、」で区切ったリスト、`YYYY-MM-DD` でない日付など）、`updated` の日付が古いページである。`--suggest-pages` を付けると、多くのページに出てくるのに専用のページがない語（3文字以上のカタカナ語や漢字の複合語、大文字で始まる英語の句）も挙げる。そのあと、LLM が必要な内容面のチェックを行う。最近更新されたページを読んで古い主張との矛盾を探し、言及されているのに専用のページがないコンセプトを洗い出し、Web 検索や新しいソースで補うとよい不足をユーザーに提案する。lint の検出結果は、すでに済ませたこととしてではなく、ユーザーが承認する編集案として必ず示す。wiki はユーザーのものであり、黙って書き換えると信頼が損なわれる。
 
 ## 防ぐべき失敗
 
@@ -165,6 +188,7 @@ gist をめぐるコミュニティの議論で、このパターンがうまく
 - `references/agent-memory-integration.md`: ユーザースコープまたはプロジェクトの wiki をエージェントの指示に登録する方法。定型文の種類と、初期化時の会話の進め方
 - `references/retrieval-setup.md`: init と upgrade で必ず行うセットアップ。パス、モデルキャッシュ、バージョンを固定したローカルの依存パッケージ、コーパス全体のベクトルの同期、準備完了のチェック、秘密情報を含まない `SCHEMA.md` の状態
 - `references/graph-workflow.md`: 任意のグラフ層。オントロジー、frontmatter のスキーマ、型付きエッジと通常の wikilink の使い分け、extract・lint・query の流れ
+- `references/mcp-server.md`: wiki の MCP サーバーの仕組み、ツールと引数、置き場所、困ったときの確かめ方
 - `references/decision-models.md`: 任意の判定レイヤー。D1〜D5 のチェック、バックエンド、プライバシー、ライセンス、設定、判定に失敗したときに処理を通す（fail-open）規則
 
 ## 付属のスクリプト
@@ -183,6 +207,8 @@ gist をめぐるコミュニティの議論で、このパターンがうまく
 - `scripts/wiki_graph_query.py`: `graph.sqlite` に対する neighbors、edges、facts、最短経路のクエリ
 - `scripts/wiki_graph_common.py`: グラフの 3 つのスクリプトが共有する、オントロジーの有無の判定と、生成物の置き換え
 - `scripts/wiki_workspace.py`: 作業領域の設定（`.info-hive/workspace.json`）を読み、`--wiki` を省いたときの既定（`dirs.wiki`、設定がなければ `./wiki`）を決める
+- `scripts/wiki_mcp_relay.py`、`scripts/wiki_mcp_server.py`: wiki の MCP サーバー。中継はプラグインの `.mcp.json` で登録され、127.0.0.1 のサーバーを 1 つだけ起動して使う。ツールは `query`、`get_page`、`list_index`、`lint`、`stats`、`graph`、`index_chunks`
+- `scripts/wiki_index.py`: MCP サーバーの検索の基盤（ruri-v3-130m の ONNX、usearch、Tantivy）。索引は wiki の外に置く
 - `scripts/wiki_decide.py`: 任意の判定モデルのクライアント。バックエンドのチェック、矛盾の洗い出し、取り込み候補の絞り込み、信頼できないテキストの洗い出し
 
 ## テンプレート

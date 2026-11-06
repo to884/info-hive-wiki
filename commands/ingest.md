@@ -18,7 +18,7 @@ argument-description: "取り込むソース。ファイルのパス、URL、ま
 4. wiki に何かを書く前に、要点をユーザーと簡単に話し合う。目立つ点、既存のページとつながる点、意外な点を挙げる。
 5. wiki を調べて、このソースが関係する既存のページを洗い出す。候補のページはそれぞれ読んで確かめる。
 6. `<WIKI_ROOT>/sources/` にソースの要約ページを書く。関係するエンティティやコンセプトのページは、`str_replace` で必要な箇所だけを更新する。新しいエンティティやコンセプトには新しいページを作り、それぞれに少なくとも1つの被リンクを付ける。インデックスを更新し、`log.md` に `## [YYYY-MM-DD] ingest | <ソースの題名>` の形で1行追記する。操作名の `ingest` は英語のまま書く。
-7. `<WIKI_ROOT>/graph/ontology.yaml` があり、今回の取り込みで型付きの `graph.relationships[]` を追加した、または追加できる場合は、ソースが明示的に裏づけている場合に限って型付きのエッジを追加する（述語、ソースページのスラッグ、証拠となる引用、確信度、ステータスを付ける）。次に `uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_graph_lint.py" "<WIKI_ROOT>"` を実行し、検出結果をユーザーと一緒に仕分けてから、`uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_graph_extract.py" "<WIKI_ROOT>"` を実行する。`log.md` の取り込みの行の下に、`   グラフ: ノード +N、型付きエッジ +M` というサブ行を追記する。
+7. `<WIKI_ROOT>/graph/ontology.yaml` があり、今回の取り込みで型付きの `graph.relationships[]` を追加した、または追加できる場合は、ソースが明示的に裏づけている場合に限って型付きのエッジを追加する（述語、ソースページのスラッグ、証拠となる引用、確信度、ステータスを付ける）。次にグラフの lint をかける。wiki の MCP サーバーのツール `lint` が使える場合は、`wiki=<WIKI_ROOT の絶対パス>` を渡し、結果の `graph.findings` を見る。使えない場合は `uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_graph_lint.py" "<WIKI_ROOT>"` を実行する。検出結果をユーザーと一緒に仕分けてから、`uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_graph_extract.py" "<WIKI_ROOT>"` を実行する。`log.md` の取り込みの行の下に、`   グラフ: ノード +N、型付きエッジ +M` というサブ行を追記する。
 8. 作業が終わったら、何をしたかをユーザーに伝える。更新したページ、作成したページ、指摘した矛盾、追って調べる価値のある点を報告する。
 
 wiki がまだない場合は、プロジェクトをまたいで使うユーザースコープの wiki なら `/wiki:init --user`、プロジェクト用の wiki なら `/wiki:init` を提案する。

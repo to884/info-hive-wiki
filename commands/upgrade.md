@@ -35,7 +35,8 @@ argument-description: "`--user` を付けるとユーザースコープの wiki 
    - frontmatter の文字列の値は二重引用符で囲む決まりになった。既存のページはそのまま読めるが、lint が `unquoted_strings` として指摘する。`init_wiki.py` は既存の `.page-template.md` を上書きしないので、テンプレートの `type` と `tags` の例を引用符つきに直すことを提案する。
 
    **検索について伝えること**:
-   - セクション検索の既定は、ローカルのハイブリッド検索である。FastEmbed と sqlite-vec による埋め込み検索の結果を、RRF で BM25 の結果と統合する。API キー、リモートのエンドポイント、プロバイダーへの同意、クエリごとの課金はない。
+   - コマンド（`/wiki:query`、`/wiki:lint`、`/wiki:stats`、`/wiki:graph`）は、まず wiki の MCP サーバーのツールを使う。サーバーは cl-nagoya/ruri-v3-130m の ONNX、usearch、Tantivy で検索し、索引は wiki の外（Windows は `%LOCALAPPDATA%\info-hive\index\`）に置く。初めて使うときは、依存（約 1 GB）とモデル（約 530 MB）を取得するので数分かかる。ツールが使えないときは、下の CLI に戻る。詳しくは `skills/info-hive/references/mcp-server.md` にある。
+   - CLI（`wiki_search.py`）のセクション検索の既定は、ローカルのハイブリッド検索である。FastEmbed と sqlite-vec による埋め込み検索の結果を、RRF で BM25 の結果と統合する。どちらの経路にも、API キー、リモートのエンドポイント、プロバイダーへの同意、クエリごとの課金はない。
    - `wiki/.wiki-cache/embeddings.sqlite` には、セクションの位置情報、内容のハッシュ、ベクトルが保存される。新しいセクションや変更されたセクションは差分だけベクトル化し、削除されたセクションは取り除く。スキーマやモデルが変わったときは自動的に作り直す。環境変数 `INFO_HIVE_EMBED_MODEL` で `intfloat/multilingual-e5-large`（約 2.24 GB）に切り替えたときも同じである。
    - 初回のセットアップとアップグレードのたびに、`uv` を通じて `setup_wiki.py` が自動で実行され、バージョンを固定した実行環境一式をインストールし、すべてのベクトルを同期する。
    - `python "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_search.py" "<検索語>" --wiki "<WIKI_ROOT>" --no-embed` を使うと、依存パッケージを使わない語彙ベースの BM25 に固定できる。パッケージがない、モデルの初期化でエラーが出た、sqlite-vec を読み込めなかった、といった場合も語彙ベースの検索に切り替わり、クエリの出力は壊れない。
@@ -43,7 +44,7 @@ argument-description: "`--user` を付けるとユーザースコープの wiki 
    - スクリプトが「ローカルの埋め込み検索（FastEmbed と sqlite-vec）」の欠落を報告した場合は、現在のテンプレートの `- Semantic backend: local FastEmbed + sqlite-vec` の行を、内容を示して承認を得たうえで、既存の `## Retrieval` セクションにマージする。llm-wiki の SCHEMA.md にこの行があっても、モデル名が `BAAI/bge-small-en-v1.5` のままなら、`intfloat/multilingual-e5-small` に直すことを提案する。
 5. 選んだ wiki について、ユーザースコープまたはプロジェクトのエージェントのメモリに書かれた記述が古い `/wiki:init` で設定されたもので、グラフ層に触れていない場合は、次のような1行の案内を追加するかをユーザーに聞く。
 
-   > 関係を問う質問では、`info-hive` スキルの `wiki_graph_query.py` で `wiki/graph/graph.sqlite` も参照できる。
+   > 関係を問う質問では、wiki の MCP サーバーのツール `graph`（使えなければ `info-hive` スキルの `wiki_graph_query.py`）で `wiki/graph/graph.sqlite` も参照できる。
 
    追加する内容を示して承認を得てから、`str_replace` で書き込む。ユーザーが「見送る」と答えたら、それ以上勧めない。
 6. `wiki_graph_extract.py` は自動で実行しない。`graph:` メタデータを持つページが1つもないうちは、実行しても何も得られない。ユーザーの準備ができたときの次の手順として伝えておく。
