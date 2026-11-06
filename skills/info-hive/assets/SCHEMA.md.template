@@ -64,6 +64,8 @@ wiki が成長するにつれて必要になった種類は、ここに追加す
 - `source` ページ: `authors`、`url`（該当する場合）、`raw`、`ingested`
 - source 以外のページ: 参照したソースの要約ページを並べた `sources`
 
+`synthesis` ページの `question`、`asked`、`sources_consulted` は任意項目である。`sources` にはソースの要約ページだけを入れ、`sources_consulted` には種類を問わず参照したページを入れる。
+
 日付（`created`、`updated`、`ingested`）は `YYYY-MM-DD` の形で書く。「2026年11月3日」や「2026/11/03」は日付として読まれず、lint が指摘する。
 
 文字列の値は、配列の要素も含めて二重引用符で囲む（`type: "source"`、`tags: ["税制", "間接税"]`）。日付と数値は囲まない。値の中の `"` は `\"`、`\` は `\\` と書く。引用符のない文字列は lint が指摘する。

@@ -72,12 +72,18 @@ wiki にクエリに関係する内容がない場合は、そうはっきり伝
 ```yaml
 ---
 type: "synthesis"
+title: "回答の題名（質問か話題から付ける）"
 question: "元の質問（そのまま、または軽く整えたもの）"
 asked: 2026-04-15
-sources_consulted: ["page-1", "page-2", "page-3"]
+sources: ["source-page-1", "source-page-2"]
+sources_consulted: ["source-page-1", "concept-page", "entity-page"]
 tags: ["..."]
+created: 2026-04-15
+updated: 2026-04-15
 ---
 ```
+
+`type`、`title`、`tags`、`created`、`updated` は lint がすべてのページに求める必須項目で、`sources` は source 以外のページに求められる項目である。`sources` には回答の根拠にしたソースの要約ページ（`wiki/sources/`）のスラッグだけを入れ、`sources_consulted` には種類を問わず参照したページ（ソース、コンセプト、エンティティ、ほかのシンセシス）のスラッグを入れる。`question`、`asked`、`sources_consulted` はシンセシスのページだけの任意項目である。文字列の値は二重引用符で囲み、日付は囲まない。
 
 本文は、ユーザーに伝えた回答そのものである。wiki の文体に合わせて軽く手を入れてもよい。新しいシンセシスのページを、該当するインデックスに追加する。`log.md` には、`## [YYYY-MM-DD] query | <質問の要約>` の形の行を追記する（`## [2026-11-03] query | 軽減税率の対象の比較`）。操作名の `query` は英語のまま書き、説明は日本語で書く。
 

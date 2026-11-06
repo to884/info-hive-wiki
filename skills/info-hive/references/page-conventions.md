@@ -45,7 +45,7 @@ frontmatter を日本語で書くときは、次の4点を守る。どれも lin
 種類ごとのフィールドは次のとおりである。
 - ソースのページには、`authors`、`url`、`raw`（raw ファイルへのパス）、`ingested`（`YYYY-MM-DD`）を加える。
 - エンティティのページには、`aliases`（同じエンティティの別名や表記の違い）、`kind`（`person`、`paper`、`product` など）を加えてもよい。
-- シンセシスのページには、`question`（クエリから保存した場合は、元の質問）と `sources_consulted` を加える。
+- シンセシスのページには、`question`（クエリから保存した場合は、元の質問）、`asked`（質問した日付）、`sources_consulted` を加えてもよい。`sources` にはソースの要約ページだけを入れ、`sources_consulted` には種類を問わず参照したページ（コンセプト、エンティティ、ほかのシンセシスを含む）を入れる。
 
 ## wikilink
 
