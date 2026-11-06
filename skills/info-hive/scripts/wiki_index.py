@@ -355,6 +355,10 @@ class Item:
     vector: object = None  # numpy の配列。None なら後で埋め込む
 
 
+# 索引のディレクトリの中で、fingerprint が変わって作り直すときも残すファイル。
+METADATA_FILES = ("writer.lock", "collection.json", "wiki.json")
+
+
 def wipe(folder: Path, keep: tuple[str, ...] = ("writer.lock",)) -> None:
     """索引のディレクトリの中身を消す。持っているロックのファイルは残す。"""
     for child in folder.iterdir():
@@ -384,6 +388,8 @@ class Collection:
         self._vector_keys: set[int] = set()
         self._dirty_vectors = False
         self._last_save = 0.0
+        # 書き込みが途中で失敗し、台帳と索引がずれているかもしれない。そろえ直すまで dirty の印を消さない。
+        self._needs_reconcile = False
         self._writer_lock = WriterLock(path)
         try:
             self._open()
@@ -402,7 +408,8 @@ class Collection:
         if meta and (meta.get("fingerprint") != self.digest or meta.get("schema") != str(LEDGER_SCHEMA)):
             log(f"索引の fingerprint が変わったので作り直す: {self.path.name}")
             self.db.close()
-            wipe(self.path)
+            # 索引を開くための情報（collection.json、wiki.json）は残す。消すと、再起動のあとで見つからなくなる。
+            wipe(self.path, keep=METADATA_FILES)
             return self._open()
         with self.db:
             self.db.execute(
@@ -467,32 +474,37 @@ class Collection:
     def reconcile(self) -> dict:
         """台帳に合わせて、Tantivy と usearch をそろえ直す。"""
         with self.lock.write():
-            ledger = {key: terms for key, terms in self.db.execute("SELECT key, terms FROM rows")}
-            searcher = self.lexical.searcher()
-            in_lexical = set()
-            if searcher.num_docs:
-                hits = searcher.search(self._tantivy.Query.all_query(), limit=searcher.num_docs).hits
-                in_lexical = {int(k) for k in searcher.fast_field_values("key", [a for _, a in hits])}
-            extra = sorted(in_lexical - set(ledger))
-            missing = sorted(set(ledger) - in_lexical)
-            self._commit_lexical(extra, [(key, ledger[key]) for key in missing])
-            stored = set(int(k) for k in self.vectors.keys) if len(self.vectors) else set()
-            with_vector = {key for key, in self.db.execute("SELECT key FROM rows WHERE has_vector = 1")}
-            orphan = sorted(stored - set(ledger))
-            lost = sorted(with_vector - stored)
-            for key in orphan:
-                self.vectors.remove(key)
-            with self.db:
-                self.db.executemany("UPDATE rows SET has_vector = 0 WHERE key = ?", [(k,) for k in lost])
-            self._vector_keys = with_vector - set(lost)
-            self._save_vectors(force=True)
-            with self.db:
-                self._set_meta("dirty", "0")
-            summary = {"lexical_removed": len(extra), "lexical_added": len(missing),
-                       "vectors_removed": len(orphan), "vectors_lost": len(lost)}
-            if any(summary.values()):
-                log(f"索引をそろえ直した: {self.path.name} {summary}")
-            return summary
+            return self._reconcile_locked()
+
+    def _reconcile_locked(self) -> dict:
+        """reconcile の本体。書き込みのロックを持って呼ぶ。"""
+        ledger = {key: terms for key, terms in self.db.execute("SELECT key, terms FROM rows")}
+        searcher = self.lexical.searcher()
+        in_lexical = set()
+        if searcher.num_docs:
+            hits = searcher.search(self._tantivy.Query.all_query(), limit=searcher.num_docs).hits
+            in_lexical = {int(k) for k in searcher.fast_field_values("key", [a for _, a in hits])}
+        extra = sorted(in_lexical - set(ledger))
+        missing = sorted(set(ledger) - in_lexical)
+        self._commit_lexical(extra, [(key, ledger[key]) for key in missing])
+        stored = set(int(k) for k in self.vectors.keys) if len(self.vectors) else set()
+        with_vector = {key for key, in self.db.execute("SELECT key FROM rows WHERE has_vector = 1")}
+        orphan = sorted(stored - set(ledger))
+        lost = sorted(with_vector - stored)
+        for key in orphan:
+            self.vectors.remove(key)
+        with self.db:
+            self.db.executemany("UPDATE rows SET has_vector = 0 WHERE key = ?", [(k,) for k in lost])
+        self._vector_keys = with_vector - set(lost)
+        self._needs_reconcile = False
+        self._save_vectors(force=True)
+        with self.db:
+            self._set_meta("dirty", "0")
+        summary = {"lexical_removed": len(extra), "lexical_added": len(missing),
+                   "vectors_removed": len(orphan), "vectors_lost": len(lost)}
+        if any(summary.values()):
+            log(f"索引をそろえ直した: {self.path.name} {summary}")
+        return summary
 
     # --- 書き込み ---
 
@@ -539,8 +551,9 @@ class Collection:
         os.replace(temporary, self._usearch_path)
         self._dirty_vectors = False
         self._last_save = time.monotonic()
-        with self.db:
-            self._set_meta("dirty", "0")
+        if not self._needs_reconcile:
+            with self.db:
+                self._set_meta("dirty", "0")
 
     def flush(self) -> None:
         with self.lock.write():
@@ -552,53 +565,70 @@ class Collection:
 
     def apply(self, upserts: list[Item], deletes: list[str] = ()) -> dict:
         """行を加え、置き換え、消す。置き換えた行は新しい key を持つ（古い key は古い世代として消える）。"""
-        import numpy as np
         with self.lock.write():
-            with self.db:
-                self._set_meta("dirty", "1")
-            old_keys = []
-            for locator in list(deletes) + [item.locator for item in upserts]:
-                key = self._locators.get(locator)
-                if key is not None:
-                    old_keys.append(key)
-            old_keys = sorted(set(old_keys))
-            next_key = int(self._meta("next_key") or 1)
-            new_rows = []
-            for item in upserts:
-                new_rows.append((next_key, item))
-                next_key += 1
-            with self.db:
-                self.db.executemany("DELETE FROM rows WHERE key = ?", [(k,) for k in old_keys])
-                self.db.executemany(
-                    "INSERT INTO rows(key, locator, content_hash, terms, text, has_vector, doc, generation, payload) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    [(key, item.locator, item.content_hash, " ".join(item.terms), item.text,
-                      int(item.vector is not None), item.doc, int(item.generation),
-                      json.dumps(item.payload, ensure_ascii=False)) for key, item in new_rows])
-                self._set_meta("next_key", str(next_key))
-            for key in old_keys:
-                locator = self._keys.pop(key, None)
-                if locator is not None:
-                    self._locators.pop(locator, None)
-                    self._hashes.pop(locator, None)
-            for key, item in new_rows:
-                self._keys[key] = item.locator
-                self._locators[item.locator] = key
-                self._hashes[item.locator] = item.content_hash
-            self._commit_lexical(old_keys, [(key, " ".join(item.terms)) for key, item in new_rows])
-            removed = [k for k in old_keys if k in self._vector_keys]
-            for key in removed:
-                self.vectors.remove(key)
-                self._vector_keys.discard(key)
-            given = [(key, item.vector) for key, item in new_rows if item.vector is not None]
-            if given:
-                self.vectors.add(np.array([k for k, _ in given], dtype=np.uint64),
-                                 np.stack([np.asarray(v, dtype=np.float32) for _, v in given]))
-                self._vector_keys.update(k for k, _ in given)
-            if removed or given:
-                self._dirty_vectors = True
-            self._save_vectors(force=True)
-            return {"added": len(new_rows), "removed": len(old_keys)}
+            self._before_write()
+            try:
+                return self._apply_locked(upserts, deletes)
+            except BaseException:
+                self._needs_reconcile = True
+                raise
+
+    @property
+    def needs_reconcile(self) -> bool:
+        return self._needs_reconcile
+
+    def _before_write(self) -> None:
+        """書き込みの前に、前に失敗した書き込みの分をそろえ直し、dirty の印を立てる。"""
+        if self._needs_reconcile:
+            self._reconcile_locked()
+        with self.db:
+            self._set_meta("dirty", "1")
+
+    def _apply_locked(self, upserts: list[Item], deletes) -> dict:
+        import numpy as np
+        old_keys = []
+        for locator in list(deletes) + [item.locator for item in upserts]:
+            key = self._locators.get(locator)
+            if key is not None:
+                old_keys.append(key)
+        old_keys = sorted(set(old_keys))
+        next_key = int(self._meta("next_key") or 1)
+        new_rows = []
+        for item in upserts:
+            new_rows.append((next_key, item))
+            next_key += 1
+        with self.db:
+            self.db.executemany("DELETE FROM rows WHERE key = ?", [(k,) for k in old_keys])
+            self.db.executemany(
+                "INSERT INTO rows(key, locator, content_hash, terms, text, has_vector, doc, generation, payload) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [(key, item.locator, item.content_hash, " ".join(item.terms), item.text,
+                  int(item.vector is not None), item.doc, int(item.generation),
+                  json.dumps(item.payload, ensure_ascii=False)) for key, item in new_rows])
+            self._set_meta("next_key", str(next_key))
+        for key in old_keys:
+            locator = self._keys.pop(key, None)
+            if locator is not None:
+                self._locators.pop(locator, None)
+                self._hashes.pop(locator, None)
+        for key, item in new_rows:
+            self._keys[key] = item.locator
+            self._locators[item.locator] = key
+            self._hashes[item.locator] = item.content_hash
+        self._commit_lexical(old_keys, [(key, " ".join(item.terms)) for key, item in new_rows])
+        removed = [k for k in old_keys if k in self._vector_keys]
+        for key in removed:
+            self.vectors.remove(key)
+            self._vector_keys.discard(key)
+        given = [(key, item.vector) for key, item in new_rows if item.vector is not None]
+        if given:
+            self.vectors.add(np.array([k for k, _ in given], dtype=np.uint64),
+                             np.stack([np.asarray(v, dtype=np.float32) for _, v in given]))
+            self._vector_keys.update(k for k, _ in given)
+        if removed or given:
+            self._dirty_vectors = True
+        self._save_vectors(force=True)
+        return {"added": len(new_rows), "removed": len(old_keys)}
 
     def pending(self, limit: int | None = None) -> list[tuple[int, str]]:
         """ベクトルのまだない行の (key, 埋め込む文字列)。"""
@@ -619,15 +649,18 @@ class Collection:
             pairs = [(k, v) for k, v in zip(keys, vectors) if k in self._keys and k not in self._vector_keys]
             if not pairs:
                 return 0
-            with self.db:
-                self._set_meta("dirty", "1")
-            self.vectors.add(np.array([k for k, _ in pairs], dtype=np.uint64),
-                             np.stack([np.asarray(v, dtype=np.float32) for _, v in pairs]))
-            self._vector_keys.update(k for k, _ in pairs)
-            with self.db:
-                self.db.executemany("UPDATE rows SET has_vector = 1 WHERE key = ?", [(k,) for k, _ in pairs])
-            self._dirty_vectors = True
-            self._save_vectors()
+            self._before_write()
+            try:
+                self.vectors.add(np.array([k for k, _ in pairs], dtype=np.uint64),
+                                 np.stack([np.asarray(v, dtype=np.float32) for _, v in pairs]))
+                self._vector_keys.update(k for k, _ in pairs)
+                with self.db:
+                    self.db.executemany("UPDATE rows SET has_vector = 1 WHERE key = ?", [(k,) for k, _ in pairs])
+                self._dirty_vectors = True
+                self._save_vectors()
+            except BaseException:
+                self._needs_reconcile = True
+                raise
             return len(pairs)
 
     def delete_where(self, sql: str, params: tuple) -> list[str]:
@@ -809,6 +842,9 @@ class WikiIndex:
     def refresh(self) -> dict:
         """wiki の変更を台帳と語彙の索引に入れる。埋め込みは embed_pending で別に行う。"""
         with self._refresh_lock:
+            if self.collection.needs_reconcile:
+                # 前の書き込みが途中で失敗した。台帳の行は残っているので、索引を台帳に合わせる。
+                self.collection.reconcile()
             signature = stat_signature(self.root)
             if signature == self._signature:
                 return {"changed": False}
@@ -978,10 +1014,18 @@ class ChunkStore:
         except (OSError, ValueError):
             info = None
         self.tokenizer = info.get("tokenizer") if info else None
+        # collection を開く・作り直すときのロック。同時に初めて呼ばれても、索引は 1 回だけ開く。
+        self._init_lock = threading.RLock()
+        # 書き込みを直列にするロック。検索はこのロックを待たない。
+        self._write_lock = threading.Lock()
         self.collection = Collection(self.dir, chunk_fingerprint(self.tokenizer)) if self.tokenizer else None
 
     def ensure(self, tokenizer: str, reset: bool = False) -> bool:
         """tokenizer を確かめる。違う tokenizer の索引があれば、reset が真のときだけ作り直す。"""
+        with self._init_lock:
+            return self._ensure_locked(tokenizer, reset)
+
+    def _ensure_locked(self, tokenizer: str, reset: bool) -> bool:
         if self.collection is not None and self.tokenizer == tokenizer and not reset:
             return False
         if self.collection is not None and self.tokenizer != tokenizer and not reset:
@@ -1000,6 +1044,10 @@ class ChunkStore:
 
     def index(self, chunks: list[dict], generation: int, tokenizer: str, delete_docs: list[str] = (),
               reset: bool = False, embedder=None) -> dict:
+        with self._write_lock:
+            return self._index_locked(chunks, generation, tokenizer, delete_docs, reset, embedder)
+
+    def _index_locked(self, chunks, generation, tokenizer, delete_docs, reset, embedder) -> dict:
         was_reset = self.ensure(tokenizer, reset)
         collection = self.collection
         items, seen = [], set()
@@ -1042,9 +1090,10 @@ class ChunkStore:
 
     def search(self, query: str, query_tokens: list[str], top: int = 10, docs: list[str] | None = None,
                max_distance: float | None = None, embedder=None) -> dict:
-        if self.collection is None:
+        with self._init_lock:
+            collection = self.collection
+        if collection is None:
             raise FileNotFoundError(f"collection {self.name} はまだない")
-        collection = self.collection
         allowed = None
         if docs:
             marks = ",".join("?" * len(docs))
