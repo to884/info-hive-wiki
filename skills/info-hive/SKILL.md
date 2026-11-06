@@ -42,7 +42,7 @@ wiki には3つの層と3つの操作がある。スキルの残りの部分は�
 
 ページの frontmatter には、型付きの `graph:` メタデータを書ける。付属の抽出スクリプトが、すべてのページを `wiki/graph/` の `nodes.jsonl`、`edges.jsonl`、`graph.sqlite`、`graph.graphml` にコンパイルする。**正本は Markdown である。**グラフは作り直せるインデックスにすぎない。`graph:` のないページも、`type` と `kind` から導いたノードとして現れ、本文の wikilink から確信度の低い `mentions` エッジを生む。型付きの意味的なエッジ（`founded`、`proposed`、`depends_on` など）には、明示的なソースと証拠となる引用が必要である。学習データから推測したエッジを書いてはならない。
 
-グラフ層の規約（述語の語彙、ノード ID の形式、必須のフィールド）は `wiki/graph/ontology.yaml` にある。詳しいリファレンスは `references/graph-workflow.md` である。中身のある取り込みのあとで、付属のスクリプトを実行する。
+グラフ層の規約（述語の語彙、ノード ID の形式、必須のフィールド）は `wiki/graph/ontology.yaml` にある。有効化、更新、検査、問い合わせ、作り直しの手順の正本は `references/graph-workflow.md` である。ページを作るか書き換えたら、型付きの関係に触れていなくても extract を実行する。
 
 ```bash
 uv run --script scripts/wiki_graph_lint.py wiki/      # オントロジー、証拠、エイリアスの衝突をチェックする
@@ -50,7 +50,7 @@ uv run --script scripts/wiki_graph_extract.py wiki/   # nodes.jsonl、edges.json
 python scripts/wiki_graph_query.py wiki/ neighbors --node product:konvy
 ```
 
-`wiki/graph/ontology.yaml` がない場合は、グラフ層を導入する前の wiki である。グラフの手順は何もしないものとして扱い、でっち上げてはならない。
+`wiki/graph/ontology.yaml` がない場合は、グラフ層を導入する前の wiki である。3 つのスクリプトは何も書き出さずに終了コード 1 で止まる。グラフの手順は飛ばし、オントロジーをでっち上げてはならない。
 
 ## 保存の範囲とディレクトリ構成
 
@@ -180,6 +180,8 @@ gist をめぐるコミュニティの議論で、このパターンがうまく
 - `scripts/wiki_graph_extract.py`: グラフのメタデータと wikilink を、バージョンを固定した PyYAML を使って JSONL、SQLite、GraphML にコンパイルする
 - `scripts/wiki_graph_lint.py`: バージョンを固定した PyYAML を使い、型付きエッジをオントロジーと照らして検証する
 - `scripts/wiki_graph_query.py`: `graph.sqlite` に対する neighbors、edges、facts、最短経路のクエリ
+- `scripts/wiki_graph_common.py`: グラフの 3 つのスクリプトが共有する、オントロジーの有無の判定と、生成物の置き換え
+- `scripts/wiki_workspace.py`: 作業領域の設定（`.info-hive/workspace.json`）を読み、`--wiki` を省いたときの既定（`dirs.wiki`、設定がなければ `./wiki`）を決める
 - `scripts/wiki_decide.py`: 任意の判定モデルのクライアント。バックエンドのチェック、矛盾の洗い出し、取り込み候補の絞り込み、信頼できないテキストの洗い出し
 
 ## テンプレート

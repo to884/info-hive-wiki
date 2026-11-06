@@ -56,6 +56,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 # import したときも見つかるようにする。
 sys.path.insert(0, str(SCRIPT_DIR))
 from wiki_text import localize_argparse, quote_in_text  # noqa: E402
+import wiki_workspace  # noqa: E402
 QUESTIONS_PATH = SCRIPT_DIR.parent / "assets" / "decision-questions.json"
 
 BACKENDS = {
@@ -667,13 +668,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("shortlist", help="新しいソースが変更する wiki のページを順位付けする（D4）")
     p.add_argument("source", help="新しいソースのファイル")
-    p.add_argument("--wiki", type=Path, default=Path("wiki"), help="wiki のディレクトリ（既定: ./wiki）")
+    p.add_argument("--wiki", type=Path, default=None, help=wiki_workspace.WIKI_DEFAULT_HELP)
     p.add_argument("--top", type=int, default=QUESTIONS["changes"]["pool"], help="検索で集める候補の数（既定: 30）")
     p.add_argument("--threshold", type=float, help="この確率以上のページを候補に残す（既定: 0.5）")
     p.add_argument("--no-embed", action="store_true", help="候補を語彙の検索だけで集める")
 
     p = sub.add_parser("contradictions", help="矛盾するセクションの組を見つける（D3）")
-    p.add_argument("--wiki", type=Path, default=Path("wiki"), help="wiki のディレクトリ（既定: ./wiki）")
+    p.add_argument("--wiki", type=Path, default=None, help=wiki_workspace.WIKI_DEFAULT_HELP)
     p.add_argument("--max-pairs", type=int, default=40, help="チェックする組の最大数（既定: 40）")
     p.add_argument("--threshold", type=float, help="この確率以上の組を報告する（既定: 0.5）")
 
@@ -690,6 +691,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command in ("ask", "check"):
             return 1
         client = None
+    if args.command in ("shortlist", "contradictions") and args.wiki is None:
+        args.wiki = wiki_workspace.default_wiki_or_exit()
     if args.command in ("shortlist", "contradictions") and not args.wiki.exists():
         print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
         return 1

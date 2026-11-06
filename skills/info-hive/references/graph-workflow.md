@@ -2,7 +2,19 @@
 
 グラフ層は、Markdown の wiki の上に任意で作るコンパイル済みのインデックスである。wiki を置き換えるものではない。`wiki/graph/` の下に wiki と並べて置き、いつでも Markdown から作り直せる。目的は、出所の裏づけを持つ型付きの関係を機械でクエリできるようにしつつ、正本は Markdown のままにすることである。
 
-`wiki/graph/ontology.yaml` がない場合、その wiki はグラフ層を導入する前のものである。extract、lint、query は実行せず、オントロジーのファイルをでっち上げてもならない。グラフ層の追加を提案するか、グラフ層なしで進める。
+この文書が、グラフの有効化、更新、検査、問い合わせ、作り直しの手順の正本である。取り込み、問い合わせ、lint、アップグレードの各手順とコマンドは、グラフの段を呼ぶ時点と結果の扱いだけを書き、規約はここを参照する。
+
+## グラフ層が有効かどうか
+
+グラフ層が有効かどうかは、オントロジー `wiki/graph/ontology.yaml` があるかだけで決める。`graph.sqlite` などの生成物の有無では決めない。
+
+- **オントロジーがある**: グラフ層は有効である。下の手順に従う。
+- **オントロジーがない**: グラフ層を導入する前の wiki である。extract、lint、query のスクリプトは、どれも何も書き出さずに、同じ文面を標準エラーに書いて終了コード 1 で止まる。オントロジーを消した wiki に古い `graph.sqlite` が残っていても、query はそれに答えない。オントロジーのファイルをでっち上げてはならない。グラフ層を使いたいなら、`/wiki:upgrade` か、`assets/ontology.yaml.template` を `wiki/graph/ontology.yaml` にコピーすることを提案する。使わないなら、グラフの段を飛ばして進める。
+- **オントロジーを読めない**（YAML の誤り、最上位がマッピングでない）: extract と lint は終了コード 2 で止まる。ユーザーにオントロジーの修正を頼む。
+
+`--ontology` で別のオントロジーを指定したときは、そのファイルの有無で同じように決める。query に `--db` で DB を明示したときは、オントロジーを確かめずにその DB を使う（`extract --out` で別の場所に作った場合のため）。
+
+終了コードのまとめ: 0 は成功、1 は必要な入力がない（wiki のディレクトリ、オントロジー、DB、ノード）、2 は環境か入力の形式の問題（PyYAML がない、オントロジーを読めない）である。
 
 ## グラフが表すもの
 
@@ -71,45 +83,64 @@ graph:
 
 迷ったら、wikilink を書き、型付きエッジはスキップする。lint は証拠の欠落を指摘するが、控えめな主張をとがめることはない。
 
-## extract / lint / query の流れ
+## 手順
+
+スクリプトのパスは、スキルのディレクトリ（`skills/info-hive/`）から見たものである。コマンドからは `${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/...` で呼ぶ。`wiki/` は実際の wiki のディレクトリに置き換える。lint は `<wiki>` を省くと、作業領域の設定（`.info-hive/workspace.json`）の `dirs.wiki`、設定がなければ `./wiki` を使う。extract と query は `<wiki>` を省けない。
+
+### 検査（lint）
 
 ```bash
-# まず型付きメタデータを検証する。lint は控えめに動き、ファイルを編集しない。
-uv run --script scripts/wiki_graph_lint.py wiki/
+uv run --script scripts/wiki_graph_lint.py wiki/ [--json] [--decide]
+```
 
-# nodes.jsonl、edges.jsonl、graph.sqlite、graph.graphml にコンパイルする。
-uv run --script scripts/wiki_graph_extract.py wiki/
+型付きのメタデータを、オントロジーと照らして検査する。ファイルは編集しない。検出結果は編集案として示し、型付きの `graph.relationships` を黙って書き換えてはならない。承認された修正を適用したら、extract を実行する。`--decide` は、任意の判定レイヤーで証拠を確かめる（`decision-models.md`）。
 
-# グラフをたどる。
+lint を実行するのは、`graph.relationships[]` を足したか直したとき、オントロジーを編集したとき、ユーザーが lint を頼んだときである。型付きの関係に触れていない更新では、lint を飛ばしてよい。
+
+### 更新（extract）
+
+```bash
+uv run --script scripts/wiki_graph_extract.py wiki/ [--out <dir>] [--formats jsonl,sqlite,graphml] [--ontology <path>]
+```
+
+**グラフ層が有効な wiki で、ページを足した、消した、名前を変えた、または書き換えたときは、必ず extract を実行する。** extract が作るエッジは `graph.relationships[]` だけから来るのではない。本文の `[[wikilink]]`（`mentions`）、frontmatter の `sources:`（`sourced_from`）、ソースページの `raw:`（`summarizes_raw`）からも作り、ノードの題名、種類、タグ、別名も frontmatter から読む。そのため、型付きの関係を足さず、新しいページも作らない取り込みでも、既存のページの本文や `sources:` を直せばグラフは変わる。extract を飛ばしてよいのは、wiki のページを 1 つも変えなかったときだけである。
+
+extract は、型付きの関係があればその前に lint を通す。lint の検出結果があっても extract は動くが、型の誤ったエッジもそのままグラフに入る。
+
+取り込みのあとで extract を実行したら、`log.md` の取り込みの行の下に、次のサブ行を追記する。
+
+`   グラフ: ノード +N、型付きエッジ +M（述語: founded、contains_product、...）`
+
+### 作り直しと中断
+
+extract は、成果物（`nodes.jsonl`、`edges.jsonl`、`graph.sqlite`、`graph.graphml`）をそれぞれ同じディレクトリの一時ファイル（`<名前>.<プロセス番号>.tmp`）に書き、書き終えてから元のファイルと置き換える。途中で止まっても、前の成果物が壊れずに残り、query を続けられる。新しい内容にするには、extract をもう一度実行する。止まった実行が残した一時ファイルは、10 分より古ければ次の extract が消す。`wiki/graph/.gitignore` のひな形は `*.tmp` を無視する。
+
+Windows では、ほかのプロセスが `graph.sqlite` を開いていると置き換えに失敗することがある。extract は少し待ってやり直し、それでも置き換えられなければ一時ファイルを消してエラーで止まる。前の `graph.sqlite` は残る。
+
+成果物はいつでも消して作り直せる。手で直してはならない。Markdown を直して extract を実行する。
+
+### 問い合わせ（query）
+
+```bash
 python scripts/wiki_graph_query.py wiki/ neighbors --node company:やまだ製作所
-python scripts/wiki_graph_query.py wiki/ edges    --subject person:山田太郎
-python scripts/wiki_graph_query.py wiki/ path     --from person:山田太郎 --to concept:消費税
+python scripts/wiki_graph_query.py wiki/ edges    --subject person:山田太郎 [--predicate founded]
+python scripts/wiki_graph_query.py wiki/ path     --from person:山田太郎 --to concept:消費税 [--max-depth 6]
 python scripts/wiki_graph_query.py wiki/ facts    --about company:やまだ製作所
 ```
 
-`--json` は、lint と query のどちらのコマンドでも使える。
+`--json` は、lint と query のどちらでも使える。query は標準ライブラリだけで動くので、`python` で実行する。
 
-## 取り込みのワークフローとの組み合わせ
-
-標準の取り込みのワークフローの手順 6 のあと（必要な箇所だけの更新と、ソースの要約ページの作成のあと）に、次のことを行う。
-
-1. 取り込むページに新しい型付きエッジを追加した場合は、`wiki_graph_lint.py` を実行する。extract の前に、検出結果をユーザーと一緒に仕分ける。
-2. `wiki_graph_extract.py` を実行して、コンパイル済みの成果物を更新する。
-3. `log.md` の取り込みの行の下に、次のサブ行を追記する。
-   `   グラフ: ノード +N、型付きエッジ +M（述語: founded、contains_product、...）`
-
-取り込むページに `graph.relationships[]` がなく、新しいページも作らなかった場合は、どちらもスキップする。グラフ層は変わらないからである。
-
-## クエリのワークフローとの組み合わせ
-
-ユーザーの質問が関係を問うものらしい場合（「X とつながっているものは？」「Y を提案したのは誰？」「A から B への経路をたどって」）は、次のようにする。
+関係を問う質問（「X とつながっているものは？」「Y を提案したのは誰？」「A から B への経路をたどって」）では、次のようにする。
 
 1. いつもどおりインデックスを読む。
-2. `wiki/graph/graph.sqlite` があり、`log.md` にある最新の `ingest` の行より新しい場合は、候補のページの周りにある型付きエッジをクエリする。`neighbors`、`edges`、`facts` がもっとも役に立つ。
-3. 関係するノードやエッジの元になっている wiki ページを読む。重要な主張については、グラフの行だけをもとに答えてはならない。`evidence` フィールドは手がかりであって、正本ではない。
-4. 引用には、グラフの行ではなく wiki ページへの `[[wikilinks]]` を使う。
+2. `graph.sqlite` が古い（`log.md` にある最新の `## [YYYY-MM-DD] ingest |` の行より前に作られた）なら、先に extract で作り直す。
+3. 候補のページの周りにある型付きエッジを問い合わせる。`neighbors`、`edges`、`facts` がもっとも役に立つ。
+4. 関係するノードやエッジの元になっている wiki ページを読む。重要な主張については、グラフの行だけをもとに答えてはならない。`evidence` フィールドは手がかりであって、正本ではない。
+5. 引用には、グラフの行ではなく wiki ページへの `[[wikilinks]]` を使う。
 
-`graph.sqlite` が古い（`log.md` にある最新の `ingest` の行より古い）場合は、先に作り直してからクエリする。
+### 有効化
+
+新しい wiki では、`init_wiki.py` が `graph/ontology.yaml`、`graph/README.md`、`graph/.gitignore` を置く。グラフ層を導入する前の wiki では、`/wiki:upgrade`（`init_wiki.py --upgrade`）が足りないファイルを足す。アップグレードは、既存のオントロジーを書き換えず、extract も自動では実行しない。
 
 ## 生成される成果物の扱い
 
@@ -129,4 +160,5 @@ python scripts/wiki_graph_query.py wiki/ facts    --about company:やまだ製�
 - `nodes.jsonl`、`edges.jsonl`、`graph.sqlite` を手で編集する。Markdown を編集し、作り直す。
 - 型付きエッジを「合わせる」ために、オントロジーの項目をでっち上げる。オントロジーは分野の実態を表すべきもので、無理に作ったエッジを取り繕うためのものではない。適切な `subject_types`/`object_types` を付けて述語を追加するか、`mentions` を使う。
 - 回答の中で、グラフの行を証拠として扱う。必ず wiki ページを引用する。グラフは、どの wiki ページを読むべきかを教えてくれただけである。
-- 取り込みのあとで、作り直すのを忘れる。グラフが気づかないうちに wiki とずれていく。取り込んだら extract を実行する、と習慣にしておく。
+- ページを書き換えたあとで、作り直すのを忘れる。型付きの関係に触れていなくても、wikilink や `sources:` が変わればグラフは変わる。グラフが気づかないうちに wiki とずれていく。
+- オントロジーがないのに、extract の結果がないことを「グラフが空」と受け取る。終了コード 1 は、グラフ層を導入していないことを示す。

@@ -18,7 +18,7 @@ wiki に任意のグラフ層がある（`wiki/graph/ontology.yaml` がある）
 uv run --script scripts/wiki_graph_lint.py wiki/
 ```
 
-このスクリプトは、構造の lint とは別に、型付きエッジの問題を検出する。対象は、未知の述語、証拠の欠落、リンク切れの目的語の参照、エイリアスの衝突、無効な `confidence`/`status` の値、リンク切れの `contradicts`/`supersedes` の参照である。検出結果は構造の lint と同じように仕分ける。つまり、修正案を示し、黙って適用しない。承認された修正を適用したら、`uv run --script scripts/wiki_graph_extract.py wiki/` を実行して、コンパイル済みの成果物を更新する。
+このスクリプトは、構造の lint とは別に、型付きエッジの問題を検出する。対象は、未知の述語、証拠の欠落、リンク切れの目的語の参照、エイリアスの衝突、無効な `confidence`/`status` の値、リンク切れの `contradicts`/`supersedes` の参照である。検出結果は構造の lint と同じように仕分ける。つまり、修正案を示し、黙って適用しない。承認された修正を適用したら、extract で成果物を作り直す。手順、終了コード、オントロジーがないときの扱いの正本は `references/graph-workflow.md` である。
 
 ユーザーが任意の判定レイヤーを有効にしている場合は、`wiki_graph_lint.py` に `--decide` を付ける。証拠のテキストがソースページに出てこない型付きエッジをチェックする。矛盾を洗い出すには、`python scripts/wiki_decide.py contradictions --wiki wiki/` を実行し、報告されたページの組を読んでから判断する。`decision-models.md` を参照。
 
