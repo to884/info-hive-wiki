@@ -251,6 +251,13 @@ class FigureTests(unittest.TestCase):
         # 閉じのあとに全角の空白があれば閉じとみなさない（CommonMark は空白とタブだけを許す）。
         self.assertEqual(WIKI_TEXT.lines_outside_fences("```\na\n```　\nb\n```\nc"), ["c"])
 
+    def test_container_fence_ends_with_its_container(self):
+        # 引用の中で閉じずに終わったフェンスは、引用が終わったところで閉じる。
+        self.assertEqual(WIKI_TEXT.lines_outside_fences("> ```text\n> example\n\nOrdinary prose"),
+                         ["", "Ordinary prose"])
+        # リストの項目の中のフェンスは、項目より浅い行で閉じる。
+        self.assertEqual(WIKI_TEXT.lines_outside_fences("- ```\n  code\n本文"), ["本文"])
+
     def test_image_syntax_variants(self):
         found = lambda s: [WIKI_TEXT.image_target(m) for m in WIKI_TEXT.IMAGE_RE.finditer(s)]
         self.assertEqual(found("![a](../assets/a(1).svg)"), ["../assets/a(1).svg"])
@@ -288,6 +295,22 @@ class FigureTests(unittest.TestCase):
         # wiki の外のファイルは、正しい相対パスとして示さない。
         self.assertNotIn("suggest", by_page["concepts/secret.md"])
         self.assertNotIn("outside", by_page["concepts/secret.md"])
+
+    def test_escaped_destination_and_invalid_path(self):
+        wiki = WikiFixture({
+            "concepts/escaped.md": page("e", r"![図](../assets/a\(1\).svg)"),
+            "concepts/nul.md": page("n", "![図](../assets/bad%00.svg)"),
+            "concepts/other.md": page("o", "![図](../assets/none.svg)"),
+            "assets/a(1).svg": SVG,
+        })
+        try:
+            findings = wiki.lint()
+        finally:
+            wiki.close()
+        by_page = {f["from_path"]: f for f in findings["missing_assets"]}
+        # escape した括弧の参照先は解決する。パスにできない参照先があっても、ほかのページの指摘は出る。
+        self.assertEqual(sorted(by_page), ["concepts/nul.md", "concepts/other.md"])
+        self.assertTrue(by_page["concepts/nul.md"]["invalid"])
 
     def test_missing_assets_in_text_report(self):
         wiki = WikiFixture({"concepts/a.md": page("a", "![図](assets/a-01.svg)"), "assets/a-01.svg": SVG})

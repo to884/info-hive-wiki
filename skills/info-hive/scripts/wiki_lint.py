@@ -70,6 +70,7 @@ from wiki_text import (  # noqa: E402
 
 
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
+MD_ESCAPE_RE = re.compile(r"\\([!-/:-@\[-`{-~])")
 URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*:")
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 # 日本語のページの候補。カタカナ語は 3 文字以上、漢字の複合語は 3 文字以上の漢字の並びとする。
@@ -152,10 +153,17 @@ def missing_assets(body: str, md_path: Path, wiki_root: Path) -> list[dict]:
             target = image_target(m).strip()
             if not target or URL_SCHEME_RE.match(target) or target.startswith(("/", "#", "\\")):
                 continue
-            rel = urllib.parse.unquote(target.split("#", 1)[0].split("?", 1)[0])
+            # Markdown の escape（\( など）を外してから、パーセントエンコードを戻す。
+            rel = MD_ESCAPE_RE.sub(r"\1", target.split("#", 1)[0].split("?", 1)[0])
+            rel = urllib.parse.unquote(rel)
             if not rel:
                 continue
-            resolved = (md_path.parent / rel).resolve()
+            try:
+                resolved = (md_path.parent / rel).resolve()
+            except (ValueError, OSError):
+                # %00 のように、ファイルのパスにできない参照先。lint を止めずに報告する。
+                found.append({"target": target, "invalid": True})
+                continue
             inside = _inside(resolved, root)
             if inside and resolved.is_file():
                 continue
@@ -163,8 +171,11 @@ def missing_assets(body: str, md_path: Path, wiki_root: Path) -> list[dict]:
             if not inside:
                 item["outside"] = True
             # wiki のルートを基準にすると wiki の中のファイルが見つかるときだけ、正しい相対パスを示す。
-            from_root = (root / rel).resolve()
-            if from_root.is_file() and _inside(from_root, root):
+            try:
+                from_root = (root / rel).resolve()
+            except (ValueError, OSError):
+                from_root = None
+            if from_root is not None and from_root.is_file() and _inside(from_root, root):
                 suggest = Path(os.path.relpath(from_root, md_path.parent.resolve())).as_posix()
                 item["suggest"] = _encode_md_path(suggest)
             found.append(item)
@@ -493,6 +504,7 @@ def render_text(findings: dict) -> str:
         ("unquoted_strings", "文字列の値が二重引用符で囲まれていない", lambda f: f"  - {f['path']}  キー: {', '.join(f['keys'])}"),
         ("missing_assets", "画像の参照先のファイルがない", lambda f: f"  - {f['target']}  （{f['from_path']}）"
          + ("  wiki の外を指している" if f.get("outside") else "")
+         + ("  ファイルのパスにできない" if f.get("invalid") else "")
          + (f"  → {f['suggest']} と書けば解決する" if f.get("suggest") else "")),
     ]
 

@@ -500,7 +500,8 @@ def wrap_display(text: str, width: int) -> list[str]:
 # ``` か ~~~ でフェンスが始まる。リストの項目（`- `、`1. `）と引用（`> `）の中のフェンスも読む。
 # 閉じるのは、同じ文字で、開いたときと同じ長さ以上の並びのあとに空白とタブしかない行である。
 _CONTAINER_PREFIX = r"[ \t]*(?:>[ \t]?)*[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?"
-_FENCE_RE = re.compile(r"^" + _CONTAINER_PREFIX + r"(`{3,}|~{3,})(.*)$")
+_FENCE_RE = re.compile(r"^(" + _CONTAINER_PREFIX + r")(`{3,}|~{3,})(.*)$")
+_QUOTE_MARKS_RE = re.compile(r"^[ \t]*((?:>[ \t]?)*)")
 _FENCE_CLOSE_RE = re.compile(r"^[ \t]*(?:>[ \t]?)*[ \t]*(`{3,}|~{3,})[ \t]*$")
 
 # 標準の Markdown の画像。alt の中の 1 段の [ ]、<...> で囲んだ参照先（空白を含めてよい）、
@@ -522,21 +523,37 @@ def image_target(match: "re.Match") -> str:
     return match.group(1) if match.group(1) is not None else match.group(2)
 
 
+def _quote_depth(line: str) -> int:
+    return _QUOTE_MARKS_RE.match(line).group(1).count(">")
+
+
 def lines_outside_fences(text: str) -> list[str]:
-    """コードフェンスの外の行だけを返す。フェンスの開きと閉じの行も除く。"""
+    """コードフェンスの外の行だけを返す。フェンスの開きと閉じの行も除く。
+
+    引用（> ）やリストの項目の中で開いたフェンスは、その引用や項目が終わったところでも閉じる。
+    引用なら > の数が減った行、項目なら項目の字下げより浅い文字のある行で終わる。
+    """
     out: list[str] = []
     fence = None
+    depth = indent = 0
     for line in text.split("\n"):
-        if fence is None:
-            m = _FENCE_RE.match(line)
-            if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
-                fence = m.group(1)
+        if fence is not None:
+            ended = (depth > 0 and _quote_depth(line) < depth) or (
+                depth == 0 and indent > 0 and line.strip() and len(line) - len(line.lstrip(" \t")) < indent)
+            if not ended:
+                m = _FENCE_CLOSE_RE.match(line)
+                if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
+                    fence = None
                 continue
-            out.append(line)
-            continue
-        m = _FENCE_CLOSE_RE.match(line)
-        if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
             fence = None
+        m = _FENCE_RE.match(line)
+        if m and not (m.group(2)[0] == "`" and "`" in m.group(3)):
+            fence = m.group(2)
+            prefix = m.group(1)
+            depth = prefix.count(">")
+            indent = len(prefix) if depth == 0 and prefix.strip() else 0
+            continue
+        out.append(line)
     return out
 
 
