@@ -67,8 +67,8 @@ def parse_type(text: str) -> str | None:
 
 
 # ページの大きさの目安（wiki_lint の既定値と同じ）。行数と、空白を除いた文字数の両方で見る。
-SOFT_LINES, HARD_LINES = 400, 800
-SOFT_CHARS, HARD_CHARS = 4000, 8000
+SOFT_LINES, HARD_LINES = 100, 200
+SOFT_CHARS, HARD_CHARS = 10000, 25000
 
 
 def size_warning(lines: int, chars: int) -> str:
