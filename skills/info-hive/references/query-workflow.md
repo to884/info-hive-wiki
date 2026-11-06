@@ -28,16 +28,11 @@ uv run --script scripts/wiki_search.py "軽減税率の対象" --top 10 --cache 
 
 ユーザーが任意の判定レイヤーを有効にしている場合は、`--decide` を付ける。このふるい分けは、クエリと単語が共通しているだけの行を取り除く。ふるい分けた結果が空なら、wiki にはおそらく答えがない。結果が `failed_open: true` を報告している場合は、ふるい分けが実行されていない。`decision-models.md` を参照。
 
-## 手順 2b: グラフを使って調べる（`wiki/graph/graph.sqlite` がある場合のみ）
+## 手順 2b: グラフを使って調べる（`wiki/graph/ontology.yaml` がある場合のみ）
 
-関係を問う質問（「X とつながっているものは？」「Y を提案したのは誰？」「A から B への経路をたどって」）では、インデックスを読んだあと、ページを読む前に、コンパイル済みのグラフにクエリをかける。
+関係を問う質問（「X とつながっているものは？」「Y を提案したのは誰？」「A から B への経路をたどって」）では、インデックスを読んだあと、ページを読む前に、コンパイル済みのグラフに問い合わせる。手順と鮮度の確かめ方は `references/graph-workflow.md` の「問い合わせ（query）」に従う。
 
-```bash
-python scripts/wiki_graph_query.py wiki/ neighbors --node <node-id>
-python scripts/wiki_graph_query.py wiki/ facts    --about <node-id>
-```
-
-構造化された隣接ノードや事実は、読むべき wiki ページを選ぶのに使う。ただし、重要な主張については、グラフの行だけをもとに答えてはならない。グラフは目的のページを早く見つけるためのものであり、証拠になるのは wiki ページとその raw ソースである。`graph.sqlite` が `log.md` にある最新の `## [YYYY-MM-DD] ingest |` の項目より古い場合は、先に `wiki_graph_extract.py` で作り直す。詳しいリファレンス: `references/graph-workflow.md`。
+構造化された隣接ノードや事実は、読むべき wiki ページを選ぶのに使う。重要な主張については、グラフの行だけをもとに答えてはならない。証拠になるのは wiki ページとその raw ソースである。`ontology.yaml` がない wiki では、`graph.sqlite` が残っていてもこの手順を飛ばす。
 
 ## 手順 3: 候補のページを読む
 
