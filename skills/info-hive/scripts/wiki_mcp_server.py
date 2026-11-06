@@ -9,6 +9,7 @@
 #   "tantivy==0.27.0",
 #   "fastembed==0.8.0",
 #   "onnxruntime==1.31.1",
+#   "pyyaml==6.0.3",
 # ]
 # ///
 """wiki の MCP サーバー（ADR-0012）。127.0.0.1 で待ち受ける streamable HTTP のサーバーで、応答は JSON にする。
@@ -21,7 +22,9 @@
   裏で動いている埋め込みがある間は止まらない。
 - モデルの読み込み、埋め込み、索引の書き込みは、このプロセスだけが行う。wiki の Markdown は書き換えない。
 
-ツール: query、get_page、list_index、index_chunks。
+ツール: query、get_page、list_index、lint、stats、graph、index_chunks。lint、stats、graph は、
+wiki_lint.py、wiki_graph_lint.py、wiki_stats.py、wiki_graph_query.py の関数を同じプロセスで呼ぶ薄い包みで、
+CLI の --json と同じ形を返す。lint は検査だけで、直す操作は持たない。
 """
 from __future__ import annotations
 
@@ -36,6 +39,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import Literal
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import wiki_mcp_common as common  # noqa: E402
@@ -81,6 +85,37 @@ class Activity:
             if self.in_flight or self.background:
                 return 0.0
             return time.monotonic() - self.last
+
+
+def wiki_root(wiki: str) -> Path:
+    """ツールに渡された wiki のルートを確かめて返す。なければ ValueError（ツールのエラーになる）。"""
+    if not wiki:
+        raise ValueError("wiki（wiki のルートのパス）を指定する")
+    try:
+        return common.normalize_wiki_root(wiki)
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise ValueError(f"wiki のルートが見つからない: {wiki}") from exc
+
+
+def plain(value):
+    """CLI の `--json` と同じく、日付などを文字列にした JSON の値にそろえる。"""
+    return json.loads(json.dumps(value, default=str, ensure_ascii=False))
+
+
+def lint_graph(root: Path) -> dict:
+    """`wiki_graph_lint.py --json` と同じ検査。オントロジーの有無と読み方は CLI の 3 つの入口と同じ規則に従う。"""
+    import wiki_graph_common
+    try:
+        ontology_path = wiki_graph_common.require_ontology(root)
+    except wiki_graph_common.GraphLayerDisabled as exc:
+        return {"state": "disabled", "message": wiki_graph_common.disabled_message(exc)}
+    import wiki_graph_extract
+    import wiki_graph_lint
+    try:
+        ontology = wiki_graph_extract.read_ontology(ontology_path)
+    except wiki_graph_extract.OntologyError as exc:
+        return {"state": "error", "message": str(exc)}
+    return {"state": "checked", "findings": plain(wiki_graph_lint.lint(wiki_graph_lint.collect_pages(root), ontology))}
 
 
 def json_response(status: int, payload: dict, extra_headers=()):
@@ -141,12 +176,7 @@ class State:
 
     def wiki(self, wiki: str):
         import wiki_index
-        if not wiki:
-            raise ValueError("wiki（wiki のルートのパス）を指定する")
-        try:
-            root = common.normalize_wiki_root(wiki)
-        except (FileNotFoundError, NotADirectoryError) as exc:
-            raise ValueError(f"wiki のルートが見つからない: {wiki}") from exc
+        root = wiki_root(wiki)
         with self.lock:
             index = self.wikis.get(root)
             if index is None:
@@ -259,7 +289,8 @@ def build_app(state: State, token: str, port: int):
     mcp = FastMCP(
         "info-hive-wiki", host="127.0.0.1", port=port, json_response=True, log_level="WARNING",
         max_request_body_size=MAX_REQUEST_BYTES,
-        instructions="info-hive の wiki を検索し、ページと索引を読むためのツール。wiki の Markdown は書き換えない。",
+        instructions="info-hive の wiki を検索し、ページと索引を読み、lint、統計、グラフの問い合わせを行うためのツール。"
+                     "wiki の Markdown は書き換えない。",
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=True,
                                                      allowed_hosts=[f"127.0.0.1:{port}"], allowed_origins=[]),
     )
@@ -314,8 +345,99 @@ def build_app(state: State, token: str, port: int):
         import wiki_index
 
         def run():
-            root = common.normalize_wiki_root(wiki)
-            return wiki_index.list_index(root, name)
+            return wiki_index.list_index(wiki_root(wiki), name)
+        return await offload(run)
+
+    @mcp.tool()
+    async def lint(wiki: str, soft_cap: int = 100, hard_cap: int = 200, soft_char_cap: int = 10000,
+                   hard_char_cap: int = 25000, required_fm: list[str] | None = None, suggest_pages: bool = False,
+                   suggest_min: int = 5, graph: bool = True) -> dict:
+        """wiki に lint をかけ、検出結果を返す。検査するだけで、wiki は直さない。
+
+        結果は `wiki_lint.py --json` と同じ形（orphans、broken_links、oversized_hard などと summary）で、
+        引数も同じ意味を持つ（soft_cap と hard_cap は行数、soft_char_cap と hard_char_cap は空白を除いた
+        文字数）。SCHEMA.md が別の上限を決めている wiki では、その値を渡す。required_fm を省くと
+        type、title、tags、created、updated を必須にする。
+        graph が真なら、`wiki_graph_lint.py --json` の結果も graph に入れる。graph の state は、
+        checked（findings に結果）、disabled（オントロジーがない。message に理由）、error（オントロジーを
+        読めない）、skipped（graph が偽）のどれかになる。判定モデルを使う検査（--decide）は含めない。
+        """
+        if min(soft_cap, hard_cap, soft_char_cap, hard_char_cap, suggest_min) < 1:
+            raise ToolError("上限と suggest_min は 1 以上にする")
+
+        def run():
+            import wiki_lint
+            root = wiki_root(wiki)
+            fields = list(required_fm) if required_fm is not None else list(wiki_lint.DEFAULT_REQUIRED_FM)
+            findings = wiki_lint.lint(wiki_lint.collect_pages(root), soft_cap, hard_cap, fields, suggest_pages,
+                                      suggest_min, soft_char_cap, hard_char_cap)
+            result = plain(findings)
+            result["graph"] = lint_graph(root) if graph else {"state": "skipped"}
+            return result
+        return await offload(run)
+
+    @mcp.tool()
+    async def stats(wiki: str) -> dict:
+        """wiki の規模、構成、リンク密度の集計と、このサーバーの索引の状態を返す。
+
+        集計は `wiki_stats.py --json` と同じ形（pages、chars、pages_by_type、largest、most_linked、advice
+        など）。index に索引のセクション数、埋め込み済みの数、状態（ready、embedding、pending）、置き場所、
+        埋め込みモデルを、server にサーバーのコードの版を足す。索引をまだ開いていなければ開いて wiki の
+        変更を取り込むが、埋め込みは始めない（query を呼ぶと始まる）。
+        """
+        def run():
+            import wiki_index
+            import wiki_stats
+            index = state.wiki(wiki)
+            index.refresh()
+            result = wiki_stats.compute_stats(index.root)
+            counts = index.collection.stats()
+            if counts["rows"] == counts["embedded"]:
+                index_state = "ready"
+            elif index.root in state.embedding:
+                index_state = "embedding"
+            else:
+                index_state = "pending"
+            model_ready = wiki_index._EMBEDDER["value"] is not None or (
+                common.models_dir() / wiki_index.MODEL["folder"] / "verified.json").is_file()
+            result["index"] = {
+                "sections": counts["rows"], "embedded": counts["embedded"],
+                "pending": counts["rows"] - counts["embedded"], "state": index_state, "dir": str(index.dir),
+                "embedder": wiki_index.embedder_id(),
+                "fingerprint": wiki_index.fingerprint_digest(wiki_index.wiki_fingerprint()),
+                "model": {"name": wiki_index.MODEL["name"], "runtime": wiki_index.MODEL["runtime"],
+                          "ready": model_ready, "error": wiki_index._EMBEDDER.get("error")},
+            }
+            result["server"] = {"version": common.code_version(), "protocol": common.PROTOCOL, "pid": os.getpid()}
+            return result
+        return await offload(run)
+
+    @mcp.tool()
+    async def graph(wiki: str, command: Literal["neighbors", "edges", "path", "facts"], node: str | None = None,
+                    subject: str | None = None, predicate: str | None = None, from_node: str | None = None,
+                    to_node: str | None = None, max_depth: int = 6, about: str | None = None) -> dict:
+        """wiki のグラフ（`<wiki>/graph/graph.sqlite`）に問い合わせる。結果は `wiki_graph_query.py --json` と同じ形。
+
+        command ごとに要る引数: neighbors は node（1 ホップ先のノード）、edges は subject（と任意の
+        predicate）、path は from_node と to_node（有向の最短経路。max_depth まで）、facts は about（出る
+        エッジと入るエッジ）。ノード ID は `concept:消費税` のような形で、NFC にそろえてから探す。
+        グラフはナビゲーション用の索引にすぎない。重要な主張は、エッジの source のページで確かめる。
+        オントロジーがない wiki と、graph.sqlite がまだない wiki ではエラーになる（グラフの DB は
+        wiki_graph_extract.py が作る。このツールは DB を作らず、読み取り専用で開く）。
+        """
+        if max_depth < 1:
+            raise ToolError("max_depth は 1 以上にする")
+
+        def run():
+            import wiki_graph_common
+            import wiki_graph_query
+            root = wiki_root(wiki)
+            try:
+                result = wiki_graph_query.run_query(root, command, node=node, subject=subject, predicate=predicate,
+                                                    start=from_node, goal=to_node, max_depth=max_depth, about=about)
+            except wiki_graph_common.GraphLayerDisabled as exc:
+                raise ValueError(wiki_graph_common.disabled_message(exc)) from exc
+            return plain(result)
         return await offload(run)
 
     @mcp.tool()

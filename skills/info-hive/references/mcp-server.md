@@ -28,9 +28,12 @@ wiki のプラグインは、検索のためのローカルの MCP サーバー�
 | `query` | ハイブリッド検索（BM25 と埋め込みを RRF で融合）。結果の形は `wiki_search.py --json` と同じ |
 | `get_page` | 1 ページの frontmatter（日本語の別名のキーを英語にそろえたもの）と本文 |
 | `list_index` | `index.md` の本文と `indexes/` の一覧。`name` を渡すと `indexes/` のそのファイル |
+| `lint` | 構造の lint（`wiki_lint.py --json` と同じ結果）と、オントロジーがあればグラフの lint（`wiki_graph_lint.py --json`）。検査するだけで直さない |
+| `stats` | 規模、構成、リンク密度の集計（`wiki_stats.py --json` と同じ結果）と、索引の状態とサーバーの版 |
+| `graph` | グラフ（`graph/graph.sqlite`）への問い合わせ（`wiki_graph_query.py --json` と同じ結果）。DB は読み取り専用で開く |
 | `index_chunks` | rag などからチャンクを受け取り、wiki の外の索引に加える |
 
-`query`、`get_page`、`list_index` には、`wiki` に wiki のルートの絶対パスを渡す。
+`index_chunks` 以外のツールには、`wiki` に wiki のルートの絶対パスを渡す。`lint`、`stats`、`graph` は、同じ名前のスクリプトの関数をサーバーの中で呼ぶ。結果のキーも CLI の `--json` と同じ英語のままである。
 
 ### query
 
@@ -44,6 +47,49 @@ wiki のプラグインは、検索のためのローカルの MCP サーバー�
 | `collection`、`query_tokens`、`docs`、`max_distance` | | `index_chunks` で入れたチャンクを検索するとき（下を参照） |
 
 結果の `index` は、索引のセクションの数と埋め込み済みの数を示す。初回や大きな変更の直後は、埋め込みを裏で進めながら答えるので、`state` が `embedding` になり、`warning` に理由が入る。そのあいだも語彙検索は wiki 全体を対象にする。
+
+### lint
+
+| 引数 | 既定 | 説明 |
+| --- | --- | --- |
+| `soft_cap`、`hard_cap` | 100、200 | ページの大きさの上限の行数（`--soft-cap`、`--hard-cap`） |
+| `soft_char_cap`、`hard_char_cap` | 10000、25000 | 空白を除いた文字数の上限（`--soft-char-cap`、`--hard-char-cap`）。`SCHEMA.md` が別の値を決めている wiki では、その値を渡す |
+| `required_fm` | `type`、`title`、`tags`、`created`、`updated` | 必須の frontmatter のフィールドの配列 |
+| `suggest_pages`、`suggest_min` | 偽、5 | 多くのページに出てくるのに専用のページがない語を挙げる |
+| `graph` | 真 | グラフの lint も行う |
+
+結果の `graph` の `state` は次のどれかになる。
+
+| `state` | 意味 |
+| --- | --- |
+| `checked` | `findings` に `wiki_graph_lint.py --json` と同じ結果が入る |
+| `disabled` | オントロジー（`graph/ontology.yaml`）がない。`message` は CLI の 3 つの入口と同じ文面 |
+| `error` | オントロジーを読めない。`message` に理由 |
+| `skipped` | `graph` が偽 |
+
+判定モデルを使う検査（`wiki_graph_lint.py --decide`）は含めない。
+
+### stats
+
+結果は `wiki_stats.py --json` と同じ形に、次の 2 つを足したものである。
+
+- `index`: 索引のセクションの数（`sections`）、埋め込み済みの数（`embedded`）、残り（`pending`）、状態（`ready`、裏で埋め込み中の `embedding`、まだ埋め込みを始めていない `pending`）、置き場所（`dir`）、埋め込みモデル（`model`）
+- `server`: サーバーのコードの版（`version`）、プロトコルの版、pid
+
+索引をまだ開いていない wiki では、開いて wiki の変更を取り込む。埋め込みは始めない。`query` を呼ぶと始まる。
+
+### graph
+
+| `command` | 要る引数 | 中身 |
+| --- | --- | --- |
+| `neighbors` | `node` | 1 ホップ先のノード |
+| `edges` | `subject`、任意の `predicate` | 主語から出るエッジ |
+| `path` | `from_node`、`to_node`、任意の `max_depth`（既定 6） | 有向の最短経路 |
+| `facts` | `about` | 出るエッジと入るエッジ |
+
+- ノード ID（`concept:消費税` など）は NFC にそろえてから探す。
+- オントロジーがない wiki、`graph.sqlite` がない wiki、見つからないノードはエラーになる。DB は `wiki_graph_extract.py` が作る。このツールは作らない。
+- グラフはナビゲーション用の索引である。重要な主張は、エッジの `source` のページで確かめる（`references/graph-workflow.md`）。
 
 ### index_chunks
 
