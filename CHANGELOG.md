@@ -6,6 +6,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- 知識ページの図表の決まりを `page-conventions.md` の「図表」に書いた。流れや関係は mermaid の図、比較は表、mermaid で描けない図だけ svg を `wiki/assets/` に置き、図表の直後に `> <表示名> 補足: ` の説明を置く（ADR-0005）。取り込みとクエリの手順にも、図表を足す場面を書いた。
+- `init_wiki.py`（`--upgrade` を含む）が `wiki/assets/` を作るようにした。
+- lint に `missing_assets` を足した。本文の画像の参照先がないか wiki の外を指すときに指摘する。参照先はページのファイルの位置から解決し、wiki のルートを基準に書いた誤り（`assets/x.svg`）には正しい相対パスを添える。
+
+### Changed
+
+- lint と統計のページの大きさから、コードフェンス（mermaid を含む）の中身と画像だけの行を除いた。`--suggest-pages` も、図のソースと画像の alt を語の候補にしない。`wiki/assets/` の中のファイルはページとして数えない。
+
+### Fixed
+
+- ADR-0005 の当初の案では svg を `assets/<スラッグ>-NN.svg` と参照するとしていたが、`wiki/<種類>/` のページからはそのパスで表示されない。参照を `../assets/<スラッグ>-NN.svg` に改めた。
+
 ## [0.2.1] - 2026-11-06
 
 ### Changed
