@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-07
+
 ### Added
 
 - 検索のためのローカルの MCP サーバーを追加した（`.mcp.json`、`wiki_mcp_relay.py`、`wiki_mcp_server.py`）。ホストは stdio の中継を起動し、中継は 127.0.0.1 で待ち受けるサーバーを 1 つだけ起動して使う。サーバーはセッションをまたいで残り、要求がない状態が 15 分続くと止まる。起動ごとのトークンと Host ヘッダーを確かめ、応答は JSON で返す。ツールは `query`、`get_page`、`list_index`、`lint`、`stats`、`graph`、`index_chunks`。wiki の Markdown を書き換えるツールは持たない。仕組みと置き場所は `references/mcp-server.md` に書いた。
@@ -122,7 +124,8 @@
 - 移植元の調査メモ `research/` と、移植元の英語の評価セットでの測定記録（`eval/decisions/results-*.json`）は取り込んでいない。
 - Paperclip 連携は移植元の v4.0.0 で削除されており、info-hive にもない。
 
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/to884/info-hive-wiki/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/to884/info-hive-wiki/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/to884/info-hive-wiki/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/to884/info-hive-wiki/compare/v0.1.1...v0.2.0
