@@ -15,8 +15,9 @@ wiki_graph_extract.py — Markdown の wiki を、クエリできるグラフに
 PyYAML の固定した依存を持つので、`uv run --script` で実行する。
 
 オントロジーがないときは、グラフ層を導入する前の wiki として扱い、何も書き出さずに
-終了コード 1 で止まる。生成物は一時ファイルに書いてから置き換えるので、途中で止まっても
-前の生成物が残る。手順の正本は references/graph-workflow.md にある。
+終了コード 1 で止まる。生成物はすべて一時ファイルに書き終えてから置き換えるので、書いている
+途中で止まっても前の生成物が残る。同じ出力先の extract は、ロックで 1 つずつ動かす。
+手順の正本は references/graph-workflow.md にある。
 
 使い方:
     uv run --script wiki_graph_extract.py <wiki-dir> [options]
@@ -211,9 +212,12 @@ def read_ontology(path: Path) -> dict:
     extract と lint は、この関数で同じように読む。
     """
     try:
-        data = yaml.safe_load(Path(path).read_text(encoding="utf-8-sig")) or {}
+        data = yaml.safe_load(Path(path).read_text(encoding="utf-8-sig"))
     except (yaml.YAMLError, OSError, UnicodeDecodeError) as e:
         raise OntologyError(f"オントロジーを読めない（{path}）: {e}") from e
+    if data is None:  # 空のファイルは、空のオントロジーとして扱う
+        data = {}
+    # []、false、0 などを空のマッピングとして通さない。
     if not isinstance(data, dict):
         raise OntologyError(f"オントロジーの最上位がマッピングでない（{path}）")
     for key in ("node_types", "predicates"):
@@ -455,42 +459,72 @@ def _normalize_for_json(value):
 
 
 OUTPUT_NAMES = ["nodes.jsonl", "edges.jsonl", "graph.sqlite", "graph.graphml"]
+# 置き換える順序。読み手が開いていて置き換えに失敗しやすい graph.sqlite を最初にする。
+# graph.sqlite の置き換えに失敗したときは、ほかの成果物も前のまま残る。
+PUBLISH_ORDER = ["graph.sqlite", "nodes.jsonl", "edges.jsonl", "graph.graphml"]
 
 
-def _write_lines_atomically(target: Path, rows: list[dict]) -> None:
-    temp = common.temp_path_for(target)
+def _write_lines(path: Path, rows: list[dict]) -> None:
+    with path.open("w", encoding="utf-8", newline="\n") as f:
+        for row in rows:
+            f.write(json.dumps(_normalize_for_json(row), sort_keys=True, ensure_ascii=False))
+            f.write("\n")
+
+
+def stage_outputs(out_dir: Path, formats: list[str], nodes: list[dict], aliases: list[dict],
+                  edges: list[dict]) -> dict[str, Path]:
+    """選んだ形式の成果物を、すべて一時ファイルに書く。{成果物の名前: 一時ファイル} を返す。
+
+    途中で失敗したら、書いた一時ファイルを消して例外を送出する。元の成果物には触れない。
+    """
+    staged: dict[str, Path] = {}
+
+    def temp(name: str) -> Path:
+        path = common.temp_path_for(out_dir / name)
+        common.remove_temp(path)
+        staged[name] = path
+        return path
+
     try:
-        with temp.open("w", encoding="utf-8", newline="\n") as f:
-            for row in rows:
-                f.write(json.dumps(_normalize_for_json(row), sort_keys=True, ensure_ascii=False))
-                f.write("\n")
+        if "sqlite" in formats:
+            build_sqlite(temp("graph.sqlite"), nodes, aliases, edges)
+        if "jsonl" in formats:
+            _write_lines(temp("nodes.jsonl"), sorted(nodes, key=lambda n: n["id"]))
+            _write_lines(temp("edges.jsonl"), sorted(edges, key=lambda e: e["id"]))
+        if "graphml" in formats:
+            write_graphml_file(temp("graph.graphml"), nodes, edges)
     except BaseException:
-        common.remove_quietly(temp)
+        for path in staged.values():
+            common.remove_temp(path)
         raise
-    common.replace_atomically(temp, target)
+    return staged
+
+
+def publish_outputs(out_dir: Path, staged: dict[str, Path]) -> None:
+    """一時ファイルを PUBLISH_ORDER の順に置き換える。失敗したら残りの一時ファイルを消して例外を送出する。"""
+    names = [name for name in PUBLISH_ORDER if name in staged]
+    for index, name in enumerate(names):
+        try:
+            common.replace_atomically(staged[name], out_dir / name)
+        except BaseException:
+            for rest in names[index:]:
+                common.remove_temp(staged[rest])
+            raise
+
+
+def write_outputs(out_dir: Path, formats: list[str], nodes: list[dict], aliases: list[dict],
+                  edges: list[dict]) -> None:
+    """成果物を作り直す。すべて書き終えてから置き換えるので、書いている途中で止まっても前の成果物が残る。"""
+    publish_outputs(out_dir, stage_outputs(out_dir, formats, nodes, aliases, edges))
 
 
 def write_jsonl(out_dir: Path, nodes: list[dict], edges: list[dict]) -> None:
-    _write_lines_atomically(out_dir / "nodes.jsonl", sorted(nodes, key=lambda n: n["id"]))
-    _write_lines_atomically(out_dir / "edges.jsonl", sorted(edges, key=lambda e: e["id"]))
+    write_outputs(out_dir, ["jsonl"], nodes, [], edges)
 
 
 def write_sqlite(out_dir: Path, nodes: list[dict], aliases: list[dict], edges: list[dict]) -> None:
-    """graph.sqlite を作り直す。
-
-    同じディレクトリの一時ファイルに作り、接続を閉じてから置き換える。途中で止まっても、
-    前の graph.sqlite がそのまま残り、問い合わせを続けられる。
-    """
-    db_path = out_dir / "graph.sqlite"
-    temp = common.temp_path_for(db_path)
-    common.remove_quietly(temp)
-    try:
-        build_sqlite(temp, nodes, aliases, edges)
-    except BaseException:
-        common.remove_quietly(temp)
-        common.remove_quietly(temp.with_name(temp.name + "-journal"))
-        raise
-    common.replace_atomically(temp, db_path)
+    """graph.sqlite だけを作り直す。一時ファイルに作り、接続を閉じてから置き換える。"""
+    write_outputs(out_dir, ["sqlite"], nodes, aliases, edges)
 
 
 def build_sqlite(db_path: Path, nodes: list[dict], aliases: list[dict], edges: list[dict]) -> None:
@@ -578,8 +612,9 @@ def build_sqlite(db_path: Path, nodes: list[dict], aliases: list[dict], edges: l
         conn.close()
 
 
-def write_graphml(out_dir: Path, nodes: list[dict], edges: list[dict]) -> None:
-    ns = "http://graphml.graphdrawing.org/xmlns"
+def write_graphml_file(path: Path, nodes: list[dict], edges: list[dict]) -> None:
+    """GraphML を path に書く。置き換えは呼び出す側が行う。"""
+    ns ="http://graphml.graphdrawing.org/xmlns"
     ET.register_namespace("", ns)
     root = ET.Element(f"{{{ns}}}graphml")
 
@@ -628,14 +663,11 @@ def write_graphml(out_dir: Path, nodes: list[dict], edges: list[dict]) -> None:
 
     tree = ET.ElementTree(root)
     ET.indent(tree, space="  ")
-    target = out_dir / "graph.graphml"
-    temp = common.temp_path_for(target)
-    try:
-        tree.write(temp, encoding="utf-8", xml_declaration=True)
-    except BaseException:
-        common.remove_quietly(temp)
-        raise
-    common.replace_atomically(temp, target)
+    tree.write(path, encoding="utf-8", xml_declaration=True)
+
+
+def write_graphml(out_dir: Path, nodes: list[dict], edges: list[dict]) -> None:
+    write_outputs(out_dir, ["graphml"], nodes, [], edges)
 
 
 # ---------------------------------------------------------------------------
@@ -673,18 +705,23 @@ def main():
 
     out_dir = args.out or (args.wiki / "graph")
     out_dir.mkdir(parents=True, exist_ok=True)
-    common.remove_stale_temps(out_dir, OUTPUT_NAMES)
 
-    pages = collect_pages(args.wiki)
-    nodes, slug_to_id, aliases = build_nodes(pages, ontology)
-    edges = build_edges(pages, slug_to_id)
-
-    if "jsonl" in formats:
-        write_jsonl(out_dir, nodes, edges)
-    if "sqlite" in formats:
-        write_sqlite(out_dir, nodes, aliases, edges)
-    if "graphml" in formats:
-        write_graphml(out_dir, nodes, edges)
+    # 同じ出力先の extract は 1 つずつ動かす。ロックを取ってからページを読むので、
+    # 後から動いた extract の成果物が、先の extract の成果物と混ざらない。
+    try:
+        with common.extract_lock(out_dir):
+            common.remove_stale_temps(out_dir, OUTPUT_NAMES)
+            pages = collect_pages(args.wiki)
+            nodes, slug_to_id, aliases = build_nodes(pages, ontology)
+            edges = build_edges(pages, slug_to_id)
+            write_outputs(out_dir, formats, nodes, aliases, edges)
+    except common.ExtractBusy as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(1)
+    except PermissionError as exc:
+        print(f"成果物を置き換えられなかった（ほかのプロセスが開いている可能性がある）: {exc}", file=sys.stderr)
+        print("前の成果物はそのまま残っている。開いているプロセスを閉じてから、もう一度実行する。", file=sys.stderr)
+        sys.exit(1)
 
     print(f"ノード {len(nodes)} 個、エッジ {len(edges)} 本を抽出した → {out_dir}")
     breakdown = defaultdict(int)

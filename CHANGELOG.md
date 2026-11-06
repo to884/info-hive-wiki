@@ -13,14 +13,15 @@
 
 ### Changed
 
-- `setup_wiki.py`、`wiki_graph_lint.py`、`wiki_stats.py`、`wiki_decide.py`（`shortlist`、`contradictions`）、`wiki_evolve.py` は、`--wiki`（または位置引数の `<wiki>`）を省くと、作業領域の設定の `dirs.wiki` を使うようにした。設定がなければ従来どおり `./wiki` を使う。設定が壊れているときは理由を書いて終了コード 1 で止まる。`wiki_lint.py` と `wiki_search.py` はまだ `./wiki` のままである。
+- `setup_wiki.py`、`wiki_graph_lint.py`、`wiki_stats.py`、`wiki_decide.py`（`shortlist`、`contradictions`）、`wiki_evolve.py` は、`--wiki`（または位置引数の `<wiki>`）を省くと、作業領域の設定の `dirs.wiki` を使うようにした。設定がなければ従来どおり `./wiki` を使う。設定が壊れているときは理由を書いて終了コード 1 で止まる。wiki を使わない `wiki_evolve.py verify-bundle` と `capture` は設定を読まない。`wiki_lint.py` と `wiki_search.py` はまだ `./wiki` のままである。
 - オントロジー（`graph/ontology.yaml`）がないときの扱いを、`wiki_graph_extract.py`、`wiki_graph_lint.py`、`wiki_graph_query.py` でそろえた。どれも何も書き出さずに、同じ文面を標準エラーに書いて終了コード 1 で止まる。以前の extract は空のオントロジーで続け、`graph/` と生成物を作っていた。query は、オントロジーがなければ古い `graph.sqlite` が残っていても答えない（`--db` で DB を明示したときを除く）。
 - グラフの手順の正本を `references/graph-workflow.md` にまとめた。取り込み、問い合わせ、lint の手順と `/wiki:graph` は、呼ぶ時点と結果の扱いだけを書き、規約はそこを参照する。
 
 ### Fixed
 
 - extract を省く条件の記述を直した。以前は「型付きの関係も新しいページもない取り込みでは extract を省く」と書いていたが、extract は本文の wikilink、`sources:`、`raw:` からもエッジを作るので、ページを書き換えたら必ず extract を実行する。
-- `wiki_graph_extract.py` は、`graph.sqlite` を先に消してから作り直していたので、途中で止まると問い合わせができなくなっていた。成果物を同じディレクトリの一時ファイルに書いてから置き換えるようにした。Windows でほかのプロセスが DB を開いているときは、少し待ってやり直し、置き換えられなければ前の DB を残してエラーで止まる。`graph/.gitignore` のひな形は一時ファイル（`*.tmp`）を無視する。
+- `wiki_graph_extract.py` は、`graph.sqlite` を先に消してから作り直していたので、途中で止まると問い合わせができなくなっていた。選んだ形式の成果物をすべて同じディレクトリの一時ファイルに書き終えてから、`graph.sqlite` を先頭に置き換えるようにした。Windows でほかのプロセスが DB を開いているときは、少し待ってやり直し、置き換えられなければほかの成果物も前のまま残して終了コード 1 で止まる。同じ出力先の extract は、OS のファイルロック（`graph/.extract.lock`）で 1 つずつ動かし、成果物が混ざらないようにした。止まった実行の一時ファイル（SQLite の `-journal` を含む）は、ロックを取った次の extract が消す。`graph/.gitignore` のひな形は一時ファイルとロックのファイルを無視する。
+- 最上位がマッピングでないオントロジー（`[]`、`false`、`0` など）を、空のオントロジーとして通していた。extract と lint は終了コード 2 で止まる。
 
 ## [0.2.1] - 2026-11-06
 

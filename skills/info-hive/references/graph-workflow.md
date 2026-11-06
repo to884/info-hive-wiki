@@ -10,7 +10,7 @@
 
 - **オントロジーがある**: グラフ層は有効である。下の手順に従う。
 - **オントロジーがない**: グラフ層を導入する前の wiki である。extract、lint、query のスクリプトは、どれも何も書き出さずに、同じ文面を標準エラーに書いて終了コード 1 で止まる。オントロジーを消した wiki に古い `graph.sqlite` が残っていても、query はそれに答えない。オントロジーのファイルをでっち上げてはならない。グラフ層を使いたいなら、`/wiki:upgrade` か、`assets/ontology.yaml.template` を `wiki/graph/ontology.yaml` にコピーすることを提案する。使わないなら、グラフの段を飛ばして進める。
-- **オントロジーを読めない**（YAML の誤り、最上位がマッピングでない）: extract と lint は終了コード 2 で止まる。ユーザーにオントロジーの修正を頼む。
+- **オントロジーを読めない**（YAML の誤り、最上位がマッピングでない。`[]` や `false` も含む）: extract と lint は終了コード 2 で止まる。ユーザーにオントロジーの修正を頼む。query は PyYAML を使わないので中身を読まず、ファイルがあれば DB に問い合わせる。
 
 `--ontology` で別のオントロジーを指定したときは、そのファイルの有無で同じように決める。query に `--db` で DB を明示したときは、オントロジーを確かめずにその DB を使う（`extract --out` で別の場所に作った場合のため）。
 
@@ -103,7 +103,7 @@ lint を実行するのは、`graph.relationships[]` を足したか直したと
 uv run --script scripts/wiki_graph_extract.py wiki/ [--out <dir>] [--formats jsonl,sqlite,graphml] [--ontology <path>]
 ```
 
-**グラフ層が有効な wiki で、ページを足した、消した、名前を変えた、または書き換えたときは、必ず extract を実行する。** extract が作るエッジは `graph.relationships[]` だけから来るのではない。本文の `[[wikilink]]`（`mentions`）、frontmatter の `sources:`（`sourced_from`）、ソースページの `raw:`（`summarizes_raw`）からも作り、ノードの題名、種類、タグ、別名も frontmatter から読む。そのため、型付きの関係を足さず、新しいページも作らない取り込みでも、既存のページの本文や `sources:` を直せばグラフは変わる。extract を飛ばしてよいのは、wiki のページを 1 つも変えなかったときだけである。
+**グラフ層が有効な wiki で、ページを足した、消した、名前を変えた、または書き換えたときは、必ず extract を実行する。** extract が作るエッジは `graph.relationships[]` だけから来るのではない。本文の `[[wikilink]]`（`mentions`）、frontmatter の `sources:`（`sourced_from`）、ソースページの `raw:`（`summarizes_raw`）からも作り、ノードの題名、種類、タグ、別名も frontmatter から読む。そのため、型付きの関係を足さず、新しいページも作らない取り込みでも、既存のページの本文や `sources:` を直せばグラフは変わる。オントロジーの `node_types` の `maps_from` を変えたときも、ノードの種類と ID が変わるので extract を実行する。extract を飛ばしてよいのは、wiki のページもオントロジーも 1 つも変えなかったときだけである。
 
 extract は、型付きの関係があればその前に lint を通す。lint の検出結果があっても extract は動くが、型の誤ったエッジもそのままグラフに入る。
 
@@ -113,9 +113,11 @@ extract は、型付きの関係があればその前に lint を通す。lint �
 
 ### 作り直しと中断
 
-extract は、成果物（`nodes.jsonl`、`edges.jsonl`、`graph.sqlite`、`graph.graphml`）をそれぞれ同じディレクトリの一時ファイル（`<名前>.<プロセス番号>.tmp`）に書き、書き終えてから元のファイルと置き換える。途中で止まっても、前の成果物が壊れずに残り、query を続けられる。新しい内容にするには、extract をもう一度実行する。止まった実行が残した一時ファイルは、10 分より古ければ次の extract が消す。`wiki/graph/.gitignore` のひな形は `*.tmp` を無視する。
+extract は、選んだ形式の成果物（`nodes.jsonl`、`edges.jsonl`、`graph.sqlite`、`graph.graphml`）を、まずすべて同じディレクトリの一時ファイル（`<名前>.<プロセス番号>.tmp`）に書く。書き終えてから、`graph.sqlite`、`nodes.jsonl`、`edges.jsonl`、`graph.graphml` の順に元のファイルと置き換える。書いている途中で止まっても、前の成果物が壊れずに残り、query を続けられる。新しい内容にするには、extract をもう一度実行する。
 
-Windows では、ほかのプロセスが `graph.sqlite` を開いていると置き換えに失敗することがある。extract は少し待ってやり直し、それでも置き換えられなければ一時ファイルを消してエラーで止まる。前の `graph.sqlite` は残る。
+同じ出力先の extract は、ロック（`<出力先>/.extract.lock`、OS のファイルロック）で 1 つずつ動かす。後から始めた extract は、先の extract が終わるまで最長 120 秒待ち、ロックを取ってからページを読む。そのため、2 つの extract の成果物が混ざらない。ロックはプロセスが止まると OS が外す。ロックを持つ extract は、止まった実行が残した一時ファイル（SQLite の `-journal` なども含む）を消す。`wiki/graph/.gitignore` のひな形は、一時ファイルとロックのファイルを無視する。
+
+Windows では、ほかのプロセスが `graph.sqlite` を開いていると置き換えに失敗する。extract は少し待ってやり直し、それでも置き換えられなければ一時ファイルを消し、終了コード 1 で止まる。`graph.sqlite` を最初に置き換えるので、このときはほかの成果物も前のまま残る。`graph.sqlite` を置き換えたあとで JSONL や GraphML の置き換えに失敗した場合と、置き換えと置き換えのあいだでプロセスが止まった場合だけは、新旧の成果物が混ざる。そのときは extract をもう一度実行する。
 
 成果物はいつでも消して作り直せる。手で直してはならない。Markdown を直して extract を実行する。
 

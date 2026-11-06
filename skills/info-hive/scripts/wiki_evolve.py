@@ -557,7 +557,8 @@ def main():
     p.add_argument('--destination', type=Path, required=True)
     sub.add_parser('verify-bundle', help='書き出した証拠とスキルのファイルをすべて検証する').add_argument('path', type=Path)
     args = localize_argparse(parser).parse_args()
-    if args.wiki is None:
+    # wiki を使わない verify-bundle と capture では、作業領域の設定を読まない。
+    if args.wiki is None and args.action not in ('verify-bundle', 'capture'):
         args.wiki = wiki_workspace.default_wiki_or_exit()
     try:
         if args.action == 'verify-bundle':
