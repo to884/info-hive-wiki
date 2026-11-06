@@ -13,6 +13,9 @@ wiki_graph_lint.py — wiki の型付きグラフのメタデータを検証す�
 
 PyYAML の固定した依存を持つので、`uv run --script` で実行する。
 
+オントロジーがないときは、グラフ層を導入する前の wiki として扱い、終了コード 1 で止まる
+（extract、query と同じ）。手順の正本は references/graph-workflow.md にある。
+
 チェック項目:
 - `graph.node_id` の値がページ全体で一意である。
 - 関係の `object` の ID がすべて既知のノードに解決される（または、object_types に "*" を
@@ -57,6 +60,7 @@ except ImportError:
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 import wiki_graph_extract as _extract  # noqa: E402
+import wiki_graph_common as common  # noqa: E402
 from wiki_text import localize_argparse, nfc  # noqa: E402
 
 
@@ -484,17 +488,13 @@ def main():
         print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
         sys.exit(1)
 
-    ontology_path = args.ontology or (args.wiki / "graph" / "ontology.yaml")
-    if not ontology_path.exists():
-        print(f"オントロジーが見つからない: {ontology_path}", file=sys.stderr)
-        print("wiki/graph/ontology.yaml を置いたかを確かめる。ひな形は assets/ontology.yaml.template にある。",
-              file=sys.stderr)
-        sys.exit(1)
+    # オントロジーの有無と読み方は extract、query と同じ規則に従う。
     try:
-        ontology = yaml.safe_load(ontology_path.read_text(encoding="utf-8-sig")) or {}
-    except yaml.YAMLError as e:
-        print(f"オントロジーを読めない: {e}", file=sys.stderr)
-        sys.exit(2)
+        ontology_path = common.require_ontology(args.wiki, args.ontology)
+    except common.GraphLayerDisabled as exc:
+        common.report_disabled(exc)
+        sys.exit(common.EXIT_GRAPH_DISABLED)
+    ontology = _extract.load_ontology(ontology_path)
 
     pages = collect_pages(args.wiki)
     findings = lint(pages, ontology)
