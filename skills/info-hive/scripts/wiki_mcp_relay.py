@@ -29,6 +29,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -87,8 +88,13 @@ def spawn_server(python: str, log_file) -> subprocess.Popen:
                      "cwd": str(common.data_dir()), "close_fds": True}
     if os.name == "nt":
         flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-        return subprocess.Popen(args, creationflags=flags, **common_kwargs)
-    return subprocess.Popen(args, start_new_session=True, **common_kwargs)
+        process = subprocess.Popen(args, creationflags=flags, **common_kwargs)
+    else:
+        process = subprocess.Popen(args, start_new_session=True, **common_kwargs)
+    # POSIX では、止まったサーバーを親の中継が回収しないとゾンビとして pid が残り、pid が生きているように見える。
+    # 中継はセッションのあいだ動き続けるので、サーバーの終了を待って回収するスレッドを置く。
+    threading.Thread(target=process.wait, name="reap-server", daemon=True).start()
+    return process
 
 
 def stop_server(info: dict) -> None:
