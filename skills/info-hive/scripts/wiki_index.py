@@ -77,6 +77,8 @@ TANTIVY_RETRIES = 6
 # 索引の書き手のロックを待つ秒数。止まりかけのサーバーが索引を閉じ終えるのを待つ。
 WRITER_LOCK_TIMEOUT = 60.0
 LEDGER_SCHEMA = 1
+# 埋め込みに使うスレッドの数（onnxruntime の intra_op）。未設定なら onnxruntime の既定（全コア）。
+EMBED_THREADS_ENV = "INFO_HIVE_EMBED_THREADS"
 # テスト用の埋め込み。値が "hash" のとき、モデルを読み込まずに文字の bigram から決定的なベクトルを作る。
 TEST_EMBEDDER_ENV = "INFO_HIVE_TEST_EMBEDDER"
 
@@ -147,8 +149,9 @@ class Embedder:
                 model_file=MODEL["files"][0][2], license="apache-2.0", size_in_gb=0.53,
             )
         self._np = np
+        threads = int(os.environ.get(EMBED_THREADS_ENV, "0") or 0) or None
         self._model = TextEmbedding(model_name=name, cache_dir=str(folder.parent / "fastembed"),
-                                    specific_model_path=str(folder))
+                                    specific_model_path=str(folder), threads=threads)
         self._lock = threading.Lock()
 
     def _embed(self, texts: list[str]):
