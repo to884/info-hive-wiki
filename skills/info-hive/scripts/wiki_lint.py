@@ -17,10 +17,10 @@ frontmatter の文字列の値（配列の要素を含む）が二重引用符�
     python wiki_lint.py [<wiki-dir>] [options]
 
 オプション:
-    --soft-cap N        ページサイズのソフト上限の行数（既定: 400）
-    --hard-cap N        ページサイズのハード上限の行数（既定: 800）
-    --soft-char-cap N   ページサイズのソフト上限の文字数。空白を除いて数える（既定: 4000）
-    --hard-char-cap N   ページサイズのハード上限の文字数。空白を除いて数える（既定: 8000）
+    --soft-cap N        ページサイズのソフト上限の行数（既定: 100）
+    --hard-cap N        ページサイズのハード上限の行数（既定: 200）
+    --soft-char-cap N   ページサイズのソフト上限の文字数。空白を除いて数える（既定: 10000）
+    --hard-char-cap N   ページサイズのハード上限の文字数。空白を除いて数える（既定: 25000）
     --required-fm a,b   必須の frontmatter のフィールド（既定: type,title,tags,created,updated）
     --suggest-pages     多くのページに出てくるのに専用のページがない語を挙げる
     --suggest-min N     --suggest-pages で挙げる最小の出現ページ数（既定: 5）
@@ -199,7 +199,7 @@ DATE_FIELDS = ("created", "updated", "ingested")
 
 
 def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str], suggest_pages: bool, suggest_min: int,
-         soft_char_cap: int = 4000, hard_char_cap: int = 8000) -> dict:
+         soft_char_cap: int = 10000, hard_char_cap: int = 25000) -> dict:
     findings = {
         "orphans": [],
         "broken_links": [],
@@ -449,10 +449,10 @@ def render_text(findings: dict) -> str:
 def main():
     parser = localize_argparse(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter))
     parser.add_argument("wiki", nargs="?", type=Path, default=Path("wiki"), help="wiki のディレクトリ（既定: ./wiki）")
-    parser.add_argument("--soft-cap", type=int, default=400, help="ページサイズのソフト上限の行数（既定: 400）")
-    parser.add_argument("--hard-cap", type=int, default=800, help="ページサイズのハード上限の行数（既定: 800）")
-    parser.add_argument("--soft-char-cap", type=int, default=4000, help="ページサイズのソフト上限の文字数。空白を除いて数える（既定: 4000）")
-    parser.add_argument("--hard-char-cap", type=int, default=8000, help="ページサイズのハード上限の文字数。空白を除いて数える（既定: 8000）")
+    parser.add_argument("--soft-cap", type=int, default=100, help="ページサイズのソフト上限の行数（既定: 100）")
+    parser.add_argument("--hard-cap", type=int, default=200, help="ページサイズのハード上限の行数（既定: 200）")
+    parser.add_argument("--soft-char-cap", type=int, default=10000, help="ページサイズのソフト上限の文字数。空白を除いて数える（既定: 10000）")
+    parser.add_argument("--hard-char-cap", type=int, default=25000, help="ページサイズのハード上限の文字数。空白を除いて数える（既定: 25000）")
     parser.add_argument("--required-fm", default="type,title,tags,created,updated", help="必須の frontmatter のフィールド。カンマで区切る（既定: type,title,tags,created,updated）")
     parser.add_argument("--suggest-pages", action="store_true", help="多くのページに出てくるのに専用のページがない語を挙げる")
     parser.add_argument("--suggest-min", type=int, default=5, help="--suggest-pages で挙げる最小の出現ページ数（既定: 5）")

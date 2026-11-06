@@ -43,7 +43,7 @@ class WikiFixture:
 
     def lint(self, **kwargs):
         pages = WIKI_LINT.collect_pages(self.root)
-        args = dict(soft_cap=400, hard_cap=800, required_fm=["type", "title"], suggest_pages=False, suggest_min=5)
+        args = dict(soft_cap=100, hard_cap=200, required_fm=["type", "title"], suggest_pages=False, suggest_min=5)
         args.update(kwargs)
         return WIKI_LINT.lint(pages, **args)
 
@@ -53,11 +53,11 @@ class WikiFixture:
 
 class PageSizeTests(unittest.TestCase):
     def test_long_japanese_page_is_oversized_by_characters(self):
-        # 行数は少ないが、空白を除いて 8,000 文字を超える日本語のページ。
+        # 行数は少ないが、空白を除いて 25,000 文字を超える日本語のページ。
         long_line = "消費税の軽減税率の説明。" * 100
         wiki = WikiFixture({
-            "concepts/long.md": page("長い", "\n".join([long_line] * 7)),
-            "concepts/medium.md": page("中くらい", "\n".join([long_line] * 4)),
+            "concepts/long.md": page("長い", "\n".join([long_line] * 22)),
+            "concepts/medium.md": page("中くらい", "\n".join([long_line] * 10)),
             "concepts/short.md": page("短い", "短い本文。"),
         })
         try:
@@ -67,8 +67,8 @@ class PageSizeTests(unittest.TestCase):
         hard = {f["path"]: f for f in findings["oversized_hard"]}
         soft = {f["path"]: f for f in findings["oversized_soft"]}
         self.assertIn("concepts/long.md", hard)
-        self.assertLess(hard["concepts/long.md"]["lines"], 400)
-        self.assertGreater(hard["concepts/long.md"]["chars"], 8000)
+        self.assertLess(hard["concepts/long.md"]["lines"], 100)
+        self.assertGreater(hard["concepts/long.md"]["chars"], 25000)
         self.assertIn("concepts/medium.md", soft)
         self.assertNotIn("concepts/short.md", hard | soft)
 
