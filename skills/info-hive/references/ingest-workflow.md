@@ -199,13 +199,13 @@ concepts: ["コンセプトのスラッグ1", "コンセプトのスラッグ2"]
 
 ## 手順 8b: グラフ層を更新する（`wiki/graph/ontology.yaml` がある場合のみ）
 
-wiki に任意のグラフ層がある場合は、次のことを行う。
+wiki に任意のグラフ層がある場合は、ページの更新を終えたこの時点で、次のことを行う。手順と規約の正本は `references/graph-workflow.md` である。
 
-1. 型付きの `graph.relationships[]` は、ソースが明示的に裏づけている場合に限って追加する（述語、ソースページのスラッグ、証拠となる引用、確信度、ステータスを付ける）。証拠の引用は、ソースの1文か文の一部をそのまま写す。言い換えず、英語のソースも訳さない。ソースが全角の「ＡＩ」なら、引用も「ＡＩ」と書く。確信が持てないときは、本文にふつうの `[[wikilink]]` を書くほうを選ぶ。本文の wikilink だけでも `mentions` エッジができる。
-2. `uv run --script scripts/wiki_graph_lint.py wiki/` を実行する。抽出する前に、検出結果をユーザーと一緒に仕分ける。型付きエッジを黙って書き換えてはならない。
-3. `uv run --script scripts/wiki_graph_extract.py wiki/` を実行し、`nodes.jsonl`、`edges.jsonl`、`graph.sqlite`、`graph.graphml` を作り直す。
+1. 型付きの `graph.relationships[]` は、ソースが明示的に裏づけている場合に限って追加する。書き方は `graph-workflow.md` の「frontmatter のスキーマ」と「型付きエッジを追加するか、ふつうの `[[wikilink]]` にするか」に従う。
+2. 型付きの関係を足したか直したときは、`graph-workflow.md` の「検査（lint）」を行い、検出結果をユーザーと一緒に仕分ける。
+3. この取り込みでページを 1 つでも作るか書き換えたら、`graph-workflow.md` の「更新（extract）」を行う。型付きの関係を足していなくても、本文の wikilink や `sources:` の変更でグラフは変わる。
 
-取り込みで `graph:` メタデータを追加せず、新しいページも作らなかった場合は、この手順をまるごとスキップする。コンパイル済みの成果物は変わらないからである。詳しいリファレンス: `references/graph-workflow.md`。
+`ontology.yaml` がない wiki では、この手順を飛ばす。
 
 ## 手順 9: ログに追記する
 

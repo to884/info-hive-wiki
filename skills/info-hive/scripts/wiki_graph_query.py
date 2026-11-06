@@ -19,6 +19,9 @@ wiki_graph_query.py — コンパイル済みの wiki のグラフ（graph.sqlit
     --db <path>           graph.sqlite のパス（既定: <wiki>/graph/graph.sqlite）
     --json                テキストの代わりに JSON を出力する
 
+--db を省いたときは、<wiki>/graph/ontology.yaml がなければグラフ層を導入する前の wiki として
+扱い、終了コード 1 で止まる（extract、lint と同じ）。手順の正本は references/graph-workflow.md にある。
+
 例:
     python wiki_graph_query.py wiki/ neighbors --node product:konvy
     python wiki_graph_query.py wiki/ edges    --subject person:stephanie-emmanouel
@@ -37,6 +40,7 @@ from pathlib import Path
 # 同じディレクトリの wiki_text を import できるようにする。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wiki_text import localize_argparse, nfc  # noqa: E402
+import wiki_graph_common as common  # noqa: E402
 
 
 EVIDENCE_SNIPPET_LEN = 140
@@ -248,6 +252,15 @@ def main():
     if not args.wiki.exists():
         print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
         sys.exit(1)
+    # 既定の DB を使うときは、extract、lint と同じくオントロジーの有無でグラフ層が有効かを決める。
+    # オントロジーを消した wiki に古い graph.sqlite が残っていても、それには答えない。
+    # --db で DB を明示したときは、その DB を使う（extract --out で別の場所に作った場合など）。
+    if args.db is None:
+        try:
+            common.require_ontology(args.wiki)
+        except common.GraphLayerDisabled as exc:
+            common.report_disabled(exc)
+            sys.exit(common.EXIT_GRAPH_DISABLED)
     db_path = args.db or (args.wiki / "graph" / "graph.sqlite")
     conn = open_db(db_path)
     try:
