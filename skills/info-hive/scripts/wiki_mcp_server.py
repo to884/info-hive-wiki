@@ -43,6 +43,9 @@ import wiki_mcp_common as common  # noqa: E402
 # 埋め込みの待ちが少ないときは、検索の前にその場で埋め込む。多いときは裏で埋め込み、語彙の結果と途中の
 # ベクトルで先に答える（初回の再埋め込みは長くかかる。ADR-0011）。
 INLINE_EMBED_LIMIT = 64
+# 要求の本文の上限。mcp の既定（4 MiB）では、ベクトルつきの index_chunks が数百件で上限に当たる。
+# 127.0.0.1 だけで待ち受け、トークンを確かめるので、大きくしてよい。
+MAX_REQUEST_BYTES = 64 * 1024 * 1024
 
 
 class Activity:
@@ -255,6 +258,7 @@ def build_app(state: State, token: str, port: int):
 
     mcp = FastMCP(
         "info-hive-wiki", host="127.0.0.1", port=port, json_response=True, log_level="WARNING",
+        max_request_body_size=MAX_REQUEST_BYTES,
         instructions="info-hive の wiki を検索し、ページと索引を読むためのツール。wiki の Markdown は書き換えない。",
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=True,
                                                      allowed_hosts=[f"127.0.0.1:{port}"], allowed_origins=[]),
@@ -324,6 +328,7 @@ def build_app(state: State, token: str, port: int):
         ruri-v3-130m の 512 次元。なければサーバーが埋め込む）。
         同じ doc の、generation より古い世代の行は消す。delete_docs の文書は丸ごと消す。
         tokenizer が既存の collection と違うときは失敗する。reset を真にすると作り直す。
+        1 回の要求の本文は 64 MiB まで。ベクトルつきなら 1,000〜2,000 件ずつに分けて渡す。
         """
         def run():
             store = state.chunk_store(collection)

@@ -136,10 +136,6 @@ def ensure_server() -> tuple[dict, bool]:
         raise RuntimeError(f"wiki の MCP サーバーが {START_TIMEOUT} 秒以内に起動しなかった")
 
 
-class ServerGone(RuntimeError):
-    """呼び出しの途中でサーバーが止まった。"""
-
-
 def flatten(exc: BaseException) -> list[BaseException]:
     inner = getattr(exc, "exceptions", None)
     if not inner:
@@ -147,14 +143,24 @@ def flatten(exc: BaseException) -> list[BaseException]:
     return [leaf for e in inner for leaf in flatten(e)]
 
 
+def cancel(scopes: set) -> None:
+    for scope in list(scopes):
+        scope.cancel()
+
+
 class Upstream:
     """サーバーとの MCP のセッション。接続は 1 つのタスクが持ち、切れたら作り直す。
 
     mcp 1.30 のクライアントは、サーバーが止まって送信に失敗しても、待っている要求に応答を返さない。
-    そのため、呼び出しの前にサーバーが生きているかを確かめ、呼び出しの間も 1 秒ごとに見張る。
+    接続を閉じても、待っている要求は返らない。そのため、接続が切れたら待っている呼び出しを取り消す。
+    接続ごとに 1 つの見張りが 1 秒ごとにサーバーを確かめ、止まっていたら接続を閉じる。取り消された
+    呼び出しは、call() がつなぎ直してやり直す。前の呼び出しから CHECK_AFTER_SECONDS 秒以上
+    空いたときは、呼び出しの前にも確かめる（要求がない時間が続くとサーバーは止まる）。
+    呼び出しのたびに確かめたり見張りを作ったりすると、p95 が 20 ms ほど増えた。
     """
 
     WATCH_SECONDS = 1.0
+    CHECK_AFTER_SECONDS = 1.0
 
     def __init__(self, task_group):
         import anyio
@@ -165,6 +171,8 @@ class Upstream:
         self._info = None
         self._lock = anyio.Lock()
         self.started_server = None
+        self._last_ok = 0.0
+        self._pending: set = set()  # 今の接続で待っている呼び出しの取り消しの範囲
 
     async def _connect(self):
         import httpx
@@ -176,6 +184,7 @@ class Upstream:
         self.started_server = started
         ready = anyio.Event()
         closed = anyio.Event()
+        pending: set = set()  # この接続で待っている呼び出し。接続が切れたら取り消す
         box = {}
 
         async def hold():
@@ -195,25 +204,37 @@ class Upstream:
                 if not isinstance(exc, Exception):
                     raise
             finally:
+                # 接続が切れたら（サーバーが止まった、セッションが切れたなど）、待っている呼び出しを取り消す。
                 closed.set()
+                cancel(pending)
                 ready.set()
+
+        async def watch():
+            while not closed.is_set():
+                await anyio.sleep(self.WATCH_SECONDS)
+                if not closed.is_set() and not await anyio.to_thread.run_sync(alive, info):
+                    log("サーバーが止まったので接続を閉じ、待っている呼び出しを取り消す")
+                    closed.set()
+                    cancel(pending)
 
         self._tg.start_soon(hold)
         await ready.wait()
         if "session" not in box:
             raise RuntimeError(f"wiki の MCP サーバーにつなげなかった: {box.get('error')!r}")
-        self._session, self._closed, self._info = box["session"], closed, info
+        self._tg.start_soon(watch)
+        self._session, self._closed, self._info, self._pending = box["session"], closed, info, pending
 
     async def session(self):
         async with self._lock:
             usable = self._session is not None and not self._closed.is_set()
-            if usable and not await self._anyio.to_thread.run_sync(alive, self._info):
+            stale = time.monotonic() - self._last_ok > self.CHECK_AFTER_SECONDS
+            if usable and stale and not await self._anyio.to_thread.run_sync(alive, self._info):
                 self._closed.set()
                 usable = False
             if not usable:
                 self._session = None
                 await self._connect()
-            return self._session, self._info
+            return self._session, self._pending
 
     async def reset(self):
         async with self._lock:
@@ -221,27 +242,21 @@ class Upstream:
                 self._closed.set()
             self._session = None
 
-    async def _watched(self, fn, session, info):
-        anyio = self._anyio
-        box = {}
-
-        async def watch():
-            while True:
-                await anyio.sleep(self.WATCH_SECONDS)
-                if not await anyio.to_thread.run_sync(alive, info):
-                    raise ServerGone("wiki の MCP サーバーが呼び出しの途中で止まった")
-
-        async with anyio.create_task_group() as tg:
-            tg.start_soon(watch)
-            box["result"] = await fn(session)
-            tg.cancel_scope.cancel()
-        return box["result"]
-
     async def call(self, fn):
         for attempt in range(2):
-            session, info = await self.session()
+            session, pending = await self.session()
+            scope = self._anyio.CancelScope()
+            pending.add(scope)
             try:
-                return await self._watched(fn, session, info)
+                try:
+                    with scope:
+                        result = await fn(session)
+                finally:
+                    pending.discard(scope)
+                if scope.cancelled_caught:
+                    raise RuntimeError("wiki の MCP サーバーが呼び出しの途中で止まった")
+                self._last_ok = time.monotonic()
+                return result
             except Exception as exc:  # noqa: BLE001 - サーバーが止まった、セッションが切れたなど
                 await self.reset()
                 leaves = flatten(exc)
