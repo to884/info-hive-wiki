@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "wiki": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--quiet",
+        "--script",
+        "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_mcp_relay.py"
+      ]
+    }
+  }
+}
