@@ -7,6 +7,9 @@ wiki_lint.py — LLM Wiki の構造の健全性をチェックする。
 日本語の wiki で起きやすい書き損じとして、英語のキーと日本語の別名の重複、全角の「：」を使った
 frontmatter のキー、「、」で区切ったリストの値、全角の「｜」「＃」を使った wikilink も報告する。
 frontmatter の文字列の値（配列の要素を含む）が二重引用符で囲まれていないページも報告する。
+本文の画像（`![説明](../assets/x.svg)`）の参照先がないものも報告する。参照先はページのファイルが
+あるディレクトリを基準に解決する。ページの大きさは、コードフェンス（mermaid を含む）の中身と
+画像だけの行を除いて数える。
 
 ファイル名、パス、スラッグ、wikilink の行き先は NFC にそろえてから比べる。frontmatter の
 日本語のキー（タイトル、種類など）と type・kind の日本語の値は、英語に直してから検査する。
@@ -34,7 +37,9 @@ frontmatter の文字列の値（配列の要素を含む）が二重引用符�
 
 import argparse
 import json
+import os
 import re
+import urllib.parse
 import sys
 from collections import Counter, defaultdict
 from datetime import date, datetime
@@ -50,16 +55,23 @@ from wiki_text import (  # noqa: E402
     has_fullwidth_link_syntax,
     ideographic_comma_values,
     is_iso_date,
+    CODE_SPAN_RE,
+    IMAGE_RE,
+    image_target,
+    lines_outside_fences,
     localize_argparse,
     nfc,
     nfkc,
     parse_frontmatter_text,
     posix_rel,
+    strip_fences_and_images,
     unquoted_string_keys,
 )
 
 
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
+MD_ESCAPE_RE = re.compile(r"\\([!-/:-@\[-`{-~])")
+URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*:")
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 # 日本語のページの候補。カタカナ語は 3 文字以上、漢字の複合語は 3 文字以上の漢字の並びとする。
 # 2 文字の漢字の並びは「方法」「場合」のような一般語が多く、候補として役に立たない。
@@ -108,7 +120,66 @@ def resolve_link(link: str, by_path: dict, by_slug) -> "str | None":
 
 
 SKIP_TOP_LEVEL_FILES = {"SCHEMA.md", "index.md", "log.md", "README.md"}
-SKIP_TOP_LEVEL_DIRS = {"indexes", "graph", "raw", ".evolution"}
+SKIP_TOP_LEVEL_DIRS = {"indexes", "graph", "raw", ".evolution", "assets"}
+
+
+def _inside(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _encode_md_path(path: str) -> str:
+    """Markdown の参照先に書けるよう、意味を持つ文字（% # ? 空白 括弧 山括弧）をパーセントエンコードする。"""
+    table = {"%": "%25", "#": "%23", "?": "%3F", " ": "%20", "(": "%28", ")": "%29", "<": "%3C", ">": "%3E"}
+    return "".join(table.get(ch, ch) for ch in path)
+
+
+def missing_assets(body: str, md_path: Path, wiki_root: Path) -> list[dict]:
+    """本文の画像の参照のうち、ファイルがないもの（または wiki の外を指すもの）を返す。
+
+    参照先は、Markdown の決まりどおり、ページのファイルがあるディレクトリを基準に解決する。
+    wiki/concepts/x.md から wiki/assets/x-01.svg を指すなら ../assets/x-01.svg と書く。
+    wiki のルートを基準にすると見つかるときは、正しい相対パスを suggest に入れる。
+    URL、data:、絶対パスは見ない。コードフェンスとインラインのコードの中は見ない。
+    """
+    found: list[dict] = []
+    root = wiki_root.resolve()
+    for line in lines_outside_fences(body):
+        # コードを空白に置き換える。消すと左右がつながり、もとにない画像の記法ができることがある。
+        for m in IMAGE_RE.finditer(CODE_SPAN_RE.sub(lambda c: " " * len(c.group(0)), line)):
+            target = image_target(m).strip()
+            if not target or URL_SCHEME_RE.match(target) or target.startswith(("/", "#", "\\")):
+                continue
+            # Markdown の escape（\( など）を外してから、パーセントエンコードを戻す。
+            rel = MD_ESCAPE_RE.sub(r"\1", target.split("#", 1)[0].split("?", 1)[0])
+            rel = urllib.parse.unquote(rel)
+            if not rel:
+                continue
+            try:
+                resolved = (md_path.parent / rel).resolve()
+            except (ValueError, OSError):
+                # %00 のように、ファイルのパスにできない参照先。lint を止めずに報告する。
+                found.append({"target": target, "invalid": True})
+                continue
+            inside = _inside(resolved, root)
+            if inside and resolved.is_file():
+                continue
+            item = {"target": target}
+            if not inside:
+                item["outside"] = True
+            # wiki のルートを基準にすると wiki の中のファイルが見つかるときだけ、正しい相対パスを示す。
+            try:
+                from_root = (root / rel).resolve()
+            except (ValueError, OSError):
+                from_root = None
+            if from_root is not None and from_root.is_file() and _inside(from_root, root):
+                suggest = Path(os.path.relpath(from_root, md_path.parent.resolve())).as_posix()
+                item["suggest"] = _encode_md_path(suggest)
+            found.append(item)
+    return found
 
 
 def parse_frontmatter(text: str) -> tuple[dict, str, bool]:
@@ -164,7 +235,9 @@ def collect_pages(wiki_root: Path) -> list[dict]:
             continue
         raw_meta, fm_text, body, malformed = parse_frontmatter_raw(text)
         meta, alias_conflicts = canonical_meta(raw_meta)
-        line_count = text.count("\n") + 1
+        # 大きさは、コードフェンスの中身と画像だけの行を除いて数える（ADR-0005）。
+        sized = strip_fences_and_images(text)
+        line_count = sized.count("\n") + 1
         links = [nfc(m.group(1).strip()) for m in WIKILINK_RE.finditer(body)]
         pages.append({
             "path": str(md_path),
@@ -174,13 +247,14 @@ def collect_pages(wiki_root: Path) -> list[dict]:
             "meta": meta,
             "body": body,
             "line_count": line_count,
-            "char_count": char_count(text),
+            "char_count": char_count(sized),
             "links": links,
             "malformed_fm": malformed,
             "alias_conflicts": alias_conflicts,
             "fullwidth_colon_keys": fullwidth_colon_keys(fm_text) if fm_text else [],
             "ideographic_comma_keys": ideographic_comma_values(raw_meta),
             "unquoted_keys": unquoted_string_keys(fm_text) if fm_text else [],
+            "missing_assets": missing_assets(body, md_path, wiki_root),
         })
     return pages
 
@@ -216,6 +290,7 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         "fullwidth_link_syntax": [],
         "non_iso_dates": [],
         "unquoted_strings": [],
+        "missing_assets": [],
         "suggested_pages": [],
         "summary": {},
     }
@@ -313,6 +388,10 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         if p.get("unquoted_keys"):
             findings["unquoted_strings"].append({"path": p["rel_path"], "keys": p["unquoted_keys"]})
 
+        # 本文の画像の参照先がない。
+        for item in p.get("missing_assets", []):
+            findings["missing_assets"].append({"from_path": p["rel_path"], **item})
+
         # 日付は ISO 形式（YYYY-MM-DD）にする。「2026年11月3日」や「2026/11/03」は、更新の停滞の
         # 判定や --since の絞り込みで読めない。
         for field in DATE_FIELDS:
@@ -338,11 +417,13 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         phrase_pages = defaultdict(set)
         for p in pages:
             seen = set()
-            for m in CAPITALIZED_PHRASE_RE.finditer(p["body"]):
+            # 図のソースと画像の alt は語の候補にしない。
+            prose = IMAGE_RE.sub("", strip_fences_and_images(p["body"]))
+            for m in CAPITALIZED_PHRASE_RE.finditer(prose):
                 phrase = m.group(1).strip()
                 seen.add(phrase)
             # 半角のカタカナも全角にそろえてから探す。
-            body = nfkc(p["body"])
+            body = nfkc(prose)
             for regex in (KATAKANA_TERM_RE, KANJI_COMPOUND_RE):
                 seen.update(m.group() for m in regex.finditer(body))
             for phrase in seen:
@@ -384,6 +465,7 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         "fullwidth_link_syntax": len(findings["fullwidth_link_syntax"]),
         "non_iso_dates": len(findings["non_iso_dates"]),
         "unquoted_strings": len(findings["unquoted_strings"]),
+        "missing_assets": len(findings["missing_assets"]),
         "suggested_pages": len(findings["suggested_pages"]),
     }
     return findings
@@ -420,6 +502,10 @@ def render_text(findings: dict) -> str:
         ("fullwidth_link_syntax", "wikilink に全角の「｜」か「＃」がある", lambda f: f"  - [[{f['link']}]]  （{f['from_path']}）"),
         ("non_iso_dates", "日付が YYYY-MM-DD の形になっていない", lambda f: f"  - {f['path']}  {f['key']}: {f['value']}"),
         ("unquoted_strings", "文字列の値が二重引用符で囲まれていない", lambda f: f"  - {f['path']}  キー: {', '.join(f['keys'])}"),
+        ("missing_assets", "画像の参照先のファイルがない", lambda f: f"  - {f['target']}  （{f['from_path']}）"
+         + ("  wiki の外を指している" if f.get("outside") else "")
+         + ("  ファイルのパスにできない" if f.get("invalid") else "")
+         + (f"  → {f['suggest']} と書けば解決する" if f.get("suggest") else "")),
     ]
 
     for key, label, formatter in sections:

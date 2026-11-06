@@ -28,16 +28,11 @@ uv run --script scripts/wiki_search.py "軽減税率の対象" --top 10 --cache 
 
 ユーザーが任意の判定レイヤーを有効にしている場合は、`--decide` を付ける。このふるい分けは、クエリと単語が共通しているだけの行を取り除く。ふるい分けた結果が空なら、wiki にはおそらく答えがない。結果が `failed_open: true` を報告している場合は、ふるい分けが実行されていない。`decision-models.md` を参照。
 
-## 手順 2b: グラフを使って調べる（`wiki/graph/graph.sqlite` がある場合のみ）
+## 手順 2b: グラフを使って調べる（`wiki/graph/ontology.yaml` がある場合のみ）
 
-関係を問う質問（「X とつながっているものは？」「Y を提案したのは誰？」「A から B への経路をたどって」）では、インデックスを読んだあと、ページを読む前に、コンパイル済みのグラフにクエリをかける。
+関係を問う質問（「X とつながっているものは？」「Y を提案したのは誰？」「A から B への経路をたどって」）では、インデックスを読んだあと、ページを読む前に、コンパイル済みのグラフに問い合わせる。手順と鮮度の確かめ方は `references/graph-workflow.md` の「問い合わせ（query）」に従う。
 
-```bash
-python scripts/wiki_graph_query.py wiki/ neighbors --node <node-id>
-python scripts/wiki_graph_query.py wiki/ facts    --about <node-id>
-```
-
-構造化された隣接ノードや事実は、読むべき wiki ページを選ぶのに使う。ただし、重要な主張については、グラフの行だけをもとに答えてはならない。グラフは目的のページを早く見つけるためのものであり、証拠になるのは wiki ページとその raw ソースである。`graph.sqlite` が `log.md` にある最新の `## [YYYY-MM-DD] ingest |` の項目より古い場合は、先に `wiki_graph_extract.py` で作り直す。詳しいリファレンス: `references/graph-workflow.md`。
+構造化された隣接ノードや事実は、読むべき wiki ページを選ぶのに使う。重要な主張については、グラフの行だけをもとに答えてはならない。証拠になるのは wiki ページとその raw ソースである。`ontology.yaml` がない wiki では、`graph.sqlite` が残っていてもこの手順を飛ばす。
 
 ## 手順 3: 候補のページを読む
 
@@ -84,6 +79,8 @@ updated: 2026-04-15
 ```
 
 `type`、`title`、`tags`、`created`、`updated` は lint がすべてのページに求める必須項目で、`sources` は source 以外のページに求められる項目である。`sources` には回答の根拠にしたソースの要約ページ（`wiki/sources/`）のスラッグだけを入れ、`sources_consulted` には種類を問わず参照したページ（ソース、コンセプト、エンティティ、ほかのシンセシス）のスラッグを入れる。`question`、`asked`、`sources_consulted` はシンセシスのページだけの任意項目である。文字列の値は二重引用符で囲み、日付は囲まない。
+
+比較や流れを答えた回答は、`page-conventions.md` の「図表」の形で、表や mermaid の図と説明を入れて保存する。
 
 本文は、ユーザーに伝えた回答そのものである。wiki の文体に合わせて軽く手を入れてもよい。新しいシンセシスのページを、該当するインデックスに追加する。`log.md` には、`## [YYYY-MM-DD] query | <質問の要約>` の形の行を追記する（`## [2026-11-03] query | 軽減税率の対象の比較`）。操作名の `query` は英語のまま書き、説明は日本語で書く。
 

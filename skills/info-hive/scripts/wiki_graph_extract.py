@@ -14,6 +14,10 @@ wiki_graph_extract.py — Markdown の wiki を、クエリできるグラフに
 
 PyYAML の固定した依存を持つので、`uv run --script` で実行する。
 
+オントロジーがないときは、グラフ層を導入する前の wiki として扱い、何も書き出さずに
+終了コード 1 で止まる。生成物は一時ファイルに書いてから置き換えるので、途中で止まっても
+前の生成物が残る。手順の正本は references/graph-workflow.md にある。
+
 使い方:
     uv run --script wiki_graph_extract.py <wiki-dir> [options]
 
@@ -53,6 +57,7 @@ except ImportError:
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 from wiki_text import canonical_meta, ljust_display, localize_argparse, nfc, posix_rel  # noqa: E402
+import wiki_graph_common as common  # noqa: E402
 
 
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
@@ -195,17 +200,35 @@ def collect_pages(wiki_root: Path) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-def load_ontology(path: Path) -> dict:
-    if not path.exists():
-        return {"node_types": {}, "predicates": {}}
+class OntologyError(Exception):
+    """オントロジーのファイルはあるが、読めない。"""
+
+
+def read_ontology(path: Path) -> dict:
+    """オントロジーを読む。読めなければ OntologyError を送出する。
+
+    ファイルがあるかどうかは、呼び出す側が先に `wiki_graph_common.require_ontology` で確かめる。
+    extract と lint は、この関数で同じように読む。
+    """
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8-sig")) or {}
-    except yaml.YAMLError as e:
-        print(f"オントロジーを読めない（{path}）: {e}", file=sys.stderr)
-        sys.exit(2)
-    data.setdefault("node_types", {})
-    data.setdefault("predicates", {})
+        data = yaml.safe_load(Path(path).read_text(encoding="utf-8-sig")) or {}
+    except (yaml.YAMLError, OSError, UnicodeDecodeError) as e:
+        raise OntologyError(f"オントロジーを読めない（{path}）: {e}") from e
+    if not isinstance(data, dict):
+        raise OntologyError(f"オントロジーの最上位がマッピングでない（{path}）")
+    for key in ("node_types", "predicates"):
+        if data.get(key) is None:
+            data[key] = {}
     return data
+
+
+def load_ontology(path: Path) -> dict:
+    """read_ontology と同じ。読めなければ終了コード 2 で止まる（CLI 用）。"""
+    try:
+        return read_ontology(path)
+    except OntologyError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(common.EXIT_BAD_ONTOLOGY)
 
 
 def derive_node_type(meta: dict, ontology: dict) -> str | None:
@@ -431,23 +454,47 @@ def _normalize_for_json(value):
     return value
 
 
+OUTPUT_NAMES = ["nodes.jsonl", "edges.jsonl", "graph.sqlite", "graph.graphml"]
+
+
+def _write_lines_atomically(target: Path, rows: list[dict]) -> None:
+    temp = common.temp_path_for(target)
+    try:
+        with temp.open("w", encoding="utf-8", newline="\n") as f:
+            for row in rows:
+                f.write(json.dumps(_normalize_for_json(row), sort_keys=True, ensure_ascii=False))
+                f.write("\n")
+    except BaseException:
+        common.remove_quietly(temp)
+        raise
+    common.replace_atomically(temp, target)
+
+
 def write_jsonl(out_dir: Path, nodes: list[dict], edges: list[dict]) -> None:
-    nodes_sorted = sorted(nodes, key=lambda n: n["id"])
-    edges_sorted = sorted(edges, key=lambda e: e["id"])
-    with (out_dir / "nodes.jsonl").open("w", encoding="utf-8") as f:
-        for n in nodes_sorted:
-            f.write(json.dumps(_normalize_for_json(n), sort_keys=True, ensure_ascii=False))
-            f.write("\n")
-    with (out_dir / "edges.jsonl").open("w", encoding="utf-8") as f:
-        for e in edges_sorted:
-            f.write(json.dumps(_normalize_for_json(e), sort_keys=True, ensure_ascii=False))
-            f.write("\n")
+    _write_lines_atomically(out_dir / "nodes.jsonl", sorted(nodes, key=lambda n: n["id"]))
+    _write_lines_atomically(out_dir / "edges.jsonl", sorted(edges, key=lambda e: e["id"]))
 
 
 def write_sqlite(out_dir: Path, nodes: list[dict], aliases: list[dict], edges: list[dict]) -> None:
+    """graph.sqlite を作り直す。
+
+    同じディレクトリの一時ファイルに作り、接続を閉じてから置き換える。途中で止まっても、
+    前の graph.sqlite がそのまま残り、問い合わせを続けられる。
+    """
     db_path = out_dir / "graph.sqlite"
-    if db_path.exists():
-        db_path.unlink()
+    temp = common.temp_path_for(db_path)
+    common.remove_quietly(temp)
+    try:
+        build_sqlite(temp, nodes, aliases, edges)
+    except BaseException:
+        common.remove_quietly(temp)
+        common.remove_quietly(temp.with_name(temp.name + "-journal"))
+        raise
+    common.replace_atomically(temp, db_path)
+
+
+def build_sqlite(db_path: Path, nodes: list[dict], aliases: list[dict], edges: list[dict]) -> None:
+    """db_path に新しいグラフの DB を作る。db_path にはまだファイルがないこと。"""
     conn = sqlite3.connect(db_path)
     try:
         conn.executescript("""
@@ -581,7 +628,14 @@ def write_graphml(out_dir: Path, nodes: list[dict], edges: list[dict]) -> None:
 
     tree = ET.ElementTree(root)
     ET.indent(tree, space="  ")
-    tree.write(out_dir / "graph.graphml", encoding="utf-8", xml_declaration=True)
+    target = out_dir / "graph.graphml"
+    temp = common.temp_path_for(target)
+    try:
+        tree.write(temp, encoding="utf-8", xml_declaration=True)
+    except BaseException:
+        common.remove_quietly(temp)
+        raise
+    common.replace_atomically(temp, target)
 
 
 # ---------------------------------------------------------------------------
@@ -603,15 +657,23 @@ def main():
         print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
         sys.exit(1)
 
-    out_dir = args.out or (args.wiki / "graph")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    ontology_path = args.ontology or (args.wiki / "graph" / "ontology.yaml")
-    ontology = load_ontology(ontology_path)
     formats = [f.strip().lower() for f in args.formats.split(",") if f.strip()]
     unknown = [f for f in formats if f not in DEFAULT_FORMATS]
     if unknown:
         print(f"未知の形式: {', '.join(unknown)}。使える形式: {', '.join(DEFAULT_FORMATS)}", file=sys.stderr)
         sys.exit(1)
+
+    # オントロジーがなければ、graph/ も生成物も作らずに止まる（lint、query と同じ扱い）。
+    try:
+        ontology_path = common.require_ontology(args.wiki, args.ontology)
+    except common.GraphLayerDisabled as exc:
+        common.report_disabled(exc)
+        sys.exit(common.EXIT_GRAPH_DISABLED)
+    ontology = load_ontology(ontology_path)
+
+    out_dir = args.out or (args.wiki / "graph")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    common.remove_stale_temps(out_dir, OUTPUT_NAMES)
 
     pages = collect_pages(args.wiki)
     nodes, slug_to_id, aliases = build_nodes(pages, ontology)

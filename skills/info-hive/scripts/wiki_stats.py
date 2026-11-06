@@ -22,8 +22,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wiki_text import (  # noqa: E402
     canonical_meta, char_count, ljust_display, localize_argparse, nfc, parse_frontmatter_text, posix_rel,
-    rjust_display,
+    rjust_display, strip_fences_and_images,
 )
+import wiki_workspace  # noqa: E402
 
 
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
@@ -53,7 +54,7 @@ def link_stem(link: str) -> str:
 
 
 SKIP_TOP_LEVEL_FILES = {"SCHEMA.md", "log.md", "README.md"}
-SKIP_TOP_LEVEL_DIRS = {"indexes", "graph", "raw", ".evolution"}
+SKIP_TOP_LEVEL_DIRS = {"indexes", "graph", "raw", ".evolution", "assets"}
 
 
 def parse_type(text: str) -> str | None:
@@ -81,8 +82,10 @@ def size_warning(lines: int, chars: int) -> str:
 
 def main():
     parser = localize_argparse(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter))
-    parser.add_argument("wiki", nargs="?", type=Path, default=Path("wiki"), help="wiki のディレクトリ（既定: ./wiki）")
+    parser.add_argument("wiki", nargs="?", type=Path, default=None, help=wiki_workspace.WIKI_DEFAULT_HELP)
     args = parser.parse_args()
+    if args.wiki is None:
+        args.wiki = wiki_workspace.default_wiki_or_exit()
 
     if not args.wiki.exists():
         print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
@@ -118,10 +121,12 @@ def main():
             continue
 
         total_pages += 1
-        line_count = text.count("\n") + 1
+        # 大きさは lint と同じく、コードフェンス（mermaid を含む）の中身と画像だけの行を除いて数える。
+        sized = strip_fences_and_images(text)
+        line_count = sized.count("\n") + 1
         # 語数は空白で区切って数えるので、日本語のページではほぼ意味をなさない。文字数も数える。
-        word_count = len(text.split())
-        chars = char_count(text)
+        word_count = len(sized.split())
+        chars = char_count(sized)
         total_lines += line_count
         total_words += word_count
         total_chars += chars

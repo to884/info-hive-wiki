@@ -4,7 +4,7 @@
 
 グラフは、markdown の wiki をもとにコンパイルする任意のインデックスである。出典つきの型付きの関係をプログラムからクエリできるようにしつつ、正本はあくまで markdown のままにする。グラフはいつでもページから作り直せる。
 
-> グラフ層はオプトイン方式である。`wiki/graph/ontology.yaml` がなければ、その wiki はグラフ層を導入する前の状態である。extract、lint、query を実行してはならず、オントロジーのファイルをでっち上げてもならない。先にグラフ層を初期化する（[`/wiki:graph`](./commands.md#wikigraph-action) または [`/wiki:init`](./commands.md#wikiinit) を使う）か、グラフ層なしで進める。
+> グラフ層はオプトイン方式である。`wiki/graph/ontology.yaml` がなければ、その wiki はグラフ層を導入する前の状態である。extract、lint、query のスクリプトは、どれも何も書き出さずに終了コード 1 で止まる。オントロジーのファイルをでっち上げてはならない。先にグラフ層を初期化する（[`/wiki:graph`](./commands.md#wikigraph-action) または [`/wiki:init`](./commands.md#wikiinit) を使う）か、グラフ層なしで進める。
 
 正本は markdown のページであり、下の図の成果物はすべて生成物なので、いつでも削除して作り直せる。
 

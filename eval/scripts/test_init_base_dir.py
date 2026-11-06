@@ -52,6 +52,7 @@ class BaseDirTests(unittest.TestCase):
         out = self.run_init(base)
         self.assertTrue((base / "wiki" / "SCHEMA.md").is_file())
         self.assertTrue((base / "raw" / "assets").is_dir())
+        self.assertTrue((base / "wiki" / "assets").is_dir())
         self.assertIn("基準のディレクトリがなかったので作った", out)
         self.assertEqual(self.installed, [base.resolve() / "wiki"])
 

@@ -7,8 +7,9 @@
 ## 置き場所
 
 - Wiki のルート: `wiki/`
+- 知識ページの図（svg）: `wiki/assets/`。ページからは `../assets/<ページのスラッグ>-NN.svg` で参照する
 - raw ソース: `raw/`
-- アセットと画像の保存先: `raw/assets/`
+- アセットと画像の保存先: `raw/assets/`（Web ページの画像は `raw/assets/<ソースのスラッグ>/`）
 
 ## ページの種類
 

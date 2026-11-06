@@ -36,6 +36,7 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wiki_text import localize_argparse, normalize_quote  # noqa: E402
+import wiki_workspace  # noqa: E402
 
 IGNORED = {'.git', '__pycache__', '.wiki-cache', '.evolution', 'node_modules', '.wiki-evolve-lock'}
 
@@ -528,7 +529,7 @@ def verify_bundle(path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--wiki', type=Path, default=Path('wiki'))
+    parser.add_argument('--wiki', type=Path, default=None, help=wiki_workspace.WIKI_DEFAULT_HELP)
     sub = parser.add_subparsers(dest='action', required=True)
     capture_parser = sub.add_parser('capture', help='確かめた経験を、変更できない raw の JSON として保存する')
     capture_parser.add_argument('--raw', type=Path, required=True)
@@ -556,6 +557,8 @@ def main():
     p.add_argument('--destination', type=Path, required=True)
     sub.add_parser('verify-bundle', help='書き出した証拠とスキルのファイルをすべて検証する').add_argument('path', type=Path)
     args = localize_argparse(parser).parse_args()
+    if args.wiki is None:
+        args.wiki = wiki_workspace.default_wiki_or_exit()
     try:
         if args.action == 'verify-bundle':
             result = verify_bundle(args.path)
