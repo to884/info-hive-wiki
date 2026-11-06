@@ -497,11 +497,29 @@ def wrap_display(text: str, width: int) -> list[str]:
 # 図表（コードフェンスと画像の行）
 # ---------------------------------------------------------------------------
 
-# 行頭（3 文字までの字下げ）の ``` か ~~~ でフェンスが始まる。CommonMark と同じく、閉じるのは
-# 同じ文字で、開いたときと同じ長さ以上の並びだけの行である。
-_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+# ``` か ~~~ でフェンスが始まる。リストの項目（`- `、`1. `）と引用（`> `）の中のフェンスも読む。
+# 閉じるのは、同じ文字で、開いたときと同じ長さ以上の並びのあとに空白とタブしかない行である。
+_CONTAINER_PREFIX = r"[ \t]*(?:>[ \t]?)*[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?"
+_FENCE_RE = re.compile(r"^" + _CONTAINER_PREFIX + r"(`{3,}|~{3,})(.*)$")
+_FENCE_CLOSE_RE = re.compile(r"^[ \t]*(?:>[ \t]?)*[ \t]*(`{3,}|~{3,})[ \t]*$")
+
+# 標準の Markdown の画像。alt の中の 1 段の [ ]、<...> で囲んだ参照先（空白を含めてよい）、
+# 1 段の ( ) を含む参照先、"…"・'…'・(…) のタイトルを読む。\! で escape したものは画像ではない。
+IMAGE_PATTERN = (
+    r"(?<!\\)!\[(?:[^\[\]\n]|\[[^\[\]\n]*\])*\]"
+    r"\(\s*(?:<([^<>\n]*)>|((?:[^\s()<>]|\([^\s()]*\))+))"
+    r"""(?:\s+(?:"[^"\n]*"|'[^'\n]*'|\([^()\n]*\)))?\s*\)"""
+)
+IMAGE_RE = re.compile(IMAGE_PATTERN)
 # 画像だけの行。1 行に画像を並べたものも含む。
-_IMAGE_ONLY_LINE_RE = re.compile(r"^\s*(?:!\[[^\]]*\]\([^)]*\)\s*)+$")
+_IMAGE_ONLY_LINE_RE = re.compile(r"^\s*(?:" + IMAGE_PATTERN + r"\s*)+$")
+# インラインのコード。開きと閉じのバッククォートの数がそろうものだけをコードとみなす。
+CODE_SPAN_RE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
+
+
+def image_target(match: "re.Match") -> str:
+    """IMAGE_RE の一致から参照先を取り出す。"""
+    return match.group(1) if match.group(1) is not None else match.group(2)
 
 
 def lines_outside_fences(text: str) -> list[str]:
@@ -509,13 +527,15 @@ def lines_outside_fences(text: str) -> list[str]:
     out: list[str] = []
     fence = None
     for line in text.split("\n"):
-        m = _FENCE_RE.match(line)
         if fence is None:
+            m = _FENCE_RE.match(line)
             if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
                 fence = m.group(1)
                 continue
             out.append(line)
-        elif m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not m.group(2).strip():
+            continue
+        m = _FENCE_CLOSE_RE.match(line)
+        if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
             fence = None
     return out
 

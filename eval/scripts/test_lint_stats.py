@@ -245,6 +245,50 @@ class FigureTests(unittest.TestCase):
         self.assertFalse([line for line in stats.splitlines() if line.startswith("  assets")])
         self.assertIn("concepts", stats)
 
+    def test_fences_inside_list_and_quote(self):
+        text = "- ```text\n  中身\n  ```\n\n後の本文\n\n> ```text\n> ![例](missing.svg)\n> ```\n\n最後"
+        self.assertEqual(WIKI_TEXT.strip_fences_and_images(text), "\n後の本文\n\n\n最後")
+        # 閉じのあとに全角の空白があれば閉じとみなさない（CommonMark は空白とタブだけを許す）。
+        self.assertEqual(WIKI_TEXT.lines_outside_fences("```\na\n```　\nb\n```\nc"), ["c"])
+
+    def test_image_syntax_variants(self):
+        found = lambda s: [WIKI_TEXT.image_target(m) for m in WIKI_TEXT.IMAGE_RE.finditer(s)]
+        self.assertEqual(found("![a](../assets/a(1).svg)"), ["../assets/a(1).svg"])
+        self.assertEqual(found("![a](<../assets/a b.svg>)"), ["../assets/a b.svg"])
+        self.assertEqual(found("![状態 [A]](../assets/x.svg)"), ["../assets/x.svg"])
+        self.assertEqual(found("![a](../assets/x.svg '題')"), ["../assets/x.svg"])
+        self.assertEqual(found(r"\![a](../assets/x.svg)"), [])
+
+    def test_missing_assets_edge_cases(self):
+        wiki = WikiFixture({
+            "concepts/paren.md": page("paren", "![図](../assets/a(1).svg)"),
+            "concepts/spaced.md": page("spaced", "![図](<../assets/a b.svg>)"),
+            "concepts/quoted-dir.md": page("q", "- ```text\n  x\n  ```\n\n![図](../assets/none.svg)"),
+            "concepts/codespan.md": page("c", "``foo ` ![例](missing.svg) ``\n\n![alt]`gap`(missing2.svg)"),
+            "concepts/hash.md": page("h", "![図](assets/a%23b.svg)"),
+            "assets/a(1).svg": SVG,
+            "assets/a b.svg": SVG,
+            "assets/a#b.svg": SVG,
+        })
+        outside = wiki.root.parent / f"{wiki.root.name}-secret.svg"
+        outside.write_text(SVG, encoding="utf-8")
+        (wiki.root / "concepts" / "secret.md").write_text(
+            page("s", f"![図](../{wiki.root.name}-secret.svg)"), encoding="utf-8")
+        try:
+            findings = wiki.lint()
+        finally:
+            outside.unlink()
+            wiki.close()
+        by_page = {f["from_path"]: f for f in findings["missing_assets"]}
+        self.assertEqual(sorted(by_page), ["concepts/hash.md", "concepts/quoted-dir.md", "concepts/secret.md"])
+        self.assertEqual(by_page["concepts/quoted-dir.md"]["target"], "../assets/none.svg")
+        # 示す相対パスは、そのまま書けば同じファイルに解決する形にする。
+        self.assertEqual(by_page["concepts/hash.md"]["suggest"], "../assets/a%23b.svg")
+        # ページからは wiki の中の存在しないファイルを指し、wiki のルートから見ると wiki の外のファイルになる。
+        # wiki の外のファイルは、正しい相対パスとして示さない。
+        self.assertNotIn("suggest", by_page["concepts/secret.md"])
+        self.assertNotIn("outside", by_page["concepts/secret.md"])
+
     def test_missing_assets_in_text_report(self):
         wiki = WikiFixture({"concepts/a.md": page("a", "![図](assets/a-01.svg)"), "assets/a-01.svg": SVG})
         try:

@@ -55,6 +55,9 @@ from wiki_text import (  # noqa: E402
     has_fullwidth_link_syntax,
     ideographic_comma_values,
     is_iso_date,
+    CODE_SPAN_RE,
+    IMAGE_RE,
+    image_target,
     lines_outside_fences,
     localize_argparse,
     nfc,
@@ -67,9 +70,6 @@ from wiki_text import (  # noqa: E402
 
 
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
-# 標準の Markdown の画像。<path> の形と、"title" を付けた形も読む。
-IMAGE_RE = re.compile(r'!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)')
-CODE_SPAN_RE = re.compile(r"`+[^`]*`+")
 URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*:")
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 # 日本語のページの候補。カタカナ語は 3 文字以上、漢字の複合語は 3 文字以上の漢字の並びとする。
@@ -122,6 +122,20 @@ SKIP_TOP_LEVEL_FILES = {"SCHEMA.md", "index.md", "log.md", "README.md"}
 SKIP_TOP_LEVEL_DIRS = {"indexes", "graph", "raw", ".evolution", "assets"}
 
 
+def _inside(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _encode_md_path(path: str) -> str:
+    """Markdown の参照先に書けるよう、意味を持つ文字（% # ? 空白 括弧 山括弧）をパーセントエンコードする。"""
+    table = {"%": "%25", "#": "%23", "?": "%3F", " ": "%20", "(": "%28", ")": "%29", "<": "%3C", ">": "%3E"}
+    return "".join(table.get(ch, ch) for ch in path)
+
+
 def missing_assets(body: str, md_path: Path, wiki_root: Path) -> list[dict]:
     """本文の画像の参照のうち、ファイルがないもの（または wiki の外を指すもの）を返す。
 
@@ -133,27 +147,26 @@ def missing_assets(body: str, md_path: Path, wiki_root: Path) -> list[dict]:
     found: list[dict] = []
     root = wiki_root.resolve()
     for line in lines_outside_fences(body):
-        for m in IMAGE_RE.finditer(CODE_SPAN_RE.sub("", line)):
-            target = m.group(1)
-            if URL_SCHEME_RE.match(target) or target.startswith(("/", "#", "\\")):
+        # コードを空白に置き換える。消すと左右がつながり、もとにない画像の記法ができることがある。
+        for m in IMAGE_RE.finditer(CODE_SPAN_RE.sub(lambda c: " " * len(c.group(0)), line)):
+            target = image_target(m).strip()
+            if not target or URL_SCHEME_RE.match(target) or target.startswith(("/", "#", "\\")):
                 continue
             rel = urllib.parse.unquote(target.split("#", 1)[0].split("?", 1)[0])
             if not rel:
                 continue
             resolved = (md_path.parent / rel).resolve()
-            try:
-                resolved.relative_to(root)
-                inside = True
-            except ValueError:
-                inside = False
+            inside = _inside(resolved, root)
             if inside and resolved.is_file():
                 continue
             item = {"target": target}
             if not inside:
                 item["outside"] = True
+            # wiki のルートを基準にすると wiki の中のファイルが見つかるときだけ、正しい相対パスを示す。
             from_root = (root / rel).resolve()
-            if from_root.is_file():
-                item["suggest"] = Path(os.path.relpath(from_root, md_path.parent.resolve())).as_posix()
+            if from_root.is_file() and _inside(from_root, root):
+                suggest = Path(os.path.relpath(from_root, md_path.parent.resolve())).as_posix()
+                item["suggest"] = _encode_md_path(suggest)
             found.append(item)
     return found
 
