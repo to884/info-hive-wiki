@@ -399,6 +399,59 @@ class UnitTests(unittest.TestCase):
         with self.assertRaises(WIKI_FETCH.FetchError):
             WIKI_FETCH.fetch("http://127.0.0.1:9/x.png", 5, 1000, block_private=True)
 
+    def test_redirect_to_private_address_is_refused_when_blocking(self):
+        handler = WIKI_FETCH._SafeRedirect(block_private=True)
+        with self.assertRaises(WIKI_FETCH.FetchError):
+            handler.redirect_request(None, None, 302, "Found", {}, "http://127.0.0.1/admin")
+
+    def test_shift_jis_label_decodes_windows_extensions(self):
+        data = "髙橋さんの手順①".encode("cp932")
+        text, encoding = WIKI_FETCH.decode_html(data, "text/html; charset=Shift_JIS")
+        self.assertEqual(text, "髙橋さんの手順①")
+        self.assertEqual(encoding, "cp932")
+
+    def test_lazy_source_wins_over_placeholder(self):
+        conv = WIKI_FETCH.Converter("https://example.com/post")
+        node = WIKI_FETCH.parse_html('<img src="/placeholder.gif" data-src="/chart.png" alt="図">').find_all("img")[0]
+        conv.image_mark(node)
+        self.assertEqual(conv.images[0]["url"], "https://example.com/chart.png")
+
+    def test_hidden_table_rows_and_cells_are_dropped(self):
+        body = self.convert(
+            '<main><p>' + "表の説明。" * 20 + '</p><table><tr><th>版</th><th>結果</th></tr>'
+            '<tbody hidden><tr><td>旧</td><td>古い結果</td></tr></tbody>'
+            '<tbody><tr><td>新</td><td>今の結果</td><td hidden>隠れたセル</td></tr></tbody></table></main>')
+        self.assertIn("| 新 | 今の結果 |", body)
+        self.assertNotIn("古い結果", body)
+        self.assertNotIn("隠れたセル", body)
+
+    def test_guessed_root_keeps_whole_table(self):
+        row = "<td>" + "説明の長い文章が入るセル。" * 4 + "</td>"
+        body = self.convert(
+            '<body><div id="menu"><a href="/">トップ</a></div><div><table><tr><th>名前</th><th>説明</th></tr>'
+            f'<tr><td>一</td>{row}</tr><tr><td>二</td>{row}</tr></table></div></body>')
+        self.assertIn("| 名前 | 説明 |", body)
+        self.assertIn("| 一 |", body)
+        self.assertIn("| 二 |", body)
+
+    def test_failed_replace_keeps_previous_images(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = Path(tmp) / "raw"
+            asset_dir = raw / "assets" / "k"
+            asset_dir.mkdir(parents=True)
+            (asset_dir / "k-01.png").write_bytes(b"old-1")
+            (asset_dir / "k-02.png").write_bytes(b"old-2")
+            # 本文の置き換えが失敗するよう、本文の場所に中身のあるディレクトリを置く。
+            target = raw / "k.md"
+            target.mkdir()
+            (target / "x").write_text("x", encoding="utf-8")
+            with self.assertRaises(OSError):
+                WIKI_FETCH.write_outputs(raw, target, asset_dir, "k", "new text", [("k-01.png", b"new-1")])
+            self.assertEqual((asset_dir / "k-01.png").read_bytes(), b"old-1")
+            self.assertEqual((asset_dir / "k-02.png").read_bytes(), b"old-2")
+            self.assertEqual(sorted(p.name for p in (raw / "assets").iterdir()), ["k"])
+            self.assertEqual(sorted(p.name for p in raw.iterdir()), ["assets", "k.md"])
+
     def test_check_slug(self):
         for bad in ("", "..", "a/b", "a\\b", "x..y", "a|b", "a#b", "a｜b"):
             with self.assertRaises(ValueError):

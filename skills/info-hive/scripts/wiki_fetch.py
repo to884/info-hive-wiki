@@ -183,6 +183,9 @@ def decode_html(data: bytes, content_type: str) -> tuple[str, str]:
         candidates.append(m.group(1).decode("ascii", errors="ignore"))
     candidates.append("utf-8")
     for name in candidates:
+        # Shift_JIS と書かれたページには、①や髙のような Windows の拡張文字がよく入る。
+        if name.lower().replace("_", "-") in ("shift-jis", "sjis", "x-sjis", "ms-kanji", "windows-31j", "csshiftjis"):
+            name = "cp932"
         try:
             return data.decode(name), name.lower()
         except (LookupError, UnicodeDecodeError):
@@ -332,6 +335,16 @@ def _link_len(node: Node) -> int:
     return sum(_visible_len(a) for a in node.find_all("a"))
 
 
+TABLE_PARTS = {"table", "thead", "tbody", "tfoot", "tr", "td", "th", "caption", "colgroup"}
+
+
+def _container_of(node: "Node | None") -> "Node | None":
+    """表の内部の要素（行、セルなど）なら、表を含む要素まで上げる。表の 1 行だけを本文に選ばないため。"""
+    while node is not None and node.tag in TABLE_PARTS:
+        node = node.parent
+    return node
+
+
 def choose_root(doc: Node) -> tuple[Node, str]:
     """本文の要素を選ぶ。(要素, 選び方) を返す。選び方は article、main、guess のどれか。"""
     articles = [a for a in doc.find_all("article") if not in_dropped(a)]
@@ -352,7 +365,8 @@ def choose_root(doc: Node) -> tuple[Node, str]:
         length = _visible_len(p)
         if length < 20:
             continue
-        for parent, weight in ((p.parent, 1.0), (p.parent.parent, 0.5)):
+        first = _container_of(p.parent)
+        for parent, weight in ((first, 1.0), (_container_of(first.parent) if first is not None else None, 0.5)):
             if parent is None or parent.tag == "#document":
                 continue
             scores[id(parent)] = scores.get(id(parent), 0) + length * weight
@@ -482,9 +496,11 @@ class Converter:
     def image_mark(self, node: Node) -> str:
         attrs = node.attrs
         src = attrs.get("src", "").strip()
+        # 遅延読み込みのページでは、src は 1 px の代わりの画像で、本物は data-src などにある。
         for key in ("data-src", "data-original", "data-lazy-src", "data-url"):
-            if attrs.get(key) and (not src or src.startswith("data:")):
+            if attrs.get(key, "").strip():
                 src = attrs[key].strip()
+                break
         if not src or src.startswith("data:"):
             srcset = attrs.get("srcset") or attrs.get("data-srcset") or ""
             first = srcset.split(",")[0].strip().split(" ")[0] if srcset else ""
@@ -698,10 +714,20 @@ class Converter:
                 parent = parent.parent
             if parent is not node:
                 continue
+            # 非表示の行（<tbody hidden> の中を含む）は、見えている行として出さない。
+            hidden = False
+            n = tr
+            while n is not None and n is not node:
+                if is_dropped(n):
+                    hidden = True
+                    break
+                n = n.parent
+            if hidden:
+                continue
             cells: list[str] = []
             col = 0
             for cell in tr.children:
-                if not (isinstance(cell, Node) and cell.tag in ("td", "th")):
+                if not (isinstance(cell, Node) and cell.tag in ("td", "th")) or is_dropped(cell):
                     continue
                 col = take_carry(cells, col)
                 text = cell_text(cell).replace("|", "\\|")
@@ -864,38 +890,64 @@ def _md_url(url: str) -> str:
 
 def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text: str,
                   images: list[tuple[str, bytes]]) -> None:
-    """本文と画像を書く。本文は一時ファイルに書いてから置き換え、古い画像は最後に消す。
+    """本文と画像を書く。途中で失敗したら、前の本文と画像をそのまま残す。
 
-    途中で失敗したときに、既存の本文が新しい画像を指したり、画像だけが消えたりしないようにする。
+    新しい本文と画像は一時の場所に書き、古い画像を退避してから、新しい画像と本文を置く。
+    どこかで失敗したら、置いた新しい画像を消して、退避した古い画像を戻す。
     書き込み先はすべて RAW_ROOT の中に限り、シンボリックリンクを通して外に書かない。
     """
     raw_root.mkdir(parents=True, exist_ok=True)
-    tmp = raw_root / f".{slug}.md.{os.getpid()}.tmp"
-    for path in [tmp] + [asset_dir / name for name, _ in images]:
+    pid = os.getpid()
+    tmp = raw_root / f".{slug}.md.{pid}.tmp"
+    staging = asset_dir.parent / f".{slug}.{pid}.new"
+    backup = asset_dir.parent / f".{slug}.{pid}.old"
+    if target.is_symlink():
+        raise ValueError(f"保存先がシンボリックリンクになっている: {target}")
+    for path in [tmp, asset_dir] + [asset_dir / name for name, _ in images]:
         if path.is_symlink():
+            if path == asset_dir:
+                raise ValueError(f"保存先がシンボリックリンクになっている: {path}")
             path.unlink()
         if not inside(raw_root, path):
             raise ValueError(f"保存先が RAW_ROOT の外になる: {path}")
-    if target.is_symlink():
-        raise ValueError(f"保存先がシンボリックリンクになっている: {target}")
+    old_files = sorted(asset_dir.glob(f"{slug}-*")) if asset_dir.is_dir() else []
+    placed: list[Path] = []
+    moved: list[tuple[Path, Path]] = []
     try:
         with tmp.open("w", encoding="utf-8", newline="") as f:
             f.write(text)
         if images:
+            staging.mkdir(parents=True, exist_ok=True)
+            for name, data in images:
+                (staging / name).write_bytes(data)
+        if old_files:
+            backup.mkdir(parents=True, exist_ok=True)
+            for old in old_files:
+                dest = backup / old.name
+                os.replace(old, dest)
+                moved.append((dest, old))
+        if images:
             asset_dir.mkdir(parents=True, exist_ok=True)
-            if not inside(raw_root, asset_dir):
-                raise ValueError(f"保存先が RAW_ROOT の外になる: {asset_dir}")
-        for name, data in images:
-            (asset_dir / name).write_bytes(data)
+            for name, _data in images:
+                os.replace(staging / name, asset_dir / name)
+                placed.append(asset_dir / name)
         os.replace(tmp, target)
+    except BaseException:
+        for path in placed:
+            if path.exists():
+                path.unlink()
+        for dest, original in moved:
+            if dest.exists():
+                os.replace(dest, original)
+        raise
     finally:
         if tmp.exists():
             tmp.unlink()
-    keep = {name for name, _ in images}
-    if asset_dir.is_dir():
-        for old in asset_dir.glob(f"{slug}-*"):
-            if old.name not in keep and (old.is_file() or old.is_symlink()):
-                old.unlink()
+        for d in (staging, backup):
+            if d.is_dir():
+                for leftover in d.iterdir():
+                    leftover.unlink()
+                d.rmdir()
 
 
 def build(args) -> tuple[int, dict]:
@@ -906,7 +958,10 @@ def build(args) -> tuple[int, dict]:
     if not inside(raw_root, target) or not inside(raw_root, asset_dir):
         raise ValueError(f"保存先が RAW_ROOT の外になる: {target}")
 
-    data, final_url, content_type = fetch(args.url, args.timeout, args.max_bytes)
+    # 内部のアドレスを取るかは、ユーザーが渡した URL で決める。公開のページが内部のアドレスへ
+    # リダイレクトしても、その先は取らない。ユーザーが内部のページを直接渡したときだけ許す。
+    block_private = not is_private_host(urllib.parse.urlsplit(args.url).hostname or "")
+    data, final_url, content_type = fetch(args.url, args.timeout, args.max_bytes, block_private=block_private)
     ctype = content_type.split(";")[0].strip().lower()
     if ctype and ctype not in ("text/html", "application/xhtml+xml", "text/plain", "application/xml", "text/xml"):
         raise FetchError(f"HTML のページではない（Content-Type: {ctype}）。PDF などは保存してから通常の手順で取り込む")
@@ -954,8 +1009,7 @@ def build(args) -> tuple[int, dict]:
         result["warnings"].append("題名が見つからない。frontmatter の title を埋める")
 
     # 画像を保存する。
-    # ページ自身が内部のアドレスにあるとき（手元のサーバーなど）だけ、内部のアドレスの画像も取る。
-    block_private = not is_private_host(urllib.parse.urlsplit(final_url).hostname or "")
+    # 画像も同じ方針で取る。ユーザーが内部のページを渡したときだけ、内部のアドレスの画像も取る。
     images_out: list[dict] = []
     dropped: list[dict] = []
     replacements: dict[int, str] = {}
