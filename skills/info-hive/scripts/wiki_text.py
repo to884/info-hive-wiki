@@ -491,3 +491,39 @@ def wrap_display(text: str, width: int) -> list[str]:
     if line.strip():
         lines.append(line.rstrip())
     return lines
+
+
+# ---------------------------------------------------------------------------
+# 図表（コードフェンスと画像の行）
+# ---------------------------------------------------------------------------
+
+# 行頭（3 文字までの字下げ）の ``` か ~~~ でフェンスが始まる。CommonMark と同じく、閉じるのは
+# 同じ文字で、開いたときと同じ長さ以上の並びだけの行である。
+_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+# 画像だけの行。1 行に画像を並べたものも含む。
+_IMAGE_ONLY_LINE_RE = re.compile(r"^\s*(?:!\[[^\]]*\]\([^)]*\)\s*)+$")
+
+
+def lines_outside_fences(text: str) -> list[str]:
+    """コードフェンスの外の行だけを返す。フェンスの開きと閉じの行も除く。"""
+    out: list[str] = []
+    fence = None
+    for line in text.split("\n"):
+        m = _FENCE_RE.match(line)
+        if fence is None:
+            if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+                fence = m.group(1)
+                continue
+            out.append(line)
+        elif m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not m.group(2).strip():
+            fence = None
+    return out
+
+
+def strip_fences_and_images(text: str) -> str:
+    """コードフェンス（mermaid を含む）の中身と、画像だけの行を除く。
+
+    ページの大きさの判定に使う。上限は本文の文章の密度を見るためのもので、図のソースの長さは
+    数えない（ADR-0005）。図の直後の説明（「> … 補足: 」）は文章なので残す。
+    """
+    return "\n".join(line for line in lines_outside_fences(text) if not _IMAGE_ONLY_LINE_RE.match(line))
