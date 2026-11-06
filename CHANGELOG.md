@@ -8,6 +8,10 @@
 
 ## [0.2.1] - 2026-11-06
 
+### Changed
+
+- ページの大きさの上限を引き上げた。ソフト上限を 10,000 文字または 100 行、ハード上限を 25,000 文字または 200 行にした（従来は 4,000 文字／400 行、8,000 文字／800 行）。`SCHEMA.md` のテンプレート、`wiki_lint.py` と `wiki_stats.py` の既定値、関連する文書をそろえた。既存の wiki は `SCHEMA.md` の値を書き換えるか、`wiki_lint.py` に `--soft-char-cap`・`--hard-char-cap`・`--soft-cap`・`--hard-cap` を渡して従来の値を保てる。
+
 ### Fixed
 
 - クエリの回答をシンセシスのページとして保存する手順（`references/query-workflow.md`）の frontmatter の例に、lint が必須とする `title`、`created`、`updated` と、source 以外のページに求める `sources` を足した。例のとおり保存すると `missing_frontmatter` が出ていた。`sources`（ソースの要約ページだけ）と `sources_consulted`（参照したページすべて）の使い分けを、`page-conventions.md` と `SCHEMA.md` のテンプレートにも書いた。
@@ -17,10 +21,6 @@
 ### Added
 
 - PDF の取り込みで、任意の `rag@info-hive` に `register_pdf` を明示的に呼ぶ手順を追加した。コマンドと自然言語の両方で使い、受付と完了を区別する。PDF 原本はコピーせずに参照し、処理済みの Markdown を読んでから要約ページを作る。README と `docs/commands.md` にも、この流れを書いた。
-
-### Changed
-
-- ページの大きさの上限を引き上げた。ソフト上限を 10,000 文字または 100 行、ハード上限を 25,000 文字または 200 行にした（従来は 4,000 文字／400 行、8,000 文字／800 行）。`SCHEMA.md` のテンプレート、`wiki_lint.py` と `wiki_stats.py` の既定値、関連する文書をそろえた。既存の wiki は `SCHEMA.md` の値を書き換えるか、`wiki_lint.py` に `--soft-char-cap`・`--hard-char-cap`・`--soft-cap`・`--hard-cap` を渡して従来の値を保てる。
 
 ## [0.1.1] - 2026-11-04
 
