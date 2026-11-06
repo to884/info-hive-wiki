@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-06
+
 ### Added
 
 - Web ページの取り込みを追加した。`/wiki:ingest <URL>` で、新しいスクリプト `wiki_fetch.py`（標準ライブラリだけ）がページを取得し、本文を Markdown にして `raw/<スラッグ>.md` に、本文の画像を `raw/assets/<スラッグ>/` に保存する。frontmatter に URL、取得日時、原文の HTML の SHA-256、原文の言語を記録し、同じ内容の再取得では何も書かない。内容が違えば別版のスラッグを提案する。エージェントは残った雑音を削り、日本語でなければ段落ごとに訳して `translated_by` に表示名を入れ、画像の直後に `> <表示名> 補足: ` の説明を書く。手順は `commands/ingest.md` と `references/ingest-workflow.md` の「Web ページ」に書いた（ADR-0004）。
@@ -101,7 +103,9 @@
 - 移植元の調査メモ `research/` と、移植元の英語の評価セットでの測定記録（`eval/decisions/results-*.json`）は取り込んでいない。
 - Paperclip 連携は移植元の v4.0.0 で削除されており、info-hive にもない。
 
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/to884/info-hive-wiki/compare/v0.2.1...v0.3.0
+[0.2.1]: https://github.com/to884/info-hive-wiki/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/to884/info-hive-wiki/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/to884/info-hive-wiki/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.1.0
