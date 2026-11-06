@@ -1,5 +1,6 @@
 graph.sqlite
 graph.graphml
-# extract が置き換える前の一時ファイル（途中で止まったときに残ることがある）
+# extract が置き換える前の一時ファイル（途中で止まったときに残ることがある）と、排他のロック
 *.tmp
-*.tmp-journal
+*.tmp-*
+.extract.lock
