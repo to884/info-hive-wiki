@@ -194,7 +194,9 @@ LLM Wiki パターンで最大の失敗は、wiki が大きくなるにつれて
 
 **インデックスを先に読むナビゲーション。** クエリでは最初にインデックスを読み、1行の要約から候補のページを見つけ、それだけを読む。インデックスは、このパターン全体をスケールさせるキャッシュである。
 
-**ローカルのハイブリッド検索。** インデックスの要約で足りないときは、`uv run --script skills/info-hive/scripts/wiki_search.py "query terms"` が、ローカルの FastEmbed によるセマンティックなベクトルと BM25 の結果を RRF で統合して、Markdown のセクションに順位を付ける。sqlite-vec は、内容のハッシュを付けたベクトルを `wiki/.wiki-cache/embeddings.sqlite` に保存し、変更されたセクションだけをベクトル化し直す。API キーもプロバイダーも不要で、wiki やクエリのテキストを外部に送ることもない。`--json` は証拠の行を出力し、`--cache` はパースしたセクションを保存する。依存パッケージをまったく使わない方法では、`python skills/info-hive/scripts/wiki_search.py "query terms" --no-embed` を実行する。`--granularity page` を付けると、ページ単位の順位付けに戻る。
+**ローカルの MCP サーバー。** プラグインは、127.0.0.1 だけで待ち受ける MCP サーバーを `.mcp.json` で登録する。コマンドの検索、lint、統計、グラフの問い合わせは、まずこのサーバーのツール（`query`、`lint`、`stats`、`graph` など）で行う。サーバーは cl-nagoya/ruri-v3-130m の ONNX、usearch、Tantivy を読み込んだまま常駐し、セッションをまたいで 1 つだけ動く。15 分使わなければ自分で止まる。初めて使うときは、依存（約 1 GB）とモデル（約 530 MB）を取得するので数分かかる。wiki の Markdown は書き換えない。詳しくは [MCP サーバー](skills/info-hive/references/mcp-server.md)にある。
+
+**ローカルのハイブリッド検索。** インデックスの要約で足りないとき、MCP のツールが使えなければ、`uv run --script skills/info-hive/scripts/wiki_search.py "query terms"` が、ローカルの FastEmbed によるセマンティックなベクトルと BM25 の結果を RRF で統合して、Markdown のセクションに順位を付ける。sqlite-vec は、内容のハッシュを付けたベクトルを `wiki/.wiki-cache/embeddings.sqlite` に保存し、変更されたセクションだけをベクトル化し直す。API キーもプロバイダーも不要で、wiki やクエリのテキストを外部に送ることもない。`--json` は証拠の行を出力し、`--cache` はパースしたセクションを保存する。依存パッケージをまったく使わない方法では、`python skills/info-hive/scripts/wiki_search.py "query terms" --no-embed` を実行する。`--granularity page` を付けると、ページ単位の順位付けに戻る。
 
 **必要な箇所だけの編集。** 取り込みの間にページを更新するとき、Claude は `str_replace` で該当するセクションだけを変え、ページ全体を書き直さない。速く、トークンの消費が少なく、wiki を git で管理していれば差分も読みやすいまま保てる。
 

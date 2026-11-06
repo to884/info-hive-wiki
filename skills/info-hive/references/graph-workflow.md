@@ -85,6 +85,8 @@ graph:
 
 ## 手順
 
+検査（lint）と問い合わせ（query）は、wiki の MCP サーバーのツール `lint` と `graph` が使えればそちらで行い、使えないときは下のスクリプトを実行する。使い分けは `SKILL.md` の「MCP のツールと CLI の使い分け」にある。更新（extract）は wiki の `graph/` に書き込むので、いつもスクリプトで実行する。
+
 スクリプトのパスは、スキルのディレクトリ（`skills/info-hive/`）から見たものである。コマンドからは `${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/...` で呼ぶ。`wiki/` は実際の wiki のディレクトリに置き換える。lint は `<wiki>` を省くと、作業領域の設定（`.info-hive/workspace.json`）の `dirs.wiki`、設定がなければ `./wiki` を使う。extract と query は `<wiki>` を省けない。
 
 ### 検査（lint）
@@ -92,6 +94,8 @@ graph:
 ```bash
 uv run --script scripts/wiki_graph_lint.py wiki/ [--json] [--decide]
 ```
+
+ツールの `lint` は、構造の lint の結果と一緒に、同じ検査の結果を `graph` に入れて返す（`state` が `checked` なら `findings`、オントロジーがなければ `disabled`、読めなければ `error`）。`--decide` が要るときはスクリプトを使う。
 
 型付きのメタデータを、オントロジーと照らして検査する。ファイルは編集しない。検出結果は編集案として示し、型付きの `graph.relationships` を黙って書き換えてはならない。承認された修正を適用したら、extract を実行する。`--decide` は、任意の判定レイヤーで証拠を確かめる（`decision-models.md`）。
 
@@ -131,6 +135,8 @@ python scripts/wiki_graph_query.py wiki/ facts    --about company:やまだ製�
 ```
 
 `--json` は、lint と query のどちらでも使える。query は標準ライブラリだけで動くので、`python` で実行する。
+
+ツールの `graph` では、`command` に `neighbors`、`edges`、`path`、`facts` のどれかを渡し、引数は `node`、`subject`（と任意の `predicate`）、`from_node` と `to_node`（と任意の `max_depth`）、`about` を使う。結果は `--json` と同じ形である。ツールは `graph.sqlite` を読み取り専用で開き、作らない。オントロジーがない wiki、`graph.sqlite` がない wiki、見つからないノードはエラーになる。
 
 関係を問う質問（「X とつながっているものは？」「Y を提案したのは誰？」「A から B への経路をたどって」）では、次のようにする。
 
