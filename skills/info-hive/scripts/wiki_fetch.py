@@ -105,7 +105,7 @@ def fetch(url: str, timeout: float, max_bytes: int, accept: str = "text/html,app
     check_url(url)
     req = urllib.request.Request(request_url(url), headers={"User-Agent": USER_AGENT, "Accept": accept})
     try:
-        with _OPENER.open(req, timeout=timeout) as resp:
+        with _OPENER.open(req, timeout=timeout) as resp:  # encoding: default-ok（ファイルではなく URL を開く）
             chunks = []
             total = 0
             while True:
@@ -177,7 +177,11 @@ DROP_ROLES = {"navigation", "banner", "contentinfo", "complementary", "search", 
 # class か id にこの語があれば、本文の外の部品とみなす。語は - と _ で区切って比べる。
 NOISE_WORDS = {"sidebar", "breadcrumb", "breadcrumbs", "share", "sharing", "social", "advert", "advertisement",
                "ads", "cookie", "cookies", "newsletter", "related", "comments", "comment", "popup", "modal",
-               "skip", "pagination", "pager", "headerlink"}
+               "skip", "pagination", "pager", "headerlink",
+               # MediaWiki の部品: [編集] のリンク、カテゴリ、「〜から取得」、ナビゲーションの箱、言語の一覧。
+               "editsection", "catlinks", "printfooter", "navbox", "portlet",
+               # 目次。本文の見出しと重なるので落とす。
+               "toc", "tableofcontents"}
 
 
 class Node:
@@ -255,9 +259,12 @@ def is_dropped(node: Node) -> bool:
         return True
     if "hidden" in node.attrs or node.attrs.get("aria-hidden", "").lower() == "true":
         return True
-    if node.tag in ("img", "picture", "figure"):
-        return False
     words = _words(node.attrs.get("class", "")) | _words(node.attrs.get("id", ""))
+    if node.tag == "img":
+        # 数式の代わりに表示する画像。数式は <math> の TeX から書く。
+        return {"math", "fallback"} <= words
+    if node.tag in ("picture", "figure"):
+        return False
     return bool(words & NOISE_WORDS)
 
 
@@ -312,6 +319,9 @@ def choose_root(doc: Node) -> tuple[Node, str]:
         return nodes[max(scores, key=adjusted)], "guess"
     body = next((n for n in doc.iter() if n.tag == "body"), doc)
     return body, "guess"
+
+
+_SECTION_NUMBER_RE = re.compile(r"^\d+(?:\.\d+)*\.\s+")
 
 
 def _link_only(node: Node) -> bool:
@@ -382,11 +392,34 @@ def _language_of(node: Node) -> str:
     return ""
 
 
+_DISPLAYSTYLE_RE = re.compile(r"^\{\\displaystyle\s*(.*)\}$", re.DOTALL)
+
+
+def _math_text(node: Node) -> str:
+    """MathML の数式を $...$ にする。TeX の注釈があればそれを使い、なければ表示の文字を並べる。
+
+    MathML の表示の文字と TeX の注釈を両方読むと、同じ式が 2 回並ぶ。
+    """
+    for n in node.iter():
+        if n.tag == "annotation" and "tex" in n.attrs.get("encoding", "").lower():
+            tex = text_of(n, skip_dropped=False).strip()
+            m = _DISPLAYSTYLE_RE.match(tex)
+            tex = (m.group(1) if m else tex).strip()
+            if tex:
+                return f" ${tex}$ "
+    def visible(n: Node) -> str:
+        return "".join(c if isinstance(c, str) else ("" if c.tag in ("annotation", "annotation-xml") else visible(c))
+                       for c in n.children)
+    return " " + _clean_inline(visible(node)) + " "
+
+
 class Converter:
     def __init__(self, base_url: str):
         self.base_url = base_url
         self.images: list[dict] = []   # {url, alt, width, height}
         self.title_node: Node | None = None
+        # 題名のほかにも <h1> があるページでは、見出しを 1 段下げて階層を保つ（h1 → ##、h2 → ###）。
+        self.heading_shift = 0
         self.skip_footer = True
 
     def abs_url(self, href: str) -> str:
@@ -432,6 +465,8 @@ class Converter:
             return self.image_mark(node)
         if tag == "br":
             return "\x00BR\x00"
+        if tag == "math":
+            return _math_text(node)
         if tag in ("code", "kbd", "samp", "tt"):
             text = _WS_RE.sub(" ", text_of(node)).strip()
             return _code_span(text) if text else ""
@@ -512,8 +547,9 @@ class Converter:
             if tag == "h1" and self.title_node is not None and _link_only(node):
                 # サイトの名前をリンクにした見出し。題名はほかの <h1> にある。
                 return []
-            return [f"{'#' * max(HEADINGS[tag], 2)} {text}"]
-        if tag == "p" or tag in ("dt", "dd", "figcaption"):
+            level = min(HEADINGS[tag] + self.heading_shift, 6)
+            return [f"{'#' * max(level, 2)} {text}"]
+        if tag == "p" or tag in ("dt", "figcaption"):
             blocks = self.paragraph(self.inline(node))
             if tag == "dt":
                 blocks = [f"**{b}**" if not IMG_MARK_RE.fullmatch(b) else b for b in blocks]
@@ -521,7 +557,8 @@ class Converter:
         if tag in ("ul", "ol"):
             listed = self.list_block(node, ordered=(tag == "ol"))
             return [listed] if listed else []
-        if tag == "li":
+        if tag in ("li", "dd"):
+            # <dd> の中にはコードブロックや段落が入ることがある（Sphinx の関数の説明など）。
             return self.blocks(node)
         if tag == "blockquote":
             inner = self.blocks(node)
@@ -766,8 +803,13 @@ def build(args) -> tuple[int, dict]:
     title_tag = next((n for n in doc.iter() if n.tag == "title"), None)
     page_title = _clean_inline(text_of(title_tag, skip_dropped=False)) if title_tag else ""
     conv.title_node = choose_title(root, doc, page_title)
+    if any(n.tag == "h1" and n is not conv.title_node and not is_dropped(n) and not _link_only(n)
+           for n in root.iter()):
+        conv.heading_shift = 1
     blocks = conv.blocks(root)
     title = _clean_inline(text_of(conv.title_node)) if conv.title_node is not None else ""
+    # 「1. Datatypes In SQLite」のような節の番号は題名に含めない。
+    title = _SECTION_NUMBER_RE.sub("", title)
     if not title:
         title = page_title
     if not title:

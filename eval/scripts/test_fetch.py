@@ -286,6 +286,49 @@ class UnitTests(unittest.TestCase):
         md = "ハッシュ関数の説明。\n\n```python\nimport hashlib\nhashlib.sha256(b'abc').hexdigest()\n```\n\n`hashlib.new()` を使う。"
         self.assertEqual(WIKI_FETCH.japanese_text_ratio(WIKI_FETCH.strip_code(md)), 1.0)
 
+    def convert(self, html):
+        doc = WIKI_FETCH.parse_html(html)
+        root, _how = WIKI_FETCH.choose_root(doc)
+        return "\n\n".join(WIKI_FETCH.Converter("https://example.com/").blocks(root))
+
+    def test_code_block_inside_definition_list(self):
+        # Sphinx の関数の説明。<dd> の中の例を段落につなげない。
+        body = self.convert(
+            '<main><dl><dt>secrets.token_bytes(n)</dt><dd><p>ランダムなバイト列を返す。</p>'
+            '<div class="highlight-pycon"><pre>&gt;&gt;&gt; token_bytes(16)\nb\'abc\'</pre></div></dd></dl>'
+            '<p>' + "本文の段落。" * 20 + '</p></main>')
+        self.assertIn("ランダムなバイト列を返す。\n\n```\n>>> token_bytes(16)\nb'abc'\n```", body)
+
+    def test_mathml_uses_tex_once(self):
+        body = self.convert(
+            '<main><p>要素の数を <span class="mwe-math-element"><span class="mwe-math-mathml-inline" style="display:none">'
+            '<math><semantics><mrow><mi>n</mi></mrow><annotation encoding="application/x-tex">{\\displaystyle n}</annotation>'
+            '</semantics></math></span><img class="mwe-math-fallback-image-inline" src="n.svg" alt="{\\displaystyle n}"></span>'
+            ' とする。' + "説明の文。" * 20 + '</p>'
+            '<span class="mw-editsection">[編集]</span><div id="catlinks">カテゴリ: データ構造</div></main>')
+        self.assertIn("要素の数を $n$ とする。", body)
+        self.assertNotIn("displaystyle", body)
+        self.assertNotIn("編集", body)
+        self.assertNotIn("カテゴリ", body)
+
+    def test_multiple_h1_keep_hierarchy_and_title_drops_number(self):
+        doc = WIKI_FETCH.parse_html(
+            '<html><head><title>Datatypes In SQLite</title></head><body>'
+            '<div class="fancy_toc"><a href="#a">1. Datatypes</a><a href="#b">2. Storage</a></div>'
+            '<div><h1>1. Datatypes In SQLite</h1><p>' + "Intro text. " * 20 + '</p>'
+            '<h1>2. Storage Classes</h1><p>' + "Storage text. " * 20 + '</p>'
+            '<h2>2.1. Boolean Datatype</h2><p>' + "Boolean text. " * 20 + '</p></div></body></html>')
+        root, _how = WIKI_FETCH.choose_root(doc)
+        conv = WIKI_FETCH.Converter("https://example.com/")
+        conv.title_node = WIKI_FETCH.choose_title(root, doc, "Datatypes In SQLite")
+        conv.heading_shift = 1
+        body = "\n\n".join(conv.blocks(root))
+        self.assertIn("## 2. Storage Classes", body)
+        self.assertIn("### 2.1. Boolean Datatype", body)
+        self.assertNotIn("1. Datatypes In SQLite", body)
+        self.assertEqual(WIKI_FETCH._SECTION_NUMBER_RE.sub("", "1. Datatypes In SQLite"), "Datatypes In SQLite")
+        self.assertEqual(WIKI_FETCH._SECTION_NUMBER_RE.sub("", "2026 年の予算"), "2026 年の予算")
+
     def test_check_slug(self):
         for bad in ("", "..", "a/b", "a\\b", "x..y", "a|b", "a#b", "a｜b"):
             with self.assertRaises(ValueError):
