@@ -1,2 +1,5 @@
 graph.sqlite
 graph.graphml
+# extract が置き換える前の一時ファイル（途中で止まったときに残ることがある）
+*.tmp
+*.tmp-journal

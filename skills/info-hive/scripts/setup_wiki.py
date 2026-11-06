@@ -20,6 +20,7 @@ import yaml
 
 import wiki_search
 from wiki_text import localize_argparse  # wiki_search が同じディレクトリを sys.path に加える
+import wiki_workspace
 
 
 def prepare(wiki_root: Path, cache_path: Path | None = None) -> dict:
@@ -58,7 +59,7 @@ def prepare(wiki_root: Path, cache_path: Path | None = None) -> dict:
 
 def main() -> None:
     parser = localize_argparse(argparse.ArgumentParser(description=__doc__))
-    parser.add_argument("--wiki", type=Path, default=Path("wiki"), help="wiki のディレクトリ（既定: ./wiki）")
+    parser.add_argument("--wiki", type=Path, default=None, help=wiki_workspace.WIKI_DEFAULT_HELP)
     parser.add_argument(
         "--cache",
         nargs="?",
@@ -67,6 +68,8 @@ def main() -> None:
         help="差分で更新するパースキャッシュも作る（値を省くと wiki/.wiki-cache/search-index.json）",
     )
     args = parser.parse_args()
+    if args.wiki is None:
+        args.wiki = wiki_workspace.default_wiki_or_exit()
 
     if not args.wiki.is_dir():
         parser.error(f"wiki のディレクトリが見つからない: {args.wiki}")
