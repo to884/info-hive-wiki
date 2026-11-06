@@ -86,6 +86,8 @@ class Workspace:
 def read_json(path: Path) -> object:
     try:
         text = Path(path).read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise WorkspaceError(f"UTF-8 として読めない: {path}: {exc}") from exc
     except OSError as exc:
         raise WorkspaceError(f"読めない: {path}: {exc}") from exc
     try:
@@ -129,8 +131,11 @@ def check_config(config: object, path: Path) -> list[str]:
         raise WorkspaceError(f"dirs はオブジェクトにする: {path}")
     for role, value in dirs.items():
         if role not in DEFAULT_DIRS:
+            # 新しい版のプラグインが足した役割かもしれないので、null も受け付けて警告だけにする。
             warnings.append(f"未知の役割 dirs.{role} がある（消さずに残す）: {path}")
-        if value is None and role == "adr":
+            if value is None:
+                continue
+        elif value is None and role == "adr":
             continue
         check_relative(value, f"dirs.{role}")
     return warnings

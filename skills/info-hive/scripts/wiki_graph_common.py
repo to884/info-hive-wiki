@@ -4,8 +4,9 @@
 
 - グラフ層が有効かどうかは、オントロジー（既定は `<wiki>/graph/ontology.yaml`）があるかで決める。
   ないときは、3 つの入口とも何も書き出さずに終了コード 1 で止まる（`EXIT_GRAPH_DISABLED`）。
-- 生成物は、同じディレクトリの一時ファイルに書いてから置き換える（`replace_atomically`）。
-  途中で止まっても、前の生成物が残る。
+- 生成物は、選んだ形式をすべて同じディレクトリの一時ファイルに書き終えてから置き換える
+  （`replace_atomically`）。書いている途中で止まっても、前の生成物が残る。
+- 同じ出力先で extract が同時に走らないように、`extract_lock` で排他する。
 """
 
 from __future__ import annotations
@@ -92,22 +93,95 @@ def remove_quietly(path: Path) -> None:
         pass
 
 
-STALE_TEMP_SECONDS = 600
+def remove_temp(path: Path) -> None:
+    """一時ファイルと、SQLite がその隣に作る付随ファイル（-journal など）を消す。"""
+    path = Path(path)
+    for suffix in ("", "-journal", "-wal", "-shm"):
+        remove_quietly(path.with_name(path.name + suffix))
 
 
 def remove_stale_temps(out_dir: Path, names: list[str]) -> None:
-    """前の実行が途中で止まって残した一時ファイル（<name>.<pid>.tmp）を消す。
+    """前の実行が途中で止まって残した一時ファイル（<name>.<pid>.tmp と付随ファイル）を消す。
 
-    同時に動いているほかの extract の一時ファイルを消さないように、
-    更新から STALE_TEMP_SECONDS 秒より経ったものだけを消す。
+    extract_lock を持っているあいだに呼ぶ。ロックを持つのは 1 つの extract だけなので、
+    残っている一時ファイルは、どれも止まった実行のものである。
     """
     out_dir = Path(out_dir)
-    now = time.time()
     for name in names:
-        for stale in out_dir.glob(f"{name}.*{TEMP_SUFFIX}"):
-            try:
-                if now - stale.stat().st_mtime < STALE_TEMP_SECONDS:
-                    continue
-            except OSError:
-                continue
-            remove_quietly(stale)
+        for pattern in (f"{name}.*{TEMP_SUFFIX}", f"{name}.*{TEMP_SUFFIX}-*"):
+            for stale in out_dir.glob(pattern):
+                remove_quietly(stale)
+
+
+# ---------------------------------------------------------------------------
+# 同時に走る extract の排他
+# ---------------------------------------------------------------------------
+
+LOCK_NAME = ".extract.lock"
+LOCK_WAIT_SECONDS = 120
+
+
+class ExtractBusy(Exception):
+    """ほかの extract が同じ出力先で動いていて、待っても終わらなかった。"""
+
+    def __init__(self, lock_path: Path):
+        self.lock_path = Path(lock_path)
+        super().__init__(f"ほかの extract が動いている（{self.lock_path}）。終わってからやり直す。")
+
+
+def _try_lock(fd: int) -> bool:
+    try:
+        if os.name == "nt":
+            import msvcrt
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        return False
+
+
+def _unlock(fd: int) -> None:
+    try:
+        if os.name == "nt":
+            import msvcrt
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError:
+        pass
+
+
+class extract_lock:
+    """出力先ごとの排他ロック。OS のファイルロックなので、プロセスが止まれば自動で外れる。
+
+    ロックのファイル（<out>/.extract.lock）は消さずに残す。消すと、別のプロセスが
+    作り直したファイルとのあいだで、2 つの extract が同時にロックを持ててしまう。
+    """
+
+    def __init__(self, out_dir: Path, wait_seconds: float | None = None):
+        self.path = Path(out_dir) / LOCK_NAME
+        self.wait_seconds = LOCK_WAIT_SECONDS if wait_seconds is None else wait_seconds
+        self.fd: int | None = None
+
+    def __enter__(self):
+        fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o644)
+        deadline = time.monotonic() + self.wait_seconds
+        while not _try_lock(fd):
+            if time.monotonic() >= deadline:
+                os.close(fd)
+                raise ExtractBusy(self.path)
+            time.sleep(0.2)
+        self.fd = fd
+        return self
+
+    def __exit__(self, *exc):
+        if self.fd is not None:
+            _unlock(self.fd)
+            os.close(self.fd)
+            self.fd = None
+        return False
