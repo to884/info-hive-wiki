@@ -6,6 +6,12 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-06
+
+### Fixed
+
+- クエリの回答をシンセシスのページとして保存する手順（`references/query-workflow.md`）の frontmatter の例に、lint が必須とする `title`、`created`、`updated` と、source 以外のページに求める `sources` を足した。例のとおり保存すると `missing_frontmatter` が出ていた。`sources`（ソースの要約ページだけ）と `sources_consulted`（参照したページすべて）の使い分けを、`page-conventions.md` と `SCHEMA.md` のテンプレートにも書いた。
+
 ## [0.2.0] - 2026-11-05
 
 ### Added
