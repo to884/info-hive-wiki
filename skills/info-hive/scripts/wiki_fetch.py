@@ -34,8 +34,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import http.client
+import ipaddress
 import json
+import os
 import re
+import socket
 import struct
 import sys
 import urllib.error
@@ -63,17 +66,42 @@ class FetchError(Exception):
 # 取得
 # ---------------------------------------------------------------------------
 
+def is_private_host(host: str) -> bool:
+    """ホストがループバック、プライベート、リンクローカルなどの内部のアドレスに解決されるか。
+
+    名前を解決できないときは False を返す（取得そのものが失敗する）。
+    """
+    if not host:
+        return False
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except (socket.gaierror, UnicodeError, OSError):
+        return False
+    for info in infos:
+        try:
+            addr = ipaddress.ip_address(info[4][0].split("%", 1)[0])
+        except ValueError:
+            continue
+        if (addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved
+                or addr.is_multicast or addr.is_unspecified):
+            return True
+    return False
+
+
 class _SafeRedirect(urllib.request.HTTPRedirectHandler):
-    """http と https の中だけでリダイレクトを許す。"""
+    """http と https の中だけでリダイレクトを許す。block_private なら、内部のアドレスへの転送も拒む。"""
+
+    def __init__(self, block_private: bool = False):
+        super().__init__()
+        self.block_private = block_private
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        scheme = urllib.parse.urlsplit(newurl).scheme.lower()
-        if scheme not in ("http", "https"):
+        parts = urllib.parse.urlsplit(newurl)
+        if parts.scheme.lower() not in ("http", "https"):
             raise FetchError(f"http/https 以外へのリダイレクトは拒む: {newurl}")
+        if self.block_private and is_private_host(parts.hostname or ""):
+            raise FetchError(f"内部のアドレスへのリダイレクトは拒む: {newurl}")
         return super().redirect_request(req, fp, code, msg, headers, newurl)
-
-
-_OPENER = urllib.request.build_opener(_SafeRedirect())
 
 
 def check_url(url: str) -> None:
@@ -100,12 +128,20 @@ def request_url(url: str) -> str:
     ))
 
 
-def fetch(url: str, timeout: float, max_bytes: int, accept: str = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5"):
-    """URL を GET し、(バイト列, 最終的な URL, Content-Type) を返す。"""
+def fetch(url: str, timeout: float, max_bytes: int, accept: str = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
+          block_private: bool = False):
+    """URL を GET し、(バイト列, 最終的な URL, Content-Type) を返す。
+
+    block_private を付けると、内部のアドレス（ループバック、LAN、リンクローカル）への取得と
+    リダイレクトを拒む。ページが指す画像は、ページ自身が内部のアドレスにない限りこれで取る。
+    """
     check_url(url)
+    if block_private and is_private_host(urllib.parse.urlsplit(url).hostname or ""):
+        raise FetchError(f"内部のアドレスは取得しない: {url}")
     req = urllib.request.Request(request_url(url), headers={"User-Agent": USER_AGENT, "Accept": accept})
+    opener = urllib.request.build_opener(_SafeRedirect(block_private))
     try:
-        with _OPENER.open(req, timeout=timeout) as resp:  # encoding: default-ok（ファイルではなく URL を開く）
+        with opener.open(req, timeout=timeout) as resp:  # encoding: default-ok（ファイルではなく URL を開く）
             chunks = []
             total = 0
             while True:
@@ -268,6 +304,16 @@ def is_dropped(node: Node) -> bool:
     return bool(words & NOISE_WORDS)
 
 
+def in_dropped(node: Node) -> bool:
+    """要素そのものか、祖先のどれかが本文の外（非表示、ナビなど）である。"""
+    n = node
+    while n is not None and n.tag != "#document":
+        if is_dropped(n):
+            return True
+        n = n.parent
+    return False
+
+
 def text_of(node: Node, skip_dropped: bool = True) -> str:
     parts = []
     for child in node.children:
@@ -288,8 +334,8 @@ def _link_len(node: Node) -> int:
 
 def choose_root(doc: Node) -> tuple[Node, str]:
     """本文の要素を選ぶ。(要素, 選び方) を返す。選び方は article、main、guess のどれか。"""
-    articles = [a for a in doc.find_all("article") if not is_dropped(a)]
-    mains = [m for m in doc.iter() if (m.tag == "main" or m.attrs.get("role", "").lower() == "main") and not is_dropped(m)]
+    articles = [a for a in doc.find_all("article") if not in_dropped(a)]
+    mains = [m for m in doc.iter() if (m.tag == "main" or m.attrs.get("role", "").lower() == "main") and not in_dropped(m)]
     best_article = max(articles, key=_visible_len) if articles else None
     best_main = max(mains, key=_visible_len) if mains else None
     if best_article is not None and _visible_len(best_article) >= 50:
@@ -301,7 +347,7 @@ def choose_root(doc: Node) -> tuple[Node, str]:
     scores: dict[int, float] = {}
     nodes: dict[int, Node] = {}
     for p in doc.iter():
-        if p.tag not in ("p", "pre", "li", "td", "blockquote") or p.parent is None:
+        if p.tag not in ("p", "pre", "li", "td", "blockquote") or p.parent is None or in_dropped(p):
             continue
         length = _visible_len(p)
         if length < 20:
@@ -319,6 +365,13 @@ def choose_root(doc: Node) -> tuple[Node, str]:
         return nodes[max(scores, key=adjusted)], "guess"
     body = next((n for n in doc.iter() if n.tag == "body"), doc)
     return body, "guess"
+
+
+def _int_attr(value, default: int) -> int:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
 
 
 _SECTION_NUMBER_RE = re.compile(r"^\d+(?:\.\d+)*\.\s+")
@@ -575,18 +628,19 @@ class Converter:
                 fence += "`"
             return [f"{fence}{_language_of(node)}\n{code}\n{fence}"]
         if tag == "table":
-            table = self.table_block(node)
-            return [table] if table else []
+            table, marks = self.table_block(node)
+            return ([table] if table else []) + marks
         if tag == "hr":
             return ["* * *"]
         return self.blocks(node)
 
     def list_block(self, node: Node, ordered: bool) -> str:
         lines = []
-        number = 1
+        number = _int_attr(node.attrs.get("start"), 1)
         for child in node.children:
             if not isinstance(child, Node) or child.tag != "li" or is_dropped(child):
                 continue
+            number = _int_attr(child.attrs.get("value"), number)
             inner = self.blocks(child)
             if not inner:
                 continue
@@ -603,8 +657,38 @@ class Converter:
                 first = False
         return "\n".join(lines)
 
-    def table_block(self, node: Node) -> str:
+    def table_block(self, node: Node) -> tuple[str, list[str]]:
+        """表を GFM の表にする。(表, 表の中の画像の印) を返す。
+
+        画像の行の直後に補足を書けるよう、セルの中の画像は表のあとに独立したブロックとして置き、
+        セルには「（表の下の画像 N）」と書く。rowspan と colspan は、結合したセルの値を
+        下の行に写し、右の列を空けて、列の対応を保つ。
+        """
         rows = []
+        marks: list[str] = []
+        carry: dict[int, list] = {}   # 列 → [値, 残りの行数]
+
+        def take_carry(row, col):
+            while col in carry:
+                value, left = carry[col]
+                row.append(value)
+                if left <= 1:
+                    del carry[col]
+                else:
+                    carry[col][1] = left - 1
+                col += 1
+            return col
+
+        def cell_text(cell):
+            if cell.find_all("table"):
+                return _clean_inline(text_of(cell))
+            raw = self.inline(cell).replace("\x00BR\x00", " ")
+
+            def keep(m):
+                marks.append(m.group(0))
+                return f"（表の下の画像 {len(marks)}）"
+            return _clean_inline(IMG_MARK_RE.sub(keep, raw))
+
         for tr in node.iter():
             if tr.tag != "tr":
                 continue
@@ -614,21 +698,31 @@ class Converter:
                 parent = parent.parent
             if parent is not node:
                 continue
-            cells = []
+            cells: list[str] = []
+            col = 0
             for cell in tr.children:
-                if isinstance(cell, Node) and cell.tag in ("td", "th"):
-                    text = cell.find_all("table") and _clean_inline(text_of(cell)) or _clean_inline(
-                        IMG_MARK_RE.sub(lambda m: "画像", self.inline(cell)).replace("\x00BR\x00", " "))
-                    cells.append(text.replace("|", "\\|"))
+                if not (isinstance(cell, Node) and cell.tag in ("td", "th")):
+                    continue
+                col = take_carry(cells, col)
+                text = cell_text(cell).replace("|", "\\|")
+                colspan = min(_int_attr(cell.attrs.get("colspan"), 1), 50)
+                rowspan = min(_int_attr(cell.attrs.get("rowspan"), 1), 200)
+                for k in range(max(colspan, 1)):
+                    value = text if k == 0 else ""
+                    cells.append(value)
+                    if rowspan > 1:
+                        carry[col] = [value, rowspan - 1]
+                    col += 1
             if cells:
+                take_carry(cells, col)
                 rows.append(cells)
         if not rows:
-            return ""
+            return "", marks
         width = max(len(r) for r in rows)
         rows = [r + [""] * (width - len(r)) for r in rows]
         lines = ["| " + " | ".join(rows[0]) + " |", "|" + "---|" * width]
         lines += ["| " + " | ".join(r) + " |" for r in rows[1:]]
-        return "\n".join(lines)
+        return "\n".join(lines), marks
 
 
 # ---------------------------------------------------------------------------
@@ -715,24 +809,27 @@ def japanese_text_ratio(text: str) -> float:
 
     wiki_encoding.py の _japanese_ratio は表示できる ASCII も数えるので、英語でも 1 に近くなる。
     こちらは言語の判定の材料にする。
+    かなを 1 文字も含まないときは 0 を返す。漢字だけの文章は、日本語より中国語の可能性が高い。
     """
-    ja = latin = 0
+    kana = kanji = latin = 0
     for ch in text:
         cp = ord(ch)
-        if 0x3040 <= cp <= 0x30FF or 0x3400 <= cp <= 0x4DBF or 0x4E00 <= cp <= 0x9FFF or 0xF900 <= cp <= 0xFAFF \
-                or 0xFF66 <= cp <= 0xFF9F:
-            ja += 1
+        if 0x3040 <= cp <= 0x30FF or 0xFF66 <= cp <= 0xFF9F:
+            kana += 1
+        elif 0x3400 <= cp <= 0x4DBF or 0x4E00 <= cp <= 0x9FFF or 0xF900 <= cp <= 0xFAFF:
+            kanji += 1
         elif ("a" <= ch.lower() <= "z") or 0x00C0 <= cp <= 0x024F:
             latin += 1
-    total = ja + latin
-    return round(ja / total, 3) if total else 0.0
+    if kana == 0:
+        return 0.0
+    return round((kana + kanji) / (kana + kanji + latin), 3)
 
 
 # ---------------------------------------------------------------------------
 # 保存
 # ---------------------------------------------------------------------------
 
-_BAD_SLUG_RE = re.compile(r'[\\/:*?"<>|#\[\]^\x00-\x1f｜＃]')
+_BAD_SLUG_RE = re.compile(r'[\\/:*?"<>|#\[\]^()\s\x00-\x1f｜＃]')
 
 
 def check_slug(slug: str) -> None:
@@ -763,6 +860,42 @@ def _alt_text(alt: str) -> str:
 
 def _md_url(url: str) -> str:
     return url.replace(" ", "%20").replace("(", "%28").replace(")", "%29")
+
+
+def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text: str,
+                  images: list[tuple[str, bytes]]) -> None:
+    """本文と画像を書く。本文は一時ファイルに書いてから置き換え、古い画像は最後に消す。
+
+    途中で失敗したときに、既存の本文が新しい画像を指したり、画像だけが消えたりしないようにする。
+    書き込み先はすべて RAW_ROOT の中に限り、シンボリックリンクを通して外に書かない。
+    """
+    raw_root.mkdir(parents=True, exist_ok=True)
+    tmp = raw_root / f".{slug}.md.{os.getpid()}.tmp"
+    for path in [tmp] + [asset_dir / name for name, _ in images]:
+        if path.is_symlink():
+            path.unlink()
+        if not inside(raw_root, path):
+            raise ValueError(f"保存先が RAW_ROOT の外になる: {path}")
+    if target.is_symlink():
+        raise ValueError(f"保存先がシンボリックリンクになっている: {target}")
+    try:
+        with tmp.open("w", encoding="utf-8", newline="") as f:
+            f.write(text)
+        if images:
+            asset_dir.mkdir(parents=True, exist_ok=True)
+            if not inside(raw_root, asset_dir):
+                raise ValueError(f"保存先が RAW_ROOT の外になる: {asset_dir}")
+        for name, data in images:
+            (asset_dir / name).write_bytes(data)
+        os.replace(tmp, target)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+    keep = {name for name, _ in images}
+    if asset_dir.is_dir():
+        for old in asset_dir.glob(f"{slug}-*"):
+            if old.name not in keep and (old.is_file() or old.is_symlink()):
+                old.unlink()
 
 
 def build(args) -> tuple[int, dict]:
@@ -799,7 +932,9 @@ def build(args) -> tuple[int, dict]:
     if how == "guess":
         result["warnings"].append("article と main がないので、段落の多い要素を本文と推定した。雑音が残っていれば削る")
 
-    conv = Converter(final_url)
+    base_tag = next((n for n in doc.iter() if n.tag == "base" and n.attrs.get("href")), None)
+    base_url = urllib.parse.urljoin(final_url, base_tag.attrs["href"]) if base_tag else final_url
+    conv = Converter(base_url)
     title_tag = next((n for n in doc.iter() if n.tag == "title"), None)
     page_title = _clean_inline(text_of(title_tag, skip_dropped=False)) if title_tag else ""
     conv.title_node = choose_title(root, doc, page_title)
@@ -819,15 +954,15 @@ def build(args) -> tuple[int, dict]:
         result["warnings"].append("題名が見つからない。frontmatter の title を埋める")
 
     # 画像を保存する。
+    # ページ自身が内部のアドレスにあるとき（手元のサーバーなど）だけ、内部のアドレスの画像も取る。
+    block_private = not is_private_host(urllib.parse.urlsplit(final_url).hostname or "")
     images_out: list[dict] = []
     dropped: list[dict] = []
     replacements: dict[int, str] = {}
     saved_by_url: dict[str, str] = {}
-    if args.force and asset_dir.is_dir():
-        for old_file in asset_dir.glob(f"{args.slug}-*"):
-            if old_file.is_file():
-                old_file.unlink()
+    pending: list[tuple[str, bytes]] = []   # (ファイル名, 中身)。本文を書く直前にまとめて書く。
     number = 0
+    attempts = 0
     for index, img in enumerate(conv.images):
         url, alt = img["url"], img["alt"]
         if not url or url.startswith("data:"):
@@ -841,16 +976,18 @@ def build(args) -> tuple[int, dict]:
             continue
         if url in saved_by_url:
             rel = saved_by_url[url]
-            replacements[index] = f'![{_alt_text(alt)}]({rel} "{url.replace(chr(34), "%22")}")'
+            replacements[index] = f'![{_alt_text(alt)}]({_md_url(rel)} "{url.replace(chr(34), "%22")}")'
             images_out.append({"path": rel, "url": url, "alt": alt})
             continue
-        if args.no_images or number >= args.max_images:
+        if args.no_images or attempts >= args.max_images:
             replacements[index] = f"![{_alt_text(alt)}]({_md_url(url)})（未取得）"
             images_out.append({"path": "", "url": url, "alt": alt,
                                "status": "not_downloaded" if args.no_images else "over_max_images"})
             continue
+        attempts += 1
         try:
-            img_data, img_final, img_type = fetch(url, args.timeout, args.max_bytes, accept="image/*,*/*;q=0.5")
+            img_data, img_final, img_type = fetch(url, args.timeout, args.max_bytes, accept="image/*,*/*;q=0.5",
+                                                  block_private=block_private)
         except (FetchError, ValueError) as exc:
             replacements[index] = f"![{_alt_text(alt)}]({_md_url(url)})（未取得）"
             images_out.append({"path": "", "url": url, "alt": alt, "status": "failed", "error": str(exc)})
@@ -868,11 +1005,10 @@ def build(args) -> tuple[int, dict]:
             continue
         number += 1
         name = f"{args.slug}-{number:02d}.{ext}"
-        asset_dir.mkdir(parents=True, exist_ok=True)
-        (asset_dir / name).write_bytes(img_data)
+        pending.append((name, img_data))
         rel = f"assets/{args.slug}/{name}"
         saved_by_url[url] = rel
-        replacements[index] = f'![{_alt_text(alt)}]({rel} "{url.replace(chr(34), "%22")}")'
+        replacements[index] = f'![{_alt_text(alt)}]({_md_url(rel)} "{url.replace(chr(34), "%22")}")'
         images_out.append({"path": rel, "url": url, "alt": alt})
 
     body_blocks = []
@@ -896,18 +1032,21 @@ def build(args) -> tuple[int, dict]:
         meta["final_url"] = final_url
     fm = "---\n" + "".join(f"{k}: {format_fm_value(v)}\n" for k, v in meta.items()) + "---\n"
     text = fm + "\n" + (f"# {title}\n\n" if title else "") + body + "\n"
-    raw_root.mkdir(parents=True, exist_ok=True)
-    with target.open("w", encoding="utf-8", newline="") as f:
-        f.write(text)
+    write_outputs(raw_root, target, asset_dir, args.slug, text, pending)
 
     lines = text.split("\n")
+    seen: dict[str, int] = {}
     for img in images_out:
-        needle = f"]({img['path']} " if img["path"] else f"]({_md_url(img['url'])})"
-        img["line"] = next((i + 1 for i, line in enumerate(lines) if needle in line), None)
+        needle = f"]({_md_url(img['path'])} " if img["path"] else f"]({_md_url(img['url'])})"
+        start = seen.get(needle, 0)
+        found = next((i for i in range(start, len(lines)) if needle in lines[i]), None)
+        img["line"] = found + 1 if found is not None else None
+        if found is not None:
+            seen[needle] = found + 1
 
     if not body.strip():
         result["warnings"].append("本文が空になった。JavaScript で描くページかもしれない。ブラウザで本文を取る")
-    elif len(re.sub(r"\s+", "", body)) < 500 and how != "article":
+    elif len(re.sub(r"\s+", "", body)) < 500:
         result["warnings"].append("本文が短い。JavaScript で描くページか、本文の推定を誤った可能性がある")
     result.update({
         "title": title,
@@ -969,6 +1108,12 @@ def main(argv: list[str] | None = None) -> int:
     except OSError as exc:
         print(f"ファイルを書けない: {exc}", file=sys.stderr)
         return 1
+    except RecursionError:
+        message = "HTML の入れ子が深すぎて変換できない"
+        if args.json:
+            print(json.dumps({"error": "too_deep", "message": message}, ensure_ascii=False))
+        print(message, file=sys.stderr)
+        return 2
     print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else render_text(code, result))
     return code
 

@@ -115,6 +115,11 @@ class FetchTests(unittest.TestCase):
         (site / "article.html").write_text(ARTICLE_EN, encoding="utf-8")
         (site / "ja.html").write_bytes(ARTICLE_JA.encode("cp932"))
         (site / "plain.html").write_text(NO_ARTICLE, encoding="utf-8")
+        (site / "base.html").write_text(
+            '<html><head><base href="/img/"></head><body><article><h1>Base</h1><p>' + "Text. " * 30
+            + '</p><img src="diagram.png" alt="via base"></article></body></html>', encoding="utf-8")
+        (site / "deep.html").write_text("<html><body>" + "<div>" * 5000 + "<p>deep</p>" + "</div>" * 5000
+                                        + "</body></html>", encoding="utf-8")
         (site / "img" / "diagram.png").write_bytes(png(640, 360))
         (site / "img" / "icon.png").write_bytes(png(16, 16))
         (site / "img" / "lazy.png").write_bytes(png(300, 200))
@@ -247,7 +252,32 @@ class FetchTests(unittest.TestCase):
         self.assertEqual(self.run_fetch("file:///etc/passwd", "x")[0], 1)
         self.assertEqual(self.run_fetch(f"{self.base}/article.html", "../escape")[0], 1)
         self.assertEqual(self.run_fetch(f"{self.base}/article.html", "a/b")[0], 1)
+        self.assertEqual(self.run_fetch(f"{self.base}/article.html", "a b")[0], 1)
         self.assertFalse(self.raw.exists() and any(self.raw.iterdir()))
+        # 入れ子が深すぎる HTML は、traceback ではなく終了コード 2 で止まる。
+        code, out, _ = self.run_fetch(f"{self.base}/deep.html", "deep")
+        self.assertEqual(code, 2)
+        self.assertEqual(out["error"], "too_deep")
+
+    def test_base_href_resolves_images(self):
+        code, out, err = self.run_fetch(f"{self.base}/base.html", "base")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out["images"][0]["url"], f"{self.base}/img/diagram.png")
+        self.assertEqual(out["images"][0]["path"], "assets/base/base-01.png")
+
+    def test_symlinked_image_file_is_not_written_through(self):
+        outside = Path(self.tmp.name) / "outside.txt"
+        outside.write_text("keep", encoding="utf-8")
+        link = self.raw / "assets" / "k" / "k-01.png"
+        link.parent.mkdir(parents=True)
+        try:
+            link.symlink_to(outside)
+        except (OSError, NotImplementedError):
+            self.skipTest("シンボリックリンクを作れない環境")
+        code, _out, err = self.run_fetch(f"{self.base}/article.html", "k")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(outside.read_text(encoding="utf-8"), "keep")
+        self.assertFalse(link.is_symlink())
 
 
 class UnitTests(unittest.TestCase):
@@ -260,7 +290,9 @@ class UnitTests(unittest.TestCase):
 
     def test_japanese_text_ratio(self):
         self.assertEqual(WIKI_FETCH.japanese_text_ratio("The Kalman filter, 2026."), 0.0)
-        self.assertEqual(WIKI_FETCH.japanese_text_ratio("消費税"), 1.0)
+        self.assertEqual(WIKI_FETCH.japanese_text_ratio("消費税は税である"), 1.0)
+        # かなのない文章は中国語の可能性が高いので、日本語とみなさない。
+        self.assertEqual(WIKI_FETCH.japanese_text_ratio("这是中文文章"), 0.0)
         self.assertAlmostEqual(WIKI_FETCH.japanese_text_ratio("RAG の評価"), 0.5)
 
     def test_title_prefers_article_h1_over_site_banner(self):
@@ -328,6 +360,44 @@ class UnitTests(unittest.TestCase):
         self.assertNotIn("1. Datatypes In SQLite", body)
         self.assertEqual(WIKI_FETCH._SECTION_NUMBER_RE.sub("", "1. Datatypes In SQLite"), "Datatypes In SQLite")
         self.assertEqual(WIKI_FETCH._SECTION_NUMBER_RE.sub("", "2026 年の予算"), "2026 年の予算")
+
+    def test_hidden_ancestor_is_not_chosen_as_content(self):
+        body = self.convert(
+            '<body><div hidden><p>' + "非表示の長い文章。" * 40 + '</p></div>'
+            '<div><p>' + "見えている本文の段落。" * 5 + '</p></div></body>')
+        self.assertIn("見えている本文", body)
+        self.assertNotIn("非表示", body)
+
+    def test_table_images_move_below_and_spans_keep_columns(self):
+        doc = WIKI_FETCH.parse_html(
+            '<main><p>' + "表の説明。" * 20 + '</p><table>'
+            '<tr><th>地域</th><th>売上</th><th>図</th></tr>'
+            '<tr><td rowspan="2">東京</td><td>100</td><td><img src="/chart.png" alt="測定結果"></td></tr>'
+            '<tr><td>200</td><td>-</td></tr>'
+            '<tr><td colspan="2">合計</td><td>300</td></tr></table></main>')
+        root, _how = WIKI_FETCH.choose_root(doc)
+        conv = WIKI_FETCH.Converter("https://example.com/")
+        blocks = conv.blocks(root)
+        table = next(b for b in blocks if b.startswith("| 地域"))
+        self.assertIn("| 東京 | 200 | - |", table)
+        self.assertIn("| 合計 |  | 300 |", table)
+        self.assertIn("（表の下の画像 1）", table)
+        # 画像は表の直後の独立したブロックになる（補足を画像の行の直後に書ける）。
+        self.assertTrue(WIKI_FETCH.IMG_MARK_RE.fullmatch(blocks[blocks.index(table) + 1]))
+        self.assertEqual(conv.images[0]["url"], "https://example.com/chart.png")
+
+    def test_ordered_list_start_and_value(self):
+        body = self.convert('<main><p>' + "前置きの文。" * 20 + '</p><ol start="5"><li>A</li><li value="9">B</li>'
+                            '<li>C</li></ol></main>')
+        self.assertIn("5. A\n9. B\n10. C", body)
+
+    def test_private_hosts(self):
+        self.assertTrue(WIKI_FETCH.is_private_host("127.0.0.1"))
+        self.assertTrue(WIKI_FETCH.is_private_host("169.254.169.254"))
+        self.assertTrue(WIKI_FETCH.is_private_host("10.0.0.5"))
+        self.assertFalse(WIKI_FETCH.is_private_host("8.8.8.8"))
+        with self.assertRaises(WIKI_FETCH.FetchError):
+            WIKI_FETCH.fetch("http://127.0.0.1:9/x.png", 5, 1000, block_private=True)
 
     def test_check_slug(self):
         for bad in ("", "..", "a/b", "a\\b", "x..y", "a|b", "a#b", "a｜b"):
