@@ -6,9 +6,11 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-05
+
 ### Added
 
-- PDF の取り込みで、任意の `rag@info-hive` に `register_pdf` を明示的に呼ぶ手順を追加した。コマンドと自然言語の両方で使い、受付と完了を区別する。PDF 原本はコピーせずに参照し、処理済みの Markdown を読んでから要約ページを作る。次のバージョンは `0.2.0` とする。
+- PDF の取り込みで、任意の `rag@info-hive` に `register_pdf` を明示的に呼ぶ手順を追加した。コマンドと自然言語の両方で使い、受付と完了を区別する。PDF 原本はコピーせずに参照し、処理済みの Markdown を読んでから要約ページを作る。README と `docs/commands.md` にも、この流れを書いた。
 
 ## [0.1.1] - 2026-11-04
 
@@ -67,6 +69,7 @@
 - 移植元の調査メモ `research/` と、移植元の英語の評価セットでの測定記録（`eval/decisions/results-*.json`）は取り込んでいない。
 - Paperclip 連携は移植元の v4.0.0 で削除されており、info-hive にもない。
 
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/to884/info-hive-wiki/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/to884/info-hive-wiki/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.1.0
