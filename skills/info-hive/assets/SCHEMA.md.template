@@ -8,7 +8,7 @@
 
 - Wiki のルート: `wiki/`
 - raw ソース: `raw/`
-- アセットと画像の保存先: `raw/assets/`
+- アセットと画像の保存先: `raw/assets/`（Web ページの画像は `raw/assets/<ソースのスラッグ>/`）
 
 ## ページの種類
 
