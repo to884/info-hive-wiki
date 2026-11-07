@@ -19,13 +19,14 @@
 - サーバーは中継の子として、Windows では DETACHED_PROCESS と新しいプロセスグループで、POSIX では新しい
   セッションで起動する。中継やホストが終わってもサーバーは残り、次のセッションの中継が使う。
 - サーバーの Python の環境は `uv sync --script` で用意し、`uv python find --script` で見つけた python で起動する。
+  環境が作りかけで壊れていれば `--reinstall` で入れ直す。
+- .mcp.json は、この中継を直接ではなく、依存のない入口の wiki_mcp_launch.py から起動する。
 
-CLAUDE_PLUGIN_ROOT を持たないホスト（Codex など）は、このファイルのパスを直接指定して起動すればよい。
+CLAUDE_PLUGIN_ROOT を持たないホスト（Codex など）は、wiki_mcp_launch.py のパスを指定して起動する。
 """
 from __future__ import annotations
 
 import os
-import shutil
 import socket
 import subprocess
 import sys
@@ -60,25 +61,13 @@ def alive(info: dict | None) -> bool:
         return False
 
 
-def uv_executable() -> str:
-    found = os.environ.get("UV") or shutil.which("uv")
-    if not found:
-        raise RuntimeError("uv が見つからない。wiki の MCP サーバーの起動には uv が要る")
-    return found
-
-
 def server_python(log_file) -> str:
-    """サーバーのスクリプトの依存を入れた環境を用意し、その python のパスを返す。"""
-    uv = uv_executable()
-    env = {**os.environ, "PYTHONUTF8": "1"}
-    subprocess.run([uv, "sync", "--quiet", "--script", str(SERVER_SCRIPT)], check=True, stdin=subprocess.DEVNULL,
-                   stdout=log_file, stderr=log_file, timeout=PREPARE_TIMEOUT, env=env)
-    found = subprocess.run([uv, "python", "find", "--script", str(SERVER_SCRIPT)], check=True,
-                           stdin=subprocess.DEVNULL, capture_output=True, timeout=120, env=env)
-    path = found.stdout.decode("utf-8", "replace").strip().splitlines()[-1]
-    if not Path(path).is_file():
-        raise RuntimeError(f"サーバーの python が見つからない: {path}")
-    return path
+    """サーバーのスクリプトの依存を入れた環境を用意し、その python のパスを返す。
+
+    環境が作りかけで壊れていれば、入れ直す（wiki_mcp_common.sync_script）。
+    """
+    common.sync_script(SERVER_SCRIPT, output=log_file, timeout=PREPARE_TIMEOUT, log=log)
+    return common.script_python(SERVER_SCRIPT)
 
 
 def spawn_server(python: str, log_file) -> subprocess.Popen:
