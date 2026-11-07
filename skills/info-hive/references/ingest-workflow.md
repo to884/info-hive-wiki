@@ -11,7 +11,9 @@
 ### PDF と rag の連携
 
 `rag` の MCP ツールが使える場合、PDF は原本の場所に置いたまま、`register_pdf(wiki_root, source, source_page, title)` を呼ぶ。
-`wiki_root` は特定した wiki の絶対パス、`source` は PDF の絶対パスまたは登録済みの名前付き参照、`source_page` は `sources/<スラッグ>.md` である。
+`wiki_root` は特定した wiki の絶対パス、`source` はユーザーが指定した PDF の絶対パス、`source_page` は `sources/<スラッグ>.md` である。
+相対パスで指定されたら、作業ディレクトリから絶対パスにして渡す。ユーザーが指定していない PDF は登録しない。PDF はどのフォルダにあってもよく、先に登録しておく必要はない。
+rag は、拡張子が `.pdf` で先頭が `%PDF-` の通常のファイルだけを受け付け、UNC パスと rag の派生データの中の PDF を拒む。拒まれたら、理由をそのまま伝える。
 この呼び出しを、コマンドと自然言語による取り込みの両方で実行する。PDF を読むだけの依頼では呼ばない。
 原本を `raw/` へコピーせず、別プラグインの内部スクリプトも直接呼ばない。
 
@@ -22,7 +24,10 @@
 `failed` の理由を直した後は `retry_job` を使う。`cancelled` は明示的な依頼なしに再試行しない。
 
 `completed` になったら `result.extracted_markdown` を分割して読み、手順 3 以降へ進む。
-ソースの要約ページには `raw: "<result.raw>"` と `rag_job_id: "<job_id>"` を書く。
+ソースの要約ページには `raw: "<result.raw>"`、`raw_sha256: "<result.sha256>"`、`rag_job_id: "<job_id>"` を書く。
+`result.raw` は `/` 区切りの絶対パス（Windows では `C:/Books/本.pdf`）で、`result.sha256` は PDF の内容の SHA-256 である。
+値の中の `\` は `\\`、`"` は `\"` と書く（`page-conventions.md` の frontmatter の決まり）。
+別の PC では PDF の場所が違うことがある。同じ PDF を取り込み直すと、`raw_sha256` で同じ出典と分かる。
 rag が使えない場合は、下の通常手順を使える。ただし RAG 連携を求められた場合は rag の有効化を案内し、索引化済みとは報告しない。
 
 ### 通常のソース
