@@ -127,18 +127,71 @@ SERVER_MODULES = ("anyio", "uvicorn", "numpy", "usearch.index", "tantivy", "yaml
 CHECK_IMPORTS_ARG = "--check-imports"
 
 
+def _listed_files(root: Path) -> dict[str, os.DirEntry]:
+    """root の下の通常のファイル。鍵は root からの相対パス（/ 区切り、大文字と小文字はそのまま）。
+
+    os.scandir でディレクトリを 1 回ずつなめる。Windows では、大きさをディレクトリの一覧から読めるので、
+    ファイルを 1 つずつ開かない。ファイルごとに stat() すると、サーバーの環境（約 3,800 ファイル）では
+    ウイルス対策の検査も重なって数分かかることがあった。シンボリックリンクは載せず（ディレクトリもたどらない）、
+    __pycache__ もなめない。載らなかったファイルは、照らすときに 1 つずつ確かめる。
+    """
+    found: dict[str, os.DirEntry] = {}
+    stack = [(os.fspath(root), "")]
+    while stack:
+        folder, prefix = stack.pop()
+        try:
+            with os.scandir(folder) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            if entry.name != "__pycache__":
+                                stack.append((entry.path, f"{prefix}{entry.name}/"))
+                        elif entry.is_file(follow_symlinks=False):
+                            found[prefix + entry.name] = entry
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return found
+
+
+def _listed_size(listed: dict[str, os.DirEntry], name: str) -> int | None:
+    """RECORD のパス name の大きさを、ディレクトリの一覧から読む。一覧で決められなければ None。
+
+    .. や . を含むパス（site-packages の外の Scripts/ など）は、シンボリックリンクをはさむと文字列の上の
+    正規化と実際の場所が食い違うので、一覧を使わない。
+    """
+    parts = name.replace("\\", "/").split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return None
+    entry = listed.get("/".join(parts))
+    if entry is None:
+        return None
+    try:
+        return entry.stat(follow_symlinks=False).st_size
+    except OSError:
+        return None
+
+
 def env_problems(limit: int = 10) -> list[str]:
     """この python の環境で、dist-info の RECORD に載っているのに欠けているか、大きさの違うファイル。
 
     依存の中には、実行中に初めて import するモジュール（anyio のバックエンド、uvicorn の lifespan など）が
     あるので、決まったモジュールを import するだけでは欠けを見逃す。入れたファイルの一覧（RECORD）と照らす。
     中身のハッシュは比べない（時間がかかる）。RECORD がない dist-info も壊れたものとみなす。
+
+    ファイルの大きさは、site-packages を os.scandir で 1 回なめた一覧から読む（_listed_files）。一覧で決められない
+    ファイル（site-packages の外の Scripts/ など、シンボリックリンク、大文字と小文字の違う名前）と、一覧の大きさが
+    RECORD と違うファイルだけを、1 つずつ stat() で確かめ直す。欠けたファイルは、従来どおりすべて見つかる。
+    Windows の一覧の大きさは、そのファイルを別のハードリンクから書き換えると古いまま残ることがある。
+    uv は環境のファイルをその場で書き換えない（入れ直すときは消してから置く）ので、この確かめでは扱わない。
     """
     import csv
     import sysconfig
     paths = sysconfig.get_paths()
     problems: list[str] = []
     for root in sorted({Path(paths["purelib"]), Path(paths["platlib"])}):
+        on_disk = _listed_files(root)
         for dist in sorted(root.glob("*.dist-info")):
             record = dist / "RECORD"
             try:
@@ -154,13 +207,16 @@ def env_problems(limit: int = 10) -> list[str]:
             for row in rows:
                 if not row or not row[0] or row[0].endswith(".pyc"):
                     continue
-                try:
-                    size = (root / row[0]).stat().st_size
-                except OSError:
-                    problems.append(f"{row[0]} がない")
-                else:
-                    if len(row) > 2 and row[2].isdigit() and int(row[2]) != size:
-                        problems.append(f"{row[0]} の大きさ（{size}）が RECORD（{row[2]}）と違う")
+                expected = int(row[2]) if len(row) > 2 and row[2].isdigit() else None
+                size = _listed_size(on_disk, row[0])
+                if size is None or (expected is not None and size != expected):
+                    try:
+                        size = (root / row[0]).stat().st_size
+                    except OSError:
+                        problems.append(f"{row[0]} がない")
+                        size = None
+                if size is not None and expected is not None and size != expected:
+                    problems.append(f"{row[0]} の大きさ（{size}）が RECORD（{row[2]}）と違う")
                 if len(problems) >= limit:
                     return problems
     return problems
