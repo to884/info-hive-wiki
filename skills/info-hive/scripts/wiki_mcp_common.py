@@ -21,6 +21,8 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import unicodedata
 from pathlib import Path
@@ -104,6 +106,41 @@ def code_version() -> str:
         except OSError:
             digest.update(name.encode() + b"\0missing")
     return digest.hexdigest()[:16]
+
+
+def uv_executable() -> str:
+    found = os.environ.get("UV") or shutil.which("uv")
+    if not found:
+        raise RuntimeError("uv が見つからない。wiki の MCP サーバーの起動には uv が要る")
+    return found
+
+
+def sync_script(script: Path, *, output, timeout: float, log) -> None:
+    """script の inline の依存を入れた uv の環境を用意する。uv の出力は output に書く。
+
+    uv が環境に依存を入れている途中で止められると（ホストがセッションの終わりにプロセスを止めるなど）、
+    環境が作りかけのまま残り、それ以降の `uv run --script` と `uv sync --script` が失敗し続ける
+    （uv 0.12 で、dist-info の METADATA が欠けた）。そのため、失敗したら 1 回だけ --reinstall で入れ直す。
+    """
+    uv = uv_executable()
+    env = {**os.environ, "PYTHONUTF8": "1"}
+    kwargs = {"stdin": subprocess.DEVNULL, "stdout": output, "stderr": output, "timeout": timeout, "env": env}
+    first = subprocess.run([uv, "sync", "--quiet", "--script", str(script)], **kwargs)
+    if first.returncode == 0:
+        return
+    log(f"{script.name} の環境を用意できなかった（終了コード {first.returncode}）。作りかけで壊れているかもしれないので、入れ直す")
+    subprocess.run([uv, "sync", "--quiet", "--reinstall", "--script", str(script)], check=True, **kwargs)
+
+
+def script_python(script: Path, timeout: float = 120) -> str:
+    """sync_script で用意した環境の python のパス。"""
+    found = subprocess.run([uv_executable(), "python", "find", "--script", str(script)], check=True,
+                           stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout,
+                           env={**os.environ, "PYTHONUTF8": "1"})
+    path = found.stdout.decode("utf-8", "replace").strip().splitlines()[-1]
+    if not Path(path).is_file():
+        raise RuntimeError(f"{script.name} の環境の python が見つからない: {path}")
+    return path
 
 
 def idle_seconds() -> float:

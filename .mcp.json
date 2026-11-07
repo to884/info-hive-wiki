@@ -6,7 +6,7 @@
         "run",
         "--quiet",
         "--script",
-        "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_mcp_relay.py"
+        "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_mcp_launch.py"
       ]
     }
   }

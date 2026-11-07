@@ -8,18 +8,20 @@ wiki のプラグインは、検索のためのローカルの MCP サーバー�
 
 ```text
 ホスト（Claude Code など）
-  └─ stdio の中継（wiki_mcp_relay.py、.mcp.json で登録）
-        └─ HTTP（127.0.0.1、トークン付き）
-             wiki の MCP サーバー（wiki_mcp_server.py、1 台に 1 つ）
-               ├─ 埋め込み: cl-nagoya/ruri-v3-130m（ONNX fp32、onnxruntime）
-               ├─ ベクトル索引: usearch（HNSW、f16、コサイン）
-               └─ 語彙検索: Tantivy の BM25（wiki の bigram のトークン）
+  └─ 入口（wiki_mcp_launch.py、.mcp.json で登録。依存を持たない）
+        └─ stdio の中継（wiki_mcp_relay.py）
+              └─ HTTP（127.0.0.1、トークン付き）
+                   wiki の MCP サーバー（wiki_mcp_server.py、1 台に 1 つ）
+                     ├─ 埋め込み: cl-nagoya/ruri-v3-130m（ONNX fp32、onnxruntime）
+                     ├─ ベクトル索引: usearch（HNSW、f16、コサイン）
+                     └─ 語彙検索: Tantivy の BM25（wiki の bigram のトークン）
 ```
 
-- ホストはセッションごとに中継を起動する。中継は、動いているサーバーがあればそれを使い、なければ起動する。セッションがいくつあっても、サーバーは 1 つで、モデルも 1 回だけ読み込む。
+- ホストはセッションごとに入口を起動する。入口は中継の環境を確かめ（壊れていれば入れ直し）、中継を動かす。中継は、動いているサーバーがあればそれを使い、なければ起動する。セッションがいくつあっても、サーバーは 1 つで、モデルも 1 回だけ読み込む。
 - サーバーは中継から切り離して起動するので、セッションが終わっても残り、次のセッションが使う。要求がない状態が 15 分続くと、自分で止まる。次の呼び出しで中継が起動し直す。
 - サーバーは 127.0.0.1 だけで待ち受ける。起動ごとに作るトークンを Bearer で確かめ、Host ヘッダーが `127.0.0.1:<ポート>` でない要求を断る。
 - サーバーの依存（約 1 GB）とモデル（約 530 MB）は、最初に使うときに取得する。最初の呼び出しは数分かかることがある。
+- uv が依存を入れている途中でプロセスが止められると（セッションの終わりなど）、uv の環境が作りかけのまま残ることがある。入口は中継の環境を、中継はサーバーの環境を、`uv sync --script` で確かめ、失敗したら `--reinstall` で 1 回だけ入れ直す。
 
 ## ツール
 
@@ -148,6 +150,14 @@ CLI の埋め込み検索は、MCP のサーバーとは別のモデル（multil
 
 ## 困ったとき
 
-- サーバーが起動しない: `logs/server.log` を見る。`uv run --script wiki_mcp_relay.py --ensure` を実行すると、サーバーを確かめ（なければ起動し）、トークンを除いた `server.json` の中身を表示する。
+- サーバーが起動しない: `logs/server.log` を見る。`uv run --script wiki_mcp_launch.py --ensure` を実行すると、サーバーを確かめ（なければ起動し）、トークンを除いた `server.json` の中身を表示する。
 - プラグインを更新した: 中継は `server.json` のコードの版を見て、古いサーバーを止めて起動し直す。
-- Claude Code 以外のホスト（Codex など）: `CLAUDE_PLUGIN_ROOT` を持たないので、`uv run --script <プラグインのパス>/skills/info-hive/scripts/wiki_mcp_relay.py` を stdio の MCP サーバーとして登録する。
+- uv の環境が壊れた（`Failed to read metadata from installed package` のような uv のエラーが出る）: 次の 2 つを実行して入れ直す。入口とサーバーは、起動のたびに同じことを自動で試す。
+
+  ```bash
+  uv sync --reinstall --script "<プラグインのパス>/skills/info-hive/scripts/wiki_mcp_relay.py"
+  uv sync --reinstall --script "<プラグインのパス>/skills/info-hive/scripts/wiki_mcp_server.py"
+  ```
+
+- 直したのにツールが出ない: Claude Code は、接続に失敗した MCP のサーバーを覚えていて、しばらく起動しないことがある（`~/.claude/mcp-needs-auth-cache.json` に `plugin:wiki:wiki` が入る）。`/mcp` で wiki のサーバーをつなぎ直す。
+- Claude Code 以外のホスト（Codex など）: `CLAUDE_PLUGIN_ROOT` を持たないので、`uv run --script <プラグインのパス>/skills/info-hive/scripts/wiki_mcp_launch.py` を stdio の MCP サーバーとして登録する。
