@@ -6,6 +6,16 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-07
+
+### Changed
+
+- PDF の取り込み（rag が有効な場合）の手順を、rag 0.4.0 の参照ルートの廃止（開発リポジトリの ADR-0013）に合わせた。`register_pdf` の `source` には、ユーザーが指定した PDF の絶対パスを渡す。PDF はどのフォルダにあってもよく、`/rag:setup` で先に登録する案内はやめた。ユーザーが指定していない PDF は登録しない。登録を拒まれたら、理由をそのまま伝える。
+
+### Added
+
+- ソースの要約ページに、PDF の内容の SHA-256 を書くキー `raw_sha256` を足した。`raw` には rag が返す `/` 区切りの絶対パスを書き、どちらも二重引用符で囲んで `\` と `"` をエスケープする。別の PC で同じ PDF を取り込み直すと、`raw_sha256` で同じ出典と分かる。
+
 ## [0.5.0] - 2026-11-07
 
 ### Changed
@@ -146,7 +156,8 @@
 - 移植元の調査メモ `research/` と、移植元の英語の評価セットでの測定記録（`eval/decisions/results-*.json`）は取り込んでいない。
 - Paperclip 連携は移植元の v4.0.0 で削除されており、info-hive にもない。
 
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/to884/info-hive-wiki/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/to884/info-hive-wiki/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/to884/info-hive-wiki/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/to884/info-hive-wiki/compare/v0.4.0...v0.4.1
