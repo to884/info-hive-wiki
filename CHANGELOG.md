@@ -6,6 +6,14 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-07
+
+### Changed
+
+- `wiki_lint.py`（位置引数の `<wiki>`）と `wiki_search.py`（`--wiki`）は、wiki を省くと作業領域の設定（`.info-hive/workspace.json`）の `dirs.wiki` を使うようにした。0.3.0 で `setup_wiki.py`、`wiki_graph_lint.py`、`wiki_stats.py`、`wiki_decide.py`、`wiki_evolve.py` に入れたのと同じ動きで、設定がなければ従来どおり `./wiki` を使い、設定が壊れているときは理由を書いて終了コード 1 で止まる。これで wiki を省けるスクリプトは、すべて同じ既定になった。wiki を明示したときは設定を読まない。MCP のツールは wiki を引数で受け取り、設定を読まないので、動きは変わらない。
+- `/wiki:lint`、`/wiki:query`、`/wiki:stats` の手順で、`<WIKI_ROOT>` がどの指示にもないときに、`./wiki` の前に作業領域の設定の `dirs.wiki` を見るようにした（`/wiki:graph` と同じ）。`references/lint-workflow.md` と `references/query-workflow.md` にも、省いたときの既定を書いた。
+- `wiki_search.py` の `--cache` のヘルプで、既定の置き場所を `<wiki>/.wiki-cache/search-index.json` と書くようにした（`./wiki` の下とは限らないため）。
+
 ## [0.4.2] - 2026-11-07
 
 ### Fixed
@@ -138,7 +146,8 @@
 - 移植元の調査メモ `research/` と、移植元の英語の評価セットでの測定記録（`eval/decisions/results-*.json`）は取り込んでいない。
 - Paperclip 連携は移植元の v4.0.0 で削除されており、info-hive にもない。
 
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/to884/info-hive-wiki/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/to884/info-hive-wiki/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/to884/info-hive-wiki/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/to884/info-hive-wiki/compare/v0.3.0...v0.4.0

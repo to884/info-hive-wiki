@@ -16,6 +16,8 @@ wiki の健全性のチェックである。操作のたびにではなく、決
 python scripts/wiki_lint.py wiki/
 ```
 
+`wiki/` は実際の wiki のディレクトリに置き換える。省くと、作業領域の設定（`.info-hive/workspace.json`）の `dirs.wiki`、設定がなければ `./wiki` を使う。設定が壊れているときは理由を書いて終了コード 1 で止まる。
+
 グラフ層がある場合は、次も実行する。
 
 ```bash

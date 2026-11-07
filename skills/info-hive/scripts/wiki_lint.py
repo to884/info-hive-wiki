@@ -19,6 +19,9 @@ frontmatter の文字列の値（配列の要素を含む）が二重引用符�
 使い方:
     python wiki_lint.py [<wiki-dir>] [options]
 
+<wiki-dir> を省くと、作業領域の設定（`.info-hive/workspace.json`）の dirs.wiki を使う。
+設定がなければ ./wiki を使う。設定が壊れているときは理由を書いて終了コード 1 で止まる。
+
 オプション:
     --soft-cap N        ページサイズのソフト上限の行数（既定: 100）
     --hard-cap N        ページサイズのハード上限の行数（既定: 200）
@@ -67,6 +70,7 @@ from wiki_text import (  # noqa: E402
     strip_fences_and_images,
     unquoted_string_keys,
 )
+import wiki_workspace  # noqa: E402
 
 
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
@@ -536,7 +540,7 @@ def render_text(findings: dict) -> str:
 
 def main():
     parser = localize_argparse(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter))
-    parser.add_argument("wiki", nargs="?", type=Path, default=Path("wiki"), help="wiki のディレクトリ（既定: ./wiki）")
+    parser.add_argument("wiki", nargs="?", type=Path, default=None, help=wiki_workspace.WIKI_DEFAULT_HELP)
     parser.add_argument("--soft-cap", type=int, default=100, help="ページサイズのソフト上限の行数（既定: 100）")
     parser.add_argument("--hard-cap", type=int, default=200, help="ページサイズのハード上限の行数（既定: 200）")
     parser.add_argument("--soft-char-cap", type=int, default=10000, help="ページサイズのソフト上限の文字数。空白を除いて数える（既定: 10000）")
@@ -546,6 +550,8 @@ def main():
     parser.add_argument("--suggest-min", type=int, default=5, help="--suggest-pages で挙げる最小の出現ページ数（既定: 5）")
     parser.add_argument("--json", action="store_true", help="テキストの代わりに JSON を出力する。キーは英語のまま")
     args = parser.parse_args()
+    if args.wiki is None:
+        args.wiki = wiki_workspace.default_wiki_or_exit()
 
     if not args.wiki.exists():
         print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
