@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-07
+
 ### Fixed
 
 - uv がサーバーや中継の依存を入れている途中でプロセスが止められると（初めて使うセッションをすぐ閉じたときなど）、uv の環境が作りかけのまま残り、それ以降は MCP のサーバーが起動しなくなっていた（Windows の uv 0.12 で、dist-info の `METADATA` が欠けた）。`.mcp.json` は依存を持たない入口 `wiki_mcp_launch.py` を起動するようにした。入口は中継の環境を、中継はサーバーの環境を `uv sync --script` で確かめ、失敗したら `--reinstall` で 1 回だけ入れ直す。0.4.0 で環境が壊れた人も、更新すれば次の起動で直る。Claude Code が失敗を覚えていてツールが出ないときは、`/mcp` でつなぎ直す（`references/mcp-server.md` の「困ったとき」）。
@@ -128,7 +130,8 @@
 - 移植元の調査メモ `research/` と、移植元の英語の評価セットでの測定記録（`eval/decisions/results-*.json`）は取り込んでいない。
 - Paperclip 連携は移植元の v4.0.0 で削除されており、info-hive にもない。
 
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/to884/info-hive-wiki/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/to884/info-hive-wiki/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/to884/info-hive-wiki/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/to884/info-hive-wiki/compare/v0.2.0...v0.2.1
