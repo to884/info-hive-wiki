@@ -24,6 +24,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import unicodedata
 from pathlib import Path
 
@@ -115,31 +116,198 @@ def uv_executable() -> str:
     return found
 
 
-def sync_script(script: Path, *, output, timeout: float, log) -> None:
-    """script の inline の依存を入れた uv の環境を用意する。uv の出力は output に書く。
+# uv の環境が壊れているとき、中継とサーバーはこの終了コードで止まる（EX_TEMPFAIL）。
+# 起動した側（入口、中継）は、この終了コードを見て環境を入れ直し、1 回だけ起動し直す。
+BROKEN_ENV_EXIT = 75
+# 中継とサーバーが起動の最初に import する外部の依存（require_env）。共有ライブラリが読めないことも見つける。
+RELAY_MODULES = ("anyio", "httpx", "filelock", "psutil", "mcp", "mcp.types", "mcp.server.lowlevel",
+                 "mcp.server.stdio", "mcp.client.session", "mcp.client.streamable_http")
+SERVER_MODULES = ("anyio", "uvicorn", "numpy", "usearch.index", "tantivy", "yaml", "mcp.server.fastmcp",
+                  "mcp.server.fastmcp.exceptions", "mcp.server.transport_security")
+CHECK_IMPORTS_ARG = "--check-imports"
+
+
+def env_problems(limit: int = 10) -> list[str]:
+    """この python の環境で、dist-info の RECORD に載っているのに欠けているか、大きさの違うファイル。
+
+    依存の中には、実行中に初めて import するモジュール（anyio のバックエンド、uvicorn の lifespan など）が
+    あるので、決まったモジュールを import するだけでは欠けを見逃す。入れたファイルの一覧（RECORD）と照らす。
+    中身のハッシュは比べない（時間がかかる）。RECORD がない dist-info も壊れたものとみなす。
+    """
+    import csv
+    import sysconfig
+    paths = sysconfig.get_paths()
+    problems: list[str] = []
+    for root in sorted({Path(paths["purelib"]), Path(paths["platlib"])}):
+        for dist in sorted(root.glob("*.dist-info")):
+            record = dist / "RECORD"
+            try:
+                rows = list(csv.reader(record.read_text(encoding="utf-8", errors="replace").splitlines()))
+            except OSError:
+                problems.append(f"{dist.name}/RECORD がない")
+                rows = []
+            else:
+                # 正しい RECORD は、自分自身と METADATA の行を必ず含む。ない RECORD は、書く途中で止まったものとみなす。
+                listed = {row[0].replace("\\", "/") for row in rows if row}
+                if f"{dist.name}/RECORD" not in listed or f"{dist.name}/METADATA" not in listed:
+                    problems.append(f"{dist.name}/RECORD が途中で切れている")
+            for row in rows:
+                if not row or not row[0] or row[0].endswith(".pyc"):
+                    continue
+                try:
+                    size = (root / row[0]).stat().st_size
+                except OSError:
+                    problems.append(f"{row[0]} がない")
+                else:
+                    if len(row) > 2 and row[2].isdigit() and int(row[2]) != size:
+                        problems.append(f"{row[0]} の大きさ（{size}）が RECORD（{row[2]}）と違う")
+                if len(problems) >= limit:
+                    return problems
+    return problems
+
+
+def require_env(modules) -> None:
+    """uv の環境がそろっているかを確かめる。壊れていれば理由を標準エラーに書き、BROKEN_ENV_EXIT で止まる。
+
+    uv が依存を入れている途中で止められると、環境が作りかけのまま残る。dist-info の METADATA が欠けると
+    `uv sync` が失敗するが、モジュールの本体だけが欠けると `uv sync` は成功してしまう。そのため、
+    標準入力を読む前に、RECORD と照らし（env_problems）、modules を import して確かめる。
+    import の失敗のうち BROKEN_ENV_EXIT にするのは ImportError だけである（メモリ不足などは入れ直しても直らない）。
+    """
+    import importlib
+    problems = env_problems()
+    if problems:
+        print(f"[wiki] uv の環境が壊れているかもしれない（{sys.prefix}）: " + "、".join(problems[:5]),
+              file=sys.stderr, flush=True)
+        sys.exit(BROKEN_ENV_EXIT)
+    for name in modules:
+        try:
+            module = importlib.import_module(name)
+            # パッケージの __init__.py が欠けると、名前空間パッケージとして import できてしまう（__file__ がない）。
+            if getattr(module, "__file__", None) is None:
+                raise ImportError(f"{name} の本体（__init__.py）がない")
+        except ImportError as exc:  # 共有ライブラリを読めないときも ImportError になる
+            print(f"[wiki] 依存の {name} を import できない（{type(exc).__name__}: {exc}）。uv の環境が壊れているかもしれない",
+                  file=sys.stderr, flush=True)
+            sys.exit(BROKEN_ENV_EXIT)
+
+
+class FileLock:
+    """標準ライブラリだけのファイルのロック（Windows は msvcrt、POSIX は fcntl）。"""
+
+    def __init__(self, path: Path, timeout: float):
+        self.path, self.timeout, self._handle = path, timeout, None
+
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._handle = open(self.path, "a+b")  # noqa: SIM115 - __exit__ で閉じる
+        ends = time.monotonic() + self.timeout
+        while True:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    self._handle.seek(0)
+                    msvcrt.locking(self._handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(self._handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return self
+            except OSError:
+                if time.monotonic() > ends:
+                    self._handle.close()
+                    raise RuntimeError(f"{self.path.name} のロックを {self.timeout:.0f} 秒以内に取れなかった") from None
+                time.sleep(0.2)
+
+    def __exit__(self, *exc):
+        try:
+            if os.name == "nt":
+                import msvcrt
+                self._handle.seek(0)
+                msvcrt.locking(self._handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        self._handle.close()
+
+
+def env_lock_path(script: Path) -> Path:
+    """script の uv の環境を入れ直すときのロック。同じ環境を使うセッションが同じロックを使うよう、環境の
+    置き場所である uv のキャッシュ（`uv cache dir`。UV_CACHE_DIR も反映される）の下に置く。一時ディレクトリは
+    ホストやセッションごとに違うことがあり、Linux では利用者のあいだで共有されることもあるので使わない。"""
+    found = subprocess.run([uv_executable(), "cache", "dir"], stdin=subprocess.DEVNULL, capture_output=True,
+                           timeout=120, env={**os.environ, "PYTHONUTF8": "1"})
+    lines = found.stdout.decode("utf-8", "replace").strip().splitlines()
+    if found.returncode != 0 or not lines:
+        detail = found.stderr.decode("utf-8", "replace").strip()[-400:]
+        raise RuntimeError(f"uv のキャッシュの場所が分からない（uv cache dir の終了コード {found.returncode}）: {detail}")
+    key = os.path.normcase(str(Path(script).resolve()))
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+    return Path(lines[-1]) / "info-hive-locks" / f"env-{Path(script).stem}-{digest}.lock"
+
+
+def _uv_sync(script: Path, *, reinstall: bool, output, timeout: float) -> int:
+    command = [uv_executable(), "sync", "--quiet", *(["--reinstall"] if reinstall else []), "--script", str(script)]
+    return subprocess.run(command, stdin=subprocess.DEVNULL, stdout=output, stderr=output, timeout=timeout,
+                          env={**os.environ, "PYTHONUTF8": "1"}).returncode
+
+
+def _imports_ok(python: str, script: Path, output, timeout: float) -> bool:
+    """環境がそろっていれば真、壊れていれば（BROKEN_ENV_EXIT）偽。それ以外の失敗は例外にする。
+
+    メモリ不足などで確かめのプロセスが落ちたときに入れ直すと、先にほかのセッションが直して使っている
+    環境まで入れ直してしまう。入れ直して直るのは、壊れた環境だけである。
+    """
+    out = subprocess.run([python, "-X", "utf8", str(script), CHECK_IMPORTS_ARG], stdin=subprocess.DEVNULL,
+                         stdout=output, stderr=output, timeout=timeout, env={**os.environ, "PYTHONUTF8": "1"})
+    if out.returncode in (0, BROKEN_ENV_EXIT):
+        return out.returncode == 0
+    raise RuntimeError(f"{script.name} の環境を確かめられなかった（{CHECK_IMPORTS_ARG} の終了コード {out.returncode}）")
+
+
+def prepare_script(script: Path, *, output, timeout: float, log, force: bool = False) -> str:
+    """script の inline の依存を入れた uv の環境を用意し、その python のパスを返す。uv の出力は output に書く。
 
     uv が環境に依存を入れている途中で止められると（ホストがセッションの終わりにプロセスを止めるなど）、
-    環境が作りかけのまま残り、それ以降の `uv run --script` と `uv sync --script` が失敗し続ける
-    （uv 0.12 で、dist-info の METADATA が欠けた）。そのため、失敗したら 1 回だけ --reinstall で入れ直す。
+    環境が作りかけのまま残る。dist-info の METADATA が欠けると `uv sync` が失敗し続け（uv 0.12）、
+    モジュールの本体だけが欠けると `uv sync` は成功するのに import に失敗する。
+
+    - ふだん（force が偽）: `uv sync --script` が成功すれば、そのまま返す。速い。
+    - `uv sync` が失敗したとき、または force が真（起動したスクリプトが BROKEN_ENV_EXIT で止まった）のとき:
+      スクリプトごとのロックを取り、ほかのセッションが先に直していないかを `uv sync` と import の確認
+      （`<script> --check-imports`。RECORD との照合と import）で確かめる。直っていなければ `--reinstall` で入れ直し、もう一度確かめる。
+      ロックの中で確かめ直すので、2 つのセッションが同時に入れ直して、動いている環境を壊すことはない。
     """
-    uv = uv_executable()
-    env = {**os.environ, "PYTHONUTF8": "1"}
-    kwargs = {"stdin": subprocess.DEVNULL, "stdout": output, "stderr": output, "timeout": timeout, "env": env}
-    first = subprocess.run([uv, "sync", "--quiet", "--script", str(script)], **kwargs)
-    if first.returncode == 0:
-        return
-    log(f"{script.name} の環境を用意できなかった（終了コード {first.returncode}）。作りかけで壊れているかもしれないので、入れ直す")
-    subprocess.run([uv, "sync", "--quiet", "--reinstall", "--script", str(script)], check=True, **kwargs)
+    if not force and _uv_sync(script, reinstall=False, output=output, timeout=timeout) == 0:
+        return script_python(script)
+    with FileLock(env_lock_path(script), timeout=timeout):
+        if _uv_sync(script, reinstall=False, output=output, timeout=timeout) == 0:
+            python = script_python(script)
+            if _imports_ok(python, script, output, timeout):
+                return python
+        log(f"{script.name} の環境が作りかけで壊れているかもしれないので、入れ直す")
+        code = _uv_sync(script, reinstall=True, output=output, timeout=timeout)
+        if code != 0:
+            raise RuntimeError(f"{script.name} の環境を入れ直せなかった（uv sync --reinstall の終了コード {code}）")
+        python = script_python(script)
+        if not _imports_ok(python, script, output, timeout):
+            raise RuntimeError(f"{script.name} の環境を入れ直しても、依存を import できない")
+        return python
 
 
 def script_python(script: Path, timeout: float = 120) -> str:
-    """sync_script で用意した環境の python のパス。"""
-    found = subprocess.run([uv_executable(), "python", "find", "--script", str(script)], check=True,
-                           stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout,
-                           env={**os.environ, "PYTHONUTF8": "1"})
-    path = found.stdout.decode("utf-8", "replace").strip().splitlines()[-1]
-    if not Path(path).is_file():
-        raise RuntimeError(f"{script.name} の環境の python が見つからない: {path}")
+    """prepare_script で用意した環境の python のパス。"""
+    found = subprocess.run([uv_executable(), "python", "find", "--script", str(script)], stdin=subprocess.DEVNULL,
+                           capture_output=True, timeout=timeout, env={**os.environ, "PYTHONUTF8": "1"})
+    if found.returncode != 0:
+        detail = found.stderr.decode("utf-8", "replace").strip()[-800:]
+        raise RuntimeError(f"{script.name} の環境の python を見つけられなかった（uv python find の終了コード "
+                           f"{found.returncode}）: {detail}")
+    lines = found.stdout.decode("utf-8", "replace").strip().splitlines()
+    path = lines[-1] if lines else ""
+    if not path or not Path(path).is_file():
+        raise RuntimeError(f"{script.name} の環境の python が見つからない: {path!r}")
     return path
 
 

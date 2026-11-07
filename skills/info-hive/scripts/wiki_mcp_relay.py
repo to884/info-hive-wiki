@@ -19,7 +19,8 @@
 - サーバーは中継の子として、Windows では DETACHED_PROCESS と新しいプロセスグループで、POSIX では新しい
   セッションで起動する。中継やホストが終わってもサーバーは残り、次のセッションの中継が使う。
 - サーバーの Python の環境は `uv sync --script` で用意し、`uv python find --script` で見つけた python で起動する。
-  環境が作りかけで壊れていれば `--reinstall` で入れ直す。
+  環境が作りかけで壊れていれば `--reinstall` で入れ直す。サーバーが依存を import できずに終了コード 75 で
+  止まったときも、入れ直して 1 回だけ起動し直す。
 - .mcp.json は、この中継を直接ではなく、依存のない入口の wiki_mcp_launch.py から起動する。
 
 CLAUDE_PLUGIN_ROOT を持たないホスト（Codex など）は、wiki_mcp_launch.py のパスを指定して起動する。
@@ -40,8 +41,12 @@ import wiki_mcp_common as common  # noqa: E402
 SERVER_SCRIPT = common.SCRIPTS / "wiki_mcp_server.py"
 # サーバーの依存を初めて取得するときは時間がかかるので、環境の用意と起動の待ちは長めにする。
 PREPARE_TIMEOUT = 1800
-START_TIMEOUT = 120
-LOCK_TIMEOUT = PREPARE_TIMEOUT + START_TIMEOUT + 60
+# ディスクのキャッシュが冷えていると、サーバーの依存の import だけで 1 分を超えることがある（WSL で測った）。
+# 待ちきれずに次の呼び出しがもう 1 つサーバーを起動しないよう、長めに待つ。
+START_TIMEOUT = 300
+# 環境の用意は、ロックの外の uv sync と、ロックの中の uv sync、確かめ、入れ直し、確かめ直しの 5 回まで
+# PREPARE_TIMEOUT ずつかかりうる。サーバーの起動し直しの分も含めて待つ。
+LOCK_TIMEOUT = 5 * PREPARE_TIMEOUT + 2 * START_TIMEOUT + 60
 
 
 def log(message: str) -> None:
@@ -61,13 +66,13 @@ def alive(info: dict | None) -> bool:
         return False
 
 
-def server_python(log_file) -> str:
+def server_python(log_file, force: bool = False) -> str:
     """サーバーのスクリプトの依存を入れた環境を用意し、その python のパスを返す。
 
-    環境が作りかけで壊れていれば、入れ直す（wiki_mcp_common.sync_script）。
+    環境が作りかけで壊れていれば、入れ直す（wiki_mcp_common.prepare_script）。force が真なら、
+    `uv sync` が成功しても依存を import できるかを確かめ、できなければ入れ直す。
     """
-    common.sync_script(SERVER_SCRIPT, output=log_file, timeout=PREPARE_TIMEOUT, log=log)
-    return common.script_python(SERVER_SCRIPT)
+    return common.prepare_script(SERVER_SCRIPT, output=log_file, timeout=PREPARE_TIMEOUT, log=log, force=force)
 
 
 def spawn_server(python: str, log_file) -> subprocess.Popen:
@@ -118,16 +123,25 @@ def ensure_server() -> tuple[dict, bool]:
         with open(common.logs_dir() / "server.log", "ab") as log_file:
             python = server_python(log_file)
             process = spawn_server(python, log_file)
-        ends = time.monotonic() + START_TIMEOUT
-        while time.monotonic() < ends:
-            info = common.read_server_info()
-            if info and alive(info):
-                return info, True
-            code = process.poll()
-            if code not in (None, 0):
-                raise RuntimeError(f"wiki の MCP サーバーが終了コード {code} で止まった。"
-                                   f"{common.logs_dir() / 'server.log'} を見る")
-            time.sleep(0.05)
+            repaired = False
+            ends = time.monotonic() + START_TIMEOUT
+            while time.monotonic() < ends:
+                info = common.read_server_info()
+                if info and alive(info):
+                    return info, True
+                code = process.poll()
+                if code == common.BROKEN_ENV_EXIT and not repaired:
+                    # サーバーが依存を import できなかった。環境を確かめて入れ直し、1 回だけ起動し直す。
+                    log("サーバーが依存を import できなかったので、環境を入れ直して起動し直す")
+                    repaired = True
+                    python = server_python(log_file, force=True)
+                    process = spawn_server(python, log_file)
+                    ends = time.monotonic() + START_TIMEOUT
+                    continue
+                if code not in (None, 0):
+                    raise RuntimeError(f"wiki の MCP サーバーが終了コード {code} で止まった。"
+                                       f"{common.logs_dir() / 'server.log'} を見る")
+                time.sleep(0.05)
         raise RuntimeError(f"wiki の MCP サーバーが {START_TIMEOUT} 秒以内に起動しなかった")
 
 
@@ -290,6 +304,11 @@ async def serve() -> None:
 
 
 def main() -> None:
+    # uv の環境が壊れていれば BROKEN_ENV_EXIT で止まる。標準入力を読む前なので、入口が環境を入れ直して
+    # 起動し直しても、ホストとの通信は崩れない。
+    common.require_env(common.RELAY_MODULES)
+    if len(sys.argv) > 1 and sys.argv[1] == common.CHECK_IMPORTS_ARG:
+        return
     import anyio
     if len(sys.argv) > 1 and sys.argv[1] == "--ensure":
         # 診断用: サーバーを確かめ（なければ起動し）、server.json の中身からトークンを除いて表示する。
