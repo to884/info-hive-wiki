@@ -146,6 +146,11 @@ def env_problems(limit: int = 10) -> list[str]:
             except OSError:
                 problems.append(f"{dist.name}/RECORD がない")
                 rows = []
+            else:
+                # 正しい RECORD は、自分自身と METADATA の行を必ず含む。ない RECORD は、書く途中で止まったものとみなす。
+                listed = {row[0].replace("\\", "/") for row in rows if row}
+                if f"{dist.name}/RECORD" not in listed or f"{dist.name}/METADATA" not in listed:
+                    problems.append(f"{dist.name}/RECORD が途中で切れている")
             for row in rows:
                 if not row or not row[0] or row[0].endswith(".pyc"):
                     continue
@@ -249,9 +254,16 @@ def _uv_sync(script: Path, *, reinstall: bool, output, timeout: float) -> int:
 
 
 def _imports_ok(python: str, script: Path, output, timeout: float) -> bool:
+    """環境がそろっていれば真、壊れていれば（BROKEN_ENV_EXIT）偽。それ以外の失敗は例外にする。
+
+    メモリ不足などで確かめのプロセスが落ちたときに入れ直すと、先にほかのセッションが直して使っている
+    環境まで入れ直してしまう。入れ直して直るのは、壊れた環境だけである。
+    """
     out = subprocess.run([python, "-X", "utf8", str(script), CHECK_IMPORTS_ARG], stdin=subprocess.DEVNULL,
                          stdout=output, stderr=output, timeout=timeout, env={**os.environ, "PYTHONUTF8": "1"})
-    return out.returncode == 0
+    if out.returncode in (0, BROKEN_ENV_EXIT):
+        return out.returncode == 0
+    raise RuntimeError(f"{script.name} の環境を確かめられなかった（{CHECK_IMPORTS_ARG} の終了コード {out.returncode}）")
 
 
 def prepare_script(script: Path, *, output, timeout: float, log, force: bool = False) -> str:

@@ -44,8 +44,9 @@ PREPARE_TIMEOUT = 1800
 # ディスクのキャッシュが冷えていると、サーバーの依存の import だけで 1 分を超えることがある（WSL で測った）。
 # 待ちきれずに次の呼び出しがもう 1 つサーバーを起動しないよう、長めに待つ。
 START_TIMEOUT = 300
-# 環境の用意は、確かめ、入れ直し、確かめ直しの 3 回まで PREPARE_TIMEOUT ずつかかりうる。
-LOCK_TIMEOUT = 3 * PREPARE_TIMEOUT + START_TIMEOUT + 60
+# 環境の用意は、ロックの外の uv sync と、ロックの中の uv sync、確かめ、入れ直し、確かめ直しの 5 回まで
+# PREPARE_TIMEOUT ずつかかりうる。サーバーの起動し直しの分も含めて待つ。
+LOCK_TIMEOUT = 5 * PREPARE_TIMEOUT + 2 * START_TIMEOUT + 60
 
 
 def log(message: str) -> None:
