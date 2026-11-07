@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-07
+
 ### Fixed
 
 - 0.4.1 の修正は、`uv sync` が失敗する壊れ方（dist-info の `METADATA` の欠け）しか直せなかった。dist-info はそろっていて、モジュールの本体だけが欠けた環境では、`uv sync` が成功するので入れ直さず、MCP のサーバーが起動しないままだった。中継とサーバーは、起動の最初に、各パッケージの dist-info の `RECORD` と照らして欠けたファイルがないかを確かめ、主な依存を import する。壊れていれば終了コード 75 で止まる。入口と中継は、それを見て環境を入れ直し、1 回だけ起動し直す。
@@ -136,7 +138,8 @@
 - 移植元の調査メモ `research/` と、移植元の英語の評価セットでの測定記録（`eval/decisions/results-*.json`）は取り込んでいない。
 - Paperclip 連携は移植元の v4.0.0 で削除されており、info-hive にもない。
 
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/to884/info-hive-wiki/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/to884/info-hive-wiki/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/to884/info-hive-wiki/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/to884/info-hive-wiki/compare/v0.2.1...v0.3.0
