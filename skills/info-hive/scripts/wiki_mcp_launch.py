@@ -34,16 +34,33 @@ def log(message: str) -> None:
     print(f"[wiki-launch] {message}", file=sys.stderr, flush=True)
 
 
-def main() -> int:
+def prepare(force: bool = False) -> str | None:
     try:
-        common.sync_script(RELAY, output=sys.stderr, timeout=PREPARE_TIMEOUT, log=log)
-        python = common.script_python(RELAY)
+        return common.prepare_script(RELAY, output=sys.stderr, timeout=PREPARE_TIMEOUT, log=log, force=force)
     except Exception as exc:  # noqa: BLE001 - 理由をホストのログに残して止まる
         log(f"中継の環境を用意できなかった: {type(exc).__name__}: {exc}")
-        return 1
+        return None
+
+
+def run_relay(python: str) -> int:
     # 標準入出力は明示して渡す（Windows では、渡さないと子に引き継がれないことがある）。
     return subprocess.run([python, "-X", "utf8", str(RELAY), *sys.argv[1:]], stdin=sys.stdin, stdout=sys.stdout,
                           stderr=sys.stderr, env={**os.environ, "PYTHONUTF8": "1"}).returncode
+
+
+def main() -> int:
+    python = prepare()
+    if python is None:
+        return 1
+    code = run_relay(python)
+    if code == common.BROKEN_ENV_EXIT:
+        # 中継は依存を import できずに、標準入力を読む前に止まった。環境を入れ直して、1 回だけ起動し直す。
+        log("中継が依存を import できなかったので、環境を入れ直して起動し直す")
+        python = prepare(force=True)
+        if python is None:
+            return 1
+        code = run_relay(python)
+    return code
 
 
 if __name__ == "__main__":
