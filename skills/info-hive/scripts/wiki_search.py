@@ -16,14 +16,14 @@ wiki_search.py — wiki のページを対象にした、セクション単位�
     python wiki_search.py "検索語" [オプション]
 
 オプション:
-    --wiki <dir>            wiki のディレクトリ（既定: ./wiki）
+    --wiki <dir>            wiki のディレクトリ（既定: 作業領域の設定の dirs.wiki。設定がなければ ./wiki）
     --top N                 上位 N 件の結果を返す（既定: 10）
     --type <type>           frontmatter の type で絞り込む（source|entity|concept|synthesis|...）
     --tag <tag>             タグで絞り込む（複数指定できる）
     --since YYYY-MM-DD      この日付以降に更新されたページだけを対象にする
     --backlinks <slug>      <slug> にリンクしているページを探す。クエリは無視する
     --top-linked N          もっとも多くリンクされている N ページ（ハブ）を表示する。クエリは無視する
-    --cache [<path>]        差分で更新するパースキャッシュ（既定: wiki/.wiki-cache/search-index.json）
+    --cache [<path>]        差分で更新するパースキャッシュ（既定: <wiki>/.wiki-cache/search-index.json）
     --granularity <mode>    セクション（既定）とページ全体のどちらを検索するか
     --per-page N            1ページあたりのセクションの結果の最大数（既定: 2）
     --json                  構造化された証拠の行を出力する
@@ -58,6 +58,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wiki_text import (  # noqa: E402
     canonical_meta, ljust_display, localize_argparse, nfc, normalize_tags, parse_frontmatter_text, posix_rel,
 )
+import wiki_workspace  # noqa: E402
 
 
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
@@ -1121,7 +1122,7 @@ def cmd_top_linked(args, pages: list[dict]) -> None:
 def main():
     parser = localize_argparse(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter))
     parser.add_argument("query", nargs="?", default="", help="検索語")
-    parser.add_argument("--wiki", type=Path, default=Path("wiki"), help="wiki のディレクトリ（既定: ./wiki）")
+    parser.add_argument("--wiki", type=Path, default=None, help=wiki_workspace.WIKI_DEFAULT_HELP)
     parser.add_argument("--top", type=int, default=10, help="上位 N 件の結果を返す（既定: 10）")
     parser.add_argument("--type", help="frontmatter の type で絞り込む")
     parser.add_argument("--tag", action="append", default=[], help="タグで絞り込む（複数指定できる）")
@@ -1129,7 +1130,7 @@ def main():
     parser.add_argument("--backlinks", help="このスラッグにリンクしているページを探す")
     parser.add_argument("--top-linked", type=int, help="被リンクの多い N ページを表示する")
     parser.add_argument("--cache", nargs="?", const="AUTO", default=None,
-                        help="差分で更新するパースキャッシュのパス（値を省くと wiki/.wiki-cache/search-index.json）")
+                        help="差分で更新するパースキャッシュのパス（値を省くと <wiki>/.wiki-cache/search-index.json）")
     parser.add_argument("--granularity", choices=("section", "page"), default="section",
                         help="セクション（既定）とページ全体のどちらを検索するか")
     parser.add_argument("--per-page", type=int, default=2,
@@ -1144,6 +1145,8 @@ def main():
                         help=f"--decide で行を残すのに必要な P(relevant)"
                              f"（既定: {decision_default_threshold('relevance')}）")
     args = parser.parse_args()
+    if args.wiki is None:
+        args.wiki = wiki_workspace.default_wiki_or_exit()
     cache_path = None
     if args.cache:
         cache_path = args.wiki / ".wiki-cache" / "search-index.json" if args.cache == "AUTO" else Path(args.cache)
