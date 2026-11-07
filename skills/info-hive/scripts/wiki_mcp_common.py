@@ -116,32 +116,72 @@ def uv_executable() -> str:
     return found
 
 
-# uv の環境が壊れていて依存を import できないとき、中継とサーバーはこの終了コードで止まる（EX_TEMPFAIL）。
+# uv の環境が壊れているとき、中継とサーバーはこの終了コードで止まる（EX_TEMPFAIL）。
 # 起動した側（入口、中継）は、この終了コードを見て環境を入れ直し、1 回だけ起動し直す。
 BROKEN_ENV_EXIT = 75
-# 中継とサーバーが使う外部の依存。起動の最初に import してみる（require_modules）。
+# 中継とサーバーが起動の最初に import する外部の依存（require_env）。共有ライブラリが読めないことも見つける。
 RELAY_MODULES = ("anyio", "httpx", "filelock", "psutil", "mcp", "mcp.types", "mcp.server.lowlevel",
                  "mcp.server.stdio", "mcp.client.session", "mcp.client.streamable_http")
-SERVER_MODULES = ("anyio", "uvicorn", "numpy", "usearch.index", "tantivy", "yaml", "huggingface_hub",
-                  "onnxruntime", "fastembed", "mcp.server.fastmcp", "mcp.server.fastmcp.exceptions",
-                  "mcp.server.transport_security")
+SERVER_MODULES = ("anyio", "uvicorn", "numpy", "usearch.index", "tantivy", "yaml", "mcp.server.fastmcp",
+                  "mcp.server.fastmcp.exceptions", "mcp.server.transport_security")
 CHECK_IMPORTS_ARG = "--check-imports"
 
 
-def require_modules(modules) -> None:
-    """依存をすべて import してみる。できなければ理由を標準エラーに書き、BROKEN_ENV_EXIT で止まる。
+def env_problems(limit: int = 10) -> list[str]:
+    """この python の環境で、dist-info の RECORD に載っているのに欠けているか、大きさの違うファイル。
 
-    uv の環境は、dist-info がそろっていてもモジュールの本体だけが欠けていることがあり、そのときは
-    `uv sync` が成功してしまう。そのため、標準入力を読む前に、実際に import して確かめる。
+    依存の中には、実行中に初めて import するモジュール（anyio のバックエンド、uvicorn の lifespan など）が
+    あるので、決まったモジュールを import するだけでは欠けを見逃す。入れたファイルの一覧（RECORD）と照らす。
+    中身のハッシュは比べない（時間がかかる）。RECORD がない dist-info も壊れたものとみなす。
+    """
+    import csv
+    import sysconfig
+    paths = sysconfig.get_paths()
+    problems: list[str] = []
+    for root in sorted({Path(paths["purelib"]), Path(paths["platlib"])}):
+        for dist in sorted(root.glob("*.dist-info")):
+            record = dist / "RECORD"
+            try:
+                rows = list(csv.reader(record.read_text(encoding="utf-8", errors="replace").splitlines()))
+            except OSError:
+                problems.append(f"{dist.name}/RECORD がない")
+                rows = []
+            for row in rows:
+                if not row or not row[0] or row[0].endswith(".pyc"):
+                    continue
+                try:
+                    size = (root / row[0]).stat().st_size
+                except OSError:
+                    problems.append(f"{row[0]} がない")
+                else:
+                    if len(row) > 2 and row[2].isdigit() and int(row[2]) != size:
+                        problems.append(f"{row[0]} の大きさ（{size}）が RECORD（{row[2]}）と違う")
+                if len(problems) >= limit:
+                    return problems
+    return problems
+
+
+def require_env(modules) -> None:
+    """uv の環境がそろっているかを確かめる。壊れていれば理由を標準エラーに書き、BROKEN_ENV_EXIT で止まる。
+
+    uv が依存を入れている途中で止められると、環境が作りかけのまま残る。dist-info の METADATA が欠けると
+    `uv sync` が失敗するが、モジュールの本体だけが欠けると `uv sync` は成功してしまう。そのため、
+    標準入力を読む前に、RECORD と照らし（env_problems）、modules を import して確かめる。
+    import の失敗のうち BROKEN_ENV_EXIT にするのは ImportError だけである（メモリ不足などは入れ直しても直らない）。
     """
     import importlib
+    problems = env_problems()
+    if problems:
+        print(f"[wiki] uv の環境が壊れているかもしれない（{sys.prefix}）: " + "、".join(problems[:5]),
+              file=sys.stderr, flush=True)
+        sys.exit(BROKEN_ENV_EXIT)
     for name in modules:
         try:
             module = importlib.import_module(name)
             # パッケージの __init__.py が欠けると、名前空間パッケージとして import できてしまう（__file__ がない）。
             if getattr(module, "__file__", None) is None:
                 raise ImportError(f"{name} の本体（__init__.py）がない")
-        except Exception as exc:  # noqa: BLE001 - ImportError のほか、共有ライブラリを読めない OSError など
+        except ImportError as exc:  # 共有ライブラリを読めないときも ImportError になる
             print(f"[wiki] 依存の {name} を import できない（{type(exc).__name__}: {exc}）。uv の環境が壊れているかもしれない",
                   file=sys.stderr, flush=True)
             sys.exit(BROKEN_ENV_EXIT)
@@ -188,12 +228,18 @@ class FileLock:
 
 
 def env_lock_path(script: Path) -> Path:
-    """script の uv の環境を入れ直すときのロック。uv の環境はデータの置き場所と関係なく共有されるので、
-    INFO_HIVE_DATA_DIR ではなく、利用者の一時ディレクトリに置く。"""
-    import tempfile
+    """script の uv の環境を入れ直すときのロック。同じ環境を使うセッションが同じロックを使うよう、環境の
+    置き場所である uv のキャッシュ（`uv cache dir`。UV_CACHE_DIR も反映される）の下に置く。一時ディレクトリは
+    ホストやセッションごとに違うことがあり、Linux では利用者のあいだで共有されることもあるので使わない。"""
+    found = subprocess.run([uv_executable(), "cache", "dir"], stdin=subprocess.DEVNULL, capture_output=True,
+                           timeout=120, env={**os.environ, "PYTHONUTF8": "1"})
+    lines = found.stdout.decode("utf-8", "replace").strip().splitlines()
+    if found.returncode != 0 or not lines:
+        detail = found.stderr.decode("utf-8", "replace").strip()[-400:]
+        raise RuntimeError(f"uv のキャッシュの場所が分からない（uv cache dir の終了コード {found.returncode}）: {detail}")
     key = os.path.normcase(str(Path(script).resolve()))
     digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
-    return Path(tempfile.gettempdir()) / "info-hive-locks" / f"env-{Path(script).stem}-{digest}.lock"
+    return Path(lines[-1]) / "info-hive-locks" / f"env-{Path(script).stem}-{digest}.lock"
 
 
 def _uv_sync(script: Path, *, reinstall: bool, output, timeout: float) -> int:
@@ -218,7 +264,7 @@ def prepare_script(script: Path, *, output, timeout: float, log, force: bool = F
     - ふだん（force が偽）: `uv sync --script` が成功すれば、そのまま返す。速い。
     - `uv sync` が失敗したとき、または force が真（起動したスクリプトが BROKEN_ENV_EXIT で止まった）のとき:
       スクリプトごとのロックを取り、ほかのセッションが先に直していないかを `uv sync` と import の確認
-      （`<script> --check-imports`）で確かめる。直っていなければ `--reinstall` で入れ直し、もう一度確かめる。
+      （`<script> --check-imports`。RECORD との照合と import）で確かめる。直っていなければ `--reinstall` で入れ直し、もう一度確かめる。
       ロックの中で確かめ直すので、2 つのセッションが同時に入れ直して、動いている環境を壊すことはない。
     """
     if not force and _uv_sync(script, reinstall=False, output=output, timeout=timeout) == 0:

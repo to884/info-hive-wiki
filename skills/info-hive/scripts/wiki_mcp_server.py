@@ -466,11 +466,11 @@ def main():
     parser = argparse.ArgumentParser(description="wiki の MCP サーバー（ふつうは中継が起動する）")
     parser.add_argument("--idle", type=float, default=None, help="要求がなくなってから止まるまでの秒数")
     parser.add_argument(common.CHECK_IMPORTS_ARG, action="store_true",
-                        help="依存を import できるかだけを確かめて終わる（中継が環境を確かめるときに使う）")
+                        help="uv の環境がそろっているかだけを確かめて終わる（中継が環境を確かめるときに使う）")
     args = parser.parse_args()
-    # 依存を import できなければ BROKEN_ENV_EXIT で止まる。中継は、それを見て環境を入れ直して起動し直す。
-    # 依存はふだん使う時点で読み込むので、uv の環境が壊れていると、待ち受けたあとの要求で初めて失敗してしまう。
-    common.require_modules(common.SERVER_MODULES)
+    # uv の環境が壊れていれば BROKEN_ENV_EXIT で止まる。中継は、それを見て環境を入れ直して起動し直す。
+    # 依存はふだん使う時点で読み込むので、確かめないと、待ち受けたあとの要求で初めて失敗してしまう。
+    common.require_env(common.SERVER_MODULES)
     if args.check_imports:
         return
     idle = args.idle if args.idle else common.idle_seconds()

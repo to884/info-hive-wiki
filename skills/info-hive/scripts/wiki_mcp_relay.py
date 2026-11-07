@@ -41,8 +41,11 @@ import wiki_mcp_common as common  # noqa: E402
 SERVER_SCRIPT = common.SCRIPTS / "wiki_mcp_server.py"
 # サーバーの依存を初めて取得するときは時間がかかるので、環境の用意と起動の待ちは長めにする。
 PREPARE_TIMEOUT = 1800
-START_TIMEOUT = 120
-LOCK_TIMEOUT = PREPARE_TIMEOUT + START_TIMEOUT + 60
+# ディスクのキャッシュが冷えていると、サーバーの依存の import だけで 1 分を超えることがある（WSL で測った）。
+# 待ちきれずに次の呼び出しがもう 1 つサーバーを起動しないよう、長めに待つ。
+START_TIMEOUT = 300
+# 環境の用意は、確かめ、入れ直し、確かめ直しの 3 回まで PREPARE_TIMEOUT ずつかかりうる。
+LOCK_TIMEOUT = 3 * PREPARE_TIMEOUT + START_TIMEOUT + 60
 
 
 def log(message: str) -> None:
@@ -300,9 +303,9 @@ async def serve() -> None:
 
 
 def main() -> None:
-    # 依存を import できなければ BROKEN_ENV_EXIT で止まる。標準入力を読む前なので、入口が環境を入れ直して
+    # uv の環境が壊れていれば BROKEN_ENV_EXIT で止まる。標準入力を読む前なので、入口が環境を入れ直して
     # 起動し直しても、ホストとの通信は崩れない。
-    common.require_modules(common.RELAY_MODULES)
+    common.require_env(common.RELAY_MODULES)
     if len(sys.argv) > 1 and sys.argv[1] == common.CHECK_IMPORTS_ARG:
         return
     import anyio
