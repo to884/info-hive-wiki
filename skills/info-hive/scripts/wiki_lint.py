@@ -7,6 +7,9 @@ wiki_lint.py — LLM Wiki の構造の健全性をチェックする。
 日本語の wiki で起きやすい書き損じとして、英語のキーと日本語の別名の重複、全角の「：」を使った
 frontmatter のキー、「、」で区切ったリストの値、全角の「｜」「＃」を使った wikilink も報告する。
 frontmatter の文字列の値（配列の要素を含む）が二重引用符で囲まれていないページも報告する。
+索引（index.md と indexes/）の見出しと、その下に並ぶページの type の食い違い、`sources:` が
+source ページを指していないもの、source ページの `raw:` の原本がないもの、（--allowed-tags を
+渡した場合は）タグの体系にないタグも報告する。
 本文の画像（`![説明](../assets/x.svg)`）の参照先がないものも報告する。参照先はページのファイルが
 あるディレクトリを基準に解決する。ページの大きさは、コードフェンス（mermaid を含む）の中身と
 画像だけの行を除いて数える。
@@ -30,12 +33,15 @@ frontmatter の文字列の値（配列の要素を含む）が二重引用符�
     --required-fm a,b   必須の frontmatter のフィールド（既定: type,title,tags,created,updated）
     --suggest-pages     多くのページに出てくるのに専用のページがない語を挙げる
     --suggest-min N     --suggest-pages で挙げる最小の出現ページ数（既定: 5）
+    --allowed-tags a,b  タグの体系（SCHEMA.md の「タグの体系」に並ぶタグ）。渡すと、ここにないタグを
+                        報告する。渡さないか空にすると、タグの検査はしない
     --json              テキストの代わりに JSON を出力する
 
 例:
     python wiki_lint.py wiki/
     python wiki_lint.py wiki/ --suggest-pages
     python wiki_lint.py wiki/ --json > lint.json
+    python wiki_lint.py wiki/ --allowed-tags "知識表現,情報検索,手法"
 """
 
 import argparse
@@ -52,6 +58,7 @@ from pathlib import Path
 # テストから import したときも見つかるようにする。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wiki_text import (  # noqa: E402
+    TYPE_ALIASES,
     canonical_meta,
     char_count,
     fullwidth_colon_keys,
@@ -65,6 +72,7 @@ from wiki_text import (  # noqa: E402
     localize_argparse,
     nfc,
     nfkc,
+    normalize_tags,
     parse_frontmatter_text,
     posix_rel,
     strip_fences_and_images,
@@ -76,6 +84,15 @@ import wiki_workspace  # noqa: E402
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 MD_ESCAPE_RE = re.compile(r"\\([!-/:-@\[-`{-~])")
 URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*:")
+# Windows のドライブから始まる絶対パス（C:/Books/x.pdf、C:\Books\x.pdf）。URL_SCHEME_RE にも合うので先に見る。
+DRIVE_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
+# frontmatter の値に書かれた wikilink（`sources: ["[[消費税]]"]`）。
+FM_WIKILINK_RE = re.compile(r"^\[\[(.+)\]\]$")
+# 索引の見出しとリストの項目。
+HEADING_RE = re.compile(r"^ {0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$")
+LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(.*)$")
+# 見出しの末尾の件数（「ソース（9）」「Sources (9)」）。
+HEADING_COUNT_RE = re.compile(r"\s*[（(][^（）()]*[）)]\s*$")
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 # 日本語のページの候補。カタカナ語は 3 文字以上、漢字の複合語は 3 文字以上の漢字の並びとする。
 # 2 文字の漢字の並びは「方法」「場合」のような一般語が多く、候補として役に立たない。
@@ -125,6 +142,123 @@ def resolve_link(link: str, by_path: dict, by_slug) -> "str | None":
 
 SKIP_TOP_LEVEL_FILES = {"SCHEMA.md", "index.md", "log.md", "README.md"}
 SKIP_TOP_LEVEL_DIRS = {"indexes", "graph", "raw", ".evolution", "assets"}
+
+# 分割した索引（indexes/<type>.md、indexes/entities-people.md）のファイル名の `-` より前が表す type。
+INDEX_FILE_TYPES = {
+    "source": "source", "sources": "source",
+    "entity": "entity", "entities": "entity",
+    "concept": "concept", "concepts": "concept",
+    "synthesis": "synthesis", "syntheses": "synthesis",
+}
+# 索引の見出しが表すページの type。日本語は type の値の別名と同じ語を使い、英語は単数と複数を読む。
+# 比べるときは NFKC にそろえて小文字にする。
+INDEX_HEADING_TYPES = {nfkc(k).lower(): v for k, v in TYPE_ALIASES.items()}
+INDEX_HEADING_TYPES.update(INDEX_FILE_TYPES)
+
+
+def heading_type(text: str) -> "str | None":
+    """索引の見出しの文字列から、そこに並ぶページの type を返す。種類の見出しでなければ None を返す。"""
+    key = HEADING_COUNT_RE.sub("", nfkc(text).strip()).strip().lower()
+    return INDEX_HEADING_TYPES.get(key)
+
+
+def collect_index_entries(wiki_root: Path) -> list[dict]:
+    """index.md と indexes/ の各ファイルから、種類の見出しの下に並ぶ項目を集める。
+
+    index.md は「## ソース」「## シンセシス」のような種類の見出しの下だけを読む。indexes/ のファイルは、
+    ファイル名（`sources.md`、`entities-people.md` の `-` より前）が種類を表すので、ファイル全体を
+    その種類として読み、種類の見出しがあればそちらを優先する。種類の見出しより深い見出し（### 人物）は
+    上の種類を引き継ぎ、同じか浅い見出しで種類でないもの（## 使い方）が来たら、種類の指定を外す。
+
+    読むのはリストの項目（`- `、`* `、`1. `）の最初の wikilink だけである。冒頭の説明文に書いた
+    `[[消費税]]` のような例示や、項目の要約に出てくるリンクは数えない。コードの中も読まない。
+    """
+    files = []
+    top = wiki_root / "index.md"
+    if top.is_file():
+        files.append(top)
+    split_dir = wiki_root / "indexes"
+    if split_dir.is_dir():
+        files.extend(sorted(split_dir.rglob("*.md")))
+    entries = []
+    for path in files:
+        rel = posix_rel(str(path.relative_to(wiki_root)))
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+        except (UnicodeDecodeError, OSError):
+            continue
+        default = None
+        if path != top:
+            default = INDEX_FILE_TYPES.get(nfkc(path.stem).lower().split("-", 1)[0])
+        current, level, heading = default, 0, None
+        for line in lines_outside_fences(text):
+            m = HEADING_RE.match(line)
+            if m:
+                depth = len(m.group(1))
+                kind = heading_type(m.group(2))
+                if kind:
+                    current, level, heading = kind, depth, m.group(2).strip()
+                elif depth <= level:
+                    current, level, heading = default, 0, None
+                continue
+            if current is None:
+                continue
+            item = LIST_ITEM_RE.match(line)
+            if not item:
+                continue
+            # コードを空白に置き換えてから探す。消すと左右がつながり、もとにないリンクができることがある。
+            link = WIKILINK_RE.search(CODE_SPAN_RE.sub(lambda c: " " * len(c.group(0)), item.group(1)))
+            if link:
+                entries.append({"index": rel, "heading": heading, "expected": current,
+                                "link": nfc(link.group(1).strip())})
+    return entries
+
+
+def _ref_values(value) -> list[str]:
+    """frontmatter のリストの値（文字列 1 つでもよい）を、空でない文字列のリストにする。"""
+    if value in (None, "", []):
+        return []
+    if not isinstance(value, list):
+        value = [value]
+    return [str(v).strip() for v in value if v is not None and str(v).strip()]
+
+
+def _exists(path: Path) -> bool:
+    try:
+        return path.exists()
+    except (OSError, ValueError):
+        return False
+
+
+def missing_raw(meta: dict, md_path: Path, wiki_root: Path) -> list[dict]:
+    """source ページの `raw:` のうち、原本がないものを返す。source 以外のページは見ない。
+
+    URL（https:、file: など）は見ない。絶対パス（rag が返す `C:/Books/x.pdf`、`/home/x/y.pdf`、`~/x`）は
+    そのまま確かめる。相対パスの基準は wiki によって違う。実際の wiki は wiki のルートから
+    `../raw/x.md`、`../W1_Raw/x.md` と書き、取り込みの手順のひな形は wiki の親から `raw/x.md` と書く。
+    そこで、wiki のルート、wiki の親、ページのディレクトリのどれかを基準にして見つかれば、原本があるとする。
+    複数の部分からなるソースはディレクトリにするので、ファイルでもディレクトリでもよい。
+    """
+    if meta.get("type") != "source":
+        return []
+    found = []
+    for raw in _ref_values(meta.get("raw")):
+        if DRIVE_PATH_RE.match(raw) or raw.startswith(("/", "\\", "~")):
+            try:
+                candidates = [Path(raw).expanduser()]
+            except RuntimeError:
+                # ホームを決められない環境の ~。見つからないものとして報告する。
+                candidates = []
+            absolute = True
+        elif URL_SCHEME_RE.match(raw):
+            continue
+        else:
+            candidates = [wiki_root / raw, wiki_root.parent / raw, md_path.parent / raw]
+            absolute = False
+        if any(_exists(c) for c in candidates):
+            continue
+        found.append({"raw": raw, "absolute": absolute})
+    return found
 
 
 def _inside(path: Path, root: Path) -> bool:
@@ -259,6 +393,7 @@ def collect_pages(wiki_root: Path) -> list[dict]:
             "ideographic_comma_keys": ideographic_comma_values(raw_meta),
             "unquoted_keys": unquoted_string_keys(fm_text) if fm_text else [],
             "missing_assets": missing_assets(body, md_path, wiki_root),
+            "missing_raw": missing_raw(meta, md_path, wiki_root),
         })
     return pages
 
@@ -279,7 +414,19 @@ DEFAULT_REQUIRED_FM = ("type", "title", "tags", "created", "updated")
 
 
 def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str], suggest_pages: bool, suggest_min: int,
-         soft_char_cap: int = 10000, hard_char_cap: int = 25000) -> dict:
+         soft_char_cap: int = 10000, hard_char_cap: int = 25000, index_entries: "list[dict] | None" = None,
+         allowed_tags: "list[str] | None" = None) -> dict:
+    """検出結果を返す。
+
+    index_entries は collect_index_entries の結果で、None なら索引の検査（index_type_mismatch）をしない。
+    allowed_tags はタグの体系で、None か空ならタグの検査（unknown_tags）をせず、summary の
+    unknown_tags を None にする。タグは NFKC にそろえてから比べる。
+    """
+    allowed = None
+    if allowed_tags is not None:
+        allowed = set(normalize_tags(allowed_tags)) - {""}
+        if not allowed:
+            allowed = None
     findings = {
         "orphans": [],
         "broken_links": [],
@@ -297,6 +444,10 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         "non_iso_dates": [],
         "unquoted_strings": [],
         "missing_assets": [],
+        "index_type_mismatch": [],
+        "unresolved_sources": [],
+        "missing_raw": [],
+        "unknown_tags": [],
         "suggested_pages": [],
         "summary": {},
     }
@@ -341,6 +492,29 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
             resolved = resolve_link(link, by_path, by_slug)
             if resolved:
                 inbound[resolved].add(p["slug"])
+
+    def types_of(slug: str) -> list:
+        """スラッグのページの type（空のものは除く）。スラッグが重複していれば、それぞれの type を返す。"""
+        return [g["meta"].get("type") for g in slug_to_pages[slug] if g["meta"].get("type") not in (None, "", [])]
+
+    # 索引の見出しとページの type の食い違い。リンク切れの項目と type のないページは見ない
+    # （分割した索引の index.md は indexes/ のファイルを指し、type の欠落は missing_frontmatter で挙がる）。
+    for entry in index_entries or []:
+        resolved = resolve_link(entry["link"], by_path, by_slug)
+        if resolved is None:
+            continue
+        types = types_of(resolved)
+        if not types or entry["expected"] in types:
+            continue
+        group = slug_to_pages[resolved]
+        findings["index_type_mismatch"].append({
+            "index": entry["index"],
+            "heading": entry["heading"],
+            "expected": entry["expected"],
+            "link": entry["link"],
+            "path": group[0]["rel_path"],
+            "type": types[0],
+        })
 
     # 孤立ページ、リンク切れ、サイズ超過、frontmatter、更新の停滞
     for p in pages:
@@ -397,6 +571,31 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         # 本文の画像の参照先がない。
         for item in p.get("missing_assets", []):
             findings["missing_assets"].append({"from_path": p["rel_path"], **item})
+
+        # sources: は source ページのスラッグを並べる。ページがないか、source でないページを指すものを挙げる。
+        for ref in _ref_values(p["meta"].get("sources")):
+            m = FM_WIKILINK_RE.match(ref)
+            resolved = resolve_link(m.group(1) if m else ref, by_path, by_slug)
+            if resolved is None:
+                findings["unresolved_sources"].append({"path": p["rel_path"], "source": ref, "reason": "missing"})
+                continue
+            types = types_of(resolved)
+            if types and "source" not in types:
+                findings["unresolved_sources"].append({"path": p["rel_path"], "source": ref, "reason": "not_source",
+                                                       "type": types[0]})
+
+        # source ページの raw: の原本がない。
+        for item in p.get("missing_raw", []):
+            findings["missing_raw"].append({"path": p["rel_path"], **item})
+
+        # タグの体系にないタグ。
+        if allowed is not None:
+            unknown = []
+            for tag in normalize_tags(p["meta"].get("tags")):
+                if tag and tag not in allowed and tag not in unknown:
+                    unknown.append(tag)
+            if unknown:
+                findings["unknown_tags"].append({"path": p["rel_path"], "tags": unknown})
 
         # 日付は ISO 形式（YYYY-MM-DD）にする。「2026年11月3日」や「2026/11/03」は、更新の停滞の
         # 判定や --since の絞り込みで読めない。
@@ -472,6 +671,11 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         "non_iso_dates": len(findings["non_iso_dates"]),
         "unquoted_strings": len(findings["unquoted_strings"]),
         "missing_assets": len(findings["missing_assets"]),
+        "index_type_mismatch": len(findings["index_type_mismatch"]),
+        "unresolved_sources": len(findings["unresolved_sources"]),
+        "missing_raw": len(findings["missing_raw"]),
+        # タグの体系を渡さなかったときは、検査していないことを 0 と区別できるよう None にする。
+        "unknown_tags": len(findings["unknown_tags"]) if allowed is not None else None,
         "suggested_pages": len(findings["suggested_pages"]),
     }
     return findings
@@ -512,6 +716,16 @@ def render_text(findings: dict) -> str:
          + ("  wiki の外を指している" if f.get("outside") else "")
          + ("  ファイルのパスにできない" if f.get("invalid") else "")
          + (f"  → {f['suggest']} と書けば解決する" if f.get("suggest") else "")),
+        ("index_type_mismatch", "索引の見出しと、そこに並ぶページの type が食い違っている",
+         lambda f: f"  - [[{f['link']}]]  （{f['index']}"
+         + (f" の「{f['heading']}」" if f.get("heading") else "")
+         + f"。{f['expected']} の欄にあるが、{f['path']} の type は {f['type']}）"),
+        ("unresolved_sources", "sources: が source ページを指していない",
+         lambda f: f"  - {f['path']}  {f['source']}: "
+         + ("ページがない" if f["reason"] == "missing" else f"type が {f.get('type')} のページを指している")),
+        ("missing_raw", "source ページの raw: の原本がない",
+         lambda f: f"  - {f['path']}  raw: {f['raw']}"),
+        ("unknown_tags", "タグの体系にないタグ", lambda f: f"  - {f['path']}  {', '.join(f['tags'])}"),
     ]
 
     for key, label, formatter in sections:
@@ -532,7 +746,12 @@ def render_text(findings: dict) -> str:
             out.append(f"  - 「{item['phrase']}」  （{item['page_count']} ページ）")
         out.append("")
 
-    if all(v == 0 for k, v in s.items() if k != "total_pages"):
+    if s.get("unknown_tags") is None:
+        out.append("タグの検査はしていない（--allowed-tags にタグの体系を渡すと、体系にないタグを報告する）。")
+        out.append("")
+
+    # None は検査していない項目なので、問題がないものとして扱う。
+    if all(not v for k, v in s.items() if k != "total_pages"):
         out.append("問題は見つからなかった。")
 
     return "\n".join(out)
@@ -548,6 +767,9 @@ def main():
     parser.add_argument("--required-fm", default=",".join(DEFAULT_REQUIRED_FM), help="必須の frontmatter のフィールド。カンマで区切る（既定: type,title,tags,created,updated）")
     parser.add_argument("--suggest-pages", action="store_true", help="多くのページに出てくるのに専用のページがない語を挙げる")
     parser.add_argument("--suggest-min", type=int, default=5, help="--suggest-pages で挙げる最小の出現ページ数（既定: 5）")
+    parser.add_argument("--allowed-tags", default=None,
+                        help="タグの体系（SCHEMA.md の「タグの体系」に並ぶタグ）。カンマで区切る。渡すと、ここにないタグを報告する。"
+                             "渡さないか空にすると、タグの検査はしない")
     parser.add_argument("--json", action="store_true", help="テキストの代わりに JSON を出力する。キーは英語のまま")
     args = parser.parse_args()
     if args.wiki is None:
@@ -559,8 +781,12 @@ def main():
 
     pages = collect_pages(args.wiki)
     required_fm = [f.strip() for f in args.required_fm.split(",") if f.strip()]
+    allowed_tags = None
+    if args.allowed_tags is not None:
+        allowed_tags = [t.strip() for t in args.allowed_tags.split(",") if t.strip()] or None
     findings = lint(pages, args.soft_cap, args.hard_cap, required_fm, args.suggest_pages, args.suggest_min,
-                    args.soft_char_cap, args.hard_char_cap)
+                    args.soft_char_cap, args.hard_char_cap, index_entries=collect_index_entries(args.wiki),
+                    allowed_tags=allowed_tags)
 
     if args.json:
         print(json.dumps(findings, indent=2, default=str, ensure_ascii=False))
