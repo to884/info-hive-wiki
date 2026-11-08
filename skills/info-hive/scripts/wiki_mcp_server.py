@@ -351,13 +351,15 @@ def build_app(state: State, token: str, port: int):
     @mcp.tool()
     async def lint(wiki: str, soft_cap: int = 100, hard_cap: int = 200, soft_char_cap: int = 10000,
                    hard_char_cap: int = 25000, required_fm: list[str] | None = None, suggest_pages: bool = False,
-                   suggest_min: int = 5, graph: bool = True) -> dict:
+                   suggest_min: int = 5, graph: bool = True, allowed_tags: list[str] | None = None) -> dict:
         """wiki に lint をかけ、検出結果を返す。検査するだけで、wiki は直さない。
 
         結果は `wiki_lint.py --json` と同じ形（orphans、broken_links、oversized_hard などと summary）で、
         引数も同じ意味を持つ（soft_cap と hard_cap は行数、soft_char_cap と hard_char_cap は空白を除いた
         文字数）。SCHEMA.md が別の上限を決めている wiki では、その値を渡す。required_fm を省くと
         type、title、tags、created、updated を必須にする。
+        allowed_tags には SCHEMA.md の「タグの体系」に並ぶタグを渡す。渡すと体系にないタグを unknown_tags に
+        挙げる。省くか空にするとタグの検査をせず、summary の unknown_tags は null になる。
         graph が真なら、`wiki_graph_lint.py --json` の結果も graph に入れる。graph の state は、
         checked（findings に結果）、disabled（オントロジーがない。message に理由）、error（オントロジーを
         読めない）、skipped（graph が偽）のどれかになる。判定モデルを使う検査（--decide）は含めない。
@@ -370,7 +372,9 @@ def build_app(state: State, token: str, port: int):
             root = wiki_root(wiki)
             fields = list(required_fm) if required_fm is not None else list(wiki_lint.DEFAULT_REQUIRED_FM)
             findings = wiki_lint.lint(wiki_lint.collect_pages(root), soft_cap, hard_cap, fields, suggest_pages,
-                                      suggest_min, soft_char_cap, hard_char_cap)
+                                      suggest_min, soft_char_cap, hard_char_cap,
+                                      index_entries=wiki_lint.collect_index_entries(root),
+                                      allowed_tags=allowed_tags)
             result = plain(findings)
             result["graph"] = lint_graph(root) if graph else {"state": "skipped"}
             return result

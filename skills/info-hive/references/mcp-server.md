@@ -61,6 +61,7 @@ wiki のプラグインは、検索のためのローカルの MCP サーバー�
 | `soft_char_cap`、`hard_char_cap` | 10000、25000 | 空白を除いた文字数の上限（`--soft-char-cap`、`--hard-char-cap`）。`SCHEMA.md` が別の値を決めている wiki では、その値を渡す |
 | `required_fm` | `type`、`title`、`tags`、`created`、`updated` | 必須の frontmatter のフィールドの配列 |
 | `suggest_pages`、`suggest_min` | 偽、5 | 多くのページに出てくるのに専用のページがない語を挙げる |
+| `allowed_tags` | なし | `SCHEMA.md` の「タグの体系」に並ぶタグの配列（`--allowed-tags`）。渡すと体系にないタグを `unknown_tags` に挙げる。省くか空にするとタグの検査をせず、`summary.unknown_tags` は `null` になる |
 | `graph` | 真 | グラフの lint も行う |
 
 結果の `graph` の `state` は次のどれかになる。

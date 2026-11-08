@@ -6,6 +6,21 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-09
+
+### Added
+
+- lint（`wiki_lint.py` と MCP のツール `lint`）に 4 つの検査を足した。どれも報告するだけで、wiki は直さない。
+  - `index_type_mismatch`: 索引の種類の見出し（「ソース」「エンティティ」「コンセプト」「シンセシス」と英語の見出し）の下に、別の `type` のページが並んでいるもの。たとえば「シンセシス」の欄にある `type: "source"` のページである。分割した索引（`indexes/`）はファイル名を種類として読む。読むのは見出しの下のリストの項目の最初の wikilink だけで、冒頭の説明文の例示や要約の中のリンクは数えない。これまで lint は `index.md` を読んでいなかったので、この誤りを見つけられなかった。
+  - `unresolved_sources`: frontmatter の `sources:` に、ないページ（`missing`）か、source でないページ（`not_source`）を書いているもの。
+  - `missing_raw`: source ページの `raw:` の原本がないもの。相対パスは wiki のルート、wiki の親、ページのディレクトリのどれかを基準にして見つかればよく、rag が書く絶対パスはそのまま確かめる。URL は見ない。
+  - `unknown_tags`: `SCHEMA.md` のタグの体系にないタグ。体系は `--allowed-tags`（ツールでは `allowed_tags`）で渡す。渡さないとこの検査はせず、`summary.unknown_tags` は `null` になる。`/wiki:lint` は `SCHEMA.md` の「タグの体系」に並ぶタグを渡す。
+- `SCHEMA.md` のひな形の「タグの体系」に、lint がここのタグで体系の外のタグを指摘することを書いた。既存の wiki の `SCHEMA.md` は書き換えない。
+
+### Changed
+
+- `wiki_lint.py --json` とツール `lint` の結果に、上の 4 つのキーと、`summary` の同じ名前の件数が加わった。`summary.unknown_tags` は、検査しなかったときに `null` になる。
+
 ## [0.6.1] - 2026-11-07
 
 ### Fixed
@@ -162,7 +177,9 @@
 - 移植元の調査メモ `research/` と、移植元の英語の評価セットでの測定記録（`eval/decisions/results-*.json`）は取り込んでいない。
 - Paperclip 連携は移植元の v4.0.0 で削除されており、info-hive にもない。
 
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/to884/info-hive-wiki/compare/v0.6.1...v0.7.0
+[0.6.1]: https://github.com/to884/info-hive-wiki/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/to884/info-hive-wiki/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/to884/info-hive-wiki/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/to884/info-hive-wiki/compare/v0.4.1...v0.4.2
