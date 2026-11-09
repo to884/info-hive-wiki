@@ -276,7 +276,8 @@ def lint(pages: list[dict], ontology: dict) -> dict:
     # 抽出後に、型付きの（暗黙でない）エッジが1本もつながっていないページ。
     # ソースのノードは対象外である（暗黙のエッジでつながるため）。
     # 主語はページで引く（スラッグで引くと、別のディレクトリの同じスラッグのページのノードになる）。
-    # node_by_id には node_id ごとに最初のページだけがあり、extract の build_nodes と同じページを選ぶ。
+    # node_by_id には node_id ごとに最初のページだけがあり、node_id が文字列なら extract の build_nodes と
+    # 同じページを選ぶ（lint は node_id を str() でそろえるので、1 と "1" のような値では食い違う）。
     extracted_edges = _extract.build_edges(
         pages, {n["disk_rel_path"]: n["id"] for n in node_by_id.values()})
     typed_node_refs: set[str] = set()
