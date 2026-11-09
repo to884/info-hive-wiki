@@ -220,6 +220,30 @@ wiki をセットアップしたら、どの Markdown ビューアーでもペ�
 
 ツールには Python 3.10 以上と `uv` が必要である。初期化とアップグレードでは `setup_wiki.py` を呼び出す。その PEP 723 の環境では、FastEmbed 0.8.0、sqlite-vec 0.1.9、PyYAML 6.0.3 のバージョンを固定しており、モデルをキャッシュし、wiki のインデックス全体を同期する。検索、グラフの lint、グラフの抽出も、それぞれバージョンを固定したスクリプトのメタデータを持つ。語彙ベースの `wiki_search.py --no-embed`、`wiki_lint.py`、`wiki_stats.py`、グラフのクエリは、標準ライブラリだけの Python で直接実行できる。同梱のスクリプトは、インストール後は `skills/info-hive/scripts/` にある。
 
+## トラブルシューティング
+
+### 社内ネットワークで、wiki の MCP サーバーが `CONNECTION_CLOSED` で起動しない
+
+TLS を検査する社内ネットワークでは、PyPI への通信の証明書が、OS の証明書ストアにだけある社内の CA で署名されていることがある。`uv` は既定で同梱の証明書を使い、OS の証明書ストアを見ないので、依存を取得できずに `invalid peer certificate: UnknownIssuer` で失敗する。Claude Code には `CONNECTION_CLOSED` とだけ表示される。
+
+MCP サーバーの入口（`wiki_mcp_launch.py`）は、この失敗を見つけると、OS の証明書ストアを使って（`UV_SYSTEM_CERTS=true`。`UV_SYSTEM_CERTS` を知らない古い uv では `UV_NATIVE_TLS=true`）1 回だけやり直す。中継がサーバーの環境を用意するときも同じである。それでも失敗したときは、理由と対処を次のログに書く（uv の出力は、入口では標準エラーに、サーバーの環境では同じディレクトリの `server.log` に書く）。
+
+- Windows: `%LOCALAPPDATA%\info-hive\logs\launch.log`
+- macOS、Linux: `~/.local/share/info-hive/logs/launch.log`（`XDG_DATA_HOME` があればその下）
+
+`/wiki:lint` などのコマンドがエージェントに実行させる `uv run --script` は、入口を通らないので、このやり直しがない。どの入口でも動くように、`uv` に OS の証明書ストアを使わせる設定を、次のどちらかで入れる。
+
+- 環境変数 `UV_SYSTEM_CERTS=true` を、ユーザーの環境変数として設定する。古い uv では `UV_NATIVE_TLS=true` である。どちらの名前を読むかは、`uv sync --help` の `[env: ...]` で分かる。
+- uv のユーザーの設定ファイルに `system-certs = true`（古い uv では `native-tls = true`）を書く。置き場所は、Windows では `%APPDATA%\uv\uv.toml`、macOS と Linux では `~/.config/uv/uv.toml`（`XDG_CONFIG_HOME` があれば `$XDG_CONFIG_HOME/uv/uv.toml`）である。
+
+社内の CA が OS の証明書ストアにもないときは、環境変数 `SSL_CERT_FILE` に CA の証明書のファイルを指定する。
+
+設定したら Claude Code を起動し直す。Claude Code は MCP サーバーの起動の失敗を約 15 分記録し、そのあいだは接続し直さない。待たずに確かめるときは、次のコマンドを手で実行する。中継とサーバーの環境を用意してサーバーを起動し、トークンを除いた `server.json` の中身を表示する。終了コードが 0 なら、中継とサーバーの環境がそろい、サーバーが動いている。ただし、環境がすでにそろっていてサーバーが動いていれば、依存を取得しないので、証明書の設定を確かめたことにはならない。初めてのときはサーバーの依存（約 1 GB）を取得するので、数分かかる。
+
+```
+uv run --quiet --script <プラグインのパス>/skills/info-hive/scripts/wiki_mcp_launch.py --ensure
+```
+
 ## クレジット
 
 info-hive の土台は、Praney Behl の [llm-wiki-plugin](https://github.com/praneybehl/llm-wiki-plugin) である（[移植元](#移植元)を参照）。以下は、移植元が挙げているクレジットである。

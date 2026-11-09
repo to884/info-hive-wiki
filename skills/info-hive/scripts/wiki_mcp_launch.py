@@ -12,6 +12,9 @@
 
 - 標準入力と標準出力は MCP の通信に使うので、そのまま中継に渡す。uv の出力は標準エラーに書く。
 - 引数はそのまま中継に渡す（`--ensure` など）。終了コードは中継のものを返す。
+- 中継の環境を用意できなかったときは、理由を標準エラーと `<データの置き場所>/logs/launch.log` に書いて止まる。
+  uv が TLS 証明書を検証できなかったとき（TLS を検査する社内ネットワーク）は、OS の証明書ストアを使って
+  1 回だけやり直す（wiki_mcp_common._uv_sync）。
 
 CLAUDE_PLUGIN_ROOT を持たないホスト（Codex など）は、このファイルのパスを指定して起動する。
 """
@@ -38,7 +41,10 @@ def prepare(force: bool = False) -> str | None:
     try:
         return common.prepare_script(RELAY, output=sys.stderr, timeout=PREPARE_TIMEOUT, log=log, force=force)
     except Exception as exc:  # noqa: BLE001 - 理由をホストのログに残して止まる
-        log(f"中継の環境を用意できなかった: {type(exc).__name__}: {exc}")
+        message = f"中継の環境を用意できなかった: {type(exc).__name__}: {exc}"
+        log(message)
+        if not isinstance(exc, common.UvTlsError):  # UvTlsError は _uv_sync が記録済み
+            common.record_failure(message)
         return None
 
 

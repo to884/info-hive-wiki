@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import re
@@ -303,10 +304,119 @@ def env_lock_path(script: Path) -> Path:
     return Path(lines[-1]) / "info-hive-locks" / f"env-{Path(script).stem}-{digest}.lock"
 
 
-def _uv_sync(script: Path, *, reinstall: bool, output, timeout: float) -> int:
+# uv に OS の証明書ストアを使わせる環境変数。UV_NATIVE_TLS は古い名前で、古い uv はこちらしか読まない。
+# どちらかがあれば利用者が決めたものとみなす。
+SYSTEM_CERTS_ENV = "UV_SYSTEM_CERTS"
+NATIVE_TLS_ENV = "UV_NATIVE_TLS"
+_TLS_USER_ENVS = (SYSTEM_CERTS_ENV, NATIVE_TLS_ENV)
+# uv が TLS 証明書を検証できなかったときの出力の句（小文字で比べる）。uv の版で文言が変わりうるので、いくつかを見る。
+# `--system-certs` のような短い断片は、パスなどに含まれて誤判定しうるので使わない。誤判定すると、壊れた環境を
+# 入れ直さずに止まってしまう。
+_TLS_ERROR_MARKERS = ("invalid peer certificate", "certificate verify failed", "use of system tls certificates",
+                      "use of native tls")
+
+
+class UvTlsError(RuntimeError):
+    """uv が TLS 証明書を検証できず、依存を取得できなかった。環境を入れ直しても直らない。"""
+
+
+def is_tls_error(text: str) -> bool:
+    lowered = text.lower()
+    return any(marker in lowered for marker in _TLS_ERROR_MARKERS)
+
+
+def tls_error_message(script: Path, user_setting: str | None) -> str:
+    tried = (f"{user_setting} が設定されているので、そのまま止まる。" if user_setting else
+             "OS の証明書ストアを使ってやり直しても失敗した。")
+    return (f"uv が {script.name} の依存を取得するときに、TLS 証明書を検証できなかった。社内ネットワークなどで、"
+            "通信を検査するプロキシが OS の証明書ストアにだけある CA で証明書を差し替えていると起きる。"
+            f"{tried}対処: 環境変数 {SYSTEM_CERTS_ENV}=true（古い uv では {NATIVE_TLS_ENV}=true）を設定するか、"
+            "uv の設定ファイル（Windows は "
+            "%APPDATA%\\uv\\uv.toml、macOS と Linux は ~/.config/uv/uv.toml。XDG_CONFIG_HOME があれば "
+            "$XDG_CONFIG_HOME/uv/uv.toml）に system-certs = true（古い uv では native-tls = true）を書く。"
+            "CA が OS の証明書ストアにもないときは、環境変数 SSL_CERT_FILE に CA の証明書のファイルを指定する。"
+            "設定したら、ホスト（Claude Code など）を起動し直す。")
+
+
+def _write_output(output, data: bytes) -> None:
+    """取り込んだ uv の出力を output に書く。output は標準エラー（テキスト）か、ログのファイル（バイナリ）。"""
+    if not data or output is None:
+        return
+    if isinstance(output, io.TextIOBase):
+        output.write(data.decode("utf-8", "replace"))
+    else:
+        output.write(data)
+    output.flush()
+
+
+def record_failure(message: str) -> None:
+    """失敗の理由を logs/launch.log に残す。ホストは標準エラーを利用者に見せないことがある（Claude Code は
+    CONNECTION_CLOSED とだけ表示する）ので、利用者が後から読める場所に書く。書けなくても止まらない。"""
+    try:
+        logs_dir().mkdir(parents=True, exist_ok=True)
+        with open(logs_dir() / "launch.log", "a", encoding="utf-8", newline="\n") as handle:
+            handle.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}\n")
+    except OSError:
+        pass
+
+
+def _run_uv(command: list[str], env: dict, output, timeout: float) -> tuple[int, str]:
+    try:
+        out = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             timeout=timeout, env=env)
+    except subprocess.TimeoutExpired as exc:
+        # 待ちきれなかったときも、それまでの出力は残す。
+        _write_output(output, exc.stdout or exc.output or b"")
+        raise
+    _write_output(output, out.stdout)
+    return out.returncode, out.stdout.decode("utf-8", "replace")
+
+
+def system_certs_env(timeout: float = 60) -> str:
+    """この uv が OS の証明書ストアを使う設定として読む環境変数の名前。
+
+    新しい uv は UV_SYSTEM_CERTS を読み、UV_NATIVE_TLS には非推奨の警告を出す。古い uv は UV_SYSTEM_CERTS を
+    知らずに黙って無視し、UV_NATIVE_TLS だけを読む。`uv sync --help` が UV_SYSTEM_CERTS を挙げるかで決める。
+    """
+    try:
+        found = subprocess.run([uv_executable(), "sync", "--help"], stdin=subprocess.DEVNULL, capture_output=True,
+                               timeout=timeout, env={**os.environ, "PYTHONUTF8": "1"})
+    except (OSError, subprocess.SubprocessError):
+        return SYSTEM_CERTS_ENV
+    text = found.stdout.decode("utf-8", "replace")
+    return NATIVE_TLS_ENV if found.returncode == 0 and SYSTEM_CERTS_ENV not in text and NATIVE_TLS_ENV in text         else SYSTEM_CERTS_ENV
+
+
+def _uv_sync(script: Path, *, reinstall: bool, output, timeout: float, log=None) -> int:
+    """`uv sync --script` の終了コードを返す。TLS 証明書を検証できずに失敗したときは、利用者が
+    UV_SYSTEM_CERTS（または UV_NATIVE_TLS）を決めていなければ、OS の証明書ストアを使って 1 回だけやり直す。
+    環境変数の名前は uv の版で選ぶ（system_certs_env）。
+
+    uv は既定で同梱の証明書を使い、OS の証明書ストアを見ない。TLS を検査する社内ネットワークでは、PyPI への
+    通信の証明書が OS にだけある CA で署名されているので、既定のままでは必ず失敗する。OS の証明書ストアを
+    いつも使わないのは、uv がそちらを遅いとしている（特に macOS）ためである。やり直しで直ったら、この
+    プロセスの環境変数にも入れ、以後の uv の呼び出しと子のプロセス（中継が用意するサーバーの環境）で使う。
+    それでも証明書の検証に失敗したら UvTlsError にする。環境を入れ直しても直らないので、入れ直しに進まない。
+    """
     command = [uv_executable(), "sync", "--quiet", *(["--reinstall"] if reinstall else []), "--script", str(script)]
-    return subprocess.run(command, stdin=subprocess.DEVNULL, stdout=output, stderr=output, timeout=timeout,
-                          env={**os.environ, "PYTHONUTF8": "1"}).returncode
+    env = {**os.environ, "PYTHONUTF8": "1"}
+    code, text = _run_uv(command, env, output, timeout)
+    if code == 0 or not is_tls_error(text):
+        return code
+    user_setting = next((f"{name}={os.environ[name]}" for name in _TLS_USER_ENVS
+                         if os.environ.get(name, "").strip()), None)
+    if user_setting is None:
+        name = system_certs_env()
+        if log:
+            log(f"uv が TLS 証明書を検証できなかったので、OS の証明書ストアを使ってやり直す（{name}=true）")
+        code, text = _run_uv(command, {**env, name: "true"}, output, timeout)
+        if code == 0 or not is_tls_error(text):
+            os.environ[name] = "true"
+            return code
+    message = tls_error_message(script, user_setting)
+    # 中継がサーバーの環境を用意するときも、利用者が読む場所（launch.log）に残す。
+    record_failure(f"UvTlsError: {message}")
+    raise UvTlsError(message)
 
 
 def _imports_ok(python: str, script: Path, output, timeout: float) -> bool:
@@ -334,16 +444,17 @@ def prepare_script(script: Path, *, output, timeout: float, log, force: bool = F
       スクリプトごとのロックを取り、ほかのセッションが先に直していないかを `uv sync` と import の確認
       （`<script> --check-imports`。RECORD との照合と import）で確かめる。直っていなければ `--reinstall` で入れ直し、もう一度確かめる。
       ロックの中で確かめ直すので、2 つのセッションが同時に入れ直して、動いている環境を壊すことはない。
+    - uv が TLS 証明書を検証できなかったとき（_uv_sync）: 環境は壊れていないので入れ直さず、UvTlsError を送り出す。
     """
-    if not force and _uv_sync(script, reinstall=False, output=output, timeout=timeout) == 0:
+    if not force and _uv_sync(script, reinstall=False, output=output, timeout=timeout, log=log) == 0:
         return script_python(script)
     with FileLock(env_lock_path(script), timeout=timeout):
-        if _uv_sync(script, reinstall=False, output=output, timeout=timeout) == 0:
+        if _uv_sync(script, reinstall=False, output=output, timeout=timeout, log=log) == 0:
             python = script_python(script)
             if _imports_ok(python, script, output, timeout):
                 return python
         log(f"{script.name} の環境が作りかけで壊れているかもしれないので、入れ直す")
-        code = _uv_sync(script, reinstall=True, output=output, timeout=timeout)
+        code = _uv_sync(script, reinstall=True, output=output, timeout=timeout, log=log)
         if code != 0:
             raise RuntimeError(f"{script.name} の環境を入れ直せなかった（uv sync --reinstall の終了コード {code}）")
         python = script_python(script)

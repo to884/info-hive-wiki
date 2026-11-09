@@ -155,6 +155,7 @@ CLI の埋め込み検索は、MCP のサーバーとは別のモデル（multil
 ## 困ったとき
 
 - サーバーが起動しない: `logs/server.log` を見る。`uv run --script wiki_mcp_launch.py --ensure` を実行すると、サーバーを確かめ（なければ起動し）、トークンを除いた `server.json` の中身を表示する。
+- 社内ネットワークで起動しない（`logs/launch.log` か uv の出力に `invalid peer certificate` や `UnknownIssuer` がある）: TLS を検査するプロキシの CA を uv が信頼していない。入口と中継は `UV_SYSTEM_CERTS=true`（古い uv では `UV_NATIVE_TLS=true`）で 1 回だけやり直すが、CLI の `uv run --script` はやり直さない。ユーザーに、環境変数 `UV_SYSTEM_CERTS=true` か、uv の `uv.toml` の `system-certs = true` を設定してもらう（README の「トラブルシューティング」）。その場で CLI を動かすときは、`uv run --system-certs --script ...` のように `--system-certs`（古い uv では `--native-tls`）を付ける。
 - プラグインを更新した: 中継は `server.json` のコードの版を見て、古いサーバーを止めて起動し直す。
 - uv の環境が壊れた（`Failed to read metadata from installed package` のような uv のエラーが出る）: 次の 2 つを実行して入れ直す。入口とサーバーは、起動のたびに同じことを自動で試す。
 
