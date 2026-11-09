@@ -275,7 +275,10 @@ def lint(pages: list[dict], ontology: dict) -> dict:
     # 孤立した型付きノード。`graph:` の frontmatter を宣言しているのに、
     # 抽出後に、型付きの（暗黙でない）エッジが1本もつながっていないページ。
     # ソースのノードは対象外である（暗黙のエッジでつながるため）。
-    extracted_edges = _extract.build_edges(pages, {n["slug"]: n["id"] for n in node_by_id.values()})
+    # 主語はページで引く（スラッグで引くと、別のディレクトリの同じスラッグのページのノードになる）。
+    # node_by_id には node_id ごとに最初のページだけがあり、extract の build_nodes と同じページを選ぶ。
+    extracted_edges = _extract.build_edges(
+        pages, {n["disk_rel_path"]: n["id"] for n in node_by_id.values()})
     typed_node_refs: set[str] = set()
     for e in extracted_edges:
         if e["predicate"] in IMPLICIT_PREDICATES:

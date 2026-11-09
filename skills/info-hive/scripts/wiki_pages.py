@@ -227,6 +227,18 @@ def build_link_index(pages: list[dict]) -> tuple[dict, set]:
     return by_path, {p["slug"] for p in pages}
 
 
+def link_lookup(link: str) -> "tuple[str, str] | None":
+    """wikilink を、何で引くかに分ける。("path", .md を除いた相対パス) か ("slug", スラッグ) を返す。
+
+    パスのない形（[[kalman-filter]]）はスラッグで、パスを付けた形（[[entities/kalman-filter]]）は
+    そのパスで引く。行き先が空なら None を返す。
+    """
+    target = clean_link_target(link)
+    if not target:
+        return None
+    return ("path", target) if "/" in target else ("slug", target)
+
+
 def resolve_link(link: str, by_path: dict, by_slug) -> "str | None":
     """wikilink を、それが指すページのスラッグに解決する。解決できなければ None を返す。
 
@@ -235,10 +247,11 @@ def resolve_link(link: str, by_path: dict, by_slug) -> "str | None":
     [[raw/foo]] が sources/foo.md に黙って結び付くことはない。照合は大文字と小文字を区別する。
     誤った「リンク切れ」の報告は目に見えて害がないが、誤った解決は気づかれない。
     """
-    target = clean_link_target(link)
-    if not target:
+    lookup = link_lookup(link)
+    if lookup is None:
         return None
-    if "/" in target:
+    kind, target = lookup
+    if kind == "path":
         return by_path.get(target)
     return target if target in by_slug else None
 

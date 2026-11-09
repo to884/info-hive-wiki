@@ -69,6 +69,7 @@ from wiki_pages import (  # noqa: E402
     clean_link_target,
     extract_wikilinks,
     iter_page_files,
+    link_lookup,
 )
 from wiki_pages import resolve_link as resolve_link_slug  # noqa: E402
 
@@ -238,10 +239,24 @@ def derive_node_type(meta: dict, ontology: dict) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def page_key(p: dict) -> str:
+    """ページを 1 つに決めるキー。ディスク上の相対パスを使う。
+
+    スラッグは別のディレクトリのページと重なり、NFC にそろえた rel_path も、NFC と NFD の名前の違いだけの
+    2 つのファイルで重なるので、どちらもページを 1 つに決めない。
+    """
+    return p.get("disk_rel_path") or p["rel_path"]
+
+
 def build_nodes(pages: list[dict], ontology: dict) -> tuple[list[dict], dict, list[dict]]:
-    """ノードのリスト、スラッグから node_id を引くインデックス、別名の行を作る。(nodes, slug_to_id, aliases) を返す。"""
+    """ノードのリスト、ページから node_id を引くインデックス、別名の行を作る。(nodes, page_node_ids, aliases) を返す。
+
+    page_node_ids のキーは page_key(p) である。node_id が前のページと重なってノードにならなかったページは
+    含まない。スラッグでは引かない。別のディレクトリに同じスラッグのページがあると、別のページのノードを
+    引いてしまうからである。
+    """
     nodes: list[dict] = []
-    slug_to_id: dict[str, str] = {}
+    page_node_ids: dict[str, str] = {}
     aliases: list[dict] = []
     seen_ids: set[str] = set()
 
@@ -272,11 +287,11 @@ def build_nodes(pages: list[dict], ontology: dict) -> tuple[list[dict], dict, li
             "canonical": bool(graph_meta.get("canonical", False)),
         }
         nodes.append(node)
-        slug_to_id[p["slug"]] = node_id
+        page_node_ids[page_key(p)] = node_id
         for alias in node["aliases"]:
             aliases.append({"alias": str(alias), "node_id": node_id})
 
-    return nodes, slug_to_id, aliases
+    return nodes, page_node_ids, aliases
 
 
 def edge_id(subject: str, predicate: str, obj: str, source: str | None, evidence: str | None) -> str:
@@ -305,19 +320,37 @@ def make_edge(*, subject, predicate, obj, source, evidence, confidence, status,
     }
 
 
-def build_edges(pages: list[dict], slug_to_id: dict[str, str]) -> list[dict]:
+def build_edges(pages: list[dict], page_node_ids: dict[str, str]) -> list[dict]:
+    """エッジを作る。page_node_ids は build_nodes が返す、page_key(p) から node_id を引くインデックス。
+
+    主語は、そのページ自身のノードである。リンクと `sources:` の行き先は、ページを 1 つに決められるときだけ
+    エッジにする。パスのない形が、同じスラッグの複数のページに当たるときは、どれにも寄せない（lint の
+    duplicate_slugs がその重なりを挙げる）。
+    """
     edges: list[dict] = []
     seen_ids: set[str] = set()
 
-    # パスを付けた wikilink を解決するためのインデックス。大文字と小文字を区別する、
-    # .md を除いた wiki からの相対パスからスラッグを引く。
-    path_to_slug: dict[str, str] = {}
+    # 行き先のページを引くインデックス。パスは .md を除いた wiki からの相対パス（NFC、大文字と小文字を区別）、
+    # スラッグはファイル名の stem である。どちらも、当たるページのキーをすべて並べる。
+    pages_by_path: dict[str, list[str]] = defaultdict(list)
+    pages_by_slug: dict[str, list[str]] = defaultdict(list)
     for p in pages:
         rel = p["rel_path"].replace("\\", "/")
         if rel.lower().endswith(".md"):
             rel = rel[:-3]
-        path_to_slug[rel] = p["slug"]
-    known_slugs = set(slug_to_id.keys())
+        pages_by_path[rel].append(page_key(p))
+        pages_by_slug[p["slug"]].append(page_key(p))
+
+    def only(keys: list[str] | None) -> str | None:
+        """ページがちょうど 1 つのときだけ、そのキーを返す。"""
+        return keys[0] if keys and len(keys) == 1 else None
+
+    def link_target(link: str) -> str | None:
+        lookup = link_lookup(link)
+        if lookup is None:
+            return None
+        kind, target = lookup
+        return only((pages_by_path if kind == "path" else pages_by_slug).get(target))
 
     def push(edge: dict) -> None:
         if edge["id"] in seen_ids:
@@ -326,8 +359,8 @@ def build_edges(pages: list[dict], slug_to_id: dict[str, str]) -> list[dict]:
         edges.append(edge)
 
     for p in pages:
-        slug = p["slug"]
-        subject_id = slug_to_id.get(slug)
+        here = page_key(p)
+        subject_id = page_node_ids.get(here)
         if not subject_id:
             continue
         meta = p["meta"]
@@ -362,11 +395,11 @@ def build_edges(pages: list[dict], slug_to_id: dict[str, str]) -> list[dict]:
         # 2. 本文の wikilink から作る mentions エッジ。
         seen_targets: set[str] = set()
         for link in p["links"]:
-            target_slug = resolve_link_slug(link, path_to_slug, known_slugs)
-            if not target_slug or target_slug == slug:
+            target = link_target(link)
+            if not target or target == here:
                 continue
-            target_id = slug_to_id.get(target_slug)
-            if not target_id or target_id in seen_targets:
+            target_id = page_node_ids.get(target)
+            if not target_id or target_id == subject_id or target_id in seen_targets:
                 continue
             seen_targets.add(target_id)
             push(make_edge(
@@ -384,7 +417,8 @@ def build_edges(pages: list[dict], slug_to_id: dict[str, str]) -> list[dict]:
         # 3. frontmatter の `sources:` から作る sourced_from エッジ（ソースページ自身ではスキップする）。
         if meta.get("type") != "source":
             for src_slug in meta.get("sources") or []:
-                src_id = slug_to_id.get(str(src_slug))
+                src_key = only(pages_by_slug.get(str(src_slug)))
+                src_id = page_node_ids.get(src_key) if src_key else None
                 if not src_id:
                     continue
                 push(make_edge(
@@ -509,7 +543,7 @@ def build_sqlite(db_path: Path, nodes: list[dict], aliases: list[dict], edges: l
         conn.executescript("""
             CREATE TABLE nodes (
               id TEXT PRIMARY KEY,
-              slug TEXT NOT NULL UNIQUE,
+              slug TEXT NOT NULL,
               title TEXT NOT NULL,
               page_type TEXT NOT NULL,
               node_type TEXT NOT NULL,
@@ -687,8 +721,8 @@ def main():
         with common.extract_lock(out_dir):
             common.remove_stale_temps(out_dir, OUTPUT_NAMES)
             pages = collect_pages(args.wiki)
-            nodes, slug_to_id, aliases = build_nodes(pages, ontology)
-            edges = build_edges(pages, slug_to_id)
+            nodes, page_node_ids, aliases = build_nodes(pages, ontology)
+            edges = build_edges(pages, page_node_ids)
             write_outputs(out_dir, formats, nodes, aliases, edges)
     except common.ExtractBusy as exc:
         print(str(exc), file=sys.stderr)
