@@ -23,8 +23,9 @@ class SplitSectionsContractTest(unittest.TestCase):
         self.assertEqual(
             sections,
             [
-                {"heading_path": [], "level": 0, "text": "", "section_index": 0},
-                {"heading_path": ["Heading"], "level": 1, "text": "", "section_index": 1},
+                # links は、本文全体の解析から集めたセクションの wikilink（0.9.0 から。判定レイヤーが使う）。
+                {"heading_path": [], "level": 0, "text": "", "links": [], "section_index": 0},
+                {"heading_path": ["Heading"], "level": 1, "text": "", "links": [], "section_index": 1},
             ],
         )
 

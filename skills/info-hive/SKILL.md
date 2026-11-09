@@ -199,7 +199,8 @@ gist をめぐるコミュニティの議論で、このパターンがうまく
 - `scripts/init_wiki.py`: wiki を初期化またはアップグレードし、実行環境とインデックスのセットアップが確認できるまで完了としない
 - `scripts/setup_wiki.py`: `uv` を通じてバージョンを固定した FastEmbed、sqlite-vec、PyYAML をインストールし、ローカルのモデルをキャッシュし、パースとベクトルのインデックスを同期する
 - `scripts/wiki_search.py`: セクション単位のローカルのハイブリッド検索。JSON の証拠、フィルター、差分更新のキャッシュ、依存パッケージを使わない語彙ベースの検索への切り替えを備える
-- `scripts/wiki_lint.py`: 構造の健全性チェック（孤立ページ、リンク切れ、大きすぎるページ、frontmatter の検証、古い日付、`YYYY-MM-DD` でない日付）
+- `scripts/wiki_lint.py`: 構造の健全性チェック（孤立ページ、リンク切れ、大きすぎるページ、frontmatter の検証、古い日付、`YYYY-MM-DD` でない日付、大文字と小文字だけが違うページ）
+- `scripts/wiki_pages.py`: lint、検索、統計、グラフが共有する、ページの集合と wikilink の抜き出しと解決の規則。コードの中の `[[...]]` はリンクとして数えない。本文は同梱した `scripts/_vendor/` の markdown-it-py で読む
 - `scripts/wiki_stats.py`: wiki の規模（ページ数、行数、文字数）、種類別のページ数、リンク密度の簡単なまとめ。インデックスを分割するタイミングを決めるのに役立つ
 - `scripts/wiki_fetch.py`: Web ページを取得し、本文を Markdown にして画像とともに `raw/` に保存する。原文の HTML の SHA-256 を記録し、同じ内容の再取得を見分ける。翻訳と画像の説明はモデルが行う
 - `scripts/wiki_encoding.py`: テキストのソースの文字コード（UTF-8、Shift_JIS、EUC-JP、ISO-2022-JP）を調べ、必要なら UTF-8 に変換した別のファイルを書き出す。元のファイルは書き換えない

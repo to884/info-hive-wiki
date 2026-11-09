@@ -260,6 +260,8 @@ info-hive の土台は、Praney Behl の [llm-wiki-plugin](https://github.com/pr
 
 MIT。移植元の著作権表示（Praney Behl）を含む [LICENSE](./LICENSE) を参照。
 
+`skills/info-hive/scripts/_vendor/` には、Markdown の解析器 markdown-it-py と mdurl（どちらも MIT ライセンス）を同梱している。それぞれの著作権表示と許諾文は [_vendor/licenses/](./skills/info-hive/scripts/_vendor/licenses/) に、取得元と版は [_vendor/README.md](./skills/info-hive/scripts/_vendor/README.md) にある。
+
 ## コントリビュート
 
 Issue と PR を歓迎する。スキル本体は `skills/info-hive/`、スラッシュコマンドは `commands/` にある。[CONTRIBUTING.md](./CONTRIBUTING.md) を参照。PR を出す前に、同梱のスクリプトを小さなテスト用の wiki に対して実行し、何も壊れていないことを確かめてほしい。

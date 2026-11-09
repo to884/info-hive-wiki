@@ -10,6 +10,7 @@ frontmatter の文字列の値（配列の要素を含む）が二重引用符�
 索引（index.md と indexes/）の見出しと、その下に並ぶページの type の食い違い、`sources:` が
 source ページを指していないもの、source ページの `raw:` の原本がないもの、（--allowed-tags を
 渡した場合は）タグの体系にないタグも報告する。
+大文字と小文字だけが違うページとディレクトリも報告する。
 本文の画像（`![説明](../assets/x.svg)`）の参照先がないものも報告する。参照先はページのファイルが
 あるディレクトリを基準に解決する。ページの大きさは、コードフェンス（mermaid を含む）の中身と
 画像だけの行を除いて数える。
@@ -79,9 +80,20 @@ from wiki_text import (  # noqa: E402
     unquoted_string_keys,
 )
 import wiki_workspace  # noqa: E402
+# ページの集合とリンクの規則は wiki_pages の 1 か所に置く（ADR-0010 の決定の 1）。ほかのスクリプトと試験が
+# wiki_lint.resolve_link などの名前で使うので、同じ名前で読み込んでおく。
+from wiki_pages import (  # noqa: E402
+    SKIP_TOP_LEVEL_DIRS,
+    SKIP_TOP_LEVEL_FILES,
+    WIKILINK_RE,
+    case_only_duplicates,
+    clean_link_target,
+    extract_wikilinks,
+    iter_page_files,
+    resolve_link,
+)
 
 
-WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 MD_ESCAPE_RE = re.compile(r"\\([!-/:-@\[-`{-~])")
 URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*:")
 # Windows のドライブから始まる絶対パス（C:/Books/x.pdf、C:\Books\x.pdf）。URL_SCHEME_RE にも合うので先に見る。
@@ -100,48 +112,6 @@ KATAKANA_TERM_RE = re.compile(r"[\u30a1-\u30fa\u30fc]{3,}")
 KANJI_COMPOUND_RE = re.compile(r"[\u3005\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]{3,}")
 CAPITALIZED_PHRASE_RE = re.compile(r"\b([A-Z][a-zA-Z0-9]+(?:\s+[A-Z][a-zA-Z0-9]+){0,3})\b")
 
-
-def clean_link_target(link: str) -> str:
-    """wikilink から別名、アンカー、.md を取り除き、パスだけにする。
-
-    ファイル名と同じく NFC にそろえる。全角の「｜」「＃」は区切りとして扱わない（Obsidian と同じ）。
-    """
-    target = nfc(link).split("|", 1)[0]      # 表示用の別名があれば取り除く
-    target = target.split("#", 1)[0]    # 見出しのアンカーを取り除く
-    target = target.replace("\\", "/").strip().strip("/")
-    if target.lower().endswith(".md"):
-        target = target[:-3]
-    return target.strip()
-
-
-def resolve_link(link: str, by_path: dict, by_slug) -> "str | None":
-    """wikilink を、それが指すページのスラッグに解決する。リンク切れなら None を返す。
-
-    wikilink には、パスのない形（[[kalman-filter]]）とパスを付けた形（[[entities/kalman-filter]]）があり、
-    見出しのアンカーや明示的な .md が付くこともある。ページはファイル名のステムで識別されるので、
-    リンクの生のテキストで比べると、パスを付けた形をすべて見落とす。その結果リンク切れと報告され、
-    被リンクにも数えられないので、よく参照されているページまで孤立ページと誤って報告される。
-
-    ディレクトリの接頭辞は飾りではなく「制約」として扱う。パスを付けたリンクは、そのパスが
-    ちょうど存在する場合にだけ解決する。ステムだけの照合に切り替えると、[[raw/foo]] が
-    sources/foo.md に黙って結び付いてしまう。ソースページを raw ファイルにちなんで名付けている
-    wiki ならどこでも起きる衝突で、ツリーの外を指す本当のリンク切れを誤って合格にしてしまう。
-    解決できないと答えるのは安全だが、誤って解決するのは安全ではない。
-
-    照合は、どちらの形でも大文字と小文字を区別する。パスだけ（パスのないスラッグは除く）大文字と
-    小文字を同一視すると非対称になる。誤り方が2通りあるとすれば、誤った「リンク切れ」の報告は
-    目に見えて害がないが、誤った解決は気づかれない。
-    """
-    target = clean_link_target(link)
-    if not target:
-        return None
-    if "/" in target:
-        return by_path.get(target)
-    return target if target in by_slug else None
-
-
-SKIP_TOP_LEVEL_FILES = {"SCHEMA.md", "index.md", "log.md", "README.md"}
-SKIP_TOP_LEVEL_DIRS = {"indexes", "graph", "raw", ".evolution", "assets"}
 
 # 分割した索引（indexes/<type>.md、indexes/entities-people.md）のファイル名の `-` より前が表す type。
 INDEX_FILE_TYPES = {
@@ -348,12 +318,8 @@ def parse_frontmatter_raw(text: str) -> "tuple[dict, str | None, str, bool]":
 
 def collect_pages(wiki_root: Path) -> list[dict]:
     pages = []
-    for md_path in wiki_root.rglob("*.md"):
+    for md_path in iter_page_files(wiki_root):
         rel = md_path.relative_to(wiki_root)
-        if rel.parts[0] in SKIP_TOP_LEVEL_FILES or rel.parts[0] in SKIP_TOP_LEVEL_DIRS:
-            continue
-        if rel.name.startswith("."):
-            continue
         # 比べるときは NFC にそろえた / 区切りのパスを使う。ディスク上の名前のままのパスも残し、
         # 正規化すると同じ名前になる2つのファイルを、重複の報告で見分けられるようにする。
         rel_path = posix_rel(str(rel))
@@ -376,7 +342,8 @@ def collect_pages(wiki_root: Path) -> list[dict]:
         # 大きさは、コードフェンスの中身と画像だけの行を除いて数える（ADR-0005）。
         sized = strip_fences_and_images(text)
         line_count = sized.count("\n") + 1
-        links = [nfc(m.group(1).strip()) for m in WIKILINK_RE.finditer(body)]
+        # コードフェンスとインラインのコードの中の [[...]] は数えない（ADR-0010 の決定の 1）。
+        links = extract_wikilinks(body)
         pages.append({
             "path": str(md_path),
             "rel_path": rel_path,
@@ -435,6 +402,7 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         "missing_frontmatter": [],
         "malformed_frontmatter": [],
         "duplicate_slugs": [],
+        "case_only_duplicates": [],
         "stale_pages": [],
         "read_errors": [],
         "frontmatter_alias_conflicts": [],
@@ -473,6 +441,10 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
                 # Unicode の正規化の違いだけで名前が異なるファイルがある。
                 finding["normalization_collision"] = True
             findings["duplicate_slugs"].append(finding)
+
+    # 大文字と小文字だけが違うページとディレクトリ。NTFS と APFS の既定では、静的な書き出しで同じ場所を
+    # 取るので、閲覧の書き出しが接尾辞を足すか止まる（ADR-0010 の決定の 3）。前もって知らせる。
+    findings["case_only_duplicates"] = case_only_duplicates([p["rel_path"] for p in pages])
 
     # 被リンクの対応表
     inbound = defaultdict(set)
@@ -662,6 +634,7 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         "missing_frontmatter": len(findings["missing_frontmatter"]),
         "malformed_frontmatter": len(findings["malformed_frontmatter"]),
         "duplicate_slugs": len(findings["duplicate_slugs"]),
+        "case_only_duplicates": len(findings["case_only_duplicates"]),
         "stale_pages": len(findings["stale_pages"]),
         "read_errors": len(findings["read_errors"]),
         "frontmatter_alias_conflicts": len(findings["frontmatter_alias_conflicts"]),
@@ -703,6 +676,8 @@ def render_text(findings: dict) -> str:
         ("malformed_frontmatter", "frontmatter を読めない", lambda f: f"  - {f['path']}"),
         ("duplicate_slugs", "重複したスラッグ", lambda f: f"  - {f['slug']}: {', '.join(f['paths'])}"
          + ("  （Unicode の正規化の違いだけで名前が異なる）" if f.get("normalization_collision") else "")),
+        ("case_only_duplicates", "大文字と小文字だけが違うページかディレクトリ（閲覧の書き出しで同じ場所を取る）",
+         lambda f: f"  - {'、'.join(f['paths'])}" + ("  （ディレクトリ）" if f["kind"] == "dir" else "")),
         ("stale_pages", "更新の止まったページ（よくリンクされているのに 90 日以上更新されていない）",
          lambda f: f"  - {f['path']}  （更新 {f['updated']}、{f['age_days']} 日前、被リンク {f['inbound_count']}）"),
         ("read_errors", "読み込めないファイル", lambda f: f"  - {f['path']}: {f['error']}"),

@@ -549,8 +549,10 @@ def contradiction_pairs(wiki: Path, max_pairs: int) -> list[tuple[str, dict, dic
         title = page["meta"].get("title") or page["slug"]
         for section in page["sections"]:
             linked = set()
-            for m in ws.WIKILINK_RE.finditer(section["text"]):
-                slug = ws.resolve_link(m.group(1), by_path, by_slug)
+            # セクションの links は、本文全体の解析から集めたもの（コードの中と参照リンクの定義の中は数えない）。
+            # セクションの本文だけを読み直すと、別のセクションの参照リンクの定義が見えず、ないリンクが生まれる。
+            for link in section["links"]:
+                slug = ws.resolve_link(link, by_path, by_slug)
                 if slug in entity_titles and slug != page["slug"]:
                     linked.add(slug)
             text = section["text"].strip()

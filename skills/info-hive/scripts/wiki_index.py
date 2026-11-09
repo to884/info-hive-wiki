@@ -814,7 +814,8 @@ def section_hash(section: dict) -> str:
 def stat_signature(root: Path) -> str:
     """wiki の Markdown のパス、大きさ、更新時刻から作る印。変わっていなければ読み直さない。"""
     digest = hashlib.sha256()
-    for path in sorted(root.rglob("*.md")):
+    # ページの走査（wiki_pages.iter_page_files）と同じく、拡張子の大文字と小文字を問わない。
+    for path in sorted(root.rglob("*.[mM][dD]")):
         try:
             st = path.stat()
         except OSError:
