@@ -6,6 +6,14 @@
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-09
+
+### Fixed
+
+- `init_wiki.py` が書き出す `SCHEMA.md` と `graph/README.md` のコマンドの例で、スクリプトのパスが、wiki を使う側のどこから実行しても解決しなかった。ひな形は `scripts/wiki_graph_extract.py`（スキルのディレクトリから見たパス）と `skills/info-hive/scripts/wiki_search.py`（プラグインから見たパス）を混ぜて書いていたが、どちらも、プロジェクトのルートからは見つからない。
+  - ひな形では `<skill-root>/scripts/...` と書き、同じファイルの中で、`<skill-root>` はインストールした info-hive スキルのディレクトリ（Claude Code のプラグインでは `${CLAUDE_PLUGIN_ROOT}/skills/info-hive`）の実際のパスに置き換えると説明するようにした。`${CLAUDE_PLUGIN_ROOT}` はプラグインのコマンドの中で展開されるもので、書き出したファイルの中では展開されず、シェルでも設定されていないことがあるので、そのまま書かない。初期化のときに実際のパスを書き込むこともしない。プラグインの版ごとにパスが変わり、マシンにも依存するからである。
+  - 既存の wiki の `SCHEMA.md` と `graph/README.md` は書き換えない。見出しは変えていないので、`init_wiki.py --upgrade` も差分を案内しない。直したいときは、ひな形（`assets/SCHEMA.md.template` の「Retrieval」と「Graph layer」、`assets/graph_README.md.template`）に合わせて手で直す。
+
 ## [0.9.0] - 2026-11-09
 
 ### Added
