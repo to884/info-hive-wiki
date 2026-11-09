@@ -155,12 +155,13 @@ wiki が約 150 ページを超えるか、`index.md` が 300 行を超えたら
 
 ## Retrieval
 
-- 検索は、既定でセクション単位のハイブリッド検索である: `uv run --script skills/info-hive/scripts/wiki_search.py "query" --json`。
+- 検索は、既定でセクション単位のハイブリッド検索である: `uv run --script <skill-root>/scripts/wiki_search.py "query" --json`。
+- このファイルのコマンドの `<skill-root>` は、インストールした info-hive スキルのディレクトリ（`SKILL.md` のあるディレクトリ）の実際のパスに置き換える。Claude Code のプラグイン `wiki` では `${CLAUDE_PLUGIN_ROOT}/skills/info-hive` にあたるが、この変数はプラグインのコマンドの中で展開されるもので、このファイルの中では展開されず、シェルでも設定されていないことがある。コマンドはプロジェクトのルートから実行する。
 - Semantic backend: local FastEmbed + sqlite-vec（`intfloat/multilingual-e5-small`、384 次元）。wiki やクエリのテキストがマシンの外に出ることはない。
 - セマンティック検索を初めて使うときに、モデルのファイルを `~/.cache/info-hive/fastembed/` にダウンロードする。モデルのキャッシュの場所を変えるには `FASTEMBED_CACHE_PATH` を設定する。
 - `wiki/.wiki-cache/` には、作り直せる検索用のファイルを置く。`search-index.json`（パースキャッシュ）と `embeddings.sqlite`（セクションのメタデータと sqlite-vec のベクトル）である。削除してかまわない。手で編集してはならない。gitignore の対象である。
 - ベクトルのインデックスは内容のハッシュで管理する。新しいセクションと変更されたセクションだけをベクトル化し直し、削除されたセクションは取り除き、モデルやスキーマが変わったときは自動で作り直す。
-- 依存パッケージを使わない語彙ベースの検索: `python skills/info-hive/scripts/wiki_search.py "query" --no-embed`（Python で直接実行すると、PEP 723 の依存関係の解決を経由しない）。ローカルのバックエンドがない場合や失敗した場合も、コマンドは失敗せずに語彙ベースの検索に切り替わる。
+- 依存パッケージを使わない語彙ベースの検索: `python <skill-root>/scripts/wiki_search.py "query" --no-embed`（Python で直接実行すると、PEP 723 の依存関係の解決を経由しない）。ローカルのバックエンドがない場合や失敗した場合も、コマンドは失敗せずに語彙ベースの検索に切り替わる。
 - 語彙ベースの検索は日本語に対応している。かなと漢字は2文字ずつ重ねて切り出し、漢字は1文字単位でも索引に入れる。日本語のクエリは、分かち書きせずにそのまま渡す。
 
 ## Graph layer
@@ -172,7 +173,7 @@ wiki が約 150 ページを超えるか、`index.md` が 300 行を超えたら
 - `wiki/graph/graph.sqlite`: 生成されるファイル。既定で gitignore の対象である。
 - `wiki/graph/graph.graphml`: 生成されるファイル。差分を見たい場合だけ git で管理する。
 
-グラフは `scripts/wiki_graph_extract.py` で Markdown から再現性のある形で生成できる。正本は Markdown なので、グラフはいつ削除しても、知識を失わずに作り直せる。
+グラフは `<skill-root>/scripts/wiki_graph_extract.py` で Markdown から再現性のある形で生成できる。正本は Markdown なので、グラフはいつ削除しても、知識を失わずに作り直せる。
 
 ## Claim destinations
 
