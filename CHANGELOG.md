@@ -6,6 +6,21 @@
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-09
+
+### Added
+
+- lint（`wiki_lint.py` と MCP のツール `lint`）に `case_only_duplicates` を足した。`concepts/Kalman.md` と `concepts/kalman.md`、`Concepts/` と `concepts/` のように、大文字と小文字だけが違うページかディレクトリを挙げる。Windows と macOS の既定のファイルシステムでは同じ場所を取るので、閲覧のための書き出しで困る。1 件は `{"kind": "file" | "dir", "paths": [...]}` で、`summary.case_only_duplicates` に件数が入る。報告するだけで、wiki は直さない。
+- ページの集合と wikilink の抜き出しと解決の規則を、新しい `scripts/wiki_pages.py` の 1 か所にまとめた。lint、検索（MCP の `query` の索引を含む）、統計、グラフ、判定レイヤーがこれを使う。閲覧（browse）の準備である（ADR-0010 の決定の 1）。
+- Markdown の解析器 markdown-it-py 3.0.0 と mdurl 0.1.2（どちらも MIT ライセンス）を、`scripts/_vendor/` に同梱した。lint と統計は、今までどおり何も入れずに動く。取得元、SHA-256、ライセンスは `scripts/_vendor/README.md` にある。
+
+### Changed
+
+- コードブロック（フェンスと字下げ）とインラインのコードの中の `[[...]]` を、wikilink として数えなくなった。lint のリンク切れと被リンク、検索の `links`、グラフの `mentions` のエッジ、統計のリンクの数、判定レイヤーの矛盾の候補が変わる。本文は、閲覧が使うものと同じ Markdown の解析器（markdown-it-py 3.0.0、commonmark、表を有効）で読み、本文の文字とするところだけからリンクを拾う。引用とリストの入れ子の中のフェンス、行をまたぐコードスパン、表のセル、参照リンクの定義（`[ref]: url "タイトル"`）の中も、閲覧と同じに扱う。`\[\[x]]` のように角括弧を escape したものは wikilink として数え、`[[R&amp;D]]` のような文字参照は元の文字（`R&D`）に戻してから解決する。
+- 検索（`wiki_search.py` と MCP の `query`）が、wiki の最上位の `README.md` と `assets/` の中の Markdown を対象にしなくなった。lint と統計は `.wiki-cache/` の中の Markdown を、グラフは `assets/` と `.wiki-cache/` の中の Markdown を、ページとして数えなくなった。どれも、lint が数えていたページの集合にそろえた。外れるページがある wiki では、検索の BM25 の文書数が変わるので、残ったページの順位も変わりうる。MCP の `get_page` は `README.md` を返さなくなった。
+- 検索のセクションの分割が、コードブロックの中の `#` と、`#　見出し` のように `#` のあとが全角空白の行で分かれなくなった（閲覧でも見出しにならない）。検索のパースキャッシュ（`search-index.json`）は、形式の番号を上げたので自動で作り直される。
+- グラフ層を使っている wiki は、`wiki_graph_extract.py` でグラフを作り直す。0.8.0 で作った `graph/graph.sqlite` などは、作り直すまで、コードの中の `[[...]]` によるエッジと、`assets/` の中のノードを含んだままである。MCP のツール `graph` も、作り直すまで古い結果を返す。
+
 ## [0.8.0] - 2026-11-09
 
 ### Added
