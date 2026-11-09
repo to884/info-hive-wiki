@@ -68,14 +68,27 @@ from wiki_pages import (  # noqa: E402
     WIKILINK_RE,
     clean_link_target,
     extract_wikilinks,
+    build_page_index,
+    classify_source_ref,
     iter_page_files,
+    link_candidates,
     link_lookup,
+    ref_values,
 )
 from wiki_pages import resolve_link as resolve_link_slug  # noqa: E402
 
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
 DEFAULT_FORMATS = ["jsonl", "sqlite", "graphml"]
+
+# build_nodes と build_edges の診断の種類。グラフの lint は、同じ名前の検出結果として挙げる。
+DIAGNOSTIC_LABELS = {
+    "duplicate_node_id": "同じ node_id のページ",
+    "ambiguous_object": "目的語の node_id を持つページが複数ある関係",
+    "ambiguous_source": "sources: の値に当たるページが複数ある",
+    "unresolved_source": "sources: の値に当たるページがない",
+    "order_dependent_edge_ids": "並べ替えるとエッジの ID が入れ替わりうる関係の項目",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -163,7 +176,9 @@ def collect_pages(wiki_root: Path) -> list[dict]:
             # スラッグとパスは NFC にそろえる。lint が重複を報告するときのために、
             # ディスク上の実際のパスも disk_rel_path に残しておく。
             "rel_path": posix_rel(str(rel)),
-            "disk_rel_path": str(rel).replace("\\", "/"),
+            # as_posix は Windows の区切りだけを / にする。Linux でファイル名に含まれる \ は、そのまま残す
+            # （/ に替えると、concepts/a\b.md が concepts/a/b.md と同じキーになる）。
+            "disk_rel_path": rel.as_posix(),
             "slug": nfc(md_path.stem),
             "meta": meta,
             "body": body,
@@ -248,29 +263,47 @@ def page_key(p: dict) -> str:
     return p.get("disk_rel_path") or p["rel_path"]
 
 
-def build_nodes(pages: list[dict], ontology: dict) -> tuple[list[dict], dict, list[dict]]:
+def page_node_id(meta: dict, slug: str, ontology: dict) -> str:
+    """ページのノード ID。graph.node_id があればそれを文字列にし、なければ <node_type>:<slug> にする。
+
+    グラフの lint の derive_node_id と同じ規則である（1 と "1" を同じ ID とみなす）。
+    """
+    graph_meta = meta.get("graph") if isinstance(meta.get("graph"), dict) else {}
+    explicit = graph_meta.get("node_id")
+    if explicit:
+        return str(explicit)
+    return f"{derive_node_type(meta, ontology) or 'concept'}:{slug}"
+
+
+def build_nodes(pages: list[dict], ontology: dict,
+                diagnostics: list | None = None) -> tuple[list[dict], dict, list[dict]]:
     """ノードのリスト、ページから node_id を引くインデックス、別名の行を作る。(nodes, page_node_ids, aliases) を返す。
 
-    page_node_ids のキーは page_key(p) である。node_id が前のページと重なってノードにならなかったページは
-    含まない。スラッグでは引かない。別のディレクトリに同じスラッグのページがあると、別のページのノードを
-    引いてしまうからである。
+    page_node_ids のキーは page_key(p) で、すべてのページを含む。スラッグでは引かない。別のディレクトリに
+    同じスラッグのページがあると、別のページのノードを引いてしまうからである。
+    同じ node_id のページが複数あるときは、ノードは最初のページから 1 つだけ作り（ノードの題名やパスは
+    そのページのもの）、どのページも page_node_ids ではそのノードを指す。ページの関係は捨てない。
+    diagnostics にリストを渡すと、{"kind": "duplicate_node_id", "node_id", "pages"} を足す。pages はディスク上の
+    パス（page_key）である。
     """
     nodes: list[dict] = []
     page_node_ids: dict[str, str] = {}
     aliases: list[dict] = []
-    seen_ids: set[str] = set()
+    pages_of_id: dict[str, list[str]] = defaultdict(list)
 
     for p in pages:
         meta = p["meta"]
         graph_meta = meta.get("graph") if isinstance(meta.get("graph"), dict) else {}
         node_type = derive_node_type(meta, ontology) or "concept"
-        explicit_id = graph_meta.get("node_id")
-        node_id = explicit_id or f"{node_type}:{p['slug']}"
+        node_id = page_node_id(meta, p["slug"], ontology)
+        page_node_ids[page_key(p)] = node_id
+        # 報告にはディスク上のパスを使う（lint の duplicate_node_ids と同じ）。NFC のパスでは、NFC と NFD の
+        # 名前の違いだけの 2 つのファイルが同じに見える。
+        pages_of_id[node_id].append(page_key(p))
 
-        # 重複はスキップする。最初のものを使い、lint がこれを指摘する。
-        if node_id in seen_ids:
+        # 同じ node_id の 2 つ目からは、ノードを作らない。lint の duplicate_node_ids がこれを指摘する。
+        if len(pages_of_id[node_id]) > 1:
             continue
-        seen_ids.add(node_id)
 
         node = {
             "id": node_id,
@@ -287,26 +320,62 @@ def build_nodes(pages: list[dict], ontology: dict) -> tuple[list[dict], dict, li
             "canonical": bool(graph_meta.get("canonical", False)),
         }
         nodes.append(node)
-        page_node_ids[page_key(p)] = node_id
         for alias in node["aliases"]:
             aliases.append({"alias": str(alias), "node_id": node_id})
 
+    if diagnostics is not None:
+        for node_id, paths in pages_of_id.items():
+            if len(paths) > 1:
+                diagnostics.append({"kind": "duplicate_node_id", "node_id": node_id, "pages": paths})
     return nodes, page_node_ids, aliases
 
 
-def edge_id(subject: str, predicate: str, obj: str, source: str | None, evidence: str | None) -> str:
+def edge_id(subject: str, predicate: str, obj: str, source: str | None, evidence: str | None,
+            page: str | None = None, variant: str | None = None) -> str:
     # 96 ビットに切り詰める。現実的な wiki の規模なら衝突のおそれは無視でき、
     # ID が短いほうが JSONL、sqlite、graphml の出力が読みやすい。
+    # page も入れる。別のページに同じ内容の関係を書いたら、別のエッジにする（どのページの関係かを失わない）。
+    # variant には、graph.relationships の項目の relationship_variant_key と、番号を入れる前の ID が同じ項目の
+    # 何番目かを入れる。status や valid_from だけが違う 2 件も、まったく同じ 2 件も、別のエッジになる。
     h = hashlib.sha256()
-    parts = [subject or "", predicate or "", obj or "", source or "", evidence or ""]
+    parts = ["" if x in (None, "") else str(x) for x in (subject, predicate, obj, source, evidence, page, variant)]
     h.update("\x1f".join(parts).encode("utf-8"))
     return h.hexdigest()[:24]
 
 
+# 型付きの関係のエッジの ID に入れる欄（主語、述語、目的語、出典、証拠のほか）。
+VARIANT_FIELDS = ("confidence", "status", "valid_from", "valid_to", "notes", "raw_ref")
+# 参照の欄。ノード ID などの値は ID に入れるが、エッジの ID の形（edge_id が返す 16 進 24 桁）の値は入れない。
+# 入れると、参照を書き直すたびに自分の ID が変わり、互いを指す 2 件の参照が成り立たない。
+REFERENCE_FIELDS = ("contradicts", "supersedes")
+EDGE_ID_RE = re.compile(r"^[0-9a-f]{24}$")
+
+
+def _stable_json(value) -> str:
+    """値を、比べられる文字列にする。辞書のキーは文字列にそろえる（_normalize_for_json）。"""
+    return json.dumps(_normalize_for_json(value), sort_keys=True, ensure_ascii=False, default=str)
+
+
+def relationship_variant_key(rel: dict) -> str:
+    """graph.relationships の項目を見分けるキー。VARIANT_FIELDS と、エッジの ID でない参照の欄の値から作る。
+
+    エッジの ID を書いた参照の欄と、未知の拡張の欄は入れない。それらだけが違う項目は、番号で分かれる
+    （build_edges が order_dependent_edge_ids の診断に挙げる）。
+    """
+    refs = [[k, None if EDGE_ID_RE.match(str(rel.get(k) or "")) else rel.get(k)] for k in REFERENCE_FIELDS]
+    return _stable_json([[k, rel.get(k)] for k in VARIANT_FIELDS] + refs)
+
+
 def make_edge(*, subject, predicate, obj, source, evidence, confidence, status,
-              extraction_method, page, extras: dict | None = None) -> dict:
+              extraction_method, page, extras: dict | None = None, page_id: str | None = None,
+              variant: str | None = None) -> dict:
+    """エッジを作る。page は出力するページのパス（NFC）、page_id はエッジの ID に入れるページのキー。
+
+    page_id を省くと page を使う。NFC と NFD の名前の違いだけの 2 つのファイルは、page が同じになるので、
+    ID にはディスク上のパス（page_key）を入れて、別のエッジに保つ。
+    """
     return {
-        "id": edge_id(subject, predicate, obj, source, evidence),
+        "id": edge_id(subject, predicate, obj, source, evidence, page_id or page, variant),
         "subject": subject,
         "predicate": predicate,
         "object": obj,
@@ -320,37 +389,47 @@ def make_edge(*, subject, predicate, obj, source, evidence, confidence, status,
     }
 
 
-def build_edges(pages: list[dict], page_node_ids: dict[str, str]) -> list[dict]:
+def build_edges(pages: list[dict], page_node_ids: dict[str, str],
+                diagnostics: list | None = None) -> list[dict]:
     """エッジを作る。page_node_ids は build_nodes が返す、page_key(p) から node_id を引くインデックス。
 
-    主語は、そのページ自身のノードである。リンクと `sources:` の行き先は、ページを 1 つに決められるときだけ
-    エッジにする。パスのない形が、同じスラッグの複数のページに当たるときは、どれにも寄せない（lint の
-    duplicate_slugs がその重なりを挙げる）。
+    - 主語は、そのエッジを書いたページのノードである。スラッグから引き直さない。
+    - エッジの ID には page が入る。別のページに書いた同じ内容の関係は、別のエッジになる。
+    - 型付きの関係の目的語は、ノード ID として引く。そのノード ID を持つページが 2 つ以上あれば、エッジを
+      作らず、曖昧とする（ambiguous_object）。持つページがなければ、今までどおり文字列の目的語のエッジにする。
+    - 本文の wikilink と `sources:` は、wiki_pages.link_candidates（resolve_link と同じ規則）でページに解決し、
+      ページが 1 つのときだけ、そのページのノードへのエッジにする。パスのない形が、同じスラッグの複数の
+      ページに当たるときは、どれにも寄せない（lint の duplicate_slugs がその重なりを挙げる）。
+    - `sources:` の値で、ページが 2 つ以上のもの（ambiguous_source）と、ないもの（unresolved_source）は、
+      エッジを作らない。
+
+    diagnostics にリストを渡すと、ambiguous_object、ambiguous_source、unresolved_source、order_dependent_edge_ids の
+    診断を足す。order_dependent_edge_ids は、ID に入る欄がすべて同じで、エッジの ID を書いた参照の欄か未知の欄だけが
+    違う項目（indexes）で、並べ替えると ID が別の項目に移りうる。
+    どれも {"kind", "page", ...} の形で、page はエッジの page と同じく、その参照を書いたページの rel_path（NFC）
+    である。候補のページを並べる pages は、ディスク上のパス（page_key）である。
     """
     edges: list[dict] = []
     seen_ids: set[str] = set()
 
     # 行き先のページを引くインデックス。パスは .md を除いた wiki からの相対パス（NFC、大文字と小文字を区別）、
     # スラッグはファイル名の stem である。どちらも、当たるページのキーをすべて並べる。
-    pages_by_path: dict[str, list[str]] = defaultdict(list)
-    pages_by_slug: dict[str, list[str]] = defaultdict(list)
-    for p in pages:
-        rel = p["rel_path"].replace("\\", "/")
-        if rel.lower().endswith(".md"):
-            rel = rel[:-3]
-        pages_by_path[rel].append(page_key(p))
-        pages_by_slug[p["slug"]].append(page_key(p))
+    pages_by_path, pages_by_slug = build_page_index(pages, page_key)
+    type_by_key = {page_key(p): p["meta"].get("type") for p in pages}
 
-    def only(keys: list[str] | None) -> str | None:
-        """ページがちょうど 1 つのときだけ、そのキーを返す。"""
-        return keys[0] if keys and len(keys) == 1 else None
+    # ノード ID ごとの、それを持つページの数。2 つ以上なら、目的語としては曖昧である。
+    pages_per_node: dict[str, int] = defaultdict(int)
+    for node_id in page_node_ids.values():
+        pages_per_node[node_id] += 1
 
     def link_target(link: str) -> str | None:
-        lookup = link_lookup(link)
-        if lookup is None:
-            return None
-        kind, target = lookup
-        return only((pages_by_path if kind == "path" else pages_by_slug).get(target))
+        """wikilink が指すページのキー。ページがちょうど 1 つのときだけ返す。"""
+        found = link_candidates(link, pages_by_path, pages_by_slug)
+        return found[0] if len(found) == 1 else None
+
+    def note(kind: str, p: dict, **fields) -> None:
+        if diagnostics is not None:
+            diagnostics.append({"kind": kind, "page": p["rel_path"], **fields})
 
     def push(edge: dict) -> None:
         if edge["id"] in seen_ids:
@@ -366,19 +445,33 @@ def build_edges(pages: list[dict], page_node_ids: dict[str, str]) -> list[dict]:
         meta = p["meta"]
         graph_meta = meta.get("graph") if isinstance(meta.get("graph"), dict) else {}
 
-        # 1. graph.relationships[] から作る型付きの意味のエッジ。
-        for rel in graph_meta.get("relationships") or []:
+        # 1. graph.relationships[] から作る型付きの意味のエッジ。項目 1 つから、必ず 1 本のエッジを作る。
+        seen_items: dict[str, int] = defaultdict(int)
+        same_base: dict[str, list] = defaultdict(list)
+        for index, rel in enumerate(graph_meta.get("relationships") or []):
             if not isinstance(rel, dict):
                 continue
             obj = rel.get("object")
             predicate = rel.get("predicate")
             if not (obj and predicate):
                 continue
+            if pages_per_node.get(str(obj), 0) > 1:
+                # 同じ node_id のページが複数あり、どのページのノードか決められない。
+                note("ambiguous_object", p, index=index, predicate=str(predicate), object=str(obj),
+                     pages=sorted(k for k, v in page_node_ids.items() if v == str(obj)))
+                continue
             extras = {
                 k: rel[k] for k in ("valid_from", "valid_to", "notes", "raw_ref",
                                     "contradicts", "supersedes")
                 if k in rel and rel[k] is not None
             }
+            item = relationship_variant_key(rel)
+            # 番号は、番号を入れる前の ID が同じ項目の中で数える（ID と同じ値の扱いで比べるので、省いた欄と空文字の
+            # 欄も同じに数える）。ID に入る欄の違う項目を並べ替えても、番号は変わらない。
+            base = edge_id(subject_id, str(predicate), str(obj), rel.get("source"), rel.get("evidence"), here, item)
+            ordinal = seen_items[base]
+            seen_items[base] += 1
+            same_base[base].append((index, _stable_json(rel)))
             push(make_edge(
                 subject=subject_id,
                 predicate=str(predicate),
@@ -389,8 +482,16 @@ def build_edges(pages: list[dict], page_node_ids: dict[str, str]) -> list[dict]:
                 status=rel.get("status"),
                 extraction_method="explicit_graph_frontmatter",
                 page=p["rel_path"],
+                page_id=here,
+                variant=f"{item}#{ordinal}",
                 extras=extras,
             ))
+
+        # 中身の違う項目が同じ番号の列に並んだら（エッジの ID を書いた参照の欄か、未知の欄だけが違う）、
+        # 並べ替えると ID が別の項目に移りうる。黙らずに診断に挙げる。
+        for group in same_base.values():
+            if len(group) > 1 and len({content for _index, content in group}) > 1:
+                note("order_dependent_edge_ids", p, indexes=[index for index, _content in group])
 
         # 2. 本文の wikilink から作る mentions エッジ。
         seen_targets: set[str] = set()
@@ -412,25 +513,32 @@ def build_edges(pages: list[dict], page_node_ids: dict[str, str]) -> list[dict]:
                 status="current",
                 extraction_method="body_wikilink",
                 page=p["rel_path"],
+                page_id=here,
             ))
 
         # 3. frontmatter の `sources:` から作る sourced_from エッジ（ソースページ自身ではスキップする）。
-        if meta.get("type") != "source":
-            for src_slug in meta.get("sources") or []:
-                src_key = only(pages_by_slug.get(str(src_slug)))
-                src_id = page_node_ids.get(src_key) if src_key else None
-                if not src_id:
-                    continue
+        # 値は、lint の unresolved_sources と同じく、スラッグ、パス、[[...]] のどれで書いてもよい。
+        # 曖昧と未解決の診断は、ソースページでも挙げる。エッジを作らないのは、ソースページ自身の sources: だけである。
+        # 分け方は lint の unresolved_sources と同じ wiki_pages.classify_source_ref に任せる。lint が source でない
+        # ページを指すと挙げる値（not_source）も、ページが 1 つなら sourced_from を作る（lint がそれを挙げる）。
+        for ref in ref_values(meta.get("sources")):
+            _status, found, _wrong_type = classify_source_ref(ref, pages_by_path, pages_by_slug, type_by_key.get)
+            if len(found) != 1:
+                note("ambiguous_source" if found else "unresolved_source", p, source=ref, pages=sorted(found))
+                continue
+            src_id = page_node_ids.get(found[0])
+            if meta.get("type") != "source" and src_id:
                 push(make_edge(
                     subject=subject_id,
                     predicate="sourced_from",
                     obj=src_id,
-                    source=str(src_slug),
+                    source=ref,
                     evidence=None,
                     confidence="high",
                     status="current",
                     extraction_method="frontmatter_sources",
                     page=p["rel_path"],
+                    page_id=here,
                 ))
 
         # 4. ソースページの raw: フィールドから作る summarizes_raw エッジ。
@@ -447,6 +555,7 @@ def build_edges(pages: list[dict], page_node_ids: dict[str, str]) -> list[dict]:
                     status="current",
                     extraction_method="frontmatter_raw",
                     page=p["rel_path"],
+                    page_id=here,
                 ))
 
     return edges
@@ -457,13 +566,31 @@ def build_edges(pages: list[dict], page_node_ids: dict[str, str]) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+def _json_key(key) -> str:
+    """辞書のキーを、json.dumps と同じ規則で文字列にする（True は "true"、None は "null"、2 は "2"）。"""
+    if isinstance(key, str):
+        return key
+    if key is True or key is False or key is None or isinstance(key, (int, float)):
+        return json.dumps(key)
+    return str(key)
+
+
 def _normalize_for_json(value):
     if hasattr(value, "isoformat"):
         return value.isoformat()
     if isinstance(value, list):
         return [_normalize_for_json(v) for v in value]
     if isinstance(value, dict):
-        return {k: _normalize_for_json(v) for k, v in value.items()}
+        # キーは json.dumps と同じ規則で文字列にそろえる。数値と文字列のキーが混ざると、sort_keys で比べられずに
+        # 止まるからである。文字列のキーとぶつかる数値などのキー（2 と "2"）には、型の名前を付けて値を消さない。
+        text_keys = {k for k in value if isinstance(k, str)}
+        out = {}
+        for k, v in value.items():
+            name = _json_key(k)
+            if not isinstance(k, str) and name in text_keys:
+                name = f"{name}#{type(k).__name__}"
+            out[name] = _normalize_for_json(v)
+        return out
     return value
 
 
@@ -636,6 +763,7 @@ def write_graphml_file(path: Path, nodes: list[dict], edges: list[dict]) -> None
         ("d_confidence", "edge", "confidence", "string"),
         ("d_status", "edge", "status", "string"),
         ("d_source", "edge", "source", "string"),
+        ("d_page", "edge", "page", "string"),
     ]
     for kid, kfor, kname, ktype in keys:
         k = ET.SubElement(root, f"{{{ns}}}key")
@@ -721,8 +849,9 @@ def main():
         with common.extract_lock(out_dir):
             common.remove_stale_temps(out_dir, OUTPUT_NAMES)
             pages = collect_pages(args.wiki)
-            nodes, page_node_ids, aliases = build_nodes(pages, ontology)
-            edges = build_edges(pages, page_node_ids)
+            diagnostics: list[dict] = []
+            nodes, page_node_ids, aliases = build_nodes(pages, ontology, diagnostics)
+            edges = build_edges(pages, page_node_ids, diagnostics)
             write_outputs(out_dir, formats, nodes, aliases, edges)
     except common.ExtractBusy as exc:
         print(str(exc), file=sys.stderr)
@@ -738,6 +867,13 @@ def main():
         breakdown[e["predicate"]] += 1
     for pred, count in sorted(breakdown.items(), key=lambda x: (-x[1], x[0])):
         print(f"  {ljust_display(pred, 20)} {count}")
+    if diagnostics:
+        # 黙って捨てない。エッジにしなかった参照と、重なった node_id を知らせる。
+        kinds = defaultdict(int)
+        for d in diagnostics:
+            kinds[d["kind"]] += 1
+        summary = "、".join(f"{DIAGNOSTIC_LABELS.get(k, k)} {n} 件" for k, n in sorted(kinds.items()))
+        print(f"診断: {summary}。wiki_graph_lint.py で確かめる。", file=sys.stderr)
 
 
 if __name__ == "__main__":

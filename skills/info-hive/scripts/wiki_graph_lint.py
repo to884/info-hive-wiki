@@ -106,12 +106,8 @@ def derive_node_type(meta: dict, ontology: dict) -> str | None:
 
 
 def derive_node_id(meta: dict, slug: str, ontology: dict) -> str:
-    graph_meta = meta.get("graph") if isinstance(meta.get("graph"), dict) else {}
-    explicit = graph_meta.get("node_id")
-    if explicit:
-        return str(explicit)
-    node_type = derive_node_type(meta, ontology) or "concept"
-    return f"{node_type}:{slug}"
+    """extract の page_node_id と同じ。extract と lint で、ページのノード ID の規則を食い違わせない。"""
+    return _extract.page_node_id(meta, slug, ontology)
 
 
 def types_match(allowed: list[str] | None, actual: str | None) -> bool:
@@ -139,6 +135,10 @@ def lint(pages: list[dict], ontology: dict) -> dict:
         "broken_contradicts": [],
         "broken_supersedes": [],
         "orphan_typed_nodes": [],
+        "ambiguous_object_refs": [],
+        "ambiguous_sources": [],
+        "unresolved_sources": [],
+        "order_dependent_edge_ids": [],
         "summary": {},
     }
 
@@ -221,7 +221,9 @@ def lint(pages: list[dict], ontology: dict) -> dict:
             # "*" がある場合だけ許可する（例: summarizes_raw）。
             object_types = pdef.get("object_types") or []
             allows_wildcard_obj = "*" in object_types
-            if obj and obj not in node_by_id:
+            # 抽出と同じく、目的語は文字列にしてノード ID と比べる（object: 1 は "1" のノードを指す）。
+            obj_key = str(obj) if obj else None
+            if obj_key and obj_key not in node_by_id:
                 if not allows_wildcard_obj:
                     findings["broken_object_refs"].append({**here})
 
@@ -234,7 +236,7 @@ def lint(pages: list[dict], ontology: dict) -> dict:
                     "allowed": pdef.get("subject_types"),
                 })
             # 目的語の型のチェック（目的語がノードに解決される場合だけ）
-            obj_node = node_by_id.get(obj) if obj else None
+            obj_node = node_by_id.get(obj_key) if obj_key else None
             obj_type = obj_node["node_type"] if obj_node else None
             if obj_node and not types_match(pdef.get("object_types"), obj_type):
                 findings["object_type_mismatch"].append({
@@ -275,11 +277,17 @@ def lint(pages: list[dict], ontology: dict) -> dict:
     # 孤立した型付きノード。`graph:` の frontmatter を宣言しているのに、
     # 抽出後に、型付きの（暗黙でない）エッジが1本もつながっていないページ。
     # ソースのノードは対象外である（暗黙のエッジでつながるため）。
-    # 主語はページで引く（スラッグで引くと、別のディレクトリの同じスラッグのページのノードになる）。
-    # node_by_id には node_id ごとに最初のページだけがあり、node_id が文字列なら extract の build_nodes と
-    # 同じページを選ぶ（lint は node_id を str() でそろえるので、1 と "1" のような値では食い違う）。
-    extracted_edges = _extract.build_edges(
-        pages, {n["disk_rel_path"]: n["id"] for n in node_by_id.values()})
+    # extract と同じ build_nodes と build_edges で作る。主語はページで引く（スラッグで引くと、別の
+    # ディレクトリの同じスラッグのページのノードになる）。エッジにしなかった参照は、診断として挙げる。
+    diagnostics: list[dict] = []
+    _nodes, page_node_ids, _aliases = _extract.build_nodes(pages, ontology)
+    extracted_edges = _extract.build_edges(pages, page_node_ids, diagnostics)
+    for d in diagnostics:
+        bucket = {"ambiguous_object": "ambiguous_object_refs", "ambiguous_source": "ambiguous_sources",
+                  "unresolved_source": "unresolved_sources",
+                  "order_dependent_edge_ids": "order_dependent_edge_ids"}.get(d["kind"])
+        if bucket:
+            findings[bucket].append({k: v for k, v in d.items() if k != "kind"})
     typed_node_refs: set[str] = set()
     for e in extracted_edges:
         if e["predicate"] in IMPLICIT_PREDICATES:
@@ -436,6 +444,14 @@ def render_text(findings: dict) -> str:
          lambda f: f"  - {f['page']}#rel[{f['index']}]  supersedes={f.get('supersedes')}"),
         ("orphan_typed_nodes", "孤立した型付きノード（型付きのエッジが入ってくることも出ていくこともない）",
          lambda f: f"  - {f['node_id']}  （{f['path']}）"),
+        ("ambiguous_object_refs", "目的語の node_id を持つページが複数あり、エッジにしなかった関係",
+         lambda f: f"  - {f['page']}#rel[{f['index']}]  {f['predicate']} → {f['object']}  （{', '.join(f['pages'])}）"),
+        ("ambiguous_sources", "sources: の値に当たるページが複数あり、sourced_from を作らなかった",
+         lambda f: f"  - {f['page']}  {f['source']}  （{', '.join(f['pages'])}）"),
+        ("unresolved_sources", "sources: の値に当たるページがなく、sourced_from を作らなかった",
+         lambda f: f"  - {f['page']}  {f['source']}"),
+        ("order_dependent_edge_ids", "並べ替えるとエッジの ID が入れ替わりうる関係の項目（エッジの ID の参照か未知の欄だけが違う）",
+         lambda f: f"  - {f['page']}#rel{f['indexes']}"),
         ("evidence_unsupported", "ソースページが証拠を裏づけていない（判定モデル）",
          lambda f: f"  - {f['page']}#rel[{f['index']}]  {f['predicate']} → {f['object']}  "
                    f"（source={f['source']}、choice={f['choice']}、confidence={f['confidence']}）"),

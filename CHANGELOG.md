@@ -10,13 +10,33 @@
 
 ### Fixed
 
-- グラフの抽出（`wiki_graph_extract.py`）で、`a/Foo.md` と `b/Foo.md` のように別のディレクトリに同じスラッグのページがあると、エッジが別のページのノードに付いていた。ノードをスラッグで引いていたので、後に読んだページが前のページを上書きしていた。別の `graph.node_id` を付けても防げなかった。
-  - `graph.relationships` の型付きの関係、`mentions`、`sourced_from`、`summarizes_raw` の主語が、別のページのノードになっていた。今は、そのエッジを書いたページ自身のノードになる。
-  - パスを付けた `[[a/Foo]]` も、別のページのノードを指していた。今は、そのページを指す。`a/Foo.md` から `[[b/Foo]]` へのリンクは、自分へのリンクとして捨てていたが、今は `mentions` のエッジになる。ただし、node_id が前のページと重なってノードにならなかったページ（型も既定の node_id も同じ `a/Foo.md` と `b/Foo.md` の後者など）へのリンクは、今までどおりエッジにならない。グラフの lint の `duplicate_node_ids` がその重なりを挙げる。
+グラフの抽出（`wiki_graph_extract.py`）で、エッジが別のページのノードに付く、または黙って消える不具合を直した。閲覧（browse）の関係表は、エッジを書いたページで関係を振り分けるので、それに必要な形にそろえた。
+
+- 別のディレクトリに同じスラッグのページ（`a/Foo.md` と `b/Foo.md`）があると、ノードをスラッグで引いていたので、後に読んだページが前のページを上書きしていた。別の `graph.node_id` を付けても防げなかった。
+  - `graph.relationships` の型付きの関係、`mentions`、`sourced_from`、`summarizes_raw` の主語が、別のページのノードになっていた。今は、そのエッジを書いたページのノードになる。
+  - パスを付けた `[[a/Foo]]` も、別のページのノードを指していた。今は、そのページを指す。`a/Foo.md` から `[[b/Foo]]` へのリンクは、自分へのリンクとして捨てていたが、今は `mentions` のエッジになる（2 つのページが同じノード ID を持つときは、今までどおり作らない）。
   - パスのない `[[Foo]]` と `sources:` の `Foo` は、同じスラッグのページが複数あるとき、どれにも寄せず、エッジを作らない（後に読んだページを選んでいた）。重なったスラッグは、wiki の lint の `duplicate_slugs` が挙げる。スラッグが 1 つしかないページへのリンクは、今までどおりである。
   - 同じスラッグの 2 つのノード（別の `graph.node_id` か、既定の node_id で型が違うもの。`concept:Foo` と `product:Foo` など）があると、`graph.sqlite` の `nodes.slug` の UNIQUE 制約に反し、抽出が止まってグラフを作れなかった。`nodes.slug` の UNIQUE を外した。問い合わせ（`wiki_graph_query.py` と MCP のツール `graph`）はノードを ID で引くので、影響はない。
-- グラフの lint（`wiki_graph_lint.py` と MCP のツール `lint` の `graph`）の `orphan_typed_nodes` も、同じ理由で、関係を書いたページを孤立と挙げ、別のページを孤立から外していた。今は、関係を書いたページで判断する。
-- グラフ層を使っていて、別のディレクトリに同じスラッグのページがある wiki は、`wiki_graph_extract.py` でグラフを作り直す。作り直すまで、`graph/graph.sqlite` などと MCP のツール `graph` は、別のページのノードに付いたエッジを返す。同じスラッグのページがない wiki では、エッジは変わらない。
+- 別のページに同じ内容の関係を書くと、エッジが 1 本にまとまり、後のページの `page` が失われていた。エッジの ID にページ（ディスク上の相対パス）を入れ、別のエッジにした。NFC と NFD の名前の違いだけの 2 つのファイルも、`page` は同じ NFC のパスになるが、別のエッジになる。
+- 同じページの `graph.relationships` の 2 つの項目が、`status` や `valid_from`、`valid_to` だけ違うと、エッジが 1 本にまとまっていた（エッジの ID が、主語、述語、目的語、出典、証拠しか見ていなかった）。今は、エッジにする項目（`predicate` と `object` があり、目的語のノード ID が曖昧でないもの）1 つから、必ず 1 本のエッジを作る。エッジの ID には、主語、述語、目的語、出典、証拠に加えて `confidence`、`status`、`valid_from`、`valid_to`、`notes`、`raw_ref` と、`contradicts`、`supersedes` のうちエッジの ID の形（16 進 24 桁）でない値を入れ、これらがすべて同じ項目は、ページの中で出てきた順の番号で分ける。`contradicts` と `supersedes` に書いたエッジの ID は ID に入れないので、互いのエッジの ID を書いても、自分の ID は変わらない。ID に入る欄の違う項目を並べ替えても、ID は変わらない。エッジの ID を書いた参照の欄か未知の欄だけが違う項目は、並べ替えると ID が別の項目に移りうるので、グラフの lint が `order_dependent_edge_ids` に挙げる。
+- 別のスラッグのページに同じ `graph.node_id` を付けると、後のページの関係が黙って消えていた。今は、ノードは最初のページから 1 つだけ作り、どのページの関係も、そのノードを主語にして残す。そのノード ID を目的語にした型付きの関係は、どのページのノードか決められないので、エッジにしない。
+- `sources:` にパス（`sources/paper`）か `[[sources/paper]]` を書くと、lint の `unresolved_sources` は解決するのに、`sourced_from` のエッジを作らなかった。今は、lint の `unresolved_sources` と同じ関数（`wiki_pages.classify_source_ref`）で、外側の `[[ ]]` を外し、wikilink の規則でページに解決する。ページが 1 つなら `sourced_from` を作る（source でないページを指すときも作り、lint の `unresolved_sources` が `not_source` として挙げる）。`sources: paper` のように 1 つの値を文字列で書いたときは、1 文字ずつ別の値として読んでいたが、今は 1 つの値として読む。
+- グラフの lint（`wiki_graph_lint.py` と MCP のツール `lint` の `graph`）の `orphan_typed_nodes` も、同じ理由で、関係を書いたページを孤立と挙げ、別のページを孤立から外していた。今は、抽出と同じエッジで判断する。
+- グラフの lint は、`object: 1` のような数値の目的語を、`graph.node_id: 1` のノードに当たらないとして `broken_object_refs` に挙げていた。抽出と同じく、文字列にしてノード ID と比べる。
+
+### Added
+
+- グラフの lint に、抽出がエッジにしなかった参照の検出結果を足した。`ambiguous_object_refs`（目的語のノード ID を持つページが複数ある型付きの関係）、`ambiguous_sources`（`sources:` の値に当たるページが複数ある）、`unresolved_sources`（当たるページがない）、`order_dependent_edge_ids`（並べ替えるとエッジの ID が入れ替わりうる関係の項目）である。どれも `summary` に件数が入る。抽出も、これらと `duplicate_node_ids` にあたるものがあれば、件数を標準エラーに書く。
+- `build_nodes()` と `build_edges()` は、引数 `diagnostics` にリストを渡すと、上の診断を足す。`sources:` の診断は、`sourced_from` を作らないソースページでも挙げる。
+- `graph.graphml` のエッジに、`page`（そのエッジを書いたページ）を足した。
+- `graph.relationships` の `notes` などに、`2:` のような数値のキーと文字列のキーが混ざっていると、`graph.sqlite` と `edges.jsonl` を書くところで止まっていた。キーを JSON と同じ規則で文字列にそろえてから書く（`2` は `"2"`、`true` は `"true"` で、今まで書けていた出力は変わらない）。文字列のキーとぶつかる数値などのキー（`2` と `"2"` が両方あるとき）は、`"2#int"` のように型の名前を付けて、値を消さない。
+
+### Changed
+
+- wiki の lint の `unresolved_sources` は、パスを付けた値（`concepts/paper`）を、そのパスのページの `type` で判断するようになった。今までは同じスラッグのページすべての `type` で判断していたので、`sources/paper.md` があると、source でない `concepts/paper.md` を指す値を挙げなかった。パスのない値の判断は変わらない。
+- エッジの ID にページが入ったので、すべてのエッジの ID が変わる。`contradicts:` や `supersedes:` にエッジの ID を書いていたら、作り直したあとの ID に直す（グラフの lint は、エッジの ID の参照を確かめていない）。
+- `build_nodes()` の 2 つ目の返り値は、スラッグからではなく、ページ（ディスク上の相対パス）から node_id を引く対応になった。`build_edges()` はそれを受け取る。`graph.node_id` に文字列でない値（`1`）を書いたときは、lint と同じく文字列（`"1"`）のノード ID にする。
+- グラフ層を使っている wiki は、`wiki_graph_extract.py` でグラフを作り直す。作り直すまで、`graph/graph.sqlite` などと MCP のツール `graph` は、古い ID と、別のページのノードに付いたエッジを返す。
 
 ## [0.9.0] - 2026-11-09
 
