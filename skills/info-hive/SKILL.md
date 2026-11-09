@@ -128,7 +128,7 @@ wiki のプラグインは、ローカルの MCP サーバー（`wiki`）を持�
   - ツールの呼び出しがつながらない、または返らない。初めて使うときは、サーバーが依存（約 1 GB）とモデル（約 530 MB）を取得するので、数分かかることがある。CLI に戻ったときは、サーバーを準備していることと、次からは速くなることをユーザーに伝える。
   - CLI にしかない機能が要る。`wiki_search.py` の `--backlinks`、`--granularity page`、`--no-embed`、判定レイヤーの `--decide`（検索とグラフの lint）がこれに当たる。
 - ツールが結果を返したら、0 件でも、同じ検索を CLI でやり直さない。結果の `warning` に理由が入っている、または `index.state` が `embedding` のときも同じである。このときサーバーの語彙検索は wiki 全体を対象にしており、意味の検索だけが埋め込み済みの分に限られる。CLI の `--no-embed` は語彙検索だけなので、やり直しても新しい情報は得られない。結果をそのまま使い、意味の検索が一部だけだったことを回答に添える。
-- `uv run --script` が `invalid peer certificate` や `UnknownIssuer` で失敗したら、TLS を検査する社内ネットワークで uv が証明書を信頼していない。`--system-certs` を付けてやり直し、ユーザーに `UV_SYSTEM_CERTS=true` の設定を勧める（`references/mcp-server.md` の「困ったとき」）。
+- `uv run --script` が `invalid peer certificate` や `UnknownIssuer` で失敗したら、TLS を検査する社内ネットワークで uv が証明書を信頼していない。`--system-certs`（古い uv では `--native-tls`）を付けてやり直し、ユーザーに `UV_SYSTEM_CERTS=true` の設定を勧める（`references/mcp-server.md` の「困ったとき」）。
 - グラフの作り直し（`wiki_graph_extract.py`）は wiki の `graph/` に書き込むので、ツールにはない。いつも CLI で実行する。
 - ツールは wiki の Markdown を書き換えない。lint の検出結果を直すときも、編集案をユーザーに示してから、エージェントがページを編集する。
 

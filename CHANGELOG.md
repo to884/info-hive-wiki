@@ -11,7 +11,7 @@
 ### Fixed
 
 - TLS を検査する社内ネットワークで、wiki の MCP サーバーが `CONNECTION_CLOSED` で起動しなかった（#30）。uv は既定で OS の証明書ストアを使わないので、社内の CA が署名した PyPI の証明書を検証できず、入口（`wiki_mcp_launch.py`）と中継が依存を取得できなかった。
-  - 入口と中継は、`uv sync` が証明書の検証（`invalid peer certificate` など）で失敗したら、`UV_SYSTEM_CERTS=true` で 1 回だけやり直す。直ったら、以後の uv の呼び出しと、中継が用意するサーバーの環境でも使う。利用者が `UV_SYSTEM_CERTS` か `UV_NATIVE_TLS` を設定しているときは、その設定を変えない。OS の証明書ストアを最初から使わないのは、uv がそちらを遅いとしている（特に macOS）ためである。
+  - 入口と中継は、`uv sync` が証明書の検証（`invalid peer certificate` など）で失敗したら、`UV_SYSTEM_CERTS=true` で 1 回だけやり直す。`UV_SYSTEM_CERTS` を知らない古い uv（`uv sync --help` で見分ける）では `UV_NATIVE_TLS=true` を使う。直ったら、以後の uv の呼び出しと、中継が用意するサーバーの環境でも使う。利用者が `UV_SYSTEM_CERTS` か `UV_NATIVE_TLS` を設定しているときは、その設定を変えない。OS の証明書ストアを最初から使わないのは、uv がそちらを遅いとしている（特に macOS）ためである。
   - それでも失敗したら、環境が壊れたとみなして入れ直すことをやめ、すぐに止まる。理由と対処（`UV_SYSTEM_CERTS=true`、`uv.toml` の `system-certs = true`、`SSL_CERT_FILE`）を標準エラーと `logs/launch.log` に書く。
 - README に「トラブルシューティング」の節を足した。コマンドがエージェントに実行させる `uv run --script` は入口を通らずやり直さないので、ユーザーの環境変数か uv の設定ファイルで設定するよう案内する。スキルと `references/mcp-server.md` にも、証明書のエラーのときに `--system-certs` を付けてやり直すことを書いた。
 

@@ -304,9 +304,11 @@ def env_lock_path(script: Path) -> Path:
     return Path(lines[-1]) / "info-hive-locks" / f"env-{Path(script).stem}-{digest}.lock"
 
 
-# uv に OS の証明書ストアを使わせる環境変数。UV_NATIVE_TLS は古い名前で、どちらかがあれば利用者が決めたものとみなす。
+# uv に OS の証明書ストアを使わせる環境変数。UV_NATIVE_TLS は古い名前で、古い uv はこちらしか読まない。
+# どちらかがあれば利用者が決めたものとみなす。
 SYSTEM_CERTS_ENV = "UV_SYSTEM_CERTS"
-_TLS_USER_ENVS = (SYSTEM_CERTS_ENV, "UV_NATIVE_TLS")
+NATIVE_TLS_ENV = "UV_NATIVE_TLS"
+_TLS_USER_ENVS = (SYSTEM_CERTS_ENV, NATIVE_TLS_ENV)
 # uv が TLS 証明書を検証できなかったときの出力の句（小文字で比べる）。uv の版で文言が変わりうるので、いくつかを見る。
 # `--system-certs` のような短い断片は、パスなどに含まれて誤判定しうるので使わない。誤判定すると、壊れた環境を
 # 入れ直さずに止まってしまう。
@@ -325,12 +327,13 @@ def is_tls_error(text: str) -> bool:
 
 def tls_error_message(script: Path, user_setting: str | None) -> str:
     tried = (f"{user_setting} が設定されているので、そのまま止まる。" if user_setting else
-             f"OS の証明書ストアを使って（{SYSTEM_CERTS_ENV}=true）やり直しても失敗した。")
+             "OS の証明書ストアを使ってやり直しても失敗した。")
     return (f"uv が {script.name} の依存を取得するときに、TLS 証明書を検証できなかった。社内ネットワークなどで、"
             "通信を検査するプロキシが OS の証明書ストアにだけある CA で証明書を差し替えていると起きる。"
-            f"{tried}対処: 環境変数 {SYSTEM_CERTS_ENV}=true を設定するか、uv の設定ファイル（Windows は "
+            f"{tried}対処: 環境変数 {SYSTEM_CERTS_ENV}=true（古い uv では {NATIVE_TLS_ENV}=true）を設定するか、"
+            "uv の設定ファイル（Windows は "
             "%APPDATA%\\uv\\uv.toml、macOS と Linux は ~/.config/uv/uv.toml。XDG_CONFIG_HOME があれば "
-            "$XDG_CONFIG_HOME/uv/uv.toml）に system-certs = true を書く。"
+            "$XDG_CONFIG_HOME/uv/uv.toml）に system-certs = true（古い uv では native-tls = true）を書く。"
             "CA が OS の証明書ストアにもないときは、環境変数 SSL_CERT_FILE に CA の証明書のファイルを指定する。"
             "設定したら、ホスト（Claude Code など）を起動し直す。")
 
@@ -369,9 +372,25 @@ def _run_uv(command: list[str], env: dict, output, timeout: float) -> tuple[int,
     return out.returncode, out.stdout.decode("utf-8", "replace")
 
 
+def system_certs_env(timeout: float = 60) -> str:
+    """この uv が OS の証明書ストアを使う設定として読む環境変数の名前。
+
+    新しい uv は UV_SYSTEM_CERTS を読み、UV_NATIVE_TLS には非推奨の警告を出す。古い uv は UV_SYSTEM_CERTS を
+    知らずに黙って無視し、UV_NATIVE_TLS だけを読む。`uv sync --help` が UV_SYSTEM_CERTS を挙げるかで決める。
+    """
+    try:
+        found = subprocess.run([uv_executable(), "sync", "--help"], stdin=subprocess.DEVNULL, capture_output=True,
+                               timeout=timeout, env={**os.environ, "PYTHONUTF8": "1"})
+    except (OSError, subprocess.SubprocessError):
+        return SYSTEM_CERTS_ENV
+    text = found.stdout.decode("utf-8", "replace")
+    return NATIVE_TLS_ENV if found.returncode == 0 and SYSTEM_CERTS_ENV not in text and NATIVE_TLS_ENV in text         else SYSTEM_CERTS_ENV
+
+
 def _uv_sync(script: Path, *, reinstall: bool, output, timeout: float, log=None) -> int:
     """`uv sync --script` の終了コードを返す。TLS 証明書を検証できずに失敗したときは、利用者が
-    UV_SYSTEM_CERTS（または UV_NATIVE_TLS）を決めていなければ、UV_SYSTEM_CERTS=true で 1 回だけやり直す。
+    UV_SYSTEM_CERTS（または UV_NATIVE_TLS）を決めていなければ、OS の証明書ストアを使って 1 回だけやり直す。
+    環境変数の名前は uv の版で選ぶ（system_certs_env）。
 
     uv は既定で同梱の証明書を使い、OS の証明書ストアを見ない。TLS を検査する社内ネットワークでは、PyPI への
     通信の証明書が OS にだけある CA で署名されているので、既定のままでは必ず失敗する。OS の証明書ストアを
@@ -387,11 +406,12 @@ def _uv_sync(script: Path, *, reinstall: bool, output, timeout: float, log=None)
     user_setting = next((f"{name}={os.environ[name]}" for name in _TLS_USER_ENVS
                          if os.environ.get(name, "").strip()), None)
     if user_setting is None:
+        name = system_certs_env()
         if log:
-            log(f"uv が TLS 証明書を検証できなかったので、OS の証明書ストアを使ってやり直す（{SYSTEM_CERTS_ENV}=true）")
-        code, text = _run_uv(command, {**env, SYSTEM_CERTS_ENV: "true"}, output, timeout)
+            log(f"uv が TLS 証明書を検証できなかったので、OS の証明書ストアを使ってやり直す（{name}=true）")
+        code, text = _run_uv(command, {**env, name: "true"}, output, timeout)
         if code == 0 or not is_tls_error(text):
-            os.environ[SYSTEM_CERTS_ENV] = "true"
+            os.environ[name] = "true"
             return code
     message = tls_error_message(script, user_setting)
     # 中継がサーバーの環境を用意するときも、利用者が読む場所（launch.log）に残す。
