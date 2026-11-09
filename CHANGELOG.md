@@ -6,6 +6,18 @@
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-11-09
+
+### Fixed
+
+- グラフの抽出（`wiki_graph_extract.py`）で、`a/Foo.md` と `b/Foo.md` のように別のディレクトリに同じスラッグのページがあると、エッジが別のページのノードに付いていた。ノードをスラッグで引いていたので、後に読んだページが前のページを上書きしていた。別の `graph.node_id` を付けても防げなかった。
+  - `graph.relationships` の型付きの関係、`mentions`、`sourced_from`、`summarizes_raw` の主語が、別のページのノードになっていた。今は、そのエッジを書いたページ自身のノードになる。
+  - パスを付けた `[[a/Foo]]` も、別のページのノードを指していた。今は、そのページを指す。`a/Foo.md` から `[[b/Foo]]` へのリンクは、自分へのリンクとして捨てていたが、今は `mentions` のエッジになる。
+  - パスのない `[[Foo]]` と `sources:` の `Foo` は、同じスラッグのページが複数あるとき、どれにも寄せず、エッジを作らない（後に読んだページを選んでいた）。重なったスラッグは、wiki の lint の `duplicate_slugs` が挙げる。スラッグが 1 つしかないページへのリンクは、今までどおりである。
+  - 同じスラッグの 2 つのノード（別の `graph.node_id` か、既定の node_id で型が違うもの。`concept:Foo` と `product:Foo` など）があると、`graph.sqlite` の `nodes.slug` の UNIQUE 制約に反し、抽出が止まってグラフを作れなかった。`nodes.slug` の UNIQUE を外した。問い合わせ（`wiki_graph_query.py` と MCP のツール `graph`）はノードを ID で引くので、影響はない。
+- グラフの lint（`wiki_graph_lint.py` と MCP のツール `lint` の `graph`）の `orphan_typed_nodes` も、同じ理由で、関係を書いたページを孤立と挙げ、別のページを孤立から外していた。今は、関係を書いたページで判断する。
+- グラフ層を使っていて、別のディレクトリに同じスラッグのページがある wiki は、`wiki_graph_extract.py` でグラフを作り直す。作り直すまで、`graph/graph.sqlite` などと MCP のツール `graph` は、別のページのノードに付いたエッジを返す。同じスラッグのページがない wiki では、エッジは変わらない。
+
 ## [0.9.0] - 2026-11-09
 
 ### Added
