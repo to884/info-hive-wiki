@@ -61,40 +61,18 @@ from wiki_text import canonical_meta, ljust_display, localize_argparse, nfc, pos
 import wiki_graph_common as common  # noqa: E402
 
 
-WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
+# ページの集合とリンクの規則は wiki_pages の 1 か所に置く（ADR-0010 の決定の 1）。
+from wiki_pages import (  # noqa: E402
+    SKIP_TOP_LEVEL_DIRS,
+    SKIP_TOP_LEVEL_FILES,
+    WIKILINK_RE,
+    clean_link_target,
+    extract_wikilinks,
+    iter_page_files,
+)
+from wiki_pages import resolve_link as resolve_link_slug  # noqa: E402
+
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
-
-
-def clean_link_target(link: str) -> str:
-    """wikilink から別名、アンカー、.md を取り除き、パスだけにする。"""
-    target = link.split("|", 1)[0]      # 表示用の別名があれば取り除く
-    target = target.split("#", 1)[0]    # 見出しのアンカーを取り除く
-    target = target.replace("\\", "/").strip().strip("/")
-    if target.lower().endswith(".md"):
-        target = target[:-3]
-    # スラッグとパスのインデックスは NFC なので、リンクの行き先も NFC にそろえる。
-    return nfc(target.strip())
-
-
-def resolve_link_slug(link: str, by_path: dict, by_slug) -> "str | None":
-    """wikilink を、それが指すページのスラッグに解決する。解決できなければ None を返す。
-
-    ノード ID はファイル名のステムをキーにしているので、リンクの生のテキストで比べると、
-    パスを付けたリンク（[[entities/kalman-filter]]）がすべて落ち、その mentions エッジは
-    出力されない。ディレクトリの接頭辞は「制約」として扱う。パスを付けたリンクは、
-    そのパスがちょうど存在する場合にだけ解決する。そのため [[raw/foo]] が sources/foo.md に
-    黙って結び付き、たまたまステムが同じ別々の文書の間にエッジをでっち上げることはない。
-    """
-    target = clean_link_target(link)
-    if not target:
-        return None
-    if "/" in target:
-        return by_path.get(target)
-    return target if target in by_slug else None
-
-
-SKIP_TOP_LEVEL_FILES = {"SCHEMA.md", "index.md", "log.md", "README.md"}
-SKIP_TOP_LEVEL_DIRS = {"indexes", "graph", "raw", ".evolution"}
 
 DEFAULT_FORMATS = ["jsonl", "sqlite", "graphml"]
 
@@ -169,19 +147,16 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
 
 def collect_pages(wiki_root: Path) -> list[dict]:
     pages = []
-    for md_path in sorted(wiki_root.rglob("*.md")):
+    for md_path in iter_page_files(wiki_root):
         rel = md_path.relative_to(wiki_root)
-        if rel.parts[0] in SKIP_TOP_LEVEL_FILES or rel.parts[0] in SKIP_TOP_LEVEL_DIRS:
-            continue
-        if rel.name.startswith("."):
-            continue
         try:
             # BOM 付きの UTF-8 でも frontmatter を読めるように utf-8-sig で読む。
             text = md_path.read_text(encoding="utf-8-sig")
         except (UnicodeDecodeError, OSError):
             continue
         meta, body = parse_frontmatter(text)
-        links = [nfc(m.group(1).strip()) for m in WIKILINK_RE.finditer(body)]
+        # コードフェンスとインラインのコードの中の [[...]] からは mentions のエッジを作らない。
+        links = extract_wikilinks(body)
         pages.append({
             "path": str(md_path),
             # スラッグとパスは NFC にそろえる。lint が重複を報告するときのために、

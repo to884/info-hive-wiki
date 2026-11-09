@@ -59,9 +59,23 @@ from wiki_text import (  # noqa: E402
     canonical_meta, ljust_display, localize_argparse, nfc, normalize_tags, parse_frontmatter_text, posix_rel,
 )
 import wiki_workspace  # noqa: E402
+# ページの集合とリンクの規則は wiki_pages の 1 か所に置く（ADR-0010 の決定の 1）。wiki_index、wiki_decide、
+# 試験が wiki_search.resolve_link などの名前で使うので、同じ名前で読み込んでおく。
+from wiki_pages import (  # noqa: E402
+    WIKILINK_RE,
+    build_link_index,
+    clean_link_target,
+    code_line_mask,
+    PARSER_ID,
+    heading_line_mask,
+    links_by_line,
+    split_lines,
+    extract_wikilinks,
+    iter_page_files,
+    resolve_link,
+)
 
 
-WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 # 文字種ごとの並び。英数字は小文字にしたあとの ASCII だけを語とみなす（移植元と同じ）。
 # 漢字には 々 と 〆、CJK 統合漢字の拡張 B 以降（𠮷 など）を含める。
@@ -119,8 +133,9 @@ VECTOR_INDEX_NAME = "embeddings.sqlite"
 # prefix-v1: EMBED_MODELS の接頭辞を付ける（P3）。
 EMBED_INPUT_FORMAT = "prefix-v1"
 # パースキャッシュの形式。日本語のキーを英語に直すようにしたので 2 に、frontmatter の解析を
-# wiki_text の共通のパーサー（引用符の中のカンマと行末のコメントを扱う）に替えたので 3 に上げた。
-PARSE_CACHE_SCHEMA = 3
+# wiki_text の共通のパーサー（引用符の中のカンマと行末のコメントを扱う）に替えたので 3 に、
+# コードの中の wikilink を links に入れないようにしたので 4 に上げた。
+PARSE_CACHE_SCHEMA = 4
 
 
 def parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -166,10 +181,6 @@ def slug_from_path(path: Path, wiki_root: Path) -> str:
     return nfc(path.stem)
 
 
-def extract_wikilinks(body: str) -> list[str]:
-    return [nfc(m.group(1).strip()) for m in WIKILINK_RE.finditer(body)]
-
-
 def cache_page_body(sections: list[dict]) -> str:
     """キャッシュしたセクションのデータから、検索できる Markdown を組み立て直す。"""
     chunks = []
@@ -192,6 +203,10 @@ def load_parse_cache(cache_path: Path) -> dict:
     if not isinstance(payload, dict) or payload.get("schema") != PARSE_CACHE_SCHEMA:
         print("パースキャッシュを作り直す（対応していない形式）", file=sys.stderr)
         return {}
+    if payload.get("parser") != PARSER_ID:
+        # 本文の解析器（同梱した markdown-it-py）が変わると、links とセクションも変わりうる。
+        print("パースキャッシュを作り直す（解析器が変わった）", file=sys.stderr)
+        return {}
     files = payload.get("files")
     if not isinstance(files, dict):
         print("パースキャッシュを作り直す（files が不正）", file=sys.stderr)
@@ -206,6 +221,8 @@ def load_parse_cache(cache_path: Path) -> dict:
                 and all(isinstance(heading, str) for heading in section["heading_path"])
                 and isinstance(section.get("level"), int)
                 and isinstance(section.get("text"), str)
+                and isinstance(section.get("links"), list)
+                and all(isinstance(link, str) for link in section["links"])
                 for section in sections
             )
         )
@@ -227,49 +244,10 @@ def write_parse_cache(cache_path: Path, files: dict) -> None:
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(str(cache_path) + ".tmp")
     temporary.write_text(
-        json.dumps({"schema": PARSE_CACHE_SCHEMA, "files": files}, ensure_ascii=False, sort_keys=True),
+        json.dumps({"schema": PARSE_CACHE_SCHEMA, "parser": PARSER_ID, "files": files}, ensure_ascii=False, sort_keys=True),
         encoding="utf-8",
     )
     os.replace(temporary, cache_path)
-
-
-def clean_link_target(link: str) -> str:
-    """wikilink から別名、アンカー、.md を取り除き、パスだけにする。"""
-    target = link.split("|", 1)[0]      # 表示用の別名があれば取り除く
-    target = target.split("#", 1)[0]    # 見出しのアンカーを取り除く
-    target = target.replace("\\", "/").strip().strip("/")
-    if target.lower().endswith(".md"):
-        target = target[:-3]
-    # NFD で書かれたリンクも、NFC のスラッグとパスで解決できるようにする。
-    return nfc(target.strip())
-
-
-def build_link_index(pages: list[dict]) -> tuple[dict, set]:
-    """wikilink を解決するための (パスからスラッグへの対応, {スラッグ}) を返す。"""
-    by_path = {}
-    for p in pages:
-        rel = posix_rel(p["rel_path"])
-        if rel.lower().endswith(".md"):
-            rel = rel[:-3]
-        by_path[rel] = p["slug"]
-    return by_path, {p["slug"] for p in pages}
-
-
-def resolve_link(link: str, by_path: dict, by_slug) -> "str | None":
-    """wikilink を、それが指すページのスラッグに解決する。解決できなければ None を返す。
-
-    パスのない形（[[kalman-filter]]）もパスを付けた形（[[entities/kalman-filter]]）も、
-    ファイル名のステムで識別されるページを指す。そのため、リンクの生のテキストで比べると、
-    --backlinks はパスを付けた参照をすべて見落とし、--top-linked の件数は2つの形に分かれてしまう。
-    ディレクトリの接頭辞は飾りではなく「制約」である。パスを付けたリンクは、そのパスがちょうど
-    存在する場合にだけ解決するので、[[raw/foo]] が sources/foo になりすますことはない。
-    """
-    target = clean_link_target(link)
-    if not target:
-        return None
-    if "/" in target:
-        return by_path.get(target)
-    return target if target in by_slug else None
 
 
 def link_key(link: str, by_path: dict, by_slug) -> str:
@@ -282,12 +260,9 @@ def collect_pages(wiki_root: Path, cache_path: Path | None = None) -> list[dict]
     pages = []
     cached_files = load_parse_cache(cache_path) if cache_path else {}
     next_cache = {}
-    for md_path in wiki_root.rglob("*.md"):
+    # ページの集合は lint と同じ（wiki_pages）。最上位の README.md と assets/、.evolution/、.wiki-cache/ は含めない。
+    for md_path in iter_page_files(wiki_root):
         rel = md_path.relative_to(wiki_root)
-        if rel.parts[0] in {"SCHEMA.md", "index.md", "log.md"} or rel.name.startswith("."):
-            continue
-        if rel.parts[0] in {"indexes", "graph", "raw", ".wiki-cache", ".evolution"}:
-            continue
         rel_path = posix_rel(rel.as_posix())
         try:
             raw = md_path.read_bytes()
@@ -319,6 +294,7 @@ def collect_pages(wiki_root: Path, cache_path: Path | None = None) -> list[dict]
                     "heading_path": section["heading_path"],
                     "level": section["level"],
                     "text": section["text"],
+                    "links": section["links"],
                 }
                 for section in sections
             ],
@@ -350,25 +326,34 @@ def split_sections(title: str, body: str) -> list[dict]:
     current_path: list[str] = []
     current_level = 0
     current_lines: list[str] = []
-    in_fence = False
+    current_links: list[str] = []
+    # Markdown と同じく CR と LF だけで行に分ける（splitlines は U+2028 などでも分けるので、抜き出しと食い違う）。
+    lines = split_lines(body)
+    if len(lines) > 1 and lines[-1] == "":
+        # 末尾の改行のあとの空の行は、0.8.0（splitlines）と同じく数えない。数えると、最後のセクションの文字列が
+        # 変わり、変わっていないページまで検索の埋め込みを作り直すことになる。
+        lines.pop()
+    # 見出しは、wikilink の抜き出しと同じ wiki_pages の規則で決める。コードブロック（4 連のバッククォートの中の
+    # 3 連、引用やリストの中のフェンス、字下げのコード）の中の「# 」と、「#　」（# のあとが全角空白）は見出しではない。
+    is_heading = heading_line_mask(lines)
+    # セクションの links は、本文全体を 1 度だけ解析した行ごとのリンクから集める。セクションの本文を切り出して
+    # 読み直すと、参照リンクの定義（[r]: url）が別のセクションにあるとき、本文全体にはないリンクが生まれる。
+    line_links = links_by_line(lines)
 
     def append_section() -> None:
         sections.append({
             "heading_path": current_path.copy(),
             "level": current_level,
             "text": "\n".join(current_lines),
+            "links": current_links.copy(),
             "section_index": len(sections),
         })
 
-    for line in body.splitlines():
-        stripped = line.strip()
-        if stripped.startswith(("```", "~~~")):
-            in_fence = not in_fence
-            current_lines.append(line)
-            continue
-        heading = None if in_fence else HEADING_RE.match(line)
+    for line, heading_line, found in zip(lines, is_heading, line_links):
+        heading = HEADING_RE.match(line) if heading_line else None
         if not heading:
             current_lines.append(line)
+            current_links.extend(found)
             continue
 
         append_section()
@@ -379,6 +364,7 @@ def split_sections(title: str, body: str) -> list[dict]:
         heading_stack.append((current_level, heading_text))
         current_path = [text for _, text in heading_stack]
         current_lines = []
+        current_links = []
 
     append_section()
     return sections

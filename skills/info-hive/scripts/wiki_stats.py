@@ -30,9 +30,10 @@ from wiki_text import (  # noqa: E402
     rjust_display, strip_fences_and_images,
 )
 import wiki_workspace  # noqa: E402
+# ページの集合とリンクの抜き出しは、lint と同じ規則（wiki_pages）を使う。
+from wiki_pages import SKIP_TOP_LEVEL_DIRS, SKIP_TOP_LEVEL_FILES, WIKILINK_RE, extract_wikilinks, is_page_path  # noqa: E402,F401
 
 
-WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
 
@@ -56,10 +57,6 @@ def link_stem(link: str) -> str:
         target = target[:-3]
     # NFD で書かれたリンクも、NFC のファイル名と同じページとして数える。
     return nfc(target.strip())
-
-
-SKIP_TOP_LEVEL_FILES = {"SCHEMA.md", "log.md", "README.md"}
-SKIP_TOP_LEVEL_DIRS = {"indexes", "graph", "raw", ".evolution", "assets"}
 
 
 def parse_type(text: str) -> str | None:
@@ -123,7 +120,7 @@ def compute_stats(wiki: Path) -> dict:
     most_linked_in = Counter()
     index_lines = 0
 
-    for md_path in wiki.rglob("*.md"):
+    for md_path in wiki.rglob("*.[mM][dD]"):  # 拡張子の大文字と小文字を問わない（wiki_pages と同じ）
         rel = md_path.relative_to(wiki)
         try:
             # 先頭に BOM があっても読めるようにする。
@@ -134,11 +131,8 @@ def compute_stats(wiki: Path) -> dict:
         if rel.name == "index.md" and len(rel.parts) == 1:
             index_lines = text.count("\n") + 1
             continue
-        if rel.parts[0] in SKIP_TOP_LEVEL_FILES:
-            continue
-        if rel.parts[0] in SKIP_TOP_LEVEL_DIRS:
-            continue
-        if rel.name.startswith("."):
+        # ページの数え方は lint と同じ（wiki_pages）。
+        if not is_page_path(rel.as_posix()):
             continue
 
         total_pages += 1
@@ -153,7 +147,8 @@ def compute_stats(wiki: Path) -> dict:
         total_chars += chars
         # wikilink を数える前に frontmatter を取り除く。frontmatter ではパスのないスラッグを使う。
         body = FRONTMATTER_RE.sub("", text, count=1) if text.startswith("---") else text
-        links = WIKILINK_RE.findall(body)
+        # コードフェンスとインラインのコードの中の [[...]] は数えない（lint と同じ）。
+        links = extract_wikilinks(body)
         total_links += len(links)
         for link in links:
             most_linked_in[link_stem(link)] += 1

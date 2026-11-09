@@ -38,7 +38,7 @@ PROTOCOL = 1
 SCRIPTS = Path(__file__).resolve().parent
 # サーバーの版を決めるファイル。中身が変わったら、中継は古いサーバーを止めて起動し直す。
 SERVER_FILES = ("wiki_mcp_common.py", "wiki_mcp_server.py", "wiki_index.py", "wiki_search.py", "wiki_text.py",
-                "wiki_lint.py", "wiki_stats.py", "wiki_workspace.py", "wiki_graph_common.py", "wiki_graph_query.py",
+                "wiki_pages.py", "wiki_lint.py", "wiki_stats.py", "wiki_workspace.py", "wiki_graph_common.py", "wiki_graph_query.py",
                 "wiki_graph_lint.py", "wiki_graph_extract.py")
 COLLECTION_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
@@ -107,6 +107,16 @@ def code_version() -> str:
             digest.update(name.encode() + b"\0" + (SCRIPTS / name).read_bytes())
         except OSError:
             digest.update(name.encode() + b"\0missing")
+    # 同梱した Markdown の解析器（_vendor/）の中身も含める。markdown-it-py や mdurl だけを入れ替えても、
+    # 動いているサーバーが古い解析器のまま使われないようにする。
+    vendor = SCRIPTS / "_vendor"
+    if vendor.is_dir():
+        for path in sorted(vendor.rglob("*"), key=lambda p: p.relative_to(vendor).as_posix()):
+            if path.is_file() and "__pycache__" not in path.parts:
+                try:
+                    digest.update(b"_vendor/" + path.relative_to(vendor).as_posix().encode() + b"\0" + path.read_bytes())
+                except OSError:
+                    digest.update(b"_vendor/" + path.relative_to(vendor).as_posix().encode() + b"\0missing")
     return digest.hexdigest()[:16]
 
 

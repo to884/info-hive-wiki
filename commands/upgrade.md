@@ -21,6 +21,7 @@ argument-description: "`--user` を付けるとユーザースコープの wiki 
    - ページでグラフ層を使い始めるときは、明示的なソースが裏づけている場合に限って、型付きの `graph.relationships[]` を追加する。詳しくは `skills/info-hive/references/graph-workflow.md` を参照。
    - グラフの lint と抽出は、PyYAML のバージョンを固定したメタデータを持ち、`uv run --script` で実行される。手作業での `pip install` は不要である。
    - `/wiki:ingest` に URL を渡すと、`wiki_fetch.py` で Web ページを取り込める。既存の wiki に移行作業は要らない。画像は `raw/assets/<スラッグ>/` に保存する。`raw/assets/` は `init_wiki.py` がすでに作っている。
+   - コードブロックとインラインのコードの中の `[[...]]` を、wikilink として数えなくなった。グラフ層を使っている wiki は、`wiki_graph_extract.py` でグラフを作り直すよう伝える（作り直すまで、MCP の `graph` は古い結果を返す）。検索は、最上位の `README.md` と `assets/` の中の Markdown を対象にしなくなった。
    - 取り込みで、ソースの要約ページに `## 主張と行き先` の表を残すようになった。抜き出した主張ごとに、どのページへ送ったか（`create`、`update`、`source_only`）と理由を書く。既存のソースのページに移行作業は要らず、次に取り込むソースから表が付く。`init_wiki.py` は既存の `.page-template.md` を上書きしないので、テンプレートの `## 関係するページ` の直前にこのセクションを足すことを提案する。
    - 知識ページに図表を入れられるようになった。`--upgrade` で `wiki/assets/`（svg の図の置き場所）ができる。既存のページに移行作業は要らない。ページの大きさは、コードフェンスの中身と画像だけの行を除いて数えるようになったので、mermaid の図の多いページは、以前より小さく数えられる。
 
