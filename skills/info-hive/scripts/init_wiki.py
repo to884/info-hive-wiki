@@ -52,6 +52,12 @@ SUBDIRS = ["sources", "entities", "concepts", "synthesis", "graph", "assets"]
 # label は利用者に見せる説明なので日本語で書く。
 SCHEMA_SECTION_MARKERS = [
     {
+        "marker": "## Claim destinations",
+        "version": "0.8.0",
+        "anchor": "## Claim destinations",
+        "label": "ソースの要約ページの主張と行き先の表",
+    },
+    {
         "marker": "## Skill evolution",
         "version": "3.2.0",
         "anchor": "## Skill evolution",
