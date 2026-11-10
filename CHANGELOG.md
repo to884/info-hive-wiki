@@ -6,6 +6,16 @@
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-09
+
+### Fixed
+
+- `init_wiki.py` が書き出す `SCHEMA.md` と `graph/README.md` のコマンドの例で、スクリプトのパスが、wiki を使う側のどこから実行しても解決しなかった。ひな形は `scripts/wiki_graph_extract.py`（スキルのディレクトリから見たパス）と `skills/info-hive/scripts/wiki_search.py`（プラグインから見たパス）を混ぜて書いていたが、どちらも、プロジェクトのルートからは見つからない。
+  - ひな形では `"<skill-root>/scripts/..."` と書き、同じファイルの中で、`<skill-root>` はインストールした info-hive スキルのディレクトリ（Claude Code のプラグインでは `${CLAUDE_PLUGIN_ROOT}/skills/info-hive`）の実際のパスに置き換えると説明するようにした。`${CLAUDE_PLUGIN_ROOT}` はプラグインのコマンドの中で展開されるもので、書き出したファイルの中では展開されず、シェルでも設定されていないことがあるので、そのまま書かない。初期化のときに実際のパスを書き込むこともしない。プラグインの版ごとにパスが変わり、マシンにも依存するからである。
+  - スクリプトのパスは `"` で囲み、パスに空白があっても引数が分かれないようにした。
+  - `SCHEMA.md` の検索の例に `--wiki wiki/` を付けた。今までは対象の wiki を指定していなかったので、`--wiki-dir` で別の名前にした wiki では、作業領域の設定がなければ `./wiki` を検索していた。`wiki/` は、別の名前で初期化した wiki では置き換えるよう、`SCHEMA.md` と `graph/README.md` に書いた。
+  - 既存の wiki の `SCHEMA.md` と `graph/README.md` は書き換えない。見出しは変えていないので、`init_wiki.py --upgrade` も差分を案内しない。直したいときは、ひな形（`assets/SCHEMA.md.template` の「Retrieval」と「Graph layer」、`assets/graph_README.md.template`）に合わせて手で直す。
+
 ## [0.9.0] - 2026-11-09
 
 ### Added
