@@ -66,7 +66,7 @@ class ParseTests(unittest.TestCase):
 
 
 class WiderYamlTests(unittest.TestCase):
-    """規約にない YAML の書き方も読む（0.9.6）。値は、型に直さない YAML の値と同じ文字列かその配列である。"""
+    """規約にない YAML の書き方も読む（0.9.7）。値は、型に直さない YAML の値と同じ文字列かその配列である。"""
 
     def test_block_list_with_any_indent(self):
         self.assertEqual(parse('sources:\n- "a"\n- b # コメント\ntags:\n    - "税制"\n'),
