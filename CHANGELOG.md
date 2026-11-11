@@ -6,6 +6,16 @@
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-11-11
+
+### Fixed
+
+- スキルの `SKILL.md` と `references/*.md` のコマンドの例で、スクリプトのパスの書き方がそろっていなかった。`scripts/wiki_lint.py`（スキルのディレクトリから見たパス）、`skills/info-hive/scripts/setup_wiki.py`（プラグインから見たパス）、`${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/...`、`<プラグインのパス>/skills/info-hive/scripts/...`、`wiki_mcp_launch.py`（名前だけ）が混ざっていて、wiki を使う側のプロジェクトのルートで実行すると、多くは見つからなかった。
+  - 0.9.1 のひな形と同じく、実行するスクリプトはすべて `"<skill-root>/scripts/<名前>.py"` と書くようにした。`SKILL.md` に「スクリプトのパス」の節を足し、`<skill-root>` はこのスキルのディレクトリ（Claude Code では、スキルを読み込んだときに示されるベースディレクトリ）の実際のパスに置き換えると書いた。コマンドのある各リファレンスには、その節を指す 1 行を足した。`references/graph-workflow.md` の、`${CLAUDE_PLUGIN_ROOT}` で呼ぶという説明は書き換えた。
+  - `${CLAUDE_PLUGIN_ROOT}` を使わないのは、リファレンスは普通のファイルとして読まれ、スキルはこの変数を持たないホストでも使われるからである。プラグインのコマンド（`commands/*.md`）は今までどおり `${CLAUDE_PLUGIN_ROOT}` を使う。
+  - 文の中で `scripts/wiki_pages.py` のようにスキルの中のファイルを指す書き方は、スキルのディレクトリから見たパスとして残した。
+  - `references/evolution-workflow.md` の JSON の `argv` の例は、`/absolute/skill/scripts/...` を `<skill-root>/scripts/...` にし、シェルを通さないので絶対パスに置き換えると書いた。`references/decision-models.md` の `eval/decisions/run_eval.py` は、プラグインのリポジトリのルートで実行すると書いた。
+
 ## [0.9.2] - 2026-11-11
 
 ### Fixed
