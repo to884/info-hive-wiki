@@ -236,13 +236,15 @@ def _unread_fields(own_pairs: list, root, raw_meta: dict, meta: dict, fm_text: s
     own_pairs は、マージキーを展開する前の最上位の (キーのノード, 値のノード) で、root は展開したあとの
     最上位のノードである。raw_meta は lint のパーサーが返した、書かれたままのキーの辞書、meta はそれを
     canonical_meta で英語のキーに直した辞書である。次のどれかに当たる欄を返す。
-    - その欄を書いた回数が、lint のパーサーがキーの行として読んだ回数より多い（`"type": x`、`type : x`。
-      読めるキーと読めないキーで 2 度書いたものを含む）。値のある宣言が 1 つもなければ、挙げない。
+    - その欄を書いた回数が、lint のパーサーがキーの行として読んだ回数より多い（`? type` の形のキー、
+      エスケープを含むキー。読めるキーと読めないキーで 2 度書いたものを含む）。値のある宣言が 1 つも
+      なければ、挙げない。
     - 同じキーに書いた YAML の配列の要素の数より少ない数しか、lint のパーサーが読んでいない
-      （字下げのない `- x`、字下げ 4 つの `    - x`、複数行の `[a,` … `]`）。数え方は lint のパーサーに合わせる。
+      （アンカーを付けた配列、次の行に書いた `[a, b]`）。数え方は lint のパーサーに合わせる。
       同じキーの配列はつなぎ、あとに書いた文字列は配列を置き換える。
     - マージキーで来た値があるのに、lint の形にその欄がない。
-    値の中身は比べない。
+    値の中身は比べない。wiki 0.9.6 から、lint のパーサーは、字下げの違うブロックの配列、複数行の `[a,` … `]`、
+    引用符つきのキー（`"type": x`）、コロンの前の空白（`type : x`）を読むので、これらは挙がらない。
     """
     written_times: dict[str, int] = {}
     has_value: set[str] = set()
@@ -354,7 +356,7 @@ def read_frontmatter(text: str) -> "tuple[dict, str, list[dict]]":
     raw_meta = parse_frontmatter_text(fm_text)
     meta, _conflicts = canonical_meta(raw_meta)
     graph_meta, problems = _read_graph(fm_text, raw_meta, meta)
-    # lint の形の graph（入れ子を読まないので []。字下げ 2 つの `  - x` が紛れ込むこともある）は使わない。
+    # lint の形の graph（入れ子を読まないので []）は使わない。
     meta.pop("graph", None)
     if graph_meta is not None:
         meta["graph"] = graph_meta
@@ -1001,6 +1003,19 @@ def build_sqlite(db_path: Path, nodes: list[dict], aliases: list[dict], edges: l
         conn.close()
 
 
+# XML 1.0 に書けない文字（タブ、LF、CR のほかの制御文字、サロゲート、U+FFFE、U+FFFF）。
+_XML_INVALID_RE = re.compile("[^\t\n\r\x20-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
+
+
+def _xml_text(value) -> str:
+    """GraphML に書く文字列にする。XML に書けない文字は U+FFFD に置き換える。
+
+    frontmatter の値には、制御文字が入りうる（`title: "a\\0b"` のエスケープや、ファイルに直接書いた文字）。
+    そのまま書くと、書き出しは成功するのに、読めない GraphML になる。JSONL と SQLite には、元の値のまま書く。
+    """
+    return _XML_INVALID_RE.sub("\ufffd", str(value))
+
+
 def write_graphml_file(path: Path, nodes: list[dict], edges: list[dict]) -> None:
     """GraphML を path に書く。置き換えは呼び出す側が行う。"""
     ns ="http://graphml.graphdrawing.org/xmlns"
@@ -1031,25 +1046,25 @@ def write_graphml_file(path: Path, nodes: list[dict], edges: list[dict]) -> None
 
     for n in sorted(nodes, key=lambda n: n["id"]):
         node_el = ET.SubElement(graph, f"{{{ns}}}node")
-        node_el.set("id", n["id"])
+        node_el.set("id", _xml_text(n["id"]))
         for kid, kfor, kname, _ in keys:
             if kfor != "node":
                 continue
             data = ET.SubElement(node_el, f"{{{ns}}}data")
             data.set("key", kid)
-            data.text = str(n.get(kname) or "")
+            data.text = _xml_text(n.get(kname) or "")
 
     for e in sorted(edges, key=lambda e: e["id"]):
         edge_el = ET.SubElement(graph, f"{{{ns}}}edge")
-        edge_el.set("id", e["id"])
-        edge_el.set("source", e["subject"])
-        edge_el.set("target", e["object"])
+        edge_el.set("id", _xml_text(e["id"]))
+        edge_el.set("source", _xml_text(e["subject"]))
+        edge_el.set("target", _xml_text(e["object"]))
         for kid, kfor, kname, _ in keys:
             if kfor != "edge":
                 continue
             data = ET.SubElement(edge_el, f"{{{ns}}}data")
             data.set("key", kid)
-            data.text = str(e.get(kname) or "")
+            data.text = _xml_text(e.get(kname) or "")
 
     tree = ET.ElementTree(root)
     ET.indent(tree, space="  ")
