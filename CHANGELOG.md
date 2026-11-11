@@ -6,6 +6,12 @@
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-11-11
+
+### Fixed
+
+- グラフの lint（`wiki_graph_lint.py` と MCP のツール `lint` の `graph`）は、`graph.relationships` の `contradicts` と `supersedes` の値を、ノード ID とソースページのスラッグとだけ照らしていた。手順書（`references/graph-workflow.md`）とひな形（`assets/SCHEMA.md.template`）はエッジの ID を書いてよいとしているのに、実在するエッジの ID を書いても `broken_contradicts` と `broken_supersedes` に挙げていた。今は、抽出（`wiki_graph_extract.py`）と同じエッジを作り、その ID も参照先として認める。16 進 24 桁の形でも、抽出したエッジにない ID は今までどおり挙げる。この食い違いは 0.9.2 より前からあった。0.9.2 で、2 つの関係が互いのエッジの ID を書けるようにしたので、エッジの ID の参照が実際に使えるようになっていた。
+
 ## [0.9.3] - 2026-11-11
 
 ### Fixed
