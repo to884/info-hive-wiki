@@ -36,7 +36,7 @@ FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*(?:\n|$)", re.DOTALL)
 KEY_RE = re.compile(r"^([\w-]+):\s*(.*)$")
 
 # README の表と同じワークフローの順。ここにないコマンドは、名前順で後ろに並べる。
-PREFERRED_ORDER = ["init", "ingest", "query", "lint", "stats", "graph", "learn", "evolve", "upgrade", "help"]
+PREFERRED_ORDER = ["init", "ingest", "query", "lint", "stats", "graph", "browse", "learn", "evolve", "upgrade", "help"]
 
 DEFAULT_PLUGIN_NAME = "wiki"
 NO_ARGUMENTS = "引数はない。"

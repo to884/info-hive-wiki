@@ -39,7 +39,7 @@ LLM Wiki がもっとも役立つのは、時間とともに増えていく知�
 
 ### Claude Code: プラグイン一式
 
-ネイティブの方法である。スキルと10個の `/wiki:*` スラッシュコマンドが、1回のインストールでそろう。プラグインは、マーケットプレイス用のリポジトリ [to884/info-hive-marketplace](https://github.com/to884/info-hive-marketplace) から入れる。
+ネイティブの方法である。スキルと11個の `/wiki:*` スラッシュコマンドが、1回のインストールでそろう。プラグインは、マーケットプレイス用のリポジトリ [to884/info-hive-marketplace](https://github.com/to884/info-hive-marketplace) から入れる。
 
 ```
 /plugin marketplace add to884/info-hive-marketplace
@@ -84,7 +84,7 @@ ln -s "$(pwd)/info-hive-wiki/skills/info-hive" ~/.omp/agent/skills/info-hive
 
 Claude Code 以外でスキルを使うときに知っておくべきことは次のとおり。
 
-- **スラッシュコマンドは Claude Code 専用である。** 10個の `/wiki:*` コマンドは、Claude Code プラグインのマニフェストとして `commands/` にある。ほかのエージェントでは、自然言語でスキルを呼び出す（「この論文を wiki に追加して」「X について wiki には何が書いてある？」「wiki に lint をかけて」）。あとは SKILL.md が処理する。
+- **スラッシュコマンドは Claude Code 専用である。** 11個の `/wiki:*` コマンドは、Claude Code プラグインのマニフェストとして `commands/` にある。ほかのエージェントでは、自然言語でスキルを呼び出す（「この論文を wiki に追加して」「X について wiki には何が書いてある？」「wiki に lint をかけて」）。あとは SKILL.md が処理する。
 - **同梱のツールはすべて、エージェントから使える。** 一覧のどのエージェントも、インストールしたスキルを通じて、`setup_wiki.py`、ハイブリッド検索と語彙ベースの検索、lint、stats、グラフの lint・抽出・クエリ、初期化を実行できる。依存パッケージを持つスクリプトには、バージョンを固定した PEP 723 のメタデータがあり、`uv run --script` で実行する。初期化とアップグレードでは、準備が整ったと報告する前に実行環境一式を検証する。
 - **wiki 自体はエージェントに依存しない。** ただの Markdown ファイルのディレクトリである。あるエージェントで取り込み、別のエージェントでクエリしてもよい。`wiki/` の中に、特定のランタイムに縛るものは何もない。
 
@@ -155,6 +155,7 @@ Claude はインデックスを読んで候補のページを見つけ、それ�
 | `/wiki:lint` | 構造と内容の健全性をチェックする。`wiki/graph/ontology.yaml` があればグラフの lint も実行する。 |
 | `/wiki:stats` | wiki の規模、リンク密度、スケーリングのどの閾値に達しているかを表示する。 |
 | `/wiki:graph <action>` | コンパイル済みのグラフ層に対して `extract` / `lint` / `neighbors` / `edges` / `path` / `facts` を実行する。 |
+| `/wiki:browse [slug]` | wiki をブラウザで閲覧する。必要なときだけ 127.0.0.1 のサーバーを起動する。`--stop` で止める。 |
 | `/wiki:learn <task artifacts>` | 検証済みの経験を記録し、根拠にリンクした再利用できるパターンにまとめる。 |
 | `/wiki:evolve <goal or action>` | スキルの改善案を作成・評価・確認・適用し、ロールバックする。すべての試行の結果を残す。 |
 | `/wiki:upgrade` | 既存の wiki を現在のプラグインのバージョンにアップグレードする（冪等なファイル操作と、手順を追った SCHEMA.md のマージ）。 |

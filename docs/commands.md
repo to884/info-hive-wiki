@@ -2,7 +2,7 @@
 
 # コマンド
 
-Claude Code のプラグインには、10個の `/wiki:*` スラッシュコマンドが付属する。ほかのエージェントでは、同じ依頼を自然言語で伝える。どちらの方法でも、裏で同じスキルが呼び出される。
+Claude Code のプラグインには、11個の `/wiki:*` スラッシュコマンドが付属する。ほかのエージェントでは、同じ依頼を自然言語で伝える。どちらの方法でも、裏で同じスキルが呼び出される。
 
 | コマンド | 内容 |
 | --- | --- |
@@ -12,6 +12,7 @@ Claude Code のプラグインには、10個の `/wiki:*` スラッシュコマ�
 | [`/wiki:lint`](#wikilint) | 構造と内容の健全性をチェックする。 |
 | [`/wiki:stats`](#wikistats) | 規模、リンク密度と、スケーリングのどの閾値に達しているかを表示する。 |
 | [`/wiki:graph <action>`](#wikigraph-action) | 型付きグラフ層をコンパイル、lint、またはクエリする。 |
+| [`/wiki:browse [slug]`](#wikibrowse-slug) | wiki をブラウザで閲覧する。 |
 | [`/wiki:learn <task artifacts>`](#wikilearn-task-artifacts) | 検証済みの経験を記録し、再利用できるパターンにまとめる。 |
 | [`/wiki:evolve <goal or action>`](#wikievolve-goal-or-action) | スキルの改善案をステージング、評価、確認、適用、またはロールバックする。 |
 | [`/wiki:upgrade`](#wikiupgrade) | 既存の wiki を、現在のプラグインのバージョンにアップグレードする。 |
@@ -96,6 +97,20 @@ wiki の型付きグラフ層をコンパイル、lint、またはクエリす�
 ```
 
 `extract` は markdown をコンパイルして `nodes.jsonl`、`edges.jsonl`、`graph.sqlite`、`graph.graphml` を作る。`lint` は型付きエッジを検証する。クエリ系のサブコマンドは、コンパイル済みのグラフをたどる。正本は markdown のままなので、グラフはいつ削除して作り直してもよい。[グラフ層のガイド](./graph.md)を参照。
+
+## `/wiki:browse [slug]`
+
+wiki を、日本語の CSS と、ナビゲーション、メタ欄、被リンク、ページごとの関係表、未解決リンクの表示つきの HTML で閲覧する。必要なときだけ 127.0.0.1 で待ち受けるサーバーを起動し、操作がない状態が 30 分続くと終わる。閲覧は読むだけで、wiki のファイルを変えない。
+
+```bash
+/wiki:browse
+/wiki:browse 知識グラフ
+/wiki:browse --stop
+```
+
+slug を付けると、`[[slug]]` と同じ規則でページを探して開く。リンクの判定は lint と同じで、未解決リンクの一覧は lint の「リンク切れの wikilink」と一致する。ページを開いたときに Markdown を HTML に変換するので、ページを編集して再読み込みすれば、新しい内容が出る。URL には起動ごとのトークンが入り、ほかのページや、同じ PC のほかの利用者からは開けない。
+
+持ち出せる静的の HTML は、`wiki_browse.py build <WIKI_ROOT> --out <書き出し先>` で書き出せる。書き出し先は wiki の外の空のディレクトリにする。
 
 ## `/wiki:upgrade`
 
