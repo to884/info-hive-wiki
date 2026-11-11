@@ -216,6 +216,7 @@ gist をめぐるコミュニティの議論で、このパターンがうまく
 - `scripts/wiki_graph_lint.py`: バージョンを固定した PyYAML を使い、型付きエッジをオントロジーと照らして検証する
 - `scripts/wiki_graph_query.py`: `graph.sqlite` に対する neighbors、edges、facts、最短経路のクエリ
 - `scripts/wiki_graph_common.py`: グラフの 3 つのスクリプトが共有する、オントロジーの有無の判定と、生成物の置き換え
+- `scripts/wiki_browse.py`、`scripts/wiki_browse_core.py`、`scripts/wiki_browse_fs.py`、`scripts/browse_assets/`: wiki の閲覧（`/wiki:browse`）。中核は wiki を 1 度だけ読み、lint と同じリンクの判定で HTML を描く。`build` は静的の HTML を wiki の外に書き出し、`serve` は 127.0.0.1 のサーバーを起動する。wiki のファイルは変えない
 - `scripts/wiki_workspace.py`: 作業領域の設定（`.info-hive/workspace.json`）を読み、`--wiki` を省いたときの既定（`dirs.wiki`、設定がなければ `./wiki`）を決める
 - `scripts/wiki_mcp_launch.py`、`scripts/wiki_mcp_relay.py`、`scripts/wiki_mcp_server.py`: wiki の MCP サーバー。入口がプラグインの `.mcp.json` で登録され、中継の環境を確かめてから中継を動かす。中継は127.0.0.1 のサーバーを 1 つだけ起動して使う。ツールは `query`、`get_page`、`list_index`、`lint`、`stats`、`graph`、`index_chunks`
 - `scripts/wiki_index.py`: MCP サーバーの検索の基盤（ruri-v3-130m の ONNX、usearch、Tantivy）。索引は wiki の外に置く

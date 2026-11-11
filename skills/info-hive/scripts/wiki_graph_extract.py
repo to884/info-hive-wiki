@@ -417,6 +417,17 @@ def read_ontology(path: Path) -> dict:
     """
     try:
         text = Path(path).read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError) as e:
+        raise OntologyError(f"オントロジーを読めない（{path}）: {e}") from e
+    return parse_ontology(text, path)
+
+
+def parse_ontology(text: str, path="graph/ontology.yaml") -> dict:
+    """読んだオントロジーの文字を解釈する。誤っていれば OntologyError を送出する。
+
+    path は、知らせの文に入れる名前だけに使う。閲覧は、1 度だけ読んだ文字をこの関数に渡す。
+    """
+    try:
         loader = yaml.SafeLoader(text)
         try:
             # yaml.safe_load と同じ読み方。書かれた文字を取るために、ノードを手元に残す。

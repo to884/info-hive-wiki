@@ -29,6 +29,9 @@ SKIP_TOP_LEVEL_FILES = frozenset({"SCHEMA.md", "index.md", "log.md", "README.md"
 SKIP_TOP_LEVEL_DIRS = frozenset({"indexes", "graph", "raw", "assets", ".evolution", ".wiki-cache"})
 
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
+# WIKILINK_RE と同じものに当たり、別名も取り出す（1 つ目が行き先、2 つ目が別名）。閲覧が wikilink を描くときに使う。
+# 当たる範囲が WIKILINK_RE と同じなので、描くものと extract_wikilinks が拾うものは一致する。
+WIKILINK_FULL_RE = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +120,18 @@ def _load_vendored():
 
 
 markdown_it = _load_vendored()
-_MD = markdown_it.MarkdownIt("commonmark", {"html": False}).enable("table")
+
+
+def new_parser():
+    """本文を読むパーサーを新しく作る（同梱の markdown-it-py、commonmark、生の HTML は無効、表は有効）。
+
+    lint などがリンクを拾うパーサーも、閲覧が描くパーサーも、これで作る。設定が同じなので、同じ本文から
+    同じトークンができる。閲覧は、描くための規則を、自分で作ったパーサーにだけ足す。
+    """
+    return markdown_it.MarkdownIt("commonmark", {"html": False}).enable("table")
+
+
+_MD = new_parser()
 _LINE_SPLIT_RE = re.compile(r"\r\n|\r|\n")
 
 
