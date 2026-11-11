@@ -186,7 +186,8 @@ def has_fullwidth_link_syntax(link: str) -> bool:
 #   値の中に YAML にないエスケープ（\d など）が 1 つでもあれば、その値は \" と \\ だけを戻す。
 # - `|` と `>` のブロックのスカラーを、YAML と同じ値に読む。
 # 引用符の中のカンマで配列を分けず、引用符の外の「 #」から行末まではコメントとして捨てる。
-# 行は LF（と CRLF）で分け、値の前後の空白は、全角の空白などの Unicode の空白も除く。
+# 行は LF（と CRLF）で分け、値の前後の空白は、全角の空白などの Unicode の空白も除く。その空白のあとの # も
+# コメントにする（YAML は、空白とタブのあとの # だけ）。日本語の入力で入りやすい空白を許すためである。
 #
 # 値はすべて、書かれた文字のままの文字列か、その配列になる（true、2024、2024-01-01、null も文字列）。
 # 入れ子（graph: など）、次の行に書いた値、複数行にまたがるスカラー、アンカー（&、*）、タグ（!!str）、
@@ -344,14 +345,17 @@ def _fm_split_items(inner: str) -> list[str]:
     return [item for item in items if item]
 
 
-def _fm_flow_line(line: str, quote: "str | None", depth: int) -> "tuple[str, str | None, int, bool] | None":
-    """複数行にまたがる [...] の 1 行を読む。(残す文字, 引用符の状態, 括弧の深さ, 閉じたか) を返す。
+def _fm_flow_line(line: str, state: tuple) -> "tuple[str, tuple, bool] | None":
+    """複数行にまたがる [...] の 1 行を読む。(残す文字, 状態, 閉じたか) を返す。
 
-    quote と depth は、前の行までの状態である。引用符の外の # から行末までは、コメントとして捨てる。
-    YAML と同じく、# がコメントになるのは、行頭、空白のあと、`,`・`[`・`]`・`{`・`}` のあと、閉じた引用符の
-    あとである（`a#b` の # は値の一部）。引用符の読み方は _fm_split_items と同じである。括弧が閉じたあとに、
-    コメントでない文字が続いていれば None を返す。
+    state は、前の行までの (引用符, 括弧の深さ, 引用符のない値の途中か) である。括弧が閉じているかどうかを
+    YAML と同じに見るために、引用符とコメントを YAML の決まりで読む（_fm_split_items とは違う）。
+    - 引用符は、値の先頭でだけ始まる。引用符のない値の途中の ' と " は文字である（`it's`、`a"b`）。
+    - # がコメントになるのは、行頭、空白のあと、`,`・`[`・`]`・`{`・`}` のあと、閉じた引用符のあとである
+      （`a#b` の # は値の一部）。コメントの中の ] と引用符は読まない。
+    括弧が閉じたあとに、コメントでない文字が続いていれば None を返す。
     """
+    quote, depth, plain = state
     i = 0
     n = len(line)
     comment_ok = True   # この位置の # がコメントになるか
@@ -365,11 +369,15 @@ def _fm_flow_line(line: str, quote: "str | None", depth: int) -> "tuple[str, str
                 quote = None
                 comment_ok = True
         elif ch == "#" and comment_ok:
-            return line[:i].strip(), quote, depth, False
-        elif ch in "\"'":
+            return line[:i].strip(), (None, depth, False), False
+        elif ch.isspace():
+            comment_ok = True
+        elif ch in "\"'" and not plain:
             quote = ch
             comment_ok = False
-        else:
+        elif ch in ",[]{}":
+            plain = False
+            comment_ok = True
             if ch == "[":
                 depth += 1
             elif ch == "]":
@@ -377,34 +385,41 @@ def _fm_flow_line(line: str, quote: "str | None", depth: int) -> "tuple[str, str
                 if depth == 0:
                     if _fm_strip_comment(line[i + 1:].strip()):
                         return None
-                    return line[:i + 1].strip(), quote, depth, True
-            comment_ok = ch.isspace() or ch in ",[]{}"
+                    return line[:i + 1].strip(), (None, 0, False), True
+        elif ch == ":" and (i + 1 >= n or line[i + 1].isspace() or line[i + 1] in ",[]{}"):
+            # `キー: 値` の区切り。次の値は、引用符で始めてよい。
+            plain = False
+            comment_ok = False
+        else:
+            plain = True
+            comment_ok = False
         i += 1
-    return line.strip(), quote, depth, False
+    return line.strip(), (quote, depth, plain), False
 
 
 def _fm_multiline_flow(first: str, lines: list[str], start: int) -> "tuple[list[str], int] | None":
     """1 行で閉じない [ の配列を、閉じる ] の行まで読む。(項目の一覧, 次に読む行の番号) を返す。
 
-    first は 1 行目の値（[ で始まり、コメントを除いてある）、start は次の行の番号である。行をまたぐところは
+    first は 1 行目の値（[ で始まる。コメントを除く前のもの）、start は次の行の番号である。行をまたぐところは
     空白 1 つにし、1 行に書いたときと同じ項目に分ける。次のときは None を返し、呼び出す側は、今までどおり
     1 行目だけの文字列として読む。
     - 1 行目で括弧が閉じている（`[a] b`）。
     - 閉じる前に、字下げのないキーの行が来る。] を書き忘れたものとして扱い、後ろの欄を配列に取り込まない。
     - frontmatter の終わりまで閉じない。
+    1 行目が ] で終わる値には使わない。それは、呼び出す側が、今までどおり 1 行の配列として読む。
     """
-    read = _fm_flow_line(first, None, 0)
-    if read is None or read[3]:
+    read = _fm_flow_line(first, (None, 0, False))
+    if read is None or read[2]:
         return None
-    parts = [read[0]]
-    _text, quote, depth, _closed = read
+    text, state, _closed = read
+    parts = [text]
     for index in range(start, len(lines)):
         if _FM_KEY_RE.match(lines[index]):
             return None
-        read = _fm_flow_line(lines[index], quote, depth)
+        read = _fm_flow_line(lines[index], state)
         if read is None:
             return None
-        text, quote, depth, closed = read
+        text, state, closed = read
         if text:
             parts.append(text)
         if closed:
@@ -508,7 +523,8 @@ def _fm_entries(frontmatter_text: str):
         if not kv:
             continue
         key = kv.group(1) or kv.group(2) or kv.group(3)
-        value = _fm_strip_comment(kv.group(4).strip())
+        written = kv.group(4).strip()
+        value = _fm_strip_comment(written)
         seq_key = seq_indent = None
         if not value:
             seq_key = key
@@ -516,9 +532,11 @@ def _fm_entries(frontmatter_text: str):
             continue
         if value.startswith("["):
             if value.endswith("]"):
+                # ] で終わる行は、0.9.5 までと同じに、1 行の配列として読む。後ろの行は見ない。行末の ] が
+                # コメントや引用符の中にあっても（`[a,# メモ ]`、`[a, "b]`）、読み方を変えない。
                 yield key, "list", _fm_split_items(value[1:-1]), True
                 continue
-            flow = _fm_multiline_flow(value, lines, i)
+            flow = _fm_multiline_flow(written, lines, i)
             if flow is not None:
                 items, i = flow
                 yield key, "list", items, True

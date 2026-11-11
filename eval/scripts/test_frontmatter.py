@@ -77,6 +77,18 @@ class WiderYamlTests(unittest.TestCase):
         meta = parse('graph:\n  aliases:\n  - "a"\nsources:\n  junk\n  - b\ntitle: "x"\n')
         self.assertEqual(meta, {"graph": [], "sources": [], "title": "x"})
 
+    def test_block_list_ends_at_an_unindented_line(self):
+        # 読まないキーの行（source-url:）を挟んだあとの要素は、前のキーの要素ではない。
+        meta = parse('sources:\n  - "a"\nsource-url:\n  - "b"\ntags:\n- "c"\n???\n- "d"\n')
+        self.assertEqual(meta, {"sources": ["a"], "tags": ["c"]})
+
+    def test_line_ending_with_a_bracket_is_a_one_line_list(self):
+        # ] で終わる行は、0.9.5 までと同じに 1 行の配列として読み、後ろの行を取り込まない。
+        self.assertEqual(parse("sources: [it's]\n# don't ]\ntags: [a, \"b]\n  c\"]\n"),
+                         {"sources": ["it's"], "tags": ["a", '"b']})
+        # コメントの中の括弧と引用符は、複数行の配列の形に関わらない。
+        self.assertEqual(parse("sources: [a,  # メモ ] \"\n b]  # ]\n"), {"sources": ["a", "b"]})
+
     def test_multiline_inline_list(self):
         meta = parse('sources: ["a",\n  "b, c",  # コメント\n  d,# コメント\n]\ntags: ["x"]\n')
         self.assertEqual(meta, {"sources": ["a", "b, c", "d"], "tags": ["x"]})

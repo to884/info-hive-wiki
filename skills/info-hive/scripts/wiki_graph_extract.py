@@ -1012,8 +1012,23 @@ def _xml_text(value) -> str:
 
     frontmatter の値には、制御文字が入りうる（`title: "a\\0b"` のエスケープや、ファイルに直接書いた文字）。
     そのまま書くと、書き出しは成功するのに、読めない GraphML になる。JSONL と SQLite には、元の値のまま書く。
+    値（題名など）に使う。別の値と同じ文字列になってよい。ID には _xml_id を使う。値の中の CR は、XML を
+    読む側が LF にする。
     """
     return _XML_INVALID_RE.sub("\ufffd", str(value))
+
+
+def _xml_id(value) -> str:
+    """GraphML に書く ID にする（ノードとエッジの ID、エッジの両端）。別の ID と同じ文字列にならない。
+
+    XML に書ける文字だけで、U+FFFD を含まない ID は、そのまま書く。XML に書けない文字は U+FFFD と {16 進のコード} に、
+    ID の中の U+FFFD は U+FFFD を 2 つにして書く。_xml_text のように U+FFFD 1 つに置き換えると、
+    `x\\0y` と `x\\x01y` のような別のノードが同じ ID になり、GraphML の中で 1 つのノードになってしまう。
+    """
+    text = str(value)
+    if "\ufffd" not in text and not _XML_INVALID_RE.search(text):
+        return text
+    return _XML_INVALID_RE.sub(lambda m: "\ufffd{%X}" % ord(m.group()), text.replace("\ufffd", "\ufffd\ufffd"))
 
 
 def write_graphml_file(path: Path, nodes: list[dict], edges: list[dict]) -> None:
@@ -1046,7 +1061,7 @@ def write_graphml_file(path: Path, nodes: list[dict], edges: list[dict]) -> None
 
     for n in sorted(nodes, key=lambda n: n["id"]):
         node_el = ET.SubElement(graph, f"{{{ns}}}node")
-        node_el.set("id", _xml_text(n["id"]))
+        node_el.set("id", _xml_id(n["id"]))
         for kid, kfor, kname, _ in keys:
             if kfor != "node":
                 continue
@@ -1056,9 +1071,9 @@ def write_graphml_file(path: Path, nodes: list[dict], edges: list[dict]) -> None
 
     for e in sorted(edges, key=lambda e: e["id"]):
         edge_el = ET.SubElement(graph, f"{{{ns}}}edge")
-        edge_el.set("id", _xml_text(e["id"]))
-        edge_el.set("source", _xml_text(e["subject"]))
-        edge_el.set("target", _xml_text(e["object"]))
+        edge_el.set("id", _xml_id(e["id"]))
+        edge_el.set("source", _xml_id(e["subject"]))
+        edge_el.set("target", _xml_id(e["object"]))
         for kid, kfor, kname, _ in keys:
             if kfor != "edge":
                 continue
