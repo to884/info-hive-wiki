@@ -57,7 +57,9 @@ except ImportError:
 # 同じディレクトリにある共通モジュールを import する。
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
-from wiki_text import canonical_meta, ljust_display, localize_argparse, nfc, posix_rel  # noqa: E402
+from wiki_text import (  # noqa: E402
+    canonical_key, canonical_meta, ljust_display, localize_argparse, nfc, parse_frontmatter_text, posix_rel,
+)
 import wiki_graph_common as common  # noqa: E402
 
 
@@ -88,7 +90,19 @@ DIAGNOSTIC_LABELS = {
     "ambiguous_source": "sources: の値に当たるページが複数ある",
     "unresolved_source": "sources: の値に当たるページがない",
     "order_dependent_edge_ids": "並べ替えるとエッジの ID が入れ替わりうる関係の項目",
+    "unreadable_graph": "graph: を読めなかったページ",
+    "unread_field": "lint のパーサーが読めない書き方の欄",
 }
+
+# `graph:` の中で、ページやノードを指す欄。normalize_refs が NFC にそろえ、read_frontmatter が書かれた文字で読む。
+GRAPH_REF_FIELDS = ("node_id", "aliases")
+RELATIONSHIP_REF_FIELDS = ("object", "source", "contradicts", "supersedes")
+# グラフがエッジとノードの種類に使う最上位の欄。lint のパーサーが読めなかったら、unread_field の診断に挙げる。
+WATCHED_TOP_FIELDS = ("type", "kind", "sources", "raw")
+# YAML として読めない frontmatter に `graph` の欄があるかを、行頭の書き方で見る（`graph:`、`"graph":`、`graph :`）。
+GRAPH_KEY_LINE_RE = re.compile(r"""^(?:graph|"graph"|'graph')[ \t]*:""", re.MULTILINE)
+_YAML_STR_TAG = "tag:yaml.org,2002:str"
+_YAML_NULL_TAG = "tag:yaml.org,2002:null"
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +134,7 @@ def normalize_refs(meta: dict) -> dict:
     graph_meta = out.get("graph")
     if isinstance(graph_meta, dict):
         graph_meta = dict(graph_meta)
-        for key in ("node_id", "aliases"):
+        for key in GRAPH_REF_FIELDS:
             if key in graph_meta:
                 graph_meta[key] = _nfc_value(graph_meta[key])
         rels = graph_meta.get("relationships")
@@ -129,7 +143,7 @@ def normalize_refs(meta: dict) -> dict:
             for rel in rels:
                 if isinstance(rel, dict):
                     rel = dict(rel)
-                    for key in ("object", "source", "contradicts", "supersedes"):
+                    for key in RELATIONSHIP_REF_FIELDS:
                         if key in rel:
                             rel[key] = _nfc_value(rel[key])
                 new_rels.append(rel)
@@ -138,25 +152,178 @@ def normalize_refs(meta: dict) -> dict:
     return out
 
 
-def parse_frontmatter(text: str) -> tuple[dict, str]:
-    """PyYAML で YAML の frontmatter を取り出す。(meta, body) を返す。
+def _is_typed_scalar(value) -> bool:
+    """PyYAML が、文字列でも None でもないスカラー（真偽値、数、日付、日時など）に読んだ値なら True。"""
+    return value is not None and not isinstance(value, (str, list, dict))
 
-    トップレベルのキーと type・kind の値の日本語の別名は英語に直す（`graph:` の中のキーは
-    直さない）。ノードやページを指す値は NFC にそろえる。
+
+def _as_written(value, written):
+    """参照の欄の値のうち、PyYAML が文字列でないスカラーに読んだものを、書かれた文字に置き換えて返す。
+
+    written は、同じ位置を「スカラーはすべて文字列」で読んだ値である。配列は、長さが同じときだけ要素ごとに
+    置き換える（入れ子の配列には入らない）。文字列、None（値なし）、位置が合わない値は、そのまま返す。
+    value は書き換えず、新しい値を返す（アンカーで共有している別の欄を変えない）。
+    """
+    def one(v, w):
+        return w if _is_typed_scalar(v) and isinstance(w, str) and w else v
+
+    if isinstance(value, list):
+        if isinstance(written, list) and len(written) == len(value):
+            return [one(v, w) for v, w in zip(value, written)]
+        return value
+    return one(value, written)
+
+
+def _graph_ref_values(graph_meta: dict):
+    for key in GRAPH_REF_FIELDS:
+        yield graph_meta.get(key)
+    rels = graph_meta.get("relationships")
+    for rel in rels if isinstance(rels, list) else []:
+        if isinstance(rel, dict):
+            for key in RELATIONSHIP_REF_FIELDS:
+                yield rel.get(key)
+
+
+def _graph_refs_as_written(graph_meta: dict, graph_node) -> dict:
+    """`graph:` の中の、ページやノードを指す欄を、書かれた文字で読み直す。
+
+    `source: 007` は 7 ではなく "007"、`object: no` は False ではなく "no" にする。対象は GRAPH_REF_FIELDS と
+    RELATIONSHIP_REF_FIELDS だけで、ほかの欄（canonical、valid_from、notes など）は PyYAML の値のまま残す。
+    None（null、~、値なし）は値なしのまま残す。置き換える値がなければ、何もせずに返す。
+    """
+    def needs(value) -> bool:
+        return any(_is_typed_scalar(v) for v in value) if isinstance(value, list) else _is_typed_scalar(value)
+
+    if not any(needs(v) for v in _graph_ref_values(graph_meta)):
+        return graph_meta
+    try:
+        # 同じノードを、型を解決しない BaseConstructor で組み立てる。スカラーはすべて書かれた文字になる。
+        written = yaml.constructor.BaseConstructor().construct_document(graph_node)
+    except Exception:
+        return graph_meta
+    if not isinstance(written, dict):
+        return graph_meta
+    out = dict(graph_meta)
+    for key in GRAPH_REF_FIELDS:
+        if key in out:
+            out[key] = _as_written(out[key], written.get(key))
+    rels, written_rels = out.get("relationships"), written.get("relationships")
+    if isinstance(rels, list) and isinstance(written_rels, list) and len(rels) == len(written_rels):
+        new_rels = []
+        for rel, written_rel in zip(rels, written_rels):
+            if isinstance(rel, dict) and isinstance(written_rel, dict):
+                rel = dict(rel)
+                for key in RELATIONSHIP_REF_FIELDS:
+                    # マージキー（<<）で来た値も written_rel にある（PyYAML が、組み立てるときにノードを展開している）。
+                    # written_rel にないキーは、PyYAML の値のまま残る。
+                    if key in rel:
+                        rel[key] = _as_written(rel[key], written_rel.get(key))
+            new_rels.append(rel)
+        out["relationships"] = new_rels
+    return out
+
+
+def _unread_fields(top_pairs: list, meta: dict) -> list[str]:
+    """YAML には値があるのに、lint のパーサーが読めなかった WATCHED_TOP_FIELDS の欄を返す。
+
+    キーを読めなかった欄（`"type": x`、`type : x`）と、YAML の配列より少ない数しか読めなかった欄
+    （字下げのない `- x`、字下げ 4 つの `    - x`、複数行の `[a,` … `]`）である。
+    """
+    counts: dict[str, int] = {}
+    for key_node, value_node in top_pairs:
+        if not (isinstance(key_node, yaml.ScalarNode) and key_node.tag == _YAML_STR_TAG):
+            continue
+        field = canonical_key(key_node.value)
+        if field not in WATCHED_TOP_FIELDS:
+            continue
+        if isinstance(value_node, yaml.SequenceNode):
+            counts[field] = counts.get(field, 0) + len(value_node.value)
+        elif not (isinstance(value_node, yaml.ScalarNode) and value_node.tag == _YAML_NULL_TAG):
+            counts.setdefault(field, 0)
+    found = []
+    for field in WATCHED_TOP_FIELDS:
+        if field not in counts:
+            continue
+        value = meta.get(field)
+        if field not in meta or (counts[field] and not (isinstance(value, list) and len(value) >= counts[field])):
+            found.append(field)
+    return found
+
+
+def _read_graph(fm_text: str, meta: dict) -> "tuple[dict | None, list[dict]]":
+    """frontmatter の `graph` の欄だけを PyYAML で読む。(graph のマッピングか None, 診断の一覧) を返す。
+
+    PyYAML には frontmatter を構文として読ませ、値に組み立てるのは `graph` のノードだけにする。ほかの欄の値
+    （PyYAML が ValueError を出す `created: 2026-13-01` など）には左右されない。meta は lint の形の辞書で、
+    lint のパーサーが `graph` のキーを読んだかどうかと、unread_field の判定に使う。
+    """
+    problems: list[dict] = []
+    # 構文として読めないときに、graph の欄がありそうか。あれば、関係を黙って失わないように挙げる。
+    declared = "graph" in meta or bool(GRAPH_KEY_LINE_RE.search(fm_text))
+    unreadable = {"kind": "unreadable_graph", "reason": "yaml_error"}
+    loader = yaml.SafeLoader(fm_text)
+    try:
+        try:
+            root = loader.get_single_node()
+            if isinstance(root, yaml.MappingNode):
+                loader.flatten_mapping(root)  # 最上位のマージキー（<<）を、PyYAML が読むときと同じに展開する
+        except Exception:
+            return None, [unreadable] if declared else []
+        if not isinstance(root, yaml.MappingNode):
+            # 最上位がマッピングでない（`type:source` だけの frontmatter は、1 つの文字列になる）。
+            return None, [unreadable] if declared and root is not None else []
+        problems.extend({"kind": "unread_field", "field": field} for field in _unread_fields(root.value, meta))
+        graph_node = None
+        for key_node, value_node in root.value:
+            if isinstance(key_node, yaml.ScalarNode) and key_node.tag == _YAML_STR_TAG and key_node.value == "graph":
+                graph_node = value_node  # 同じキーが 2 つあれば、PyYAML と同じく後のものを使う
+        if graph_node is None or (isinstance(graph_node, yaml.ScalarNode) and graph_node.tag == _YAML_NULL_TAG):
+            return None, problems
+        if not isinstance(graph_node, yaml.MappingNode):
+            return None, problems + [{"kind": "unreadable_graph", "reason": "not_mapping"}]
+        try:
+            graph_meta = loader.construct_document(graph_node)
+        except Exception:
+            # 値を組み立てられない（`valid_from: 2026-13-01`、`!!float nope`、配列のキーなど）。
+            return None, problems + [unreadable]
+        if not isinstance(graph_meta, dict):
+            return None, problems + [{"kind": "unreadable_graph", "reason": "not_mapping"}]
+        return _graph_refs_as_written(graph_meta, graph_node), problems
+    finally:
+        loader.dispose()
+
+
+def read_frontmatter(text: str) -> "tuple[dict, str, list[dict]]":
+    """frontmatter を読む。(meta, body, 診断の一覧) を返す。
+
+    最上位の欄は、wiki の lint と同じ文字列のパーサー（wiki_text.parse_frontmatter_text）と canonical_meta で読む。
+    値は書かれた文字のままの文字列か、その配列になり、lint、検索、統計と同じ値になる（`sources: [true]` は
+    ["true"]、`kind: 2024` は "2024"）。日本語の別名のキーと type・kind の値は英語に直す。
+    `graph` の欄だけを PyYAML から取る（lint のパーサーは入れ子を読まない）。マッピングに読めなければ、
+    `graph` のキーを置かない。`graph:` の中のキーは直さない。ノードやページを指す値は NFC にそろえる。
+
+    診断は、ページを付ける前の {"kind": ...} で、build_nodes がページを足して diagnostics に入れる。
+    - unreadable_graph: `graph` の欄を書いたのに、マッピングに読めなかった。reason は "yaml_error" か "not_mapping"。
+    - unread_field: YAML には値があるのに、lint のパーサーが読めなかった最上位の欄（field）。
     """
     m = FRONTMATTER_RE.match(text)
     if not m:
-        return {}, text
+        return {}, text, []
     fm_text = m.group(1)
     body = text[m.end():]
-    try:
-        meta = yaml.safe_load(fm_text) or {}
-    except yaml.YAMLError:
-        meta = {}
-    if not isinstance(meta, dict):
-        meta = {}
-    meta, _conflicts = canonical_meta(meta)
-    return normalize_refs(meta), body
+    meta, _conflicts = canonical_meta(parse_frontmatter_text(fm_text))
+    graph_meta, problems = _read_graph(fm_text, meta)
+    # lint の形の graph（入れ子を読まないので []。字下げ 2 つの `  - x` が紛れ込むこともある）は使わない。
+    meta.pop("graph", None)
+    if graph_meta is not None:
+        meta["graph"] = graph_meta
+    return normalize_refs(meta), body, problems
+
+
+def parse_frontmatter(text: str) -> tuple[dict, str]:
+    """read_frontmatter の (meta, body) だけを返す。"""
+    meta, body, _problems = read_frontmatter(text)
+    return meta, body
 
 
 def collect_pages(wiki_root: Path) -> list[dict]:
@@ -168,7 +335,7 @@ def collect_pages(wiki_root: Path) -> list[dict]:
             text = md_path.read_text(encoding="utf-8-sig")
         except (UnicodeDecodeError, OSError):
             continue
-        meta, body = parse_frontmatter(text)
+        meta, body, fm_problems = read_frontmatter(text)
         # コードフェンスとインラインのコードの中の [[...]] からは mentions のエッジを作らない。
         links = extract_wikilinks(body)
         pages.append({
@@ -183,6 +350,8 @@ def collect_pages(wiki_root: Path) -> list[dict]:
             "meta": meta,
             "body": body,
             "links": links,
+            # frontmatter を読んだときの診断（unreadable_graph、unread_field）。build_nodes が diagnostics に入れる。
+            "fm_problems": fm_problems,
         })
     return pages
 
@@ -203,8 +372,10 @@ def read_ontology(path: Path) -> dict:
     extract と lint は、この関数で同じように読む。
     """
     try:
-        data = yaml.safe_load(Path(path).read_text(encoding="utf-8-sig"))
-    except (yaml.YAMLError, OSError, UnicodeDecodeError) as e:
+        text = Path(path).read_text(encoding="utf-8-sig")
+        data = yaml.safe_load(text)
+    except (yaml.YAMLError, ValueError, OSError, UnicodeDecodeError) as e:
+        # ValueError は、PyYAML が値を組み立てられないとき（`2026-13-01` のような日付）に出る。
         raise OntologyError(f"オントロジーを読めない（{path}）: {e}") from e
     if data is None:  # 空のファイルは、空のオントロジーとして扱う
         data = {}
@@ -214,7 +385,35 @@ def read_ontology(path: Path) -> dict:
     for key in ("node_types", "predicates"):
         if data.get(key) is None:
             data[key] = {}
+    _maps_from_as_written(data, text)
     return data
+
+
+def _maps_from_as_written(data: dict, text: str) -> None:
+    """node_types[*].maps_from の type と kind を、書かれた文字にそろえる。
+
+    ページの type と kind は文字で読む（read_frontmatter）ので、照らす側も文字にする。`maps_from: {kind: 2024}` は、
+    ページの `kind: 2024`（"2024"）に当たる。キーで引いて置き換え、引けないもの（マージキーで来た値など）は残す。
+    """
+    node_types = data.get("node_types")
+    if not isinstance(node_types, dict):
+        return
+    try:
+        written = yaml.load(text, Loader=yaml.BaseLoader)
+    except Exception:
+        return
+    written_types = written.get("node_types") if isinstance(written, dict) else None
+    if not isinstance(written_types, dict):
+        return
+    for name, nt_def in node_types.items():
+        maps = nt_def.get("maps_from") if isinstance(nt_def, dict) else None
+        written_def = written_types.get(name) if isinstance(name, str) else None
+        written_maps = written_def.get("maps_from") if isinstance(written_def, dict) else None
+        if not (isinstance(maps, dict) and isinstance(written_maps, dict)):
+            continue
+        for key in ("type", "kind"):
+            if _is_typed_scalar(maps.get(key)) and isinstance(written_maps.get(key), str) and written_maps[key]:
+                maps[key] = written_maps[key]
 
 
 def load_ontology(path: Path) -> dict:
@@ -297,6 +496,10 @@ def build_nodes(pages: list[dict], ontology: dict,
         node_type = derive_node_type(meta, ontology) or "concept"
         node_id = page_node_id(meta, p["slug"], ontology)
         page_node_ids[page_key(p)] = node_id
+        if diagnostics is not None:
+            for problem in p.get("fm_problems") or []:
+                diagnostics.append({"kind": problem["kind"], "page": p["rel_path"],
+                                    **{k: v for k, v in problem.items() if k != "kind"}})
         # 報告にはディスク上のパスを使う（lint の duplicate_node_ids と同じ）。NFC のパスでは、NFC と NFD の
         # 名前の違いだけの 2 つのファイルが同じに見える。
         pages_of_id[node_id].append(page_key(p))
@@ -312,7 +515,8 @@ def build_nodes(pages: list[dict], ontology: dict,
             "page_type": meta.get("type") or "",
             "node_type": node_type,
             "kind": meta.get("kind") or "",
-            "tags": list(meta.get("tags") or []),
+            # 文字列 1 つで書いたタグ（tags: ml）は、1 つのタグにする（1 文字ずつに分けない）。
+            "tags": ref_values(meta.get("tags")),
             "aliases": list(graph_meta.get("aliases") or []),
             "path": p["rel_path"],
             "created": meta.get("created") or "",
@@ -541,10 +745,10 @@ def build_edges(pages: list[dict], page_node_ids: dict[str, str],
                     page_id=here,
                 ))
 
-        # 4. ソースページの raw: フィールドから作る summarizes_raw エッジ。
+        # 4. ソースページの raw: フィールドから作る summarizes_raw エッジ。lint の missing_raw と同じく、
+        # 配列で書いた raw: は値ごとに読む。
         if meta.get("type") == "source":
-            raw_path = meta.get("raw")
-            if raw_path:
+            for raw_path in ref_values(meta.get("raw")):
                 push(make_edge(
                     subject=subject_id,
                     predicate="summarizes_raw",

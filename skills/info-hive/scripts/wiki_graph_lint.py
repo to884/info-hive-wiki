@@ -30,6 +30,8 @@ PyYAML の固定した依存を持つので、`uv run --script` で実行する�
 - 同じノード ID について、正本のノードが重複していない。
 - 別名が、異なる正本のノードの間で衝突していない。
 - `contradicts` と `supersedes` の参照が、既知のノードかエッジの ID に解決される。
+- frontmatter の `graph:` を読めなかったページ（YAML として読めない、マッピングでない）と、lint のパーサーが
+  読めない書き方の最上位の欄（`type`、`kind`、`sources`、`raw`）がない。
 - 生成したグラフに、孤立した型付きノード（型付きのエッジが入ってくることも出ていくこともないノード）がない。
   ただし `source` のノードは除く（ソースとしてだけ使われることを許可する）。
 - 任意（--decide）: 証拠の引用がソースページにない型付きのエッジを、判定モデルがチェックする。
@@ -68,10 +70,15 @@ import wiki_workspace  # noqa: E402
 ALLOWED_CONFIDENCE = {"high", "medium", "low"}
 ALLOWED_STATUS = {"current", "historical", "proposed", "disputed", "superseded"}
 IMPLICIT_PREDICATES = {"mentions", "sourced_from", "summarizes_raw"}
+# unreadable_graph の reason の説明。
+UNREADABLE_REASONS = {
+    "yaml_error": "frontmatter か graph: の値を YAML として読めない",
+    "not_mapping": "graph: の値がマッピングでない",
+}
 
 
 def parse_frontmatter(text: str) -> tuple[dict, str]:
-    """extract と同じ規則で frontmatter を読む。日本語の別名を英語に直し、参照を NFC にそろえる。"""
+    """extract と同じ規則で frontmatter を読む。最上位の欄は wiki の lint と同じ値で、graph だけを PyYAML から取る。"""
     return _extract.parse_frontmatter(text)
 
 
@@ -139,6 +146,8 @@ def lint(pages: list[dict], ontology: dict) -> dict:
         "ambiguous_sources": [],
         "unresolved_sources": [],
         "order_dependent_edge_ids": [],
+        "unreadable_graph": [],
+        "unread_fields": [],
         "summary": {},
     }
 
@@ -280,12 +289,14 @@ def lint(pages: list[dict], ontology: dict) -> dict:
     # extract と同じ build_nodes と build_edges で作る。主語はページで引く（スラッグで引くと、別の
     # ディレクトリの同じスラッグのページのノードになる）。エッジにしなかった参照は、診断として挙げる。
     diagnostics: list[dict] = []
-    _nodes, page_node_ids, _aliases = _extract.build_nodes(pages, ontology)
+    _nodes, page_node_ids, _aliases = _extract.build_nodes(pages, ontology, diagnostics)
     extracted_edges = _extract.build_edges(pages, page_node_ids, diagnostics)
     for d in diagnostics:
+        # duplicate_node_id は、上で duplicate_node_ids に挙げている。
         bucket = {"ambiguous_object": "ambiguous_object_refs", "ambiguous_source": "ambiguous_sources",
                   "unresolved_source": "unresolved_sources",
-                  "order_dependent_edge_ids": "order_dependent_edge_ids"}.get(d["kind"])
+                  "order_dependent_edge_ids": "order_dependent_edge_ids",
+                  "unreadable_graph": "unreadable_graph", "unread_field": "unread_fields"}.get(d["kind"])
         if bucket:
             findings[bucket].append({k: v for k, v in d.items() if k != "kind"})
     typed_node_refs: set[str] = set()
@@ -452,6 +463,10 @@ def render_text(findings: dict) -> str:
          lambda f: f"  - {f['page']}  {f['source']}"),
         ("order_dependent_edge_ids", "並べ替えるとエッジの ID が入れ替わりうる関係の項目（エッジの ID の参照か未知の欄だけが違う）",
          lambda f: f"  - {f['page']}#rel{f['indexes']}"),
+        ("unreadable_graph", "frontmatter の graph: を読めなかったページ（型付きの関係を作らなかった）",
+         lambda f: f"  - {f['page']}  （{UNREADABLE_REASONS.get(f['reason'], f['reason'])}）"),
+        ("unread_fields", "wiki の lint のパーサーが読めない書き方の欄（lint と同じく、グラフも読まない）",
+         lambda f: f"  - {f['page']}  {f['field']}:"),
         ("evidence_unsupported", "ソースページが証拠を裏づけていない（判定モデル）",
          lambda f: f"  - {f['page']}#rel[{f['index']}]  {f['predicate']} → {f['object']}  "
                    f"（source={f['source']}、choice={f['choice']}、confidence={f['confidence']}）"),
