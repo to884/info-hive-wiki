@@ -76,8 +76,25 @@ class InputFile:
     real: "Path | None" = None   # シンボリックリンクとジャンクションを解いた実体
 
 
+class EnumerationError(OSError):
+    """Wiki のディレクトリの一覧を作れなかった。"""
+
+
+def check_enumerable(root: Path) -> None:
+    """Wiki のディレクトリを、シンボリックリンクをたどらずに走査し、一覧を作れないディレクトリがあれば送出する。
+
+    ページの集合は lint と同じ iter_page_files（Path.rglob）で決める。rglob は一覧を作れないディレクトリを
+    黙って飛ばし、空や一部の集合を返すので、そのまま使うと「0 ページの正常な Wiki」と区別できない（守ること 9）。
+    """
+    def fail(err):
+        raise EnumerationError(getattr(err, "errno", None) or 0, "一覧を作れないディレクトリがある")
+    for _dirpath, _dirs, _files in os.walk(root, onerror=fail):
+        pass
+
+
 def list_inputs(root: Path) -> list:
-    """入力の集合を、(種類, パス) の並びで返す。中身は読まない。"""
+    """入力の集合を、(種類, パス) の並びで返す。中身は読まない。一覧を作れなければ EnumerationError。"""
+    check_enumerable(root)
     items = [("page", p) for p in wiki_pages.iter_page_files(root)]
     items += [("index", p) for p in wiki_lint.index_files(root)]
     onto = root / ONTOLOGY_REL
@@ -86,17 +103,33 @@ def list_inputs(root: Path) -> list:
     return items
 
 
-def signature(root: Path, items: "list | None" = None) -> str:
-    """入力の印。各入力の相対パス、大きさ、更新時刻と、索引とオントロジーの有無から作る。"""
-    items = list_inputs(root) if items is None else items
+def signature(root: Path) -> str:
+    """入力の印。Wiki の下の Markdown（拡張子の大文字と小文字は問わない）とオントロジーの、相対パス、大きさ、
+    更新時刻から作る。一覧を作れないディレクトリがあれば EnumerationError を送出する。
+
+    印は、入力の集合（ページ、索引、オントロジー）を含む上位の集合から作る。入力が変われば必ず変わればよく、
+    ページの集合の規則（iter_page_files）を要求のたびに当てはめる必要はない。1 回の走査で、一覧を作れない
+    ディレクトリも見つけられる（rglob は黙って飛ばす）。シンボリックリンクのディレクトリは、iter_page_files の
+    rglob と同じくたどらない。ファイルのシンボリックリンクは、先の大きさと更新時刻を使う。
+    """
+    def fail(err):
+        raise EnumerationError(getattr(err, "errno", None) or 0, "一覧を作れないディレクトリがある")
+    found = []
+    for dirpath, _dirs, files in os.walk(root, onerror=fail):
+        for name in files:
+            if name.lower().endswith(".md"):
+                found.append(os.path.join(dirpath, name))
+    onto = root / ONTOLOGY_REL
+    if onto.is_file():
+        found.append(str(onto))
     h = hashlib.sha256()
-    for kind, path in items:
+    for path in sorted(found):
         try:
             st = os.stat(path)
             part = f"{st.st_size}\0{st.st_mtime_ns}"
         except OSError:
             part = "missing"
-        h.update(f"{kind}\0{path.relative_to(root).as_posix()}\0{part}\n".encode("utf-8"))
+        h.update(f"{os.path.relpath(path, root)}\0{part}\n".encode("utf-8"))
     return h.hexdigest()
 
 
@@ -132,8 +165,8 @@ class Snapshot:
 def take_snapshot(root: Path) -> Snapshot:
     """入力を 1 度だけ読み、写しを作る。印は読む前に取る。"""
     root = Path(root)
+    sig = signature(root)        # 読む前に取る
     items = list_inputs(root)
-    sig = signature(root, items)
     inputs = []
     unreadable = False
     gen = hashlib.sha256(CORE_VERSION.encode("utf-8"))
@@ -208,7 +241,7 @@ def safe_component(part: str, key: str, limit: int, is_dir: bool, top: bool) -> 
         changed = True
     if is_dir and name.lower().endswith(".html"):
         changed = True
-    if name.startswith(".browse-"):
+    if name.lower().startswith(".browse-"):   # Windows と macOS では大文字の名前も目印と同じ場所になる
         changed = True
     if top and (name if is_dir else name + ".html").casefold() in RESERVED_TOP:
         changed = True

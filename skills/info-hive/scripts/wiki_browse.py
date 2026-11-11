@@ -351,6 +351,7 @@ class BrowseState:
         self.build_lock = threading.Lock()
         self.attempts: dict = {}
         self.shutdown_requested = False
+        self.generated_at = ""
 
     def _should_retry(self) -> bool:
         cur = self.current
@@ -393,6 +394,7 @@ class BrowseState:
                 self.failed = type(e).__name__
                 return self._answer(cur, request_sig, "failed")
             self.current = new
+            self.generated_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
             self.failed = None
             return self._answer(new, request_sig, None)
         finally:
@@ -523,7 +525,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     f'<p><a href="{html.escape(core.rel_href(name, index))}">索引へ</a></p></body></html>\n')
             return self._send(404, body.encode("utf-8"), "text/html; charset=utf-8")
         reason = None if stale is None else ("組み立てに失敗した" if stale == "failed" else "組み立てている")
-        text = c.render(name, app.state.raw, stale=reason)
+        text = c.render(name, app.state.raw, generated_at=app.state.generated_at, stale=reason)
         ctype = "text/javascript; charset=utf-8" if name.endswith(".js") else "text/html; charset=utf-8"
         return self._send(200, text.encode("utf-8"), ctype)
 
@@ -814,10 +816,11 @@ def stop(root: Path) -> int:
     if not lock.acquire(STOP_WAIT):
         raise Failed("サーバーが終わらないので、止められなかった")
     try:
-        guard.set_protected([root, *core.external_inputs(root)])
+        # 状態のディレクトリが Wiki の入力と重なれば、記録に触れない（サーバー自身の後片付けと同じ）。
+        _refresh_guard(guard, root, state_dir)
         latest = _read_record(state_dir)
         if latest is not None and latest.get("instance") == rec["instance"]:
-            guard.unlink(state_dir / "server.json")   # 記録を指すページがあれば、守りが拒む
+            guard.unlink(state_dir / "server.json")
     except fs.Refused:
         pass
     finally:
@@ -854,6 +857,9 @@ def main(argv=None) -> int:
         return _run_server_command(args)
     except (Failed, fs.Refused, core.NameCollision) as e:
         say(str(e))
+        return EXIT_FAILED
+    except core.EnumerationError:
+        say("Wiki のディレクトリの一覧を作れない。アクセス権を確かめる")
         return EXIT_FAILED
 
 
