@@ -6,11 +6,21 @@
 
 ## [Unreleased]
 
-## [0.9.3] - 2026-11-11
+## [0.9.4] - 2026-11-11
 
 ### Fixed
 
 - グラフの lint（`wiki_graph_lint.py` と MCP のツール `lint` の `graph`）は、`graph.relationships` の `contradicts` と `supersedes` の値を、ノード ID とソースページのスラッグとだけ照らしていた。手順書（`references/graph-workflow.md`）とひな形（`assets/SCHEMA.md.template`）はエッジの ID を書いてよいとしているのに、実在するエッジの ID を書いても `broken_contradicts` と `broken_supersedes` に挙げていた。今は、抽出（`wiki_graph_extract.py`）と同じエッジを作り、その ID も参照先として認める。16 進 24 桁の形でも、抽出したエッジにない ID は今までどおり挙げる。この食い違いは 0.9.2 より前からあった。0.9.2 で、2 つの関係が互いのエッジの ID を書けるようにしたので、エッジの ID の参照が実際に使えるようになっていた。
+
+## [0.9.3] - 2026-11-11
+
+### Fixed
+
+- スキルの `SKILL.md` と `references/*.md` のコマンドの例で、スクリプトのパスの書き方がそろっていなかった。`scripts/wiki_lint.py`（スキルのディレクトリから見たパス）、`skills/info-hive/scripts/setup_wiki.py`（プラグインから見たパス）、`${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/...`、`<プラグインのパス>/skills/info-hive/scripts/...`、`wiki_mcp_launch.py`（名前だけ）が混ざっていて、wiki を使う側のプロジェクトのルートで実行すると、多くは見つからなかった。
+  - 0.9.1 のひな形と同じく、実行するスクリプトはすべて `"<skill-root>/scripts/<名前>.py"` と書くようにした。`SKILL.md` に「スクリプトのパス」の節を足し、`<skill-root>` はこのスキルのディレクトリ（Claude Code では、スキルを読み込んだときに示されるベースディレクトリ）の実際のパスに置き換えると書いた。コマンドのある各リファレンスには、その節を指す 1 行を足した。`references/graph-workflow.md` の、`${CLAUDE_PLUGIN_ROOT}` で呼ぶという説明は書き換えた。
+  - `${CLAUDE_PLUGIN_ROOT}` を使わないのは、リファレンスは普通のファイルとして読まれ、スキルはこの変数を持たないホストでも使われるからである。プラグインのコマンド（`commands/*.md`）は今までどおり `${CLAUDE_PLUGIN_ROOT}` を使う。
+  - 文の中で `scripts/wiki_pages.py` のようにスキルの中のファイルを指す書き方は、スキルのディレクトリから見たパスとして残した。表などで `wiki_search.py --json` のように名前と引数だけを書いたものは、機能を示す名前として残し、そう `SKILL.md` に書いた。実行の手順として名前だけを書いていた `references/lint-workflow.md` の `wiki_search.py --top-linked 10` と `references/page-conventions.md` の `wiki_search.py --backlinks <slug>` は、`--wiki wiki/` を付けたコマンドに書き換えた。
+  - `references/evolution-workflow.md` の JSON の `argv` の例は、`/absolute/skill/scripts/...` を `<skill-root>/scripts/...` にし、シェルを通さないので絶対パスに置き換えると書いた。`references/decision-models.md` の `eval/decisions/run_eval.py` は、プラグインのリポジトリのルートで実行すると書いた。
 
 ## [0.9.2] - 2026-11-11
 

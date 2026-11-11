@@ -93,12 +93,12 @@ graph:
 
 検査（lint）と問い合わせ（query）は、wiki の MCP サーバーのツール `lint` と `graph` が使えればそちらで行い、使えないときは下のスクリプトを実行する。使い分けは `SKILL.md` の「MCP のツールと CLI の使い分け」にある。更新（extract）は wiki の `graph/` に書き込むので、いつもスクリプトで実行する。
 
-スクリプトのパスは、スキルのディレクトリ（`skills/info-hive/`）から見たものである。コマンドからは `${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/...` で呼ぶ。`wiki/` は実際の wiki のディレクトリに置き換える。lint は `<wiki>` を省くと、作業領域の設定（`.info-hive/workspace.json`）の `dirs.wiki`、設定がなければ `./wiki` を使う。extract と query は `<wiki>` を省けない。
+コマンドの `<skill-root>` は、このスキルのディレクトリ（`SKILL.md` のあるディレクトリ）の実際のパスに置き換える。書き方は `SKILL.md` の「スクリプトのパス」にある。`wiki/` は実際の wiki のディレクトリに置き換える。lint は `<wiki>` を省くと、作業領域の設定（`.info-hive/workspace.json`）の `dirs.wiki`、設定がなければ `./wiki` を使う。extract と query は `<wiki>` を省けない。
 
 ### 検査（lint）
 
 ```bash
-uv run --script scripts/wiki_graph_lint.py wiki/ [--json] [--decide]
+uv run --script "<skill-root>/scripts/wiki_graph_lint.py" wiki/ [--json] [--decide]
 ```
 
 ツールの `lint` は、構造の lint の結果と一緒に、同じ検査の結果を `graph` に入れて返す（`state` が `checked` なら `findings`、オントロジーがなければ `disabled`、読めなければ `error`）。`--decide` が要るときはスクリプトを使う。
@@ -110,7 +110,7 @@ lint を実行するのは、`graph.relationships[]` を足したか直したと
 ### 更新（extract）
 
 ```bash
-uv run --script scripts/wiki_graph_extract.py wiki/ [--out <dir>] [--formats jsonl,sqlite,graphml] [--ontology <path>]
+uv run --script "<skill-root>/scripts/wiki_graph_extract.py" wiki/ [--out <dir>] [--formats jsonl,sqlite,graphml] [--ontology <path>]
 ```
 
 **グラフ層が有効な wiki で、ページを足した、消した、名前を変えた、または書き換えたときは、必ず extract を実行する。** extract が作るエッジは `graph.relationships[]` だけから来るのではない。本文の `[[wikilink]]`（`mentions`）、frontmatter の `sources:`（`sourced_from`）、ソースページの `raw:`（`summarizes_raw`）からも作り、ノードの題名、種類、タグ、別名も frontmatter から読む。そのため、型付きの関係を足さず、新しいページも作らない取り込みでも、既存のページの本文や `sources:` を直せばグラフは変わる。オントロジーの `node_types` の `maps_from` を変えたときも、ノードの種類と ID が変わるので extract を実行する。extract を飛ばしてよいのは、wiki のページもオントロジーも 1 つも変えなかったときだけである。
@@ -134,10 +134,10 @@ Windows では、ほかのプロセスが `graph.sqlite` を開いていると�
 ### 問い合わせ（query）
 
 ```bash
-python scripts/wiki_graph_query.py wiki/ neighbors --node company:やまだ製作所
-python scripts/wiki_graph_query.py wiki/ edges    --subject person:山田太郎 [--predicate founded]
-python scripts/wiki_graph_query.py wiki/ path     --from person:山田太郎 --to concept:消費税 [--max-depth 6]
-python scripts/wiki_graph_query.py wiki/ facts    --about company:やまだ製作所
+python "<skill-root>/scripts/wiki_graph_query.py" wiki/ neighbors --node company:やまだ製作所
+python "<skill-root>/scripts/wiki_graph_query.py" wiki/ edges    --subject person:山田太郎 [--predicate founded]
+python "<skill-root>/scripts/wiki_graph_query.py" wiki/ path     --from person:山田太郎 --to concept:消費税 [--max-depth 6]
+python "<skill-root>/scripts/wiki_graph_query.py" wiki/ facts    --about company:やまだ製作所
 ```
 
 `--json` は、lint と query のどちらでも使える。query は標準ライブラリだけで動くので、`python` で実行する。
