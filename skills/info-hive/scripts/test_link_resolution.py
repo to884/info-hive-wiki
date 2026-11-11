@@ -306,12 +306,17 @@ def check_fixture_graph(root: Path, failures) -> None:
     print("graph: NFD filename gets mentions edges from NFC links")
     pages = wiki_graph_extract.collect_pages(root)
     ontology = {"node_types": {}, "predicates": {}}
-    nodes, slug_to_id, _aliases = wiki_graph_extract.build_nodes(pages, ontology)
-    edges = wiki_graph_extract.build_edges(pages, slug_to_id)
-    guide_id = slug_to_id.get(GUIDE)
-    check("graph", guide_id is not None, True, "node for NFD file is keyed by NFC slug", failures)
+    nodes, page_node_ids, _aliases = wiki_graph_extract.build_nodes(pages, ontology)
+    edges = wiki_graph_extract.build_edges(pages, page_node_ids)
+
+    def node_of(slug: str):
+        page = next((p for p in pages if p["slug"] == slug), None)
+        return page_node_ids.get(wiki_graph_extract.page_key(page)) if page else None
+
+    guide_id = node_of(GUIDE)
+    check("graph", guide_id is not None, True, "node for NFD file is found by its NFC slug", failures)
     for name in ("目次", "索引"):
-        subject = slug_to_id.get(name)
+        subject = node_of(name)
         found = any(e["predicate"] == "mentions" and e["subject"] == subject
                     and e["object"] == guide_id for e in edges) if guide_id else False
         check("graph", found, True, f"{name} -> ガイド mentions edge", failures)

@@ -89,7 +89,10 @@ from wiki_pages import (  # noqa: E402
     case_only_duplicates,
     clean_link_target,
     extract_wikilinks,
+    build_page_index,
+    classify_source_ref,
     iter_page_files,
+    ref_values,
     resolve_link,
 )
 
@@ -99,7 +102,6 @@ URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*:")
 # Windows のドライブから始まる絶対パス（C:/Books/x.pdf、C:\Books\x.pdf）。URL_SCHEME_RE にも合うので先に見る。
 DRIVE_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
 # frontmatter の値に書かれた wikilink（`sources: ["[[消費税]]"]`）。
-FM_WIKILINK_RE = re.compile(r"^\[\[(.+)\]\]$")
 # 索引の見出しとリストの項目。
 HEADING_RE = re.compile(r"^ {0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$")
 LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(.*)$")
@@ -184,13 +186,8 @@ def collect_index_entries(wiki_root: Path) -> list[dict]:
     return entries
 
 
-def _ref_values(value) -> list[str]:
-    """frontmatter のリストの値（文字列 1 つでもよい）を、空でない文字列のリストにする。"""
-    if value in (None, "", []):
-        return []
-    if not isinstance(value, list):
-        value = [value]
-    return [str(v).strip() for v in value if v is not None and str(v).strip()]
+# frontmatter の参照の読み方は、グラフの抽出と同じく wiki_pages に置く。
+_ref_values = ref_values
 
 
 def _exists(path: Path) -> bool:
@@ -465,6 +462,12 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
             if resolved:
                 inbound[resolved].add(p["slug"])
 
+    # sources: の値を、ページを単位に引くためのインデックス。
+    src_by_path, src_by_slug = build_page_index(pages)
+
+    def page_type(q: dict):
+        return q["meta"].get("type")
+
     def types_of(slug: str) -> list:
         """スラッグのページの type（空のものは除く）。スラッグが重複していれば、それぞれの type を返す。"""
         return [g["meta"].get("type") for g in slug_to_pages[slug] if g["meta"].get("type") not in (None, "", [])]
@@ -544,17 +547,15 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         for item in p.get("missing_assets", []):
             findings["missing_assets"].append({"from_path": p["rel_path"], **item})
 
-        # sources: は source ページのスラッグを並べる。ページがないか、source でないページを指すものを挙げる。
+        # sources: は source ページを指す。ページがないか、source でないページを指すものを挙げる。
+        # 分け方はグラフの抽出（sourced_from）と同じ wiki_pages.classify_source_ref に任せる。
         for ref in _ref_values(p["meta"].get("sources")):
-            m = FM_WIKILINK_RE.match(ref)
-            resolved = resolve_link(m.group(1) if m else ref, by_path, by_slug)
-            if resolved is None:
+            status, _found, wrong_type = classify_source_ref(ref, src_by_path, src_by_slug, page_type)
+            if status == "missing":
                 findings["unresolved_sources"].append({"path": p["rel_path"], "source": ref, "reason": "missing"})
-                continue
-            types = types_of(resolved)
-            if types and "source" not in types:
+            elif status == "not_source":
                 findings["unresolved_sources"].append({"path": p["rel_path"], "source": ref, "reason": "not_source",
-                                                       "type": types[0]})
+                                                       "type": wrong_type})
 
         # source ページの raw: の原本がない。
         for item in p.get("missing_raw", []):

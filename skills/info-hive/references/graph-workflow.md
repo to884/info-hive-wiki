@@ -22,7 +22,13 @@ extract で得られるエッジは、次の3種類である。
 
 1. ページの frontmatter の `graph.relationships[]` で宣言した型付きの意味のエッジ。例: `founded`、`proposed`、`depends_on`。それぞれ、明示的な `source`（ソースページのスラッグ）、`evidence` の引用、`confidence`（high/medium/low）、`status`（current/historical/proposed/disputed/superseded）を持つ。extract がこれらを作り出すことはない。
 2. `mentions` エッジ。本文の `[[wikilink]]` 1つにつき1本できる（ページごとに重複は除く）。確信度は `low` である。目的のページを早く見つけるのには役立つが、型付きの関係の証拠として引用してはならない。
-3. `sourced_from` エッジと `summarizes_raw` エッジ。`sourced_from` は、ソースページ以外のページの frontmatter にある `sources:` リストのスラッグ1つにつき1本でき、ソースページを指す。`summarizes_raw` は、ソースページの `raw:` フィールド1つにつき1本でき、raw ファイルのパスを（文字列リテラルの）目的語とする。
+3. `sourced_from` エッジと `summarizes_raw` エッジ。`sourced_from` は、ソースページ以外のページの frontmatter にある `sources:` リストの値1つにつき1本でき、ソースページを指す。値は、wikilink と同じ規則で、スラッグ（`paper`）、パス（`sources/paper`）、`[[sources/paper]]` のどれで書いてもよい。読み方は wiki の lint の `unresolved_sources` と同じで、lint が source でないページを指すと挙げる値からも、ページが 1 つなら `sourced_from` ができる。`summarizes_raw` は、ソースページの `raw:` フィールド1つにつき1本でき、raw ファイルのパスを（文字列リテラルの）目的語とする。
+
+どのエッジも、主語はそれを書いたページ自身のノードであり、エッジの `page` はそのページである。別のページに同じ内容の関係を書けば、別のエッジになる（エッジの ID に、ディスク上のページのパスが入る）。`graph.relationships` の項目のうち、`predicate` と `object` があり、目的語が曖昧でない（下の段落）もの 1 つからは、必ず 1 本のエッジができる。同じページで `status` や `valid_to` だけが違う 2 件も、まったく同じ 2 件も、別のエッジになる。`contradicts` と `supersedes` に書いたエッジの ID は、エッジの ID の計算に入れないので、互いのエッジの ID を書いても、それぞれの ID は変わらない。エッジの ID を書いた参照か未知の欄だけが違う 2 件は、ページの中の順番で ID が決まり、並べ替えると入れ替わりうるので、グラフの lint が `order_dependent_edge_ids` に挙げる。
+
+ページへの参照（本文の wikilink と `sources:` の値）は、当たるページが 1 つのときだけエッジにする。`a/Foo.md` と `b/Foo.md` のように、別のディレクトリに同じスラッグのページがあるとき、パスのない `[[Foo]]` と `sources:` の `Foo` は、どちらのページにも寄せず、エッジを作らない。パスを付けた `[[a/Foo]]` と `sources:` の `a/Foo` は、そのページを指す。`sources:` の値で、当たるページが複数あるものと、ないものは、グラフの lint の `ambiguous_sources` と `unresolved_sources` が挙げる（ソースページの `sources:` は `sourced_from` を作らないが、この 2 つは挙げる）。重なったスラッグは、wiki の lint の `duplicate_slugs` が挙げる。
+
+別のページが同じノード ID を持つとき（同じ `graph.node_id` を付けたか、型が同じで既定の node_id を使う同じスラッグのページ）、ノードは最初のページから 1 つだけでき、どのページの関係も、そのノードを主語にして残る。そのノード ID を目的語にした型付きの関係は、どのページのノードか決められないので、エッジにしない。グラフの lint は、重なったノード ID を `duplicate_node_ids` に、エッジにしなかった関係を `ambiguous_object_refs` に挙げる。別の `graph.node_id` を付けて分ける。
 
 ## frontmatter のスキーマ
 

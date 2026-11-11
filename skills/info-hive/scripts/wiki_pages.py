@@ -227,6 +227,89 @@ def build_link_index(pages: list[dict]) -> tuple[dict, set]:
     return by_path, {p["slug"] for p in pages}
 
 
+def link_lookup(link: str) -> "tuple[str, str] | None":
+    """wikilink を、何で引くかに分ける。("path", .md を除いた相対パス) か ("slug", スラッグ) を返す。
+
+    パスのない形（[[kalman-filter]]）はスラッグで、パスを付けた形（[[entities/kalman-filter]]）は
+    そのパスで引く。行き先が空なら None を返す。
+    """
+    target = clean_link_target(link)
+    if not target:
+        return None
+    return ("path", target) if "/" in target else ("slug", target)
+
+
+def link_candidates(link: str, pages_by_path: dict, pages_by_slug: dict) -> list:
+    """wikilink の規則（resolve_link と同じ）に当たるページを、すべて返す。
+
+    pages_by_path は .md を除いた相対パスから、pages_by_slug はスラッグから、ページ（を表す値）のリストを
+    引く。1 つならそのページ、2 つ以上なら曖昧、空なら未解決である。resolve_link はスラッグを返すので、
+    同じスラッグのページのどれかを区別できない。ページを 1 つに決めたいときはこちらを使う。
+    """
+    lookup = link_lookup(link)
+    if lookup is None:
+        return []
+    kind, target = lookup
+    return list((pages_by_path if kind == "path" else pages_by_slug).get(target) or [])
+
+
+_FM_WIKILINK_RE = re.compile(r"^\[\[(.+)\]\]$")
+
+
+def ref_values(value) -> list[str]:
+    """frontmatter のリストの値（文字列 1 つでもよい）を、空でない文字列のリストにする。"""
+    if value in (None, "", []):
+        return []
+    if not isinstance(value, list):
+        value = [value]
+    return [str(v).strip() for v in value if v is not None and str(v).strip()]
+
+
+def ref_link(ref: str) -> str:
+    """frontmatter のページへの参照（`sources:` の値など）を、wikilink の中身にする。
+
+    `paper` と `sources/paper` はそのまま、`[[sources/paper]]` は角括弧を外す。
+    """
+    m = _FM_WIKILINK_RE.match(ref)
+    return m.group(1) if m else ref
+
+
+def build_page_index(pages: list[dict], value=lambda p: p) -> "tuple[dict, dict]":
+    """link_candidates に渡す (パスからの対応, スラッグからの対応) を作る。値は value(p) のリストである。
+
+    パスは rel_path（NFC）から .md を除いたもの、スラッグは p["slug"] である。
+    """
+    pages_by_path: dict = defaultdict(list)
+    pages_by_slug: dict = defaultdict(list)
+    for p in pages:
+        rel = posix_rel(p["rel_path"])
+        if rel.lower().endswith(".md"):
+            rel = rel[:-3]
+        pages_by_path[rel].append(value(p))
+        pages_by_slug[p["slug"]].append(value(p))
+    return pages_by_path, pages_by_slug
+
+
+def classify_source_ref(ref: str, pages_by_path: dict, pages_by_slug: dict, page_type) -> "tuple[str, list, object]":
+    """`sources:` の値 1 つを分ける。(状態, 当たるページ, source でない type) を返す。
+
+    値は ref_link で外側の [[ ]] を外し、wikilink と同じ規則（link_candidates）でページを探す。状態は次のどれかである。
+    - "missing": 当たるページがない。
+    - "not_source": 当たるページのうち type のあるものが 1 つ以上あり、どれも source でない。3 つ目の値は最初の type。
+    - "ok": それ以外。
+    lint の unresolved_sources（missing と not_source）と、グラフの抽出の sourced_from が、この関数を共有する。
+    当たるページが 2 つ以上かどうか（曖昧さ）は、状態に含めない。呼び出す側が、当たるページの数で見る。
+    page_type は、ページ（pages_by_* の値）から type を返す。
+    """
+    found = link_candidates(ref_link(ref), pages_by_path, pages_by_slug)
+    if not found:
+        return "missing", [], None
+    types = [t for t in (page_type(x) for x in found) if t not in (None, "", [])]
+    if types and "source" not in types:
+        return "not_source", found, types[0]
+    return "ok", found, None
+
+
 def resolve_link(link: str, by_path: dict, by_slug) -> "str | None":
     """wikilink を、それが指すページのスラッグに解決する。解決できなければ None を返す。
 
@@ -235,10 +318,11 @@ def resolve_link(link: str, by_path: dict, by_slug) -> "str | None":
     [[raw/foo]] が sources/foo.md に黙って結び付くことはない。照合は大文字と小文字を区別する。
     誤った「リンク切れ」の報告は目に見えて害がないが、誤った解決は気づかれない。
     """
-    target = clean_link_target(link)
-    if not target:
+    lookup = link_lookup(link)
+    if lookup is None:
         return None
-    if "/" in target:
+    kind, target = lookup
+    if kind == "path":
         return by_path.get(target)
     return target if target in by_slug else None
 
