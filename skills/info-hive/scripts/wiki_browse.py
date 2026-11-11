@@ -727,9 +727,25 @@ def serve(root: Path, page: "str | None", open_browser: bool, idle: float, verbo
         _emit(url, app.port, False, state, open_browser)
         server_thread.join()
         httpd.server_close()
-        if app.state.shutdown_requested:
-            # 状態のディレクトリが守る場所と重なったので、記録に触れずに終わる（設計の 6.1）。
-            say("サーバーの状態の場所が、Wiki か Wiki が読む入力と重なったので終わる。記録は残す")
+        return _finish(root, app, guard, state_dir)
+    finally:
+        lock.release()
+
+
+def _finish(root: Path, app: "App", guard: fs.Guard, state_dir: Path) -> int:
+    """終わるときの後片付け。記録を消すのは、守る場所と重ならないことを、その時点で確かめてからにする。
+
+    組み立ての途中で終わると、組み立てが読んだ入力（記録を指すページなど）を守る場所に入れる前に、記録を消して
+    しまう。そこで、組み立てのロックを取って組み立てが走っていないことを確かめ、守る場所を今の入力から
+    決め直す（設計の 6.1）。重なれば、記録に触れずに終わる。
+    """
+    got = app.state.build_lock.acquire(timeout=BUILD_WAIT)
+    try:
+        external = core.external_inputs(root)
+        guard.set_protected([root, *external])
+        if not got or app.state.shutdown_requested or guard.overlapping(state_dir) or \
+                any(fs.is_within(x, state_dir) for x in external):
+            say("サーバーの状態の場所が、Wiki か Wiki が読む入力と重なったか、確かめられなかったので、記録を残して終わる")
             return EXIT_FAILED
         rec = _read_record(state_dir)
         if rec is not None and rec.get("instance") == app.instance:
@@ -739,7 +755,8 @@ def serve(root: Path, page: "str | None", open_browser: bool, idle: float, verbo
                 pass
         return EXIT_OK
     finally:
-        lock.release()
+        if got:
+            app.state.build_lock.release()
 
 
 def stop(root: Path) -> int:
@@ -770,9 +787,12 @@ def stop(root: Path) -> int:
     if not lock.acquire(STOP_WAIT):
         raise Failed("サーバーが終わらないので、止められなかった")
     try:
+        guard.set_protected([root, *core.external_inputs(root)])
         latest = _read_record(state_dir)
         if latest is not None and latest.get("instance") == rec["instance"]:
-            guard.unlink(state_dir / "server.json")
+            guard.unlink(state_dir / "server.json")   # 記録を指すページがあれば、守りが拒む
+    except fs.Refused:
+        pass
     finally:
         lock.release()
     print(json.dumps({"stopped": True, "running": False}), flush=True)

@@ -604,24 +604,23 @@ class Core:
             return
         try:
             ontology = wiki_graph_extract.parse_ontology(f.text)
-        except wiki_graph_extract.OntologyError:
+        except Exception:  # noqa: BLE001  OntologyError のほか、思わない例外でも関係表だけを使えないにする
             self.relations_state = "error"
             self.diagnostics.append({"kind": "relations_error", "reason": "invalid"})
             return
         gpages = []
+        diag = []
         for disk, p in sorted(self.pages.items()):
-            gmeta, _body = wiki_graph_extract.parse_frontmatter(p["text"])
-            meta = dict(p["meta"])
-            # 最上位の欄は lint の値にそろえ、入れ子の graph だけを PyYAML から取る（設計の 2）。
-            if isinstance(gmeta.get("graph"), dict):
-                meta["graph"] = gmeta["graph"]
-            else:
+            # グラフの抽出と同じ読み方（wiki 0.9.5 の read_frontmatter）。最上位の欄は lint の値、graph だけを
+            # PyYAML から取る（設計の 2）。PyYAML が組み立てられない値は、関係表の診断になる。
+            try:
+                meta, _body, problems = wiki_graph_extract.read_frontmatter(p["text"])
+            except Exception:  # noqa: BLE001  そのページの関係を使えないにして、ほかのページは続ける
+                meta, problems = dict(p["meta"]), [{"kind": "unreadable_graph", "reason": "unexpected"}]
                 meta.pop("graph", None)
-            meta = wiki_graph_extract.normalize_refs(meta)
             gpages.append({"path": str(self.page_files[disk].path), "rel_path": p["rel_path"],
                            "disk_rel_path": disk, "slug": p["slug"], "meta": meta, "body": p["body"],
-                           "links": wiki_pages.extract_wikilinks(p["body"])})
-        diag = []
+                           "links": wiki_pages.extract_wikilinks(p["body"]), "fm_problems": problems})
         try:
             _nodes, page_node_ids, _aliases = wiki_graph_extract.build_nodes(gpages, ontology, diag)
             edges = wiki_graph_extract.build_edges(gpages, page_node_ids, diag)
@@ -682,6 +681,8 @@ class Core:
         index_files = self.snapshot.by_kind("index")
         group_of_file = {}
         for f in index_files:
+            if f.text is None:
+                continue   # 読めない索引のグループは作らないので、そこへのリンクも作らない
             gid = "_g" + short_hash(f.rel, 10)
             group_of_file[_page_id(f.rel)] = gid
         counter = [0]
