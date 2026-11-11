@@ -51,7 +51,8 @@ def prepare(force: bool = False) -> str | None:
 def run_relay(python: str) -> int:
     # 標準入出力は明示して渡す（Windows では、渡さないと子に引き継がれないことがある）。
     return subprocess.run([python, "-X", "utf8", str(RELAY), *sys.argv[1:]], stdin=sys.stdin, stdout=sys.stdout,
-                          stderr=sys.stderr, env={**os.environ, "PYTHONUTF8": "1"}).returncode
+                          stderr=sys.stderr, env={**os.environ, "PYTHONUTF8": "1"},
+                          creationflags=common.child_creationflags()).returncode
 
 
 def main() -> int:

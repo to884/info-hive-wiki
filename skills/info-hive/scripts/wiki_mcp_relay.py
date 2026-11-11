@@ -16,8 +16,8 @@
   同時に起動された中継があっても、サーバーは 1 つしか起動しない。
 - サーバーは要求がない時間が続くと止まる。中継はセッションの間ずっと動くので、呼び出しが失敗したら
   サーバーを確かめ直し（必要なら起動し）、接続し直して 1 回だけやり直す。
-- サーバーは中継の子として、Windows では DETACHED_PROCESS と新しいプロセスグループで、POSIX では新しい
-  セッションで起動する。中継やホストが終わってもサーバーは残り、次のセッションの中継が使う。
+- サーバーは中継の子として、Windows では窓のない自分のコンソール（CREATE_NO_WINDOW）と新しいプロセスグループで、
+  POSIX では新しいセッションで起動する。中継やホストが終わってもサーバーは残り、次のセッションの中継が使う。
 - サーバーの Python の環境は `uv sync --script` で用意し、`uv python find --script` で見つけた python で起動する。
   環境が作りかけで壊れていれば `--reinstall` で入れ直す。サーバーが依存を import できずに終了コード 75 で
   止まったときも、入れ直して 1 回だけ起動し直す。
@@ -80,11 +80,9 @@ def spawn_server(python: str, log_file) -> subprocess.Popen:
     env = {**os.environ, "PYTHONUTF8": "1"}
     common_kwargs = {"stdin": subprocess.DEVNULL, "stdout": log_file, "stderr": log_file, "env": env,
                      "cwd": str(common.data_dir()), "close_fds": True}
-    if os.name == "nt":
-        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-        process = subprocess.Popen(args, creationflags=flags, **common_kwargs)
-    else:
-        process = subprocess.Popen(args, start_new_session=True, **common_kwargs)
+    # Windows では窓のない自分のコンソール（server_creationflags、info-hive-wiki#36）、POSIX では新しいセッションにする。
+    process = subprocess.Popen(args, creationflags=common.server_creationflags(), start_new_session=os.name != "nt",
+                               **common_kwargs)
     # POSIX では、止まったサーバーを親の中継が回収しないとゾンビとして pid が残り、pid が生きているように見える。
     # 中継はセッションのあいだ動き続けるので、サーバーの終了を待って回収するスレッドを置く。
     threading.Thread(target=process.wait, name="reap-server", daemon=True).start()

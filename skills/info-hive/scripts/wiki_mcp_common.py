@@ -127,6 +127,40 @@ def uv_executable() -> str:
     return found
 
 
+# Windows で子プロセスを起動するときの旗（info-hive-wiki#36）。MCP の経路（入口、中継、サーバー）の子プロセスの
+# 起動は、すべて次の 2 つのどちらかを creationflags に渡す（tests/wiki/test_mcp_spawn_flags.py）。
+# コンソールを持たないプロセスがコンソール用のプログラムを起動すると、新しいコンソールが作られ、画面（既定の
+# ターミナル）が出る。CREATE_NO_WINDOW なら、子は窓のないコンソールを持ち、その子孫はそれを引き継ぐ。
+# ただし、子が親と別のコンソールに入ると、親から受け取ったコンソールの標準ハンドルに書けない。
+
+def has_console() -> bool:
+    """このプロセスがコンソールを持つか（窓のないコンソールも含む）。Windows 以外では偽。"""
+    if os.name != "nt":
+        return False
+    import ctypes
+    processes = (ctypes.c_uint32 * 1)()
+    return ctypes.WinDLL("kernel32").GetConsoleProcessList(processes, 1) > 0
+
+
+def child_creationflags() -> int:
+    """標準入出力を受け渡す子プロセスの旗。コンソールがあれば引き継ぎ（0）、なければ窓のないコンソールを作る。"""
+    if os.name != "nt" or has_console():
+        return 0
+    return subprocess.CREATE_NO_WINDOW
+
+
+def server_creationflags() -> int:
+    """サーバーの旗。中継とは別の、窓のない自分のコンソールと新しいプロセスグループで起動する。
+
+    中継やホストのコンソールを閉じたことも、そこでの Ctrl+C も、サーバーには届かない。DETACHED_PROCESS は使わない。
+    コンソールのない venv の python.exe が本体の python.exe を起動すると、本体に新しいコンソールが作られ、画面が
+    出る。DETACHED_PROCESS と併せると CREATE_NO_WINDOW は無視される。サーバーの標準入出力はファイルにつなぐ。
+    """
+    if os.name != "nt":
+        return 0
+    return subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+
+
 # uv の環境が壊れているとき、中継とサーバーはこの終了コードで止まる（EX_TEMPFAIL）。
 # 起動した側（入口、中継）は、この終了コードを見て環境を入れ直し、1 回だけ起動し直す。
 BROKEN_ENV_EXIT = 75
@@ -304,7 +338,7 @@ def env_lock_path(script: Path) -> Path:
     置き場所である uv のキャッシュ（`uv cache dir`。UV_CACHE_DIR も反映される）の下に置く。一時ディレクトリは
     ホストやセッションごとに違うことがあり、Linux では利用者のあいだで共有されることもあるので使わない。"""
     found = subprocess.run([uv_executable(), "cache", "dir"], stdin=subprocess.DEVNULL, capture_output=True,
-                           timeout=120, env={**os.environ, "PYTHONUTF8": "1"})
+                           timeout=120, env={**os.environ, "PYTHONUTF8": "1"}, creationflags=child_creationflags())
     lines = found.stdout.decode("utf-8", "replace").strip().splitlines()
     if found.returncode != 0 or not lines:
         detail = found.stderr.decode("utf-8", "replace").strip()[-400:]
@@ -373,7 +407,7 @@ def record_failure(message: str) -> None:
 def _run_uv(command: list[str], env: dict, output, timeout: float) -> tuple[int, str]:
     try:
         out = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                             timeout=timeout, env=env)
+                             timeout=timeout, env=env, creationflags=child_creationflags())
     except subprocess.TimeoutExpired as exc:
         # 待ちきれなかったときも、それまでの出力は残す。
         _write_output(output, exc.stdout or exc.output or b"")
@@ -390,7 +424,8 @@ def system_certs_env(timeout: float = 60) -> str:
     """
     try:
         found = subprocess.run([uv_executable(), "sync", "--help"], stdin=subprocess.DEVNULL, capture_output=True,
-                               timeout=timeout, env={**os.environ, "PYTHONUTF8": "1"})
+                               timeout=timeout, env={**os.environ, "PYTHONUTF8": "1"},
+                               creationflags=child_creationflags())
     except (OSError, subprocess.SubprocessError):
         return SYSTEM_CERTS_ENV
     text = found.stdout.decode("utf-8", "replace")
@@ -436,7 +471,8 @@ def _imports_ok(python: str, script: Path, output, timeout: float) -> bool:
     環境まで入れ直してしまう。入れ直して直るのは、壊れた環境だけである。
     """
     out = subprocess.run([python, "-X", "utf8", str(script), CHECK_IMPORTS_ARG], stdin=subprocess.DEVNULL,
-                         stdout=output, stderr=output, timeout=timeout, env={**os.environ, "PYTHONUTF8": "1"})
+                         stdout=output, stderr=output, timeout=timeout, env={**os.environ, "PYTHONUTF8": "1"},
+                         creationflags=child_creationflags())
     if out.returncode in (0, BROKEN_ENV_EXIT):
         return out.returncode == 0
     raise RuntimeError(f"{script.name} の環境を確かめられなかった（{CHECK_IMPORTS_ARG} の終了コード {out.returncode}）")
@@ -476,7 +512,8 @@ def prepare_script(script: Path, *, output, timeout: float, log, force: bool = F
 def script_python(script: Path, timeout: float = 120) -> str:
     """prepare_script で用意した環境の python のパス。"""
     found = subprocess.run([uv_executable(), "python", "find", "--script", str(script)], stdin=subprocess.DEVNULL,
-                           capture_output=True, timeout=timeout, env={**os.environ, "PYTHONUTF8": "1"})
+                           capture_output=True, timeout=timeout, env={**os.environ, "PYTHONUTF8": "1"},
+                           creationflags=child_creationflags())
     if found.returncode != 0:
         detail = found.stderr.decode("utf-8", "replace").strip()[-800:]
         raise RuntimeError(f"{script.name} の環境の python を見つけられなかった（uv python find の終了コード "
