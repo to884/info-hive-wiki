@@ -26,9 +26,16 @@ import sys
 sys.dont_write_bytecode = True
 
 import argparse  # noqa: E402
+import hmac  # noqa: E402
+import html  # noqa: E402
+import http.client  # noqa: E402
+import http.server  # noqa: E402
 import json  # noqa: E402
 import os  # noqa: E402
+import secrets  # noqa: E402
+import threading  # noqa: E402
 import time  # noqa: E402
+import urllib.parse  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -317,6 +324,412 @@ def core_loop(stdin, stdout) -> int:
 
 
 # ---------------------------------------------------------------------------
+# サーバー（設計の 8）
+# ---------------------------------------------------------------------------
+
+BUILD_WAIT = 30.0
+RETRY_INTERVAL = 5.0
+RECORD_WAIT = 10.0
+STOP_WAIT = 10.0
+DEFAULT_IDLE = 1800.0
+
+
+def _quote_path(name: str) -> str:
+    return "/".join(urllib.parse.quote(p, safe="") for p in name.split("/"))
+
+
+class BrowseState:
+    """サーバーが持つ中核と、作り直しの状態（設計の 8.3）。"""
+
+    def __init__(self, root: Path, guard: fs.Guard, state_dir: Path, raw: str = "text"):
+        self.root = root
+        self.guard = guard
+        self.state_dir = state_dir
+        self.raw = raw
+        self.current: "core.Core | None" = None
+        self.failed: "str | None" = None
+        self.build_lock = threading.Lock()
+        self.attempts: dict = {}
+        self.shutdown_requested = False
+
+    def _should_retry(self) -> bool:
+        cur = self.current
+        return self.failed is not None or (cur is not None and cur.snapshot.unreadable)
+
+    def _recently_tried(self, sig: str) -> bool:
+        last = self.attempts.get(sig)
+        return last is not None and time.monotonic() - last < RETRY_INTERVAL
+
+    def get(self, wait: float = BUILD_WAIT) -> "tuple[core.Core | None, str | None]":
+        """答えに使う中核と、古いときの理由（"failed" か "building"）を返す。中核がなければ (None, 理由)。"""
+        request_sig = core.signature(self.root)
+        cur = self.current
+        if cur is not None and cur.snapshot.signature == request_sig and not self._should_retry():
+            return cur, None
+        if not self.build_lock.acquire(timeout=wait):
+            return self._answer(self.current, request_sig, "building")
+        try:
+            sig = core.signature(self.root)
+            cur = self.current
+            if cur is not None and cur.snapshot.signature == sig and not self._should_retry():
+                return self._answer(cur, request_sig, None)
+            if self._recently_tried(sig):
+                return self._answer(cur, request_sig, self.failed or "building")
+            self.attempts = {sig: time.monotonic()}
+            try:
+                snap = core.take_snapshot(self.root)
+                self.guard.set_protected([self.root, *snap.external])
+                if self.guard.overlapping(self.state_dir):
+                    # 状態のディレクトリが守る場所と重なった。記録に触れずに終わる（設計の 6.1）。
+                    self.shutdown_requested = True
+                    return self._answer(cur, request_sig, "failed")
+                new = core.Core(snap, record=False)
+            except Exception as e:  # noqa: BLE001  前の中核を使い続ける
+                self.failed = type(e).__name__
+                return self._answer(cur, request_sig, "failed")
+            self.current = new
+            self.failed = None
+            return self._answer(new, request_sig, None)
+        finally:
+            self.build_lock.release()
+
+    def _answer(self, c, request_sig: str, reason: "str | None"):
+        if c is None:
+            return None, reason or "building"
+        if c.snapshot.signature != request_sig:
+            return c, reason or ("failed" if self.failed else "building")
+        return c, None
+
+
+def _same(given: str, token: str) -> bool:
+    """トークンを、時間の一定な比較で確かめる。ASCII でない文字の要求でも例外にしない。"""
+    return hmac.compare_digest(given.encode("utf-8"), token.encode("utf-8"))
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    server_version = "info-hive-browse"
+    sys_version = ""
+    protocol_version = "HTTP/1.1"
+
+    # サーバーの記録には、要求のパスを書かない（トークンを残さない。設計の 8.1）。
+    def log_message(self, fmt, *args):  # noqa: D401
+        pass
+
+    def log_request(self, code="-", size="-"):
+        app = self.server.app
+        if app.verbose:
+            say(f"{self.command} {getattr(self, '_kind', '-')} {code}")
+
+    def _send(self, code: int, body: bytes, ctype: str = "text/plain; charset=utf-8", extra: "dict | None" = None):
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Security-Policy", core.CSP)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def _text(self, code: int, text: str, extra=None):
+        self._send(code, (text + "\n").encode("utf-8"), extra=extra)
+
+    def _json(self, code: int, value: dict):
+        self._send(code, json.dumps(value, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+
+    def _route(self):
+        app = self.server.app
+        app.touch()
+        self._kind = "-"
+        if self.headers.get("Host") != f"127.0.0.1:{app.port}":
+            return self._text(421, "Misdirected Request")
+        raw_path = urllib.parse.urlsplit(self.path).path
+        try:
+            path = urllib.parse.unquote(raw_path, encoding="utf-8", errors="strict")
+        except UnicodeDecodeError:
+            return self._text(404, "Not Found")
+        if not path.startswith("/"):
+            return self._text(404, "Not Found")
+        parts = path[1:].split("/")
+        # デコードしたあとで分け、`..`、`.`、空の要素、`\`、NUL を含めば拒む（設計の 8.1）。
+        if any(p in ("", ".", "..") or "\\" in p or "\0" in p for p in parts):
+            return self._text(404, "Not Found")
+        if len(parts) >= 3 and _same(parts[0], app.control_token) and parts[1] == "control":
+            self._kind = "control"
+            return self._control(parts[2:])
+        if len(parts) >= 3 and _same(parts[0], app.view_token) and parts[1] == "w" \
+                and parts[2] == app.key:
+            self._kind = "view"
+            if self.command not in ("GET", "HEAD"):
+                return self._text(405, "Method Not Allowed", {"Allow": "GET, HEAD"})
+            return self._view("/".join(parts[3:]) or "index.html")
+        return self._text(404, "Not Found")
+
+    def _view(self, name: str):
+        app = self.server.app
+        if name in core.ASSETS:
+            ctype = "text/javascript; charset=utf-8" if name.endswith(".js") else "text/css; charset=utf-8"
+            return self._send(200, core.asset_bytes(name), ctype)
+        c, stale = app.state.get()
+        if app.state.shutdown_requested:
+            app.request_shutdown()
+        if c is None:
+            return self._text(503, "Wiki を組み立てている。少し待ってから再読み込みする" if stale == "building"
+                              else "Wiki を組み立てられない。lint で確かめる", {"Retry-After": "5"})
+        if not c.knows(name):
+            index = "index.html"
+            body = ('<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>見つからない</title></head>'
+                    '<body><p>ページが見つからない。Wiki が更新されたかもしれない。</p>'
+                    f'<p><a href="{html.escape(core.rel_href(name, index))}">索引へ</a></p></body></html>\n')
+            return self._send(404, body.encode("utf-8"), "text/html; charset=utf-8")
+        reason = None if stale is None else ("組み立てに失敗した" if stale == "failed" else "組み立てている")
+        text = c.render(name, app.state.raw, stale=reason)
+        ctype = "text/javascript; charset=utf-8" if name.endswith(".js") else "text/html; charset=utf-8"
+        return self._send(200, text.encode("utf-8"), ctype)
+
+    def _control(self, rest):
+        app = self.server.app
+        op = rest[0] if rest else ""
+        if op == "status" and self.command in ("GET", "HEAD") and len(rest) == 1:
+            return self._json(200, {"instance": app.instance, "wiki_key": app.key})
+        if op == "stop" and self.command == "POST" and len(rest) == 1:
+            self._json(200, {"stopping": True})
+            app.request_shutdown()
+            return None
+        if op == "locate" and self.command in ("GET", "HEAD") and len(rest) >= 2:
+            target = "/".join(rest[1:])
+            c, _stale = app.state.get()
+            if c is None:
+                return self._json(200, {"state": "unavailable"})
+            r = c.resolve(core.nfc(target))
+            res = {"state": r["state"]}
+            if r["state"] == "resolved":
+                res["path"] = c.out_name[r["id"]]
+                if r.get("anchor"):
+                    res["anchor"] = r["anchor"]
+            return self._json(200, res)
+        return self._text(405 if op in ("status", "stop", "locate") else 404,
+                          "Method Not Allowed" if op in ("status", "stop", "locate") else "Not Found")
+
+    def do_GET(self):
+        self._route()
+
+    def do_HEAD(self):
+        self._route()
+
+    def do_POST(self):
+        self._route()
+
+    def do_PUT(self):
+        self._route()
+
+    def do_DELETE(self):
+        self._route()
+
+
+class App:
+    def __init__(self, root: Path, guard: fs.Guard, state_dir: Path, idle: float, verbose: bool = False):
+        self.root = root
+        self.key = common.wiki_key(root)
+        self.guard = guard
+        self.state_dir = state_dir
+        self.idle = idle
+        self.verbose = verbose
+        self.view_token = secrets.token_urlsafe(24)
+        self.control_token = secrets.token_urlsafe(24)
+        self.instance = secrets.token_hex(12)
+        self.state = BrowseState(root, guard, state_dir)
+        self.last = time.monotonic()
+        self.httpd = None
+        self.port = 0
+        self._stopping = threading.Event()
+
+    def touch(self):
+        self.last = time.monotonic()
+
+    def request_shutdown(self):
+        if not self._stopping.is_set():
+            self._stopping.set()
+            threading.Thread(target=self.httpd.shutdown, daemon=True).start()
+
+    def url(self, name: str = "index.html") -> str:
+        return f"http://127.0.0.1:{self.port}/{self.view_token}/w/{self.key}/{_quote_path(name)}"
+
+    def record(self) -> dict:
+        return {"port": self.port, "view_token": self.view_token, "control_token": self.control_token,
+                "instance": self.instance, "wiki_key": self.key, "started": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+
+    def idle_watch(self):
+        while not self._stopping.wait(1.0):
+            if time.monotonic() - self.last > self.idle:
+                self.request_shutdown()
+
+
+class _Server(http.server.ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = False
+
+
+def _http(port: int, method: str, path: str, timeout: float = 3.0):
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+    try:
+        conn.request(method, path, headers={"Host": f"127.0.0.1:{port}"})
+        res = conn.getresponse()
+        body = res.read()
+        return res.status, body
+    finally:
+        conn.close()
+
+
+def _status(rec: dict) -> "str | None":
+    try:
+        code, body = _http(int(rec["port"]), "GET", f"/{rec['control_token']}/control/status")
+        if code != 200:
+            return None
+        return json.loads(body).get("instance")
+    except (OSError, ValueError, KeyError, TypeError, http.client.HTTPException):
+        return None
+
+
+def _read_record(state_dir: Path) -> "dict | None":
+    try:
+        rec = json.loads((state_dir / "server.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(rec, dict) or not all(k in rec for k in ("port", "view_token", "control_token", "instance")):
+        return None
+    return rec
+
+
+def _prepare_state(root: Path) -> "tuple[fs.Guard, Path]":
+    bdir = browse_dir()
+    state_dir = bdir / f"{common.wiki_key(root)}.server"
+    guard = fs.Guard([root, *core.external_inputs(root)])
+    guard.check(bdir)
+    guard.check(state_dir)
+    fs.check_server_dir(state_dir)
+    ensure_dir(guard, bdir)
+    if not state_dir.exists():
+        guard.make_marked_dir(state_dir, fs.SERVER_MARKER, mode=0o700)
+    fs.check_server_dir(state_dir)
+    if os.name == "nt" and os.environ.get(common.DATA_DIR_ENV, "").strip():
+        say("警告: INFO_HIVE_DATA_DIR を指定している。ほかの利用者が読める場所なら、サーバーの記録のトークンを読まれる")
+    return guard, state_dir
+
+
+def _locate(port: int, control_token: str, target: str) -> dict:
+    try:
+        code, body = _http(port, "GET", f"/{control_token}/control/locate/{urllib.parse.quote(target, safe='')}",
+                           timeout=BUILD_WAIT + 5)
+        return json.loads(body) if code == 200 else {"state": "unavailable"}
+    except (OSError, ValueError, http.client.HTTPException):
+        return {"state": "unavailable"}
+
+
+def _emit(url: str, port: int, reused: bool, page_state: "str | None", open_browser: bool) -> None:
+    print(json.dumps({"url": url, "port": port, "reused": reused, "page": page_state}, ensure_ascii=False), flush=True)
+    if open_browser:
+        import webbrowser
+        webbrowser.open(url)
+
+
+def _page_url(base_url_for, port, token, target):
+    if not target:
+        return base_url_for("index.html"), None
+    found = _locate(port, token, target)
+    if found.get("state") == "resolved":
+        name = found["path"]
+        url = base_url_for(name)
+        if found.get("anchor"):
+            url += "#" + urllib.parse.quote(found["anchor"], safe="")
+        return url, "resolved"
+    return base_url_for("index.html"), found.get("state")
+
+
+def serve(root: Path, page: "str | None", open_browser: bool, idle: float, verbose: bool = False) -> int:
+    guard, state_dir = _prepare_state(root)
+    lock = fs.Lock(guard, state_dir / "server.lock")
+    deadline = time.monotonic() + RECORD_WAIT
+    while not lock.try_acquire():
+        rec = _read_record(state_dir)
+        if rec is not None and _status(rec) == rec["instance"]:
+            key = rec.get("wiki_key") or common.wiki_key(root)
+
+            def url_for(name, rec=rec, key=key):
+                return f"http://127.0.0.1:{rec['port']}/{rec['view_token']}/w/{key}/{_quote_path(name)}"
+            url, state = _page_url(url_for, int(rec["port"]), rec["control_token"], page)
+            _emit(url, int(rec["port"]), True, state, open_browser)
+            return EXIT_OK
+        if time.monotonic() >= deadline:
+            raise Failed("動いているサーバーを使い回せない。/wiki:browse --stop で止めてからやり直す")
+        time.sleep(0.2)
+    try:
+        guard.unlink(state_dir / "server.json")
+        app = App(root, guard, state_dir, idle, verbose)
+        httpd = _Server(("127.0.0.1", 0), Handler)
+        httpd.app = app
+        app.httpd = httpd
+        app.port = httpd.server_address[1]
+        guard.write_text(state_dir / "server.json", json.dumps(app.record(), ensure_ascii=False) + "\n", mode=0o600)
+        threading.Thread(target=app.idle_watch, daemon=True).start()
+        server_thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True)
+        server_thread.start()
+        url, state = _page_url(app.url, app.port, app.control_token, page)
+        _emit(url, app.port, False, state, open_browser)
+        server_thread.join()
+        httpd.server_close()
+        rec = _read_record(state_dir)
+        if rec is not None and rec.get("instance") == app.instance:
+            try:
+                guard.unlink(state_dir / "server.json")
+            except (OSError, fs.Refused):
+                pass
+        return EXIT_OK
+    finally:
+        lock.release()
+
+
+def stop(root: Path) -> int:
+    guard, state_dir = _prepare_state(root)
+    lock = fs.Lock(guard, state_dir / "server.lock")
+    if lock.try_acquire():
+        try:
+            guard.unlink(state_dir / "server.json")
+        finally:
+            lock.release()
+        print(json.dumps({"stopped": False, "running": False}), flush=True)
+        return EXIT_OK
+    deadline = time.monotonic() + RECORD_WAIT
+    rec = _read_record(state_dir)
+    while rec is None or _status(rec) != rec["instance"]:
+        if lock.try_acquire():
+            lock.release()
+            print(json.dumps({"stopped": False, "running": False}), flush=True)
+            return EXIT_OK
+        if time.monotonic() >= deadline:
+            raise Failed("サーバーが応答しないので、止められない。操作がなければ、いずれ終わる")
+        time.sleep(0.2)
+        rec = _read_record(state_dir)
+    try:
+        _http(int(rec["port"]), "POST", f"/{rec['control_token']}/control/stop")
+    except (OSError, http.client.HTTPException):
+        pass
+    if not lock.acquire(STOP_WAIT):
+        raise Failed("サーバーが終わらないので、止められなかった")
+    try:
+        latest = _read_record(state_dir)
+        if latest is not None and latest.get("instance") == rec["instance"]:
+            guard.unlink(state_dir / "server.json")
+    finally:
+        lock.release()
+    print(json.dumps({"stopped": True, "running": False}), flush=True)
+    return EXIT_OK
+
+
+# ---------------------------------------------------------------------------
 # コマンドライン
 # ---------------------------------------------------------------------------
 
@@ -349,9 +762,21 @@ def main(argv=None) -> int:
 
 def _add_server_commands(sub) -> None:
     """serve と stop（設計の 8）。"""
+    s = sub.add_parser("serve", help="127.0.0.1 のサーバーを起動して開く（動いていれば使い回す）")
+    s.add_argument("wiki")
+    s.add_argument("--page", default=None, help="開くページ（[[slug]] と同じ規則で探す）")
+    s.add_argument("--no-open", action="store_true", help="ブラウザで開かない（URL を出すだけ）")
+    s.add_argument("--idle-timeout", type=float, default=DEFAULT_IDLE, help="操作がないときに終わるまでの秒数（既定 1800）")
+    s.add_argument("--verbose", action="store_true", help="要求の方法、口の種類、状態の番号を標準エラーに出す")
+    t = sub.add_parser("stop", help="動いているサーバーを止める")
+    t.add_argument("wiki")
 
 
 def _run_server_command(args) -> int:
+    if args.cmd == "serve":
+        return serve(wiki_root(args.wiki), args.page, not args.no_open, args.idle_timeout, args.verbose)
+    if args.cmd == "stop":
+        return stop(wiki_root(args.wiki))
     raise Failed(f"未対応のコマンド: {args.cmd}")
 
 
