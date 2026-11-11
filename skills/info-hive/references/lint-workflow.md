@@ -2,6 +2,8 @@
 
 wiki の健全性のチェックである。操作のたびにではなく、決まった頻度で（N 回の取り込みごと、毎週、またはユーザーが明示的に求めたときに）実行するのがよい。lint は、MCP のツール `lint`（または `wiki_lint.py`）が行う構造の確認と、LLM が直接行う内容の確認に分かれる。
 
+コマンドの `<skill-root>` は、このスキルのディレクトリ（`SKILL.md` のあるディレクトリ）の実際のパスに置き換える。書き方は `SKILL.md` の「スクリプトのパス」にある。
+
 ## 手順 0: スキーマを確認する
 
 `wiki/SCHEMA.md` で、この wiki 固有の追加の lint ルールが定義されていることがある（たとえば「エンティティのページにはすべて `aliases:` フィールドが必要」「ソースが2つ未満のコンセプトのページは作らない」）。これを読む。
@@ -13,7 +15,7 @@ wiki の健全性のチェックである。操作のたびにではなく、決
 ツールが使えないときは、スクリプトを実行する。使い分けは `SKILL.md` の「MCP のツールと CLI の使い分け」にある。
 
 ```bash
-python scripts/wiki_lint.py wiki/
+python "<skill-root>/scripts/wiki_lint.py" wiki/
 ```
 
 `wiki/` は実際の wiki のディレクトリに置き換える。省くと、作業領域の設定（`.info-hive/workspace.json`）の `dirs.wiki`、設定がなければ `./wiki` を使う。設定が壊れているときは理由を書いて終了コード 1 で止まる。
@@ -21,12 +23,12 @@ python scripts/wiki_lint.py wiki/
 グラフ層がある場合は、次も実行する。
 
 ```bash
-uv run --script scripts/wiki_graph_lint.py wiki/
+uv run --script "<skill-root>/scripts/wiki_graph_lint.py" wiki/
 ```
 
 グラフの lint は、構造の lint とは別に、型付きエッジの問題を検出する。対象は、未知の述語、証拠の欠落、リンク切れの目的語の参照、エイリアスの衝突、無効な `confidence`/`status` の値、リンク切れの `contradicts`/`supersedes` の参照である。検出結果は構造の lint と同じように仕分ける。つまり、修正案を示し、黙って適用しない。承認された修正を適用したら、extract で成果物を作り直す。手順、終了コード、オントロジーがないときの扱いの正本は `references/graph-workflow.md` である。
 
-ユーザーが任意の判定レイヤーを有効にしている場合は、ツールではなく `wiki_graph_lint.py` を使い、`--decide` を付ける。証拠のテキストがソースページに出てこない型付きエッジをチェックする。矛盾を洗い出すには、`python scripts/wiki_decide.py contradictions --wiki wiki/` を実行し、報告されたページの組を読んでから判断する。`decision-models.md` を参照。
+ユーザーが任意の判定レイヤーを有効にしている場合は、ツールではなく `wiki_graph_lint.py` を使い、`--decide` を付ける。証拠のテキストがソースページに出てこない型付きエッジをチェックする。矛盾を洗い出すには、`python "<skill-root>/scripts/wiki_decide.py" contradictions --wiki wiki/` を実行し、報告されたページの組を読んでから判断する。`decision-models.md` を参照。
 
 lint が調べるページは、wiki の中の `.md` のうち、最上位の `SCHEMA.md`、`index.md`、`log.md`、`README.md` と、最上位の `indexes/`、`graph/`、`raw/`、`assets/`、`.evolution/`、`.wiki-cache/` の中のものと、名前が `.` で始まるファイルを除いたものである。検索（`wiki_search.py` と MCP の `query`）、統計、グラフも同じページを対象にする（`scripts/wiki_pages.py`）。
 
@@ -76,7 +78,7 @@ lint のレポートには、次のものが含まれる。
 - ページ内部の矛盾（取り込みで新しい主張を重ねたのに、既存の文章とすり合わせていないもの）。
 - まだ専用のページがないエンティティやコンセプトが、繰り返し言及されている。独立したページにする候補である。
 
-**多くリンクされているページ（ハブ）。** 取り込みのたびに更新されるので、内容がもっともずれやすい。MCP のツール `stats` の `most_linked`（上位 10 件）か、`wiki_search.py --top-linked 10` を使う（または wikilink を grep して数える）と見つけられる。ハブをそれぞれ読み、文章の筋がまだ通っているか、相互参照がまだ意味をなしているかを確かめる。
+**多くリンクされているページ（ハブ）。** 取り込みのたびに更新されるので、内容がもっともずれやすい。MCP のツール `stats` の `most_linked`（上位 10 件）か、`python "<skill-root>/scripts/wiki_search.py" "" --wiki wiki/ --top-linked 10` を実行する（または wikilink を grep して数える）と見つけられる。ハブをそれぞれ読み、文章の筋がまだ通っているか、相互参照がまだ意味をなしているかを確かめる。
 
 **不確かさが明示されているページ。** 取り込みでは、言い切らずに留保を付ける（「ソースは X と主張しているが、まだ裏づけはない」）のが規約である。lint では、その後の取り込みで裏づけられたか、反証されたかを確かめ、それに応じて更新する。
 
@@ -85,7 +87,7 @@ lint のレポートには、次のものが含まれる。
 参照されているのに、まだページになっていないものを探す。ツールの `lint` に `suggest_pages=true` を渡すか、次を実行する。
 
 ```bash
-python scripts/wiki_lint.py wiki/ --suggest-pages
+python "<skill-root>/scripts/wiki_lint.py" wiki/ --suggest-pages
 ```
 
 多くのページ（既定では 5 ページ以上。`--suggest-min` で変えられる）に出てくるのに専用のページがない、エンティティやコンセプトらしい語を見つける。候補にするのは、3 文字以上のカタカナ語、3 文字以上の漢字の並び（「消費税」「仕入税額控除」など）、大文字で始まる英語の語句で、題名かスラッグが同じページがすでにあるものは除き、出てくるページの多い順に最大 30 件を挙げる。漢字の並びは途中で切らずに数えるので、「消費税率」は「消費税」とは別の語になる。どれを独立したページにし、どれを本文での言及のままにするかは、ユーザーが決められる。

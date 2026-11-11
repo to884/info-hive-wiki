@@ -2,6 +2,8 @@
 
 判定モデルは、選択肢が決まった質問に答える小さなモデルである。たとえば「このセクションはクエリへの回答に役立つか？ A か B」「このエッジを裏づける文はどれか？ s1、s2、どれでもない」といった質問である。選択肢はコードが用意し、モデルはその中から1つを選んで確信度を返す。
 
+コマンドの `<skill-root>` は、このスキルのディレクトリ（`SKILL.md` のあるディレクトリ）の実際のパスに置き換える。書き方は `SKILL.md` の「スクリプトのパス」にある。
+
 判定レイヤーは既定では無効で、なくても wiki は同じように動く。ユーザーが求めた場合にだけ有効にする。
 
 判定モデルに渡す質問文（`assets/decision-questions.json`）は英語のままで、日本語の wiki でどれだけ正しく判定できるかはまだ確かめていない（移植計画の方針 H）。評価用のフィクスチャも英語だけである。日本語の wiki で有効にすると、関係のある結果を誤って捨てるおそれがある。
@@ -63,17 +65,17 @@
 export INFO_HIVE_DECISIONS=local          # off | local | typesafe | openrouter | liquid
 export INFO_HIVE_DECISIONS_URL=http://127.0.0.1:8080   # 任意。ベース URL
 export INFO_HIVE_DECISIONS_MODEL=d1-2B                 # 任意。モデルを上書きする
-python scripts/wiki_decide.py check                   # バックエンドを試す
+python "<skill-root>/scripts/wiki_decide.py" check                   # バックエンドを試す
 ```
 
 チェックは次のように使う。
 
 ```bash
-uv run --script scripts/wiki_search.py "軽減税率の対象" --json --decide [--decide-pool 20] [--decide-threshold 0.65]
-uv run --script scripts/wiki_graph_lint.py wiki/ --decide [--decide-threshold 0.55]
-python scripts/wiki_decide.py contradictions --wiki wiki/ [--max-pairs 40]
-python scripts/wiki_decide.py shortlist raw/<source-file> --wiki wiki/ [--top 30]
-python scripts/wiki_decide.py screen <file>
+uv run --script "<skill-root>/scripts/wiki_search.py" "軽減税率の対象" --json --decide [--decide-pool 20] [--decide-threshold 0.65]
+uv run --script "<skill-root>/scripts/wiki_graph_lint.py" wiki/ --decide [--decide-threshold 0.55]
+python "<skill-root>/scripts/wiki_decide.py" contradictions --wiki wiki/ [--max-pairs 40]
+python "<skill-root>/scripts/wiki_decide.py" shortlist raw/<source-file> --wiki wiki/ [--top 30]
+python "<skill-root>/scripts/wiki_decide.py" screen <file>
 ```
 
 `wiki_decide.py` のグローバルなフラグは、`--backend`、`--model`、`--url`、`--timeout` である。閾値のフラグは、各サブコマンドの `--help` で確かめる。`--decide` を付けると、検索の JSON にトップレベルの `decision` ブロックと、各行の `decision` フィールドが加わる。`--decide` を付けなければ、出力は変わらない。
@@ -81,6 +83,8 @@ python scripts/wiki_decide.py screen <file>
 ## 使う前に評価する
 
 評価には、合成したフィクスチャだけを使う。評価のために、非公開の wiki のテキストを外部のバックエンドに送ってはならない。
+
+次のコマンドは、プラグインのリポジトリ（info-hive-wiki）のルートで実行する。`eval/` はスキルではなくリポジトリにある。
 
 ```bash
 python eval/decisions/run_eval.py --backend fake            # ネットワークを使わない

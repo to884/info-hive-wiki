@@ -2,6 +2,8 @@
 
 ユーザーが wiki に対して質問している。やるべきことは、wiki をもとに出典つきで答え、wiki の規模に応じてたどり方を変え、必要なら回答をシンセシスのページとして保存することである。
 
+コマンドの `<skill-root>` は、このスキルのディレクトリ（`SKILL.md` のあるディレクトリ）の実際のパスに置き換える。書き方は `SKILL.md` の「スクリプトのパス」にある。
+
 ## 手順 0: スキーマを確認する
 
 このセッションでまだ読んでいなければ、`wiki/SCHEMA.md` を読む。wiki によっては、クエリ専用の規約を定めている（たとえば「比較を問う質問には、必ず比較表で答える」「回答は `wiki/synthesis/` ではなく `wiki/synthesis/qa/` に置く」）。スキーマは既定の動作より優先される。
@@ -23,12 +25,12 @@
 ツールが使えないとき、呼び出しが返らないとき、ページ単位の順位（`--granularity page`）や依存パッケージを使わない決定的な検索が要るときは、検索スクリプトを使う。使い分けは `SKILL.md` の「MCP のツールと CLI の使い分け」にある。
 
 ```bash
-uv run --script scripts/wiki_search.py "軽減税率の対象" --top 10 --cache --json
+uv run --script "<skill-root>/scripts/wiki_search.py" "軽減税率の対象" --top 10 --cache --json
 ```
 
 `--wiki` を省くと、作業領域の設定（`.info-hive/workspace.json`）の `dirs.wiki`、設定がなければ `./wiki` を検索する。設定が壊れているときは理由を書いて終了コード 1 で止まる。
 
-スクリプトも、既定では、セクション単位のハイブリッド検索の結果を返す。ローカルの FastEmbed によるセマンティックな順位付けと BM25 を RRF で統合し、JSON の各行には `heading_path`、抜粋、検索の出所が付く。埋め込みモデルの既定は多言語モデルの `intfloat/multilingual-e5-small`（fp16 の ONNX、約 0.25 GB、384 次元）で、初回のセマンティック検索でダウンロードする。環境変数 `INFO_HIVE_EMBED_MODEL` で `intfloat/multilingual-e5-large`（約 2.24 GB、1024 次元）も選べ、モデルを変えるとベクトルの索引は自動で作り直される。セクションのベクトルは `wiki/.wiki-cache/embeddings.sqlite` に保存され、変更されたセクションだけがベクトル化し直される。wiki やクエリのテキストがマシンの外に出ることはない。依存パッケージを使わない語彙ベースの BM25 にしたい場合は、`python scripts/wiki_search.py "軽減税率の対象" --no-embed` を実行する。必要に応じて frontmatter のフィルター（`--type concept`、`--tag 税制`、`--since 2026-01-01`）を使い、ページ単位の語彙ベースの順位付けにしたいときは `--granularity page` を指定する。
+スクリプトも、既定では、セクション単位のハイブリッド検索の結果を返す。ローカルの FastEmbed によるセマンティックな順位付けと BM25 を RRF で統合し、JSON の各行には `heading_path`、抜粋、検索の出所が付く。埋め込みモデルの既定は多言語モデルの `intfloat/multilingual-e5-small`（fp16 の ONNX、約 0.25 GB、384 次元）で、初回のセマンティック検索でダウンロードする。環境変数 `INFO_HIVE_EMBED_MODEL` で `intfloat/multilingual-e5-large`（約 2.24 GB、1024 次元）も選べ、モデルを変えるとベクトルの索引は自動で作り直される。セクションのベクトルは `wiki/.wiki-cache/embeddings.sqlite` に保存され、変更されたセクションだけがベクトル化し直される。wiki やクエリのテキストがマシンの外に出ることはない。依存パッケージを使わない語彙ベースの BM25 にしたい場合は、`python "<skill-root>/scripts/wiki_search.py" "軽減税率の対象" --no-embed` を実行する。必要に応じて frontmatter のフィルター（`--type concept`、`--tag 税制`、`--since 2026-01-01`）を使い、ページ単位の語彙ベースの順位付けにしたいときは `--granularity page` を指定する。
 
 日本語のクエリはそのまま渡してよく、分かち書きは要らない。語彙ベースの検索は、かなと漢字を 2 文字ずつ重ねて切り出し（文字 bigram）、漢字は 1 文字単位でも索引に入れるので、「税」のような単漢字のクエリも「消費税」を含むページに当たる。形態素解析は使わない。文字 bigram は偶然に一致しやすいので、日本語を含むクエリでは、クエリのトークンの被覆率（IDF で重み付け）が 0.25 未満のページを語彙ベースの結果から外す。詳しくは、リポジトリの `docs/search.md` を参照。
 
