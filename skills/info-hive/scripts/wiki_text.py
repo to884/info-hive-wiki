@@ -176,9 +176,11 @@ def has_fullwidth_link_syntax(link: str) -> bool:
 # ---------------------------------------------------------------------------
 #
 # 文字列の値は、配列の要素も含めて二重引用符で囲む（要件 §6.3）。日付（YYYY-MM-DD）と数値は
-# 囲まない。値の中の " は \"、\ は \\ と書く。手書きのパーサーが戻す escape はこの 2 つだけで、
-# グラフのスクリプトが使う PyYAML と同じ値になる。引用符の中のカンマで配列を分けず、引用符の
-# 外の「 #」から行末まではコメントとして捨てる。入れ子（graph: など）は読まない。
+# 囲まない。値の中の " は \"、\ は \\ と書く。手書きのパーサーが戻す escape はこの 2 つだけである。
+# 引用符の中のカンマで配列を分けず、引用符の外の「 #」から行末まではコメントとして捨てる。
+# 入れ子（graph: など）は読まない。値はすべて、書かれた文字のままの文字列か、その配列になる
+# （true、2024、2024-01-01、null も文字列）。グラフのスクリプトも、最上位の欄はこのパーサーで読み、
+# graph: の欄だけを PyYAML から取る（wiki_graph_extract.read_frontmatter）。
 
 # 「key: value」の行。キーは日本語でもよい。行頭に空白があるものは入れ子なので読まない。
 _FM_KEY_RE = re.compile(r"^(\w+):\s*(.*)$")
@@ -276,6 +278,20 @@ def _fm_raw_values(frontmatter_text: str):
                 yield key, [], True
         elif line.startswith(_FM_ITEM_PREFIX) and current_key:
             yield current_key, [_fm_strip_comment(line[len(_FM_ITEM_PREFIX):].strip())], True
+
+
+def top_level_keys(frontmatter_text: str) -> list[str]:
+    """parse_frontmatter_text がキーの行として読む行のキーを、書かれたまま、出てきた順に返す。
+
+    同じキーを 2 度書いていれば、2 つ返す。グラフの抽出が、YAML としては読めるのにこのパーサーが
+    読まないキー（`"type": x`、`type : x`）を見つけるのに使う。
+    """
+    keys = []
+    for line in frontmatter_text.split("\n"):
+        kv = _FM_KEY_RE.match(line) if line.strip() else None
+        if kv:
+            keys.append(kv.group(1))
+    return keys
 
 
 def parse_frontmatter_text(frontmatter_text: str) -> dict:

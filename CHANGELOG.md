@@ -22,6 +22,35 @@
 
 - 振る舞いを変えずに、閲覧が使う関数を切り出した。`wiki_pages.new_parser()` と `WIKILINK_FULL_RE`、`wiki_lint.index_files()`、`wiki_graph_extract.parse_ontology()`。
 
+## [0.9.5] - 2026-11-11
+
+### Fixed
+
+グラフの抽出（`wiki_graph_extract.py`）とグラフの lint（`wiki_graph_lint.py`、MCP のツール `lint` の `graph`）が、frontmatter を wiki の lint と違う値に読む不具合を直した。
+
+- グラフのスクリプトだけが frontmatter の全体を PyYAML で読んでいたので、引用符のない `true`、`yes`、`no`、数、日付、`null` が、wiki の lint、検索、統計（書かれた文字のまま読む）と違う値になっていた。`sources: [true]` は、lint では `true.md` に解決するのに、グラフでは `sourced_from` ができず、`unresolved_sources` に `True` と挙がった。`sources: [null]` は、lint が未解決と挙げるのに、グラフは値を捨てて何も挙げなかった。`type: yes` や `kind: 2024` も、lint とグラフで違う値になった。
+  - 今は、最上位の欄（`type`、`kind`、`title`、`tags`、`sources`、`raw` など）を、lint と同じパーサー（`wiki_text.parse_frontmatter_text`）で読む。`graph:` の欄だけを PyYAML から取る。wiki の lint が解決する `sources:` は、グラフでも同じページに解決する。
+  - `raw:` を配列で書くと、配列の全体を 1 つの目的語（`raw:['a', 'b']`）にしていた。lint と同じく、値 1 つにつき `summarizes_raw` を 1 本作る。`raw: " raw/a.md "` のように引用符の中の前後に空白があるときは、lint と同じく空白を除く。
+  - `tags: ml` のように 1 つの値を文字列で書くと、1 文字ずつ別のタグとして読んでいた。1 つのタグとして読む。配列で書いたタグは変わらない。
+- `graph:` の中の、ページやノードを指す欄（`node_id`、`aliases`、関係の `object`、`source`、`contradicts`、`supersedes`）に、引用符のない数、真偽値、日付を書くと、PyYAML の値を文字にしたもの（`007` は `7`、`1.10` は `1.1`、`true` は `True`）で照らしていた。`source: 007` は、ソースページ `007.md` があっても `broken_source_refs` に挙がった。`object: no` と `node_id: no` は、値がないものとして黙って捨てた。今は、書かれた文字で読む。`null`、`~`、値なしは、今までどおり値がないものとして扱う。
+- PyYAML が組み立てられない値（`created: 2026-13-01`、`!!int abc`）のあるページが 1 つあると、抽出とグラフの lint が `ValueError` で止まっていた。今は止まらない。frontmatter が YAML として構文を読めれば、`graph:` の外の値は、どう書いてあっても `graph:` の読み方に影響しない。オントロジーにそういう値があるときは、「オントロジーを読めない」（終了コード 2）として止まる。
+- frontmatter が YAML として読めない（`title: a: b`、タブ）ページは、`type` も `sources` も `graph` も黙って失い、型のない `concept` のノードになっていた。今は、最上位の欄を lint と同じに読み、`graph:` を読めなかったことを `unreadable_graph` に挙げる。
+
+### Added
+
+- グラフの lint に、検出結果を 2 つ足した。どちらも `summary` に件数が入り、抽出も件数を標準エラーに書く。`build_nodes()` の `diagnostics` には、`unreadable_graph`（`page`、`reason`）と `unread_field`（`page`、`field`）として入る。
+  - `unreadable_graph`: `graph:` を書いたのに、マッピングとして読めなかったページ。`reason` は、`yaml_error`（frontmatter が YAML として読めない、または `graph:` の中に組み立てられない値がある）か `not_mapping`（`graph:` の値がマッピングでない）である。
+  - `unread_fields`: `type`、`kind`、`sources`、`raw`（日本語の別名を含む）のうち、YAML としては値があるのに、wiki の lint のパーサーが読めない書き方のもの（下の Changed）。キーを読めない欄、YAML の配列より少ない数しか読めない欄、最上位のマージキー（`<<`）だけで来た欄である。値の中身は比べないので、ブロックのスカラー（`raw: >`）のように数が合う書き方は挙がらない。
+- `wiki_graph_extract.read_frontmatter(text)` を足した。`(meta, body, 診断の一覧)` を返す。`parse_frontmatter(text)` は今までどおり `(meta, body)` を返す。`collect_pages()` のページに、`fm_problems`（その診断の一覧）が入る。`wiki_text.top_level_keys()` を足した（lint のパーサーがキーの行として読む行のキーを返す）。
+
+### Changed
+
+- グラフが読む最上位の欄の値は、すべて文字列か文字列の配列になった。ノードの `title` と `kind` は、`title: 2024` と書くと文字の `"2024"` になる（`nodes.jsonl` では数値だった）。
+- wiki の lint のパーサーが読めない書き方は、グラフも読まなくなった（lint、検索、統計は、今までも読んでいない）。字下げのない `- x` の配列、字下げ 4 つの `    - x` の配列、複数行にまたがる `[a,` … `]`、引用符つきのキー（`"type": x`）、`type : x` である。`sources:` をこう書いていたページは、`sourced_from` ができなくなる。グラフの lint が `unread_fields` に挙げるので、1 行の `["a", "b"]` か、字下げ 2 つの `  - "a"` の行に書き直す。ブロックのスカラー（`raw: >`）、アンカー（`&`、`*`）、タグ（`!!str`）、二重引用符の中の `\"` と `\\` のほかのエスケープ（`\t`、`\n`、`\u00e9`）、引用符のない日時（`2026-11-01 10:00:00`）も、lint と同じく、書かれた文字として読む。同じキーの配列を 2 度書くと、lint と同じく 2 つをつなぐ（後のものだけを読んでいた）。
+- 引用符のない数、真偽値、日付、`null` を、`type`、`kind`、`title`、`tags`、`sources`、`raw` か、`graph:` の参照の欄に書いていたページは、ノードとエッジが変わる。`sources: [1.10]` は、`1.1.md` ではなく `1.10.md` を指す。`graph:` の参照の欄に `007`、`1.10`、`true` を書いていた関係と、`contradicts`・`supersedes` に引用符のない数を書いていた関係は、エッジの ID が変わる。ページの規約（`references/page-conventions.md`）どおりに書いたページで、次のどれにも当たらないものは、ノードもエッジも ID も変わらない。(1) これらの欄に、引用符のない数、真偽値、日付、`null` を書いている。(2) `raw:` を配列で書いているか、値の前後に空白がある。(3) `tags:` を文字列 1 つで書いている。規約どおりのページの出力が 0.9.3 と同じことは、試験と、手元の 2 つの wiki で確かめた。
+- オントロジーの `node_types[*].maps_from` の `type` と `kind` も、ページの値と同じく、書かれた文字で比べる。`maps_from: {kind: 2024}` は、今までどおりページの `kind: 2024` に当たる（マージキーとアンカーで来た値も同じ）。書き方の違う値（`2024` と `2024.0`、`yes` と `true`）は、PyYAML が同じ値に読むので当たっていたが、当たらなくなる。
+- グラフ層を使っている wiki は、`wiki_graph_extract.py` でグラフを作り直す。
+
 ## [0.9.4] - 2026-11-11
 
 ### Fixed
