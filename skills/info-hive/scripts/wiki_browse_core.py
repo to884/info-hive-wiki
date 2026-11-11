@@ -683,8 +683,8 @@ class Core:
         for f in index_files:
             if f.text is None:
                 continue   # 読めない索引のグループは作らないので、そこへのリンクも作らない
-            gid = "_g" + short_hash(f.rel, 10)
-            group_of_file[_page_id(f.rel)] = gid
+            gid = "_g" + short_hash(f.disk_rel, 10)   # NFC で同じになる 2 つの名前でも重ならない
+            group_of_file.setdefault(_page_id(f.rel), gid)
         counter = [0]
 
         def new_group(title, gid=None):
@@ -701,11 +701,11 @@ class Core:
             tokens = self.parser.parse(body)
             first_heading = next((inline_text(tokens[i + 1].children) for i, t in enumerate(tokens)
                                   if t.type == "heading_open" and i + 1 < len(tokens)), None)
+            gid = "_g" + short_hash(f.disk_rel, 10)
             if is_top:
-                top = new_group("", group_of_file[_page_id(f.rel)])
+                top = new_group("", gid)
             else:
-                top = new_group(str(meta.get("title") or first_heading or f.path.stem),
-                                group_of_file[_page_id(f.rel)])
+                top = new_group(str(meta.get("title") or first_heading or f.path.stem), gid)
             self.recorder.add("nav.js", top["title"])
             stack = [(0, top)]
             pending = []

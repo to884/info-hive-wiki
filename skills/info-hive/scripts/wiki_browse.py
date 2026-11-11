@@ -363,20 +363,24 @@ class BrowseState:
     def get(self, wait: "float | None" = None) -> "tuple[core.Core | None, str | None]":
         """答えに使う中核と、古いときの理由（"failed" か "building"）を返す。中核がなければ (None, 理由)。"""
         wait = BUILD_WAIT if wait is None else wait
-        request_sig = core.signature(self.root)
+        request_sig = self._signature()
         cur = self.current
         if cur is not None and cur.snapshot.signature == request_sig and not self._should_retry():
             return cur, None
         if not self.build_lock.acquire(timeout=wait):
             return self._answer(self.current, request_sig, "building")
         try:
-            sig = core.signature(self.root)
+            sig = self._signature()
             cur = self.current
             if cur is not None and cur.snapshot.signature == sig and not self._should_retry():
                 return self._answer(cur, request_sig, None)
             if self._recently_tried(sig):
                 return self._answer(cur, request_sig, "failed" if self.failed else "building")
             self.attempts = {sig: time.monotonic()}
+            if sig is None:
+                # 入力の一覧を作れない（ディレクトリや索引の属性を読めない）。前の中核を古いと示して使う。
+                self.failed = self.failed or "OSError"
+                return self._answer(cur, request_sig, "failed")
             try:
                 snap = core.take_snapshot(self.root)
                 self.guard.set_protected([self.root, *snap.external])
@@ -394,7 +398,14 @@ class BrowseState:
         finally:
             self.build_lock.release()
 
-    def _answer(self, c, request_sig: str, reason: "str | None"):
+    def _signature(self) -> "str | None":
+        """入力の印。入力の一覧を作れなければ None（どの中核の印とも一致しない）。"""
+        try:
+            return core.signature(self.root)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _answer(self, c, request_sig: "str | None", reason: "str | None"):
         if c is None:
             return None, reason or "building"
         if c.snapshot.signature != request_sig:
@@ -645,7 +656,11 @@ def _read_record(state_dir: Path) -> "dict | None":
         rec = json.loads((state_dir / "server.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if not isinstance(rec, dict) or not all(k in rec for k in ("port", "view_token", "control_token", "instance")):
+    if not isinstance(rec, dict):
+        return None
+    if not isinstance(rec.get("port"), int) or not 0 < rec["port"] < 65536:
+        return None
+    if not all(isinstance(rec.get(k), str) and rec[k] for k in ("view_token", "control_token", "instance")):
         return None
     return rec
 
@@ -695,6 +710,14 @@ def _page_url(base_url_for, port, token, target):
     return base_url_for("index.html"), found.get("state")
 
 
+def _refresh_guard(guard: fs.Guard, root: Path, state_dir: Path) -> None:
+    """守る場所を今の入力から決め直す。状態のディレクトリと重なれば止まる。"""
+    external = core.external_inputs(root)
+    guard.set_protected([root, *external])
+    if guard.overlapping(state_dir) or any(fs.is_within(x, state_dir) for x in external):
+        raise fs.Refused("サーバーの状態の場所が、Wiki か Wiki が読む入力と重なる。何も書かずに止める")
+
+
 def serve(root: Path, page: "str | None", open_browser: bool, idle: float, verbose: bool = False) -> int:
     guard, state_dir = _prepare_state(root)
     lock = fs.Lock(guard, state_dir / "server.lock")
@@ -713,6 +736,9 @@ def serve(root: Path, page: "str | None", open_browser: bool, idle: float, verbo
             raise Failed("動いているサーバーを使い回せない。/wiki:browse --stop で止めてからやり直す")
         time.sleep(0.2)
     try:
+        # ロックを待つあいだに、Wiki のページが状態のファイルを指すようになっているかもしれない。
+        # 守る場所を今の入力から決め直し、重なれば何も書かずに止まる（設計の 6.1）。
+        _refresh_guard(guard, root, state_dir)
         guard.unlink(state_dir / "server.json")
         app = App(root, guard, state_dir, idle, verbose)
         httpd = _Server(("127.0.0.1", 0), Handler)
@@ -764,6 +790,7 @@ def stop(root: Path) -> int:
     lock = fs.Lock(guard, state_dir / "server.lock")
     if lock.try_acquire():
         try:
+            _refresh_guard(guard, root, state_dir)
             guard.unlink(state_dir / "server.json")
         finally:
             lock.release()
