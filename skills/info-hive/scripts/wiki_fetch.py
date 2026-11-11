@@ -317,14 +317,106 @@ def in_dropped(node: Node) -> bool:
     return False
 
 
-def text_of(node: Node, skip_dropped: bool = True) -> str:
+def text_of(node: Node, skip_dropped: bool = True, br: str = "") -> str:
+    """要素の中の文字をつなぐ。br を渡すと、<br> をその文字にする（<pre> の行の区切り）。"""
     parts = []
     for child in node.children:
         if isinstance(child, str):
             parts.append(child)
+        elif child.tag == "br":
+            parts.append(br)
         elif not (skip_dropped and is_dropped(child)):
-            parts.append(text_of(child, skip_dropped))
+            parts.append(text_of(child, skip_dropped, br))
     return "".join(parts)
+
+
+_SRCSET_SPACE = " \t\n\r\f"
+
+
+def parse_srcset(srcset: str) -> list[tuple[str, str, float]]:
+    """srcset を HTML の規則に沿って (URL, 種類, 値) の列にする。種類は "w"、"x" のどちらか。
+
+    URL は空白までの文字の並びで、中のカンマは区切りにしない（`resize,w_1400/a.png` のような URL がある）。
+    URL の末尾のカンマは候補の区切りで、記述子はない。記述子のない候補は 1x とする。
+    記述子が読めない候補（`2x 1000w`、`abcw` など）は捨てる。
+    """
+    out: list[tuple[str, str, float]] = []
+    pos, n = 0, len(srcset)
+    while pos < n:
+        while pos < n and (srcset[pos] in _SRCSET_SPACE or srcset[pos] == ","):
+            pos += 1
+        if pos >= n:
+            break
+        start = pos
+        while pos < n and srcset[pos] not in _SRCSET_SPACE:
+            pos += 1
+        url = srcset[start:pos]
+        descriptors: list[str] = []
+        if url.endswith(","):
+            url = url.rstrip(",")
+        else:
+            # 記述子を、括弧の外のカンマまで読む。
+            start, depth = pos, 0
+            while pos < n and not (srcset[pos] == "," and depth == 0):
+                if srcset[pos] == "(":
+                    depth += 1
+                elif srcset[pos] == ")" and depth:
+                    depth -= 1
+                pos += 1
+            descriptors = srcset[start:pos].split()
+            pos += 1
+        if not url:
+            continue
+        if not descriptors:
+            out.append((url, "x", 1.0))
+            continue
+        if len(descriptors) != 1 or descriptors[0][-1:].lower() not in ("w", "x"):
+            continue
+        try:
+            value = float(descriptors[0][:-1])
+        except ValueError:
+            continue
+        if value > 0:
+            out.append((url, descriptors[0][-1].lower(), value))
+    return out
+
+
+def _largest_candidate(srcset: str) -> str:
+    """srcset の候補から、いちばん大きい画像の URL を返す。`data:` の候補は選ばない。
+
+    幅（w）の候補があれば幅で、なければ密度（x）で比べる。同じ大きさなら先の候補を取る。
+    """
+    candidates = [c for c in parse_srcset(srcset) if not c[0].startswith("data:")]
+    if not candidates:
+        return ""
+    kind = "w" if any(c[1] == "w" for c in candidates) else "x"
+    best_url, best_value = "", -1.0
+    for url, k, value in candidates:
+        if k == kind and value > best_value:
+            best_url, best_value = url, value
+    return best_url
+
+
+def picture_source_url(img: Node) -> str:
+    """<picture> の中の <img> に URL がないとき、兄弟の <source> の srcset から URL を選ぶ。
+
+    Medium などは、URL を <source srcset> にだけ書き、<img> には書かない。`media` のない <source>
+    （どの画面でも使われるもの）を先に、その中では WebP でない <source> を先に見る（元の形式の画像を
+    保存するため）。選んだ <source> の中では、いちばん大きい候補を取る。`srcset` が `data:` の
+    代わりの画像だけのときは、`data-srcset` を見る。
+    """
+    picture = img.parent
+    if picture is None or picture.tag != "picture":
+        return ""
+    sources = [n for n in picture.children if isinstance(n, Node) and n.tag == "source"]
+    sources.sort(key=lambda n: (bool(n.attrs.get("media", "").strip()),
+                                n.attrs.get("type", "").strip().lower() == "image/webp"))
+    for source in sources:
+        for key in ("srcset", "data-srcset"):
+            url = _largest_candidate(source.attrs.get(key, ""))
+            if url:
+                return url
+    return ""
 
 
 def _visible_len(node: Node) -> int:
@@ -503,9 +595,12 @@ class Converter:
                 break
         if not src or src.startswith("data:"):
             srcset = attrs.get("srcset") or attrs.get("data-srcset") or ""
-            first = srcset.split(",")[0].strip().split(" ")[0] if srcset else ""
+            candidates = parse_srcset(srcset)
+            first = candidates[0][0] if candidates else ""
             if first:
                 src = first
+        if not src or src.startswith("data:"):
+            src = picture_source_url(node) or src
         alt = _clean_inline(attrs.get("alt", ""))
         index = len(self.images)
         self.images.append({
@@ -636,7 +731,8 @@ class Converter:
             text = "\n\n".join(inner)
             return ["\n".join(("> " + line) if line else ">" for line in text.split("\n"))]
         if tag == "pre":
-            code = text_of(node, skip_dropped=False).replace("\r\n", "\n").strip("\n")
+            # Medium などは、<pre> の中の行を改行文字でなく <br> で区切る。
+            code = text_of(node, skip_dropped=False, br="\n").replace("\r\n", "\n").strip("\n")
             if not code.strip():
                 return []
             fence = "```"
