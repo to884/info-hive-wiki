@@ -360,8 +360,9 @@ class BrowseState:
         last = self.attempts.get(sig)
         return last is not None and time.monotonic() - last < RETRY_INTERVAL
 
-    def get(self, wait: float = BUILD_WAIT) -> "tuple[core.Core | None, str | None]":
+    def get(self, wait: "float | None" = None) -> "tuple[core.Core | None, str | None]":
         """答えに使う中核と、古いときの理由（"failed" か "building"）を返す。中核がなければ (None, 理由)。"""
+        wait = BUILD_WAIT if wait is None else wait
         request_sig = core.signature(self.root)
         cur = self.current
         if cur is not None and cur.snapshot.signature == request_sig and not self._should_retry():
@@ -374,7 +375,7 @@ class BrowseState:
             if cur is not None and cur.snapshot.signature == sig and not self._should_retry():
                 return self._answer(cur, request_sig, None)
             if self._recently_tried(sig):
-                return self._answer(cur, request_sig, self.failed or "building")
+                return self._answer(cur, request_sig, "failed" if self.failed else "building")
             self.attempts = {sig: time.monotonic()}
             try:
                 snap = core.take_snapshot(self.root)
@@ -441,9 +442,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(code, json.dumps(value, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
 
     def _route(self):
+        try:
+            self._route_inner()
+        except Exception as e:  # noqa: BLE001  描画の例外などで接続を黙って閉じない。例外の文字列は出さない
+            self.server.app.render_errors += 1
+            say(f"要求の処理に失敗した（{type(e).__name__}）")
+            try:
+                self._text(500, "ページを描けない。lint で確かめる")
+            except OSError:
+                pass
+
+    def send_error(self, code, message=None, explain=None):
+        # 標準ライブラリの既定のエラーの応答は、要求の行（トークンを含む）を返し、CSP などを付けない。
+        self.close_connection = True
+        # 要求の行が不正だと、標準ライブラリは HTTP/0.9 とみなしてヘッダーを付けない。CSP などを付けて返す。
+        self.request_version = "HTTP/1.1"
+        try:
+            self._text(code, "Bad Request" if code == 400 else "Error")
+        except OSError:
+            pass
+
+    def _route_inner(self):
         app = self.server.app
         app.touch()
         self._kind = "-"
+        if app.state.shutdown_requested:
+            app.request_shutdown()
+            return self._text(503, "終わるところである")
         if self.headers.get("Host") != f"127.0.0.1:{app.port}":
             return self._text(421, "Misdirected Request")
         raw_path = urllib.parse.urlsplit(self.path).path
@@ -476,6 +501,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         c, stale = app.state.get()
         if app.state.shutdown_requested:
             app.request_shutdown()
+            return self._text(503, "終わるところである")
         if c is None:
             return self._text(503, "Wiki を組み立てている。少し待ってから再読み込みする" if stale == "building"
                               else "Wiki を組み立てられない。lint で確かめる", {"Retry-After": "5"})
@@ -502,6 +528,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if op == "locate" and self.command in ("GET", "HEAD") and len(rest) >= 2:
             target = "/".join(rest[1:])
             c, _stale = app.state.get()
+            if app.state.shutdown_requested:
+                app.request_shutdown()
+                return self._json(503, {"state": "unavailable"})
             if c is None:
                 return self._json(200, {"state": "unavailable"})
             r = c.resolve(core.nfc(target))
@@ -529,6 +558,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_DELETE(self):
         self._route()
 
+    def do_PATCH(self):
+        self._route()
+
+    def do_OPTIONS(self):
+        self._route()
+
+    def do_TRACE(self):
+        self._route()
+
+    def do_CONNECT(self):
+        self._route()
+
 
 class App:
     def __init__(self, root: Path, guard: fs.Guard, state_dir: Path, idle: float, verbose: bool = False):
@@ -545,6 +586,7 @@ class App:
         self.last = time.monotonic()
         self.httpd = None
         self.port = 0
+        self.render_errors = 0
         self._stopping = threading.Event()
 
     def touch(self):
@@ -571,6 +613,10 @@ class App:
 class _Server(http.server.ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = False
+
+    def handle_error(self, request, client_address):
+        # 既定は、スクリプトの絶対パスを含むトレースバックを標準エラーに出す。例外の種類だけを出す。
+        say(f"接続の処理に失敗した（{type(sys.exc_info()[1]).__name__}）")
 
 
 def _http(port: int, method: str, path: str, timeout: float = 3.0):
@@ -681,6 +727,10 @@ def serve(root: Path, page: "str | None", open_browser: bool, idle: float, verbo
         _emit(url, app.port, False, state, open_browser)
         server_thread.join()
         httpd.server_close()
+        if app.state.shutdown_requested:
+            # 状態のディレクトリが守る場所と重なったので、記録に触れずに終わる（設計の 6.1）。
+            say("サーバーの状態の場所が、Wiki か Wiki が読む入力と重なったので終わる。記録は残す")
+            return EXIT_FAILED
         rec = _read_record(state_dir)
         if rec is not None and rec.get("instance") == app.instance:
             try:

@@ -53,6 +53,9 @@ EXTERNAL_SCHEMES = ("http", "https", "mailto")
 ONTOLOGY_REL = "graph/ontology.yaml"
 
 
+_DISPLAY = wiki_pages.new_parser()
+
+
 class NameCollision(Exception):
     """出力の名前が、接尾辞の桁を増やしても重なった。"""
 
@@ -315,10 +318,42 @@ def heading_key(text: str) -> str:
     return key or "section"
 
 
+def display_href(href: str) -> str:
+    """リンクにしない Markdown のリンクの行き先を、表示の文字にする（描画と見出しの鍵で同じものを使う）。"""
+    return _DISPLAY.normalizeLinkText(href)
+
+
+def _keeps_link(children, i: int) -> bool:
+    """children[i] の link_open が、外部へのリンクとして残るなら真（描画の _transform_inline と同じ判定）。"""
+    href = children[i].attrs.get("href", "")
+    j = i + 1
+    while j < len(children) and children[j].type != "link_close":
+        if children[j].type == "text" and wiki_pages.WIKILINK_FULL_RE.search(children[j].content):
+            return False
+        j += 1
+    try:
+        scheme = urllib.parse.urlparse(href).scheme.lower()
+    except ValueError:
+        return False
+    return scheme in EXTERNAL_SCHEMES
+
+
 def inline_text(children) -> str:
-    """inline の子を、表示される文字にする（wikilink は表示の文字、画像は代替テキスト）。"""
+    """inline の子を、表示される文字にする（wikilink は表示の文字、画像は代替テキスト、リンクにしない
+    Markdown のリンクは行き先を括弧に入れて添える。描画と同じ文字になる）。"""
     out = []
-    for c in children or []:
+    children = list(children or [])
+    pending = []
+    for i, c in enumerate(children):
+        if c.type == "link_open":
+            keep = _keeps_link(children, i) or c.markup == "autolink"
+            pending.append(None if keep else display_href(c.attrs.get("href", "")))
+            continue
+        if c.type == "link_close":
+            suffix = pending.pop() if pending else None
+            if suffix is not None:
+                out.append(f"（{suffix}）")
+            continue
         if c.type == "text":
             out.append(wiki_pages.WIKILINK_FULL_RE.sub(lambda m: (m.group(2) or m.group(1)).strip(), c.content))
         elif c.type == "code_inline":
@@ -358,7 +393,11 @@ def classify_raw(value: str) -> dict:
     if wiki_lint.DRIVE_PATH_RE.match(value) or value.startswith(("/", "\\", "~")):
         return {"kind": "absolute", "value": value}
     if wiki_lint.URL_SCHEME_RE.match(value):
-        parsed = urllib.parse.urlparse(value)
+        try:
+            parsed = urllib.parse.urlparse(value)
+        except ValueError:
+            # `http://[` のように解釈できない URL。描くときに例外にせず、URL として文字で出す。
+            return {"kind": "url", "value": value}
         if parsed.scheme.lower() == "file":
             path = urllib.parse.unquote(parsed.path)
             if re.match(r"^/[A-Za-z]:[\\/]", path):
@@ -763,8 +802,11 @@ class Core:
                 inner = children[i + 1:j]
                 href = c.attrs.get("href", "")
                 self.recorder.add(file, href)
-                self.recorder.add(file, self.parser.normalizeLinkText(href))
-                scheme = urllib.parse.urlparse(href).scheme.lower()
+                self.recorder.add(file, display_href(href))
+                try:
+                    scheme = urllib.parse.urlparse(href).scheme.lower()
+                except ValueError:
+                    scheme = ""
                 has_wl = any(t.type == "text" and wiki_pages.WIKILINK_FULL_RE.search(t.content) for t in inner)
                 if scheme in EXTERNAL_SCHEMES and not has_wl:
                     c.attrSet("rel", "noopener noreferrer")
@@ -776,7 +818,7 @@ class Core:
                 else:
                     out.extend(self._transform_inline(inner, path, counter, file))
                     if c.markup != "autolink":
-                        out.append(Token("text", "", 0, content=f"（{self.parser.normalizeLinkText(href)}）"))
+                        out.append(Token("text", "", 0, content=f"（{display_href(href)}）"))
                 i = j + 1
                 continue
             if c.type == "image":
@@ -864,6 +906,9 @@ class Core:
             return f"<code>{html.escape(value)}</code>"
         if mode == "link":
             self.recorder.add(path, value)
+            if value.startswith("~"):
+                # file_url が ~ をホームに展開する。展開したパスも、利用者が選んだ raw の値として通す（設計の 5）。
+                self.recorder.add(path, os.path.expanduser(value))
             return f'<a class="raw" href="{html.escape(file_url(value))}">{html.escape(value)}</a>'
         base = re.split(r"[\\/]", value)[-1]
         tail = f"（SHA-256 {html.escape(sha[:12])}…）" if sha else ""
