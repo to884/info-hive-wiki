@@ -192,6 +192,11 @@ def safe_component(part: str, key: str, limit: int, is_dir: bool, top: bool) -> 
     if name.rstrip(" .") != name:
         name = name.rstrip(" .")
         changed = True
+    if not name:
+        # 空の要素（Linux の `\tmp\a.md` は、/ にそろえると先頭が空になる）、`.`、`..` は名前にしない。
+        # そのまま残すと、出力の名前が絶対パスや、書き出し先の外を指すパスになる。
+        name = "_"
+        changed = True
     if is_reserved_windows(name):
         # 接尾辞は末尾に付くので、最初の . より前が予約名のままになる。先頭に _ を付ける。
         name = "_" + name
@@ -215,12 +220,22 @@ def safe_component(part: str, key: str, limit: int, is_dir: bool, top: bool) -> 
 
 
 def export_name(page_id: str, limit: int = NAME_LIMIT) -> str:
-    """ページの識別子から、出力のパスを決める。"""
+    """ページの識別子から、出力のパスを決める。返すのは、空の要素と `.`、`..` を持たない相対パスである。"""
     parts = page_id.split("/")
     out = [safe_component(p, "/".join(parts[:i + 1]) + ("/" if i < len(parts) - 1 else ""), limit,
                           is_dir=i < len(parts) - 1, top=i == 0)
            for i, p in enumerate(parts)]
-    return "/".join(out) + ".html"
+    name = "/".join(out) + ".html"
+    if not is_safe_relative(name):
+        raise NameCollision(f"出力の名前を相対パスにできない: {page_id!r}")
+    return name
+
+
+def is_safe_relative(name: str) -> bool:
+    """/ 区切りの相対パスで、空の要素、`.`、`..`、`\\`、NUL、ドライブ名を持たないなら真。"""
+    parts = name.split("/")
+    return bool(name) and all(p not in ("", ".", "..") and "\\" not in p and "\0" not in p and ":" not in p
+                              for p in parts)
 
 
 def _fixed_files() -> list:
@@ -379,6 +394,8 @@ class Recorder:
         self.enabled = enabled
         self.by_file = defaultdict(list)
         self.all = []
+        # どのファイルに出てもよい利用者の内容（ページの題名。リンクの文字としてほかのページにも出る）。
+        self.common = []
 
     def add(self, file: str, value) -> None:
         if value is None or not self.enabled:
@@ -402,6 +419,10 @@ class Core:
         self.recorder = Recorder(record)
         self._render_lock = threading.Lock()
         self._build_pages()
+        if record:
+            for pid in self.drawn:
+                self.recorder.common.append(self.title(pid))
+                self.recorder.all.append(self.title(pid))
         self.out_name = assign_names(sorted(self.drawn), name_limit)
         self.name_to_id = {name: pid for pid, name in self.out_name.items()}
         for pid in sorted(self.drawn):
@@ -483,9 +504,14 @@ class Core:
             self.tokens[pid] = tokens
             self.headings[pid] = assign_heading_ids(tokens)
         self.links = {}
-        for pid in self.drawn:
+        # 描かないページ（id_collision）のリンクも、lint と同じく数える。描かないので、診断は全体にだけ載せる。
+        self.hidden_links = {}
+        for disk, p in sorted(self.pages.items()):
+            pid = p["id"]
+            drawn = self.drawn.get(pid) == disk
+            tokens = self.tokens[pid] if drawn else self.parser.parse(p["body"])
             found = []
-            for tok in self.tokens[pid]:
+            for tok in tokens:
                 if tok.type == "inline":
                     for child in tok.children or []:
                         if child.type == "text" and "[[" in child.content:
@@ -494,20 +520,26 @@ class Core:
                                 r = self.resolve(target)
                                 r["label"] = (m.group(2) or m.group(1)).strip()
                                 found.append(r)
-            self.links[pid] = found
+            if drawn:
+                self.links[pid] = found
+            else:
+                self.hidden_links[disk] = found
             for r in found:
+                where = {"page": pid} if drawn else {"page": None, "source_page": pid}
                 if r["state"] != "resolved":
-                    self.diagnostics.append({"kind": r["state"], "page": pid, "target": r["target"]})
+                    self.diagnostics.append({"kind": r["state"], **where, "target": r["target"]})
                 elif r.get("missing_heading"):
-                    self.diagnostics.append({"kind": "missing_heading", "page": pid, "target": r["target"]})
+                    self.diagnostics.append({"kind": "missing_heading", **where, "target": r["target"]})
 
     def link_targets(self, pid: str) -> list:
         """そのページの本文の wikilink の行き先（lint の extract_wikilinks と同じものになる）。"""
         return [r["target"] for r in self.links[pid]]
 
     def unresolved(self) -> list:
-        return sorted((self.page(pid)["rel_path"], r["target"]) for pid in self.drawn
-                      for r in self.links[pid] if r["state"] == "unresolved")
+        """未解決のリンクの (ページの相対パス, 行き先)。lint の broken_links と同じ集合になる。"""
+        shown = [(self.page(pid)["rel_path"], r) for pid in self.drawn for r in self.links[pid]]
+        hidden = [(self.pages[d]["rel_path"], r) for d, rs in self.hidden_links.items() for r in rs]
+        return sorted((rel, r["target"]) for rel, r in shown + hidden if r["state"] == "unresolved")
 
     def _backlinks(self) -> None:
         inbound = defaultdict(set)
@@ -551,8 +583,13 @@ class Core:
                            "disk_rel_path": disk, "slug": p["slug"], "meta": meta, "body": p["body"],
                            "links": wiki_pages.extract_wikilinks(p["body"])})
         diag = []
-        _nodes, page_node_ids, _aliases = wiki_graph_extract.build_nodes(gpages, ontology, diag)
-        edges = wiki_graph_extract.build_edges(gpages, page_node_ids, diag)
+        try:
+            _nodes, page_node_ids, _aliases = wiki_graph_extract.build_nodes(gpages, ontology, diag)
+            edges = wiki_graph_extract.build_edges(gpages, page_node_ids, diag)
+        except Exception:  # noqa: BLE001  オントロジーの中の形が誤っている（node_types が配列など）
+            self.relations_state = "error"
+            self.diagnostics.append({"kind": "relations_error", "reason": "invalid"})
+            return
         self.relations_state = "ok"
         node_pages = defaultdict(list)
         for disk, node in page_node_ids.items():
@@ -852,7 +889,13 @@ class Core:
                 for key in ("status", "valid_from", "valid_to", "confidence", "source", "evidence"):
                     value = str(r.get(key) or "")
                     self.recorder.add(path, value)
-                    cells.append(html.escape(value))
+                    cell = html.escape(value)
+                    if key == "source" and value:
+                        found = self.resolve(nfc(value))
+                        if found["state"] == "resolved":
+                            cell = (f'<a href="{html.escape(rel_href(path, self.out_name[found["id"]]))}">'
+                                    f"{html.escape(self.title(found['id']))}</a>")
+                    cells.append(cell)
                 self.recorder.add(path, r["other_text"])
                 rows.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
         head = "".join(f"<th>{h}</th>" for h in ("向き", "述語", "相手", "状態", "開始", "終了", "確からしさ",
@@ -869,10 +912,11 @@ class Core:
         lis = []
         for d in items:
             parts = [d["kind"]]
-            for key in ("target", "reason", "output", "node_id", "predicate", "object", "source"):
+            for key in ("target", "reason", "output", "node_id", "predicate", "object", "source", "source_page"):
                 if d.get(key):
                     parts.append(f"{key}: {d[key]}")
-                    self.recorder.add(path, d[key])
+                    if key != "reason":   # reason は生成器が決める文字なので、利用者の内容に数えない
+                        self.recorder.add(path, d[key])
             lis.append(f"<li>{html.escape(' / '.join(map(str, parts)))}</li>")
         return f'<section id="_diagnostics"><h2>診断</h2><ul>{"".join(lis)}</ul></section>\n'
 
@@ -1042,22 +1086,29 @@ def path_forms(path: str) -> list:
 
 
 def find_leaks(files: dict, needles: list, recorder: Recorder) -> tuple:
-    """出力のファイルから絶対パスを探す。(生成器が入れたもの, 利用者が書いたもの) を返す。"""
+    """出力のファイルから絶対パスを探す。(生成器が入れたもの, 利用者が書いたもの) を返す。
+
+    検索対象の絶対パスごとに判定する。あるファイルで、どれか 1 つでも、そのファイルの利用者の内容の記録に
+    ないパスが見つかれば、生成器が入れたものとする。
+    """
     fold = os.name == "nt" or sys.platform == "darwin"
     norm = (lambda s: s.lower()) if fold else (lambda s: s)
-    leaks, warnings = [], []
+    leaks, warnings = set(), set()
     for name, content in files.items():
         text = norm(content)
+        aggregate = name in ("index.html", *DATA_FILES)
+        recorded = (recorder.all if aggregate else recorder.by_file.get(name, [])) + recorder.common
+        recorded = [norm(r.replace(BS * 2, BS)) for r in recorded]
         for needle in needles:
-            plain = [norm(str(needle).replace("\\", "/").rstrip("/")),
-                     norm(str(needle).replace("/", "\\").rstrip("\\"))]
             if not any(norm(f) in text for f in path_forms(needle)):
                 continue
-            # 索引のページとデータのファイルは、すべてのページの題名、要約、索引の見出しを載せるので、全体の記録と照らす。
-            recorded = recorder.all if name in ("index.html", *DATA_FILES) else recorder.by_file.get(name, [])
-            if any(p in norm(r.replace("\\\\", "\\")) for r in recorded for p in plain):
-                warnings.append(name)
+            plain = [norm(str(needle).replace(BS, "/").rstrip("/")),
+                     norm(str(needle).replace("/", BS).rstrip(BS))]
+            if any(q in r for r in recorded for q in plain):
+                warnings.add(name)
             else:
-                leaks.append(name)
-            break
-    return sorted(set(leaks)), sorted(set(warnings))
+                leaks.add(name)
+    return sorted(leaks), sorted(warnings - leaks)
+
+
+BS = chr(92)

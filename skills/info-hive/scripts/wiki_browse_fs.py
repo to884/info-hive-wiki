@@ -172,8 +172,11 @@ class Guard:
             raise FileExistsError(str(dst))
         os.rename(src, dst)
 
-    def rmtree(self, path) -> None:
-        """ディレクトリを消す。シンボリックリンクとジャンクションはたどらず、そのものだけを消す。"""
+    def rmtree(self, path, last: "str | None" = None) -> None:
+        """ディレクトリを消す。シンボリックリンクとジャンクションはたどらず、そのものだけを消す。
+
+        last の名前のファイル（世代の目印）は最後に消す。途中で失敗しても、目印が残り、次の書き出しで消せる。
+        """
         path = Path(path)
         if _is_link(path):
             # リンクそのものを消す。先は消さない。
@@ -181,7 +184,7 @@ class Guard:
             _remove_link(path)
             return
         self.check(path)
-        _rmtree_nofollow(path)
+        _rmtree_nofollow(path, last)
 
     def unlink(self, path) -> None:
         """ファイルを消す。ないときは何もしない。"""
@@ -241,9 +244,11 @@ def _remove_link(path: Path) -> None:
         os.rmdir(path)
 
 
-def _rmtree_nofollow(path: Path) -> None:
+def _rmtree_nofollow(path: Path, last: "str | None" = None) -> None:
+    """消せなければ、そのまま失敗する。属性（読み取り専用など）は変えない。ハードリンクの先が Wiki のページなら、
+    属性を変えるとページの属性も変わるからである。last の名前のファイルは、最上位で最後に消す（目印を最後まで残す）。"""
     with os.scandir(path) as it:
-        entries = list(it)
+        entries = sorted(it, key=lambda e: e.name == last)
     for entry in entries:
         child = Path(entry.path)
         if _is_link(child):
@@ -251,11 +256,7 @@ def _rmtree_nofollow(path: Path) -> None:
         elif entry.is_dir(follow_symlinks=False):
             _rmtree_nofollow(child)
         else:
-            try:
-                os.unlink(child)
-            except PermissionError:
-                os.chmod(child, stat.S_IWRITE)
-                os.unlink(child)
+            os.unlink(child)
     os.rmdir(path)
 
 

@@ -113,23 +113,30 @@ def _try_rmtree(guard: fs.Guard, path: Path) -> None:
         # ほかの browse のディレクトリが中にあるものは消さない。
         raise fs.Refused(f"消そうとした世代の中に、ほかの browse のディレクトリがある: {path}")
     try:
-        guard.rmtree(path)
+        # 目印を最後に消す。途中で失敗しても目印が残り、次の書き出しで世代として見つけて消せる。
+        guard.rmtree(path, last=fs.GENERATION_MARKER)
     except OSError as e:
         say(f"消せなかったので残す（次の書き出しで消す）: {path.name}（{type(e).__name__}）")
 
 
 def cleanup(guard: fs.Guard, out: Path, work: Path) -> None:
-    """作業用のディレクトリを片付け、途中で止まった入れ替えから最後に公開した世代を戻す（設計の 7 の 3）。"""
+    """作業用のディレクトリを片付け、途中で止まった入れ替えから最後に公開した世代を戻す（設計の 7 の 3）。
+
+    出力先に世代の目印があるときだけ、公開した世代がそこにあるとみなす。出力先がない、または空のディレクトリ
+    のときは、退避した世代のうち published_seq のいちばん大きいものを戻す。
+    """
     for tmp in _generation_dirs(work, "tmp-"):
         _try_rmtree(guard, tmp)
     olds = _generation_dirs(work, "old-")
-    if out.exists():
+    if out.exists() and fs.has_marker(out, fs.GENERATION_MARKER):
         for old in olds:
             _try_rmtree(guard, old)
         return
     candidates = [(m["published_seq"], o) for o in olds if (m := _read_marker(o)) is not None]
     if candidates:
         _seq, best = max(candidates)
+        if out.exists():
+            guard.rmdir_empty(out)   # 空でなければ失敗する（check_output_dir で空だと確かめてある）
         guard.rename(best, out)
         say(f"前の書き出しが途中で止まっていたので、最後に公開した世代を戻した（{best.name}）")
         olds = [o for o in olds if o != best]
@@ -151,8 +158,13 @@ def next_seq(guard: fs.Guard, out: Path, work: Path) -> int:
 
 
 def write_tree(guard: fs.Guard, base: Path, files: dict) -> None:
+    """出力のファイルを base の下に書く。名前は、base の下に収まる相対パスでなければ書かない。"""
     for name, content in sorted(files.items()):
+        if not core.is_safe_relative(name):
+            raise fs.Refused(f"出力の名前が相対パスでない: {name!r}")
         target = base / name
+        if not fs.is_within(target, base) or fs.is_within(base, target):
+            raise fs.Refused(f"出力の名前が書き出し先の外を指す: {name!r}")
         ensure_dir(guard, target.parent)
         data = content if isinstance(content, bytes) else content.encode("utf-8")
         guard.write_bytes(target, data)
@@ -207,17 +219,21 @@ def _build_locked(guard: fs.Guard, root: Path, out: Path, work: Path, raw: str) 
     guard.mkdir(tmp)
     generated_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     try:
+        # 目印を最初に置く。組み立てが途中で失敗しても、作りかけの世代として見つけて消せる。
+        guard.write_text(tmp / fs.GENERATION_MARKER,
+                         json.dumps({"generation": snap.generation, "published_seq": seq}) + "\n")
         c = core.Core(snap)
         files = c.render_all(raw, generated_at)
-        guard.write_text(tmp / fs.GENERATION_MARKER,
-                         json.dumps({"generation": c.generation, "published_seq": seq}) + "\n")
         write_tree(guard, tmp, files)
         write_tree(guard, tmp, {name: core.asset_bytes(name) for name in core.ASSETS})
         needles = [str(root), str(Path.home()), str(Path(os.path.abspath(common.data_dir()))),
                    *(str(p) for p in snap.external)]
         leaks, warnings = core.find_leaks(files, needles, c.recorder)
     except BaseException:
-        _try_rmtree(guard, tmp)
+        try:
+            _try_rmtree(guard, tmp)
+        except (fs.Refused, OSError):
+            pass   # 片付けの失敗で、元の例外を隠さない。残った作りかけは次の書き出しで消す
         raise
     report = {"wiki": root.as_posix(), "out": out.as_posix(), "generation": c.generation,
               "pages": len(c.drawn), "raw": raw, "leaks": leaks, "warnings": warnings,
