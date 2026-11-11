@@ -134,6 +134,21 @@ def heading_type(text: str) -> "str | None":
     return INDEX_HEADING_TYPES.get(key)
 
 
+def index_files(wiki_root: Path) -> list[Path]:
+    """索引のファイル（index.md と、indexes/ の下の Markdown）を、読む順に返す。
+
+    lint の索引の検査と、閲覧のナビゲーションが、同じ集め方をする。
+    """
+    files = []
+    top = wiki_root / "index.md"
+    if top.is_file():
+        files.append(top)
+    split_dir = wiki_root / "indexes"
+    if split_dir.is_dir():
+        files.extend(sorted(split_dir.rglob("*.md")))
+    return files
+
+
 def collect_index_entries(wiki_root: Path) -> list[dict]:
     """index.md と indexes/ の各ファイルから、種類の見出しの下に並ぶ項目を集める。
 
@@ -145,13 +160,8 @@ def collect_index_entries(wiki_root: Path) -> list[dict]:
     読むのはリストの項目（`- `、`* `、`1. `）の最初の wikilink だけである。冒頭の説明文に書いた
     `[[消費税]]` のような例示や、項目の要約に出てくるリンクは数えない。コードの中も読まない。
     """
-    files = []
     top = wiki_root / "index.md"
-    if top.is_file():
-        files.append(top)
-    split_dir = wiki_root / "indexes"
-    if split_dir.is_dir():
-        files.extend(sorted(split_dir.rglob("*.md")))
+    files = index_files(wiki_root)
     entries = []
     for path in files:
         rel = posix_rel(str(path.relative_to(wiki_root)))
