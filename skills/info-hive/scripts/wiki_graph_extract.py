@@ -59,6 +59,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 from wiki_text import (  # noqa: E402
     canonical_key, canonical_meta, ljust_display, localize_argparse, nfc, parse_frontmatter_text, posix_rel,
+    top_level_keys,
 )
 import wiki_graph_common as common  # noqa: E402
 
@@ -157,11 +158,37 @@ def _is_typed_scalar(value) -> bool:
     return value is not None and not isinstance(value, (str, list, dict))
 
 
+def _child(node, key: str):
+    """マッピングのノードから、文字列のキー key の値のノードを返す。なければ None。
+
+    同じキーが複数あれば、PyYAML が辞書を作るときと同じく、後のものを返す。PyYAML が値に組み立てたあとの
+    ノードは、マージキー（<<）が展開されているので、マージで来たキーも引ける。
+    """
+    found = None
+    if isinstance(node, yaml.MappingNode):
+        for key_node, value_node in node.value:
+            if isinstance(key_node, yaml.ScalarNode) and key_node.tag == _YAML_STR_TAG and key_node.value == key:
+                found = value_node
+    return found
+
+
+def _written(node):
+    """値のノードの、書かれた文字を返す。スカラーは文字列、配列は要素ごとの文字列（スカラーでない要素は None）。
+
+    それ以外（マッピング、ノードがない）は None を返す。ノードの中には入らないので、自分を含むアンカーでも止まらない。
+    """
+    if isinstance(node, yaml.ScalarNode):
+        return node.value
+    if isinstance(node, yaml.SequenceNode):
+        return [n.value if isinstance(n, yaml.ScalarNode) else None for n in node.value]
+    return None
+
+
 def _as_written(value, written):
     """参照の欄の値のうち、PyYAML が文字列でないスカラーに読んだものを、書かれた文字に置き換えて返す。
 
-    written は、同じ位置を「スカラーはすべて文字列」で読んだ値である。配列は、長さが同じときだけ要素ごとに
-    置き換える（入れ子の配列には入らない）。文字列、None（値なし）、位置が合わない値は、そのまま返す。
+    written は、同じ位置のノードの _written である。配列は、長さが同じときだけ要素ごとに置き換える（入れ子の
+    配列には入らない）。文字列、None（値なし）、位置が合わない値は、そのまま返す。
     value は書き換えず、新しい値を返す（アンカーで共有している別の欄を変えない）。
     """
     def one(v, w):
@@ -174,78 +201,70 @@ def _as_written(value, written):
     return one(value, written)
 
 
-def _graph_ref_values(graph_meta: dict):
-    for key in GRAPH_REF_FIELDS:
-        yield graph_meta.get(key)
-    rels = graph_meta.get("relationships")
-    for rel in rels if isinstance(rels, list) else []:
-        if isinstance(rel, dict):
-            for key in RELATIONSHIP_REF_FIELDS:
-                yield rel.get(key)
-
-
 def _graph_refs_as_written(graph_meta: dict, graph_node) -> dict:
     """`graph:` の中の、ページやノードを指す欄を、書かれた文字で読み直す。
 
     `source: 007` は 7 ではなく "007"、`object: no` は False ではなく "no" にする。対象は GRAPH_REF_FIELDS と
     RELATIONSHIP_REF_FIELDS だけで、ほかの欄（canonical、valid_from、notes など）は PyYAML の値のまま残す。
-    None（null、~、値なし）は値なしのまま残す。置き換える値がなければ、何もせずに返す。
+    None（null、~、値なし）は値なしのまま残す。graph_node は、graph_meta を組み立てたノードである。
     """
-    def needs(value) -> bool:
-        return any(_is_typed_scalar(v) for v in value) if isinstance(value, list) else _is_typed_scalar(value)
-
-    if not any(needs(v) for v in _graph_ref_values(graph_meta)):
-        return graph_meta
-    try:
-        # 同じノードを、型を解決しない BaseConstructor で組み立てる。スカラーはすべて書かれた文字になる。
-        written = yaml.constructor.BaseConstructor().construct_document(graph_node)
-    except Exception:
-        return graph_meta
-    if not isinstance(written, dict):
-        return graph_meta
     out = dict(graph_meta)
     for key in GRAPH_REF_FIELDS:
         if key in out:
-            out[key] = _as_written(out[key], written.get(key))
-    rels, written_rels = out.get("relationships"), written.get("relationships")
-    if isinstance(rels, list) and isinstance(written_rels, list) and len(rels) == len(written_rels):
+            out[key] = _as_written(out[key], _written(_child(graph_node, key)))
+    rels, rels_node = out.get("relationships"), _child(graph_node, "relationships")
+    if isinstance(rels, list) and isinstance(rels_node, yaml.SequenceNode) and len(rels) == len(rels_node.value):
         new_rels = []
-        for rel, written_rel in zip(rels, written_rels):
-            if isinstance(rel, dict) and isinstance(written_rel, dict):
+        for rel, rel_node in zip(rels, rels_node.value):
+            if isinstance(rel, dict):
                 rel = dict(rel)
                 for key in RELATIONSHIP_REF_FIELDS:
-                    # マージキー（<<）で来た値も written_rel にある（PyYAML が、組み立てるときにノードを展開している）。
-                    # written_rel にないキーは、PyYAML の値のまま残る。
                     if key in rel:
-                        rel[key] = _as_written(rel[key], written_rel.get(key))
+                        rel[key] = _as_written(rel[key], _written(_child(rel_node, key)))
             new_rels.append(rel)
         out["relationships"] = new_rels
     return out
 
 
-def _unread_fields(top_pairs: list, meta: dict) -> list[str]:
+def _unread_fields(own_pairs: list, root, meta: dict, fm_text: str) -> list[str]:
     """YAML には値があるのに、lint のパーサーが読めなかった WATCHED_TOP_FIELDS の欄を返す。
 
-    キーを読めなかった欄（`"type": x`、`type : x`）と、YAML の配列より少ない数しか読めなかった欄
-    （字下げのない `- x`、字下げ 4 つの `    - x`、複数行の `[a,` … `]`）である。
+    own_pairs は、マージキーを展開する前の最上位の (キーのノード, 値のノード) で、root は展開したあとの
+    最上位のノードである。次のどれかに当たる欄を返す。
+    - その欄を書いた回数（値なしを除く）が、lint のパーサーがキーの行として読んだ回数より多い
+      （`"type": x`、`type : x`。読めるキーと読めないキーで 2 度書いたものを含む）。
+    - YAML の配列の要素の数（2 度書いたら合計）より少ない数しか、lint のパーサーが読んでいない
+      （字下げのない `- x`、字下げ 4 つの `    - x`、複数行の `[a,` … `]`）。
+    - マージキーで来た値があるのに、lint の形にその欄がない。
+    値の中身は比べない。
     """
-    counts: dict[str, int] = {}
-    for key_node, value_node in top_pairs:
+    written_times: dict[str, int] = {}
+    items: dict[str, int] = {}
+    for key_node, value_node in own_pairs:
         if not (isinstance(key_node, yaml.ScalarNode) and key_node.tag == _YAML_STR_TAG):
             continue
         field = canonical_key(key_node.value)
         if field not in WATCHED_TOP_FIELDS:
             continue
         if isinstance(value_node, yaml.SequenceNode):
-            counts[field] = counts.get(field, 0) + len(value_node.value)
-        elif not (isinstance(value_node, yaml.ScalarNode) and value_node.tag == _YAML_NULL_TAG):
-            counts.setdefault(field, 0)
+            items[field] = items.get(field, 0) + len(value_node.value)
+        if not (isinstance(value_node, yaml.ScalarNode) and value_node.tag == _YAML_NULL_TAG):
+            written_times[field] = written_times.get(field, 0) + 1
+    read_times: dict[str, int] = {}
+    for key in top_level_keys(fm_text):
+        field = canonical_key(key)
+        read_times[field] = read_times.get(field, 0) + 1
+    effective: set[str] = set()
+    for key_node, value_node in root.value:
+        if (isinstance(key_node, yaml.ScalarNode) and key_node.tag == _YAML_STR_TAG
+                and not (isinstance(value_node, yaml.ScalarNode) and value_node.tag == _YAML_NULL_TAG)):
+            effective.add(canonical_key(key_node.value))
     found = []
     for field in WATCHED_TOP_FIELDS:
-        if field not in counts:
-            continue
         value = meta.get(field)
-        if field not in meta or (counts[field] and not (isinstance(value, list) and len(value) >= counts[field])):
+        if (written_times.get(field, 0) > read_times.get(field, 0)
+                or (items.get(field) and not (isinstance(value, list) and len(value) >= items[field]))
+                or (field in effective and field not in meta)):
             found.append(field)
     return found
 
@@ -255,39 +274,44 @@ def _read_graph(fm_text: str, meta: dict) -> "tuple[dict | None, list[dict]]":
 
     PyYAML には frontmatter を構文として読ませ、値に組み立てるのは `graph` のノードだけにする。ほかの欄の値
     （PyYAML が ValueError を出す `created: 2026-13-01` など）には左右されない。meta は lint の形の辞書で、
-    lint のパーサーが `graph` のキーを読んだかどうかと、unread_field の判定に使う。
+    lint のパーサーが `graph` のキーを読んだかどうかと、unread_field の判定に使う。例外は外に出さない。
     """
-    problems: list[dict] = []
     # 構文として読めないときに、graph の欄がありそうか。あれば、関係を黙って失わないように挙げる。
     declared = "graph" in meta or bool(GRAPH_KEY_LINE_RE.search(fm_text))
     unreadable = {"kind": "unreadable_graph", "reason": "yaml_error"}
-    loader = yaml.SafeLoader(fm_text)
+    not_mapping = {"kind": "unreadable_graph", "reason": "not_mapping"}
+    try:
+        # YAML に書けない文字（NUL など）があると、ここで ReaderError になる。
+        loader = yaml.SafeLoader(fm_text)
+    except Exception:
+        return None, [unreadable] if declared else []
     try:
         try:
             root = loader.get_single_node()
-            if isinstance(root, yaml.MappingNode):
-                loader.flatten_mapping(root)  # 最上位のマージキー（<<）を、PyYAML が読むときと同じに展開する
         except Exception:
             return None, [unreadable] if declared else []
         if not isinstance(root, yaml.MappingNode):
             # 最上位がマッピングでない（`type:source` だけの frontmatter は、1 つの文字列になる）。
             return None, [unreadable] if declared and root is not None else []
-        problems.extend({"kind": "unread_field", "field": field} for field in _unread_fields(root.value, meta))
-        graph_node = None
-        for key_node, value_node in root.value:
-            if isinstance(key_node, yaml.ScalarNode) and key_node.tag == _YAML_STR_TAG and key_node.value == "graph":
-                graph_node = value_node  # 同じキーが 2 つあれば、PyYAML と同じく後のものを使う
+        own_pairs = list(root.value)
+        try:
+            loader.flatten_mapping(root)  # 最上位のマージキー（<<）を、PyYAML が読むときと同じに展開する
+        except Exception:
+            pass  # 展開できないマージキー（`<<: 3`）は、ないものとして扱う。ほかの欄は読む。
+        problems = [{"kind": "unread_field", "field": field}
+                    for field in _unread_fields(own_pairs, root, meta, fm_text)]
+        graph_node = _child(root, "graph")
         if graph_node is None or (isinstance(graph_node, yaml.ScalarNode) and graph_node.tag == _YAML_NULL_TAG):
             return None, problems
         if not isinstance(graph_node, yaml.MappingNode):
-            return None, problems + [{"kind": "unreadable_graph", "reason": "not_mapping"}]
+            return None, problems + [not_mapping]
         try:
             graph_meta = loader.construct_document(graph_node)
         except Exception:
             # 値を組み立てられない（`valid_from: 2026-13-01`、`!!float nope`、配列のキーなど）。
             return None, problems + [unreadable]
         if not isinstance(graph_meta, dict):
-            return None, problems + [{"kind": "unreadable_graph", "reason": "not_mapping"}]
+            return None, problems + [not_mapping]
         return _graph_refs_as_written(graph_meta, graph_node), problems
     finally:
         loader.dispose()
@@ -369,13 +393,20 @@ def read_ontology(path: Path) -> dict:
     """オントロジーを読む。読めなければ OntologyError を送出する。
 
     ファイルがあるかどうかは、呼び出す側が先に `wiki_graph_common.require_ontology` で確かめる。
-    extract と lint は、この関数で同じように読む。
+    extract と lint は、この関数で同じように読む。node_types[*].maps_from の type と kind は、ページの値と
+    同じく、書かれた文字にそろえる（_maps_from_as_written）。ほかの値は PyYAML の値のままである。
     """
     try:
         text = Path(path).read_text(encoding="utf-8-sig")
-        data = yaml.safe_load(text)
-    except (yaml.YAMLError, ValueError, OSError, UnicodeDecodeError) as e:
-        # ValueError は、PyYAML が値を組み立てられないとき（`2026-13-01` のような日付）に出る。
+        loader = yaml.SafeLoader(text)
+        try:
+            # yaml.safe_load と同じ読み方。書かれた文字を取るために、ノードを手元に残す。
+            root = loader.get_single_node()
+            data = loader.construct_document(root) if root is not None else None
+        finally:
+            loader.dispose()
+    except Exception as e:
+        # YAML の誤りのほか、PyYAML が値を組み立てられないとき（`2026-13-01` のような日付で ValueError）も含む。
         raise OntologyError(f"オントロジーを読めない（{path}）: {e}") from e
     if data is None:  # 空のファイルは、空のオントロジーとして扱う
         data = {}
@@ -385,35 +416,30 @@ def read_ontology(path: Path) -> dict:
     for key in ("node_types", "predicates"):
         if data.get(key) is None:
             data[key] = {}
-    _maps_from_as_written(data, text)
+    _maps_from_as_written(data, root)
     return data
 
 
-def _maps_from_as_written(data: dict, text: str) -> None:
-    """node_types[*].maps_from の type と kind を、書かれた文字にそろえる。
+def _maps_from_as_written(data: dict, root) -> None:
+    """node_types[*].maps_from の type と kind を、書かれた文字にそろえる。root は data を組み立てたノード。
 
     ページの type と kind は文字で読む（read_frontmatter）ので、照らす側も文字にする。`maps_from: {kind: 2024}` は、
-    ページの `kind: 2024`（"2024"）に当たる。キーで引いて置き換え、引けないもの（マージキーで来た値など）は残す。
+    ページの `kind: 2024`（"2024"）に当たる。マージキー（<<）で来た値も、書かれた文字になる。
     """
     node_types = data.get("node_types")
+    types_node = _child(root, "node_types")
     if not isinstance(node_types, dict):
-        return
-    try:
-        written = yaml.load(text, Loader=yaml.BaseLoader)
-    except Exception:
-        return
-    written_types = written.get("node_types") if isinstance(written, dict) else None
-    if not isinstance(written_types, dict):
         return
     for name, nt_def in node_types.items():
         maps = nt_def.get("maps_from") if isinstance(nt_def, dict) else None
-        written_def = written_types.get(name) if isinstance(name, str) else None
-        written_maps = written_def.get("maps_from") if isinstance(written_def, dict) else None
-        if not (isinstance(maps, dict) and isinstance(written_maps, dict)):
+        if not (isinstance(name, str) and isinstance(maps, dict)):
             continue
+        maps_node = _child(_child(types_node, name), "maps_from")
+        new_maps = dict(maps)
         for key in ("type", "kind"):
-            if _is_typed_scalar(maps.get(key)) and isinstance(written_maps.get(key), str) and written_maps[key]:
-                maps[key] = written_maps[key]
+            if key in new_maps:
+                new_maps[key] = _as_written(new_maps[key], _written(_child(maps_node, key)))
+        nt_def["maps_from"] = new_maps
 
 
 def load_ontology(path: Path) -> dict:
@@ -451,6 +477,13 @@ def derive_node_type(meta: dict, ontology: dict) -> str | None:
 # ---------------------------------------------------------------------------
 # ノードとエッジの構築
 # ---------------------------------------------------------------------------
+
+
+def _tag_list(tags) -> list:
+    """frontmatter の tags をリストにする。文字列 1 つで書いたタグ（tags: ml）は、1 文字ずつに分けず、1 つのタグにする。"""
+    if isinstance(tags, str):
+        return [tags] if tags else []
+    return list(tags) if isinstance(tags, list) else []
 
 
 def page_key(p: dict) -> str:
@@ -515,8 +548,7 @@ def build_nodes(pages: list[dict], ontology: dict,
             "page_type": meta.get("type") or "",
             "node_type": node_type,
             "kind": meta.get("kind") or "",
-            # 文字列 1 つで書いたタグ（tags: ml）は、1 つのタグにする（1 文字ずつに分けない）。
-            "tags": ref_values(meta.get("tags")),
+            "tags": _tag_list(meta.get("tags")),
             "aliases": list(graph_meta.get("aliases") or []),
             "path": p["rel_path"],
             "created": meta.get("created") or "",

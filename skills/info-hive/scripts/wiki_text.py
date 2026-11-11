@@ -280,6 +280,20 @@ def _fm_raw_values(frontmatter_text: str):
             yield current_key, [_fm_strip_comment(line[len(_FM_ITEM_PREFIX):].strip())], True
 
 
+def top_level_keys(frontmatter_text: str) -> list[str]:
+    """parse_frontmatter_text がキーの行として読む行のキーを、書かれたまま、出てきた順に返す。
+
+    同じキーを 2 度書いていれば、2 つ返す。グラフの抽出が、YAML としては読めるのにこのパーサーが
+    読まないキー（`"type": x`、`type : x`）を見つけるのに使う。
+    """
+    keys = []
+    for line in frontmatter_text.split("\n"):
+        kv = _FM_KEY_RE.match(line) if line.strip() else None
+        if kv:
+            keys.append(kv.group(1))
+    return keys
+
+
 def parse_frontmatter_text(frontmatter_text: str) -> dict:
     """frontmatter の本文（--- の間）を読み、書かれたままのキーの dict を返す。
 
