@@ -44,7 +44,7 @@ wiki には3つの層と3つの操作がある。スキルの残りの部分は�
 
 `${CLAUDE_PLUGIN_ROOT}` を使わないのは、リファレンスのファイルは普通のファイルとして読まれ、このスキルはこの変数を持たないホストでも使われるからである。プラグインのコマンド（`commands/*.md`）だけは `${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/...` で呼ぶ。
 
-文の中で `scripts/wiki_pages.py` や `references/ingest-workflow.md` のように書いたファイルは、このスキルの中のファイルで、スキルのディレクトリから見たパスである。
+文の中で `scripts/wiki_pages.py` や `references/ingest-workflow.md` のように書いたファイルは、このスキルの中のファイルで、スキルのディレクトリから見たパスである。表などで `wiki_search.py --json` のように名前と引数だけを書いたものは、どのスクリプトのどの機能かを示す名前で、実行するときは上の形で書く。
 
 ## グラフ層（コンパイルで生成する任意の層）
 
