@@ -183,6 +183,16 @@ class Guard:
         self.check(path)
         _rmtree_nofollow(path)
 
+    def unlink(self, path) -> None:
+        """ファイルを消す。ないときは何もしない。"""
+        path = Path(path)
+        if not os.path.lexists(path):
+            return
+        self.check(path.parent, contains_ok=True)
+        if not _is_link(path):
+            self.check(path)
+        os.unlink(path)
+
     def rmdir_empty(self, path) -> None:
         """空のディレクトリを取り除く。空でなければ失敗する。"""
         path = Path(path)
