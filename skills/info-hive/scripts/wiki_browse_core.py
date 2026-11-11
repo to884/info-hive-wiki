@@ -108,28 +108,63 @@ def signature(root: Path) -> str:
     更新時刻から作る。一覧を作れないディレクトリがあれば EnumerationError を送出する。
 
     印は、入力の集合（ページ、索引、オントロジー）を含む上位の集合から作る。入力が変われば必ず変わればよく、
-    ページの集合の規則（iter_page_files）を要求のたびに当てはめる必要はない。1 回の走査で、一覧を作れない
-    ディレクトリも見つけられる（rglob は黙って飛ばす）。シンボリックリンクのディレクトリは、iter_page_files の
-    rglob と同じくたどらない。ファイルのシンボリックリンクは、先の大きさと更新時刻を使う。
+    余分なファイルの変更で変わるのは構わない。そのために、シンボリックリンクとジャンクションのディレクトリも
+    たどる（`indexes/` がリンクでも、lint は中の索引を読む。ページの rglob がリンクをたどるかは Python の版で
+    違う）。同じディレクトリは 1 度だけ走査する（リンクの輪で止まらない）。ページでも索引でもない最上位の
+    ディレクトリ（raw、assets など）は走査しない。1 回の走査で、一覧を作れないディレクトリも見つけられる
+    （rglob は黙って飛ばす）。
     """
-    def fail(err):
-        raise EnumerationError(getattr(err, "errno", None) or 0, "一覧を作れないディレクトリがある")
+    skip_top = wiki_pages.SKIP_TOP_LEVEL_DIRS - {"indexes"}
     found = []
-    for dirpath, _dirs, files in os.walk(root, onerror=fail):
-        for name in files:
-            if name.lower().endswith(".md"):
-                found.append(os.path.join(dirpath, name))
-    onto = root / ONTOLOGY_REL
-    if onto.is_file():
-        found.append(str(onto))
-    h = hashlib.sha256()
-    for path in sorted(found):
+    visited = set()
+
+    def dir_key(path):
         try:
             st = os.stat(path)
-            part = f"{st.st_size}\0{st.st_mtime_ns}"
-        except OSError:
-            part = "missing"
-        h.update(f"{os.path.relpath(path, root)}\0{part}\n".encode("utf-8"))
+        except OSError as e:
+            raise EnumerationError(getattr(e, "errno", None) or 0, "一覧を作れないディレクトリがある") from e
+        return (st.st_dev, st.st_ino) if st.st_ino else os.path.normcase(os.path.realpath(path))
+
+    def walk(directory, rel):
+        try:
+            with os.scandir(directory) as it:
+                entries = sorted(it, key=lambda e: e.name)
+        except OSError as e:
+            raise EnumerationError(getattr(e, "errno", None) or 0, "一覧を作れないディレクトリがある") from e
+        for entry in entries:
+            try:
+                is_dir = entry.is_dir()   # リンクの先がディレクトリなら真
+            except OSError:
+                is_dir = False
+            if is_dir:
+                if not rel and entry.name in skip_top:
+                    continue
+                key = dir_key(entry.path)
+                if key in visited:
+                    continue
+                visited.add(key)
+                walk(entry.path, f"{rel}{entry.name}/")
+            elif entry.name.lower().endswith(".md"):
+                try:
+                    st = entry.stat()     # リンクなら先の大きさと更新時刻
+                    part = f"{st.st_size}\0{st.st_mtime_ns}"
+                except OSError:
+                    part = "missing"
+                found.append(f"{rel}{entry.name}\0{part}")
+
+    visited.add(dir_key(root))
+    walk(str(root), "")
+    onto = root / ONTOLOGY_REL
+    try:
+        st = os.stat(onto)
+        found.append(f"\0ontology\0{st.st_size}\0{st.st_mtime_ns}")
+    except (FileNotFoundError, NotADirectoryError):
+        pass
+    except OSError:
+        found.append("\0ontology\0unreadable")
+    h = hashlib.sha256()
+    for line in sorted(found):
+        h.update((line + "\n").encode("utf-8"))
     return h.hexdigest()
 
 
@@ -1181,9 +1216,8 @@ def find_leaks(files: dict, needles: list, recorder: Recorder) -> tuple:
         for needle in needles:
             if not any(norm(f) in text for f in path_forms(needle)):
                 continue
-            plain = [norm(str(needle).replace(BS, "/").rstrip("/")),
-                     norm(str(needle).replace("/", BS).rstrip(BS))]
-            if any(q in r for r in recorded for q in plain):
+            forms = [norm(f) for f in path_forms(needle)]
+            if any(q in r for r in recorded for q in forms):
                 warnings.add(name)
             else:
                 leaks.add(name)

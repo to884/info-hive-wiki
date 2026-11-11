@@ -38,14 +38,17 @@ def _resolved(path) -> Path:
 
 
 def identity(path) -> "tuple | None":
-    """パスの実体の識別。ないものは None。
+    """パスの実体の識別。ないものは None。あるのに確かめられなければ Refused を送出する。
 
     st_ino が 0 のファイルシステム（識別を返さないもの）では、大文字と小文字をそろえたパスで代える。
     """
     try:
         st = os.stat(path)
-    except OSError:
+    except (FileNotFoundError, NotADirectoryError):
         return None
+    except OSError as e:
+        # あるのに属性を読めない（アクセス権など）。ないものとして扱うと、守る場所から外れてしまう。
+        raise Refused(f"実体を確かめられないので、書き込みを止める（{type(e).__name__}）: {path}") from e
     if st.st_ino:
         return ("id", st.st_dev, st.st_ino)
     return ("path", os.path.normcase(str(_resolved(path))))
@@ -107,7 +110,8 @@ class Guard:
         for p in protected:
             ident = identity(p)
             if ident is None:
-                continue
+                # 守る場所がない（列挙のあとで消えた）。確かめられないので、守りを外さずに止まる。
+                raise Refused(f"守る場所の実体を確かめられない: {p}")
             self._ids.add(ident)
             self._chains.update(_existing_chain(p))
             self._paths.append(_resolved(p))
