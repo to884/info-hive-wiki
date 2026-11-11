@@ -351,7 +351,6 @@ class BrowseState:
         self.build_lock = threading.Lock()
         self.attempts: dict = {}
         self.shutdown_requested = False
-        self.generated_at = ""
 
     def _should_retry(self) -> bool:
         cur = self.current
@@ -393,8 +392,9 @@ class BrowseState:
             except Exception as e:  # noqa: BLE001  前の中核を使い続ける
                 self.failed = type(e).__name__
                 return self._answer(cur, request_sig, "failed")
+            # 生成日時は中核に持たせる。答えに使う中核の世代と、いつも同じ組になる。
+            new.generated_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
             self.current = new
-            self.generated_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
             self.failed = None
             return self._answer(new, request_sig, None)
         finally:
@@ -485,6 +485,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.headers.get("Host") != f"127.0.0.1:{app.port}":
             return self._text(421, "Misdirected Request")
         raw_path = urllib.parse.urlsplit(self.path).path
+        # 操作の口の locate は、行き先（wikilink の中身）を、符号化した 1 つの要素で受け取る。行き先は
+        # ファイルのパスとして使わず、中核の解決に渡すだけなので、下のパスの確かめ（`/` や `..` を拒む）を
+        # 通さない。`[[concepts/a]]` と同じに、先頭の `/` や区切りの違う行き先も解決できる。
+        raw_parts = raw_path[1:].split("/") if raw_path.startswith("/") else []
+        if len(raw_parts) == 4 and raw_parts[1] == "control" and raw_parts[2] == "locate" \
+                and _same(raw_parts[0], app.control_token):
+            self._kind = "control"
+            if self.command not in ("GET", "HEAD"):
+                return self._text(405, "Method Not Allowed", {"Allow": "GET, HEAD"})
+            try:
+                target = urllib.parse.unquote(raw_parts[3], encoding="utf-8", errors="strict")
+            except UnicodeDecodeError:
+                return self._text(404, "Not Found")
+            return self._control_locate(target)
         try:
             path = urllib.parse.unquote(raw_path, encoding="utf-8", errors="strict")
         except UnicodeDecodeError:
@@ -525,9 +539,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     f'<p><a href="{html.escape(core.rel_href(name, index))}">索引へ</a></p></body></html>\n')
             return self._send(404, body.encode("utf-8"), "text/html; charset=utf-8")
         reason = None if stale is None else ("組み立てに失敗した" if stale == "failed" else "組み立てている")
-        text = c.render(name, app.state.raw, generated_at=app.state.generated_at, stale=reason)
+        text = c.render(name, app.state.raw, generated_at=getattr(c, "generated_at", ""), stale=reason)
         ctype = "text/javascript; charset=utf-8" if name.endswith(".js") else "text/html; charset=utf-8"
         return self._send(200, text.encode("utf-8"), ctype)
+
+    def _control_locate(self, target: str):
+        """行き先を wikilink と同じ規則で解決し、状態と、解決したページの出力の名前を返す。"""
+        app = self.server.app
+        c, _stale = app.state.get()
+        if app.state.shutdown_requested:
+            app.request_shutdown()
+            return self._json(503, {"state": "unavailable"})
+        if c is None:
+            return self._json(200, {"state": "unavailable"})
+        r = c.resolve(core.nfc(target))
+        res = {"state": r["state"]}
+        if r["state"] == "resolved":
+            res["path"] = c.out_name[r["id"]]
+            if r.get("anchor"):
+                res["anchor"] = r["anchor"]
+        return self._json(200, res)
 
     def _control(self, rest):
         app = self.server.app
@@ -539,20 +570,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             app.request_shutdown()
             return None
         if op == "locate" and self.command in ("GET", "HEAD") and len(rest) >= 2:
-            target = "/".join(rest[1:])
-            c, _stale = app.state.get()
-            if app.state.shutdown_requested:
-                app.request_shutdown()
-                return self._json(503, {"state": "unavailable"})
-            if c is None:
-                return self._json(200, {"state": "unavailable"})
-            r = c.resolve(core.nfc(target))
-            res = {"state": r["state"]}
-            if r["state"] == "resolved":
-                res["path"] = c.out_name[r["id"]]
-                if r.get("anchor"):
-                    res["anchor"] = r["anchor"]
-            return self._json(200, res)
+            return self._control_locate("/".join(rest[1:]))   # 符号化していない `concepts/a` の形
         return self._text(405 if op in ("status", "stop", "locate") else 404,
                           "Method Not Allowed" if op in ("status", "stop", "locate") else "Not Found")
 

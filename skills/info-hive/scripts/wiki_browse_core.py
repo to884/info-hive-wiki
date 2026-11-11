@@ -81,20 +81,23 @@ class EnumerationError(OSError):
 
 
 def check_enumerable(root: Path) -> None:
-    """Wiki のディレクトリを、シンボリックリンクをたどらずに走査し、一覧を作れないディレクトリがあれば送出する。
+    """入力のあるディレクトリの一覧を作れることを確かめる。作れないディレクトリがあれば EnumerationError。
 
     ページの集合は lint と同じ iter_page_files（Path.rglob）で決める。rglob は一覧を作れないディレクトリを
     黙って飛ばし、空や一部の集合を返すので、そのまま使うと「0 ページの正常な Wiki」と区別できない（守ること 9）。
+    確かめるのは、印（signature）と同じ範囲である。入力でない最上位のディレクトリ（raw、assets、.wiki-cache
+    など）は見ない。そこを読めなくても、閲覧の起動、作り直し、停止は止めない。
     """
-    def fail(err):
-        raise EnumerationError(getattr(err, "errno", None) or 0, "一覧を作れないディレクトリがある")
-    for _dirpath, _dirs, _files in os.walk(root, onerror=fail):
-        pass
+    signature(root)
 
 
-def list_inputs(root: Path) -> list:
-    """入力の集合を、(種類, パス) の並びで返す。中身は読まない。一覧を作れなければ EnumerationError。"""
-    check_enumerable(root)
+def list_inputs(root: Path, checked: bool = False) -> list:
+    """入力の集合を、(種類, パス) の並びで返す。中身は読まない。一覧を作れなければ EnumerationError。
+
+    checked が真なら、呼ぶ側が直前に signature() で一覧を確かめてあるので、確かめを繰り返さない。
+    """
+    if not checked:
+        check_enumerable(root)
     items = [("page", p) for p in wiki_pages.iter_page_files(root)]
     items += [("index", p) for p in wiki_lint.index_files(root)]
     onto = root / ONTOLOGY_REL
@@ -200,8 +203,8 @@ class Snapshot:
 def take_snapshot(root: Path) -> Snapshot:
     """入力を 1 度だけ読み、写しを作る。印は読む前に取る。"""
     root = Path(root)
-    sig = signature(root)        # 読む前に取る
-    items = list_inputs(root)
+    sig = signature(root)        # 読む前に取る。一覧を作れることも、ここで確かめる
+    items = list_inputs(root, checked=True)
     inputs = []
     unreadable = False
     gen = hashlib.sha256(CORE_VERSION.encode("utf-8"))
