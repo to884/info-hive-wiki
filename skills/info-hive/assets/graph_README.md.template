@@ -3,8 +3,10 @@
 このディレクトリには、Markdown の wiki から導いたコンパイル済みのナレッジグラフを置く。正本は Markdown である。ここにあるものはすべて、知識を失わずに削除して作り直せる。
 
 ```bash
-uv run --script scripts/wiki_graph_extract.py wiki/ --out wiki/graph
+uv run --script "<skill-root>/scripts/wiki_graph_extract.py" wiki/ --out wiki/graph
 ```
+
+このファイルのコマンドの `<skill-root>` は、インストールした info-hive スキルのディレクトリ（`SKILL.md` のあるディレクトリ）の実際のパスに置き換える。パスに空白があっても分かれないよう、コマンドではスクリプトのパスを `"` で囲んである。Claude Code のプラグイン `wiki` では `${CLAUDE_PLUGIN_ROOT}/skills/info-hive` にあたるが、この変数はプラグインのコマンドの中で展開されるもので、このファイルの中では展開されず、シェルでも設定されていないことがある。`wiki/` と `wiki/graph` は、プロジェクトのルートから見たこの wiki のディレクトリ（このファイルがある `graph/` の 1 つ上）とこのディレクトリで、初期化の既定の名前のときはそのままでよい。別の名前で初期化した wiki では置き換え、名前に空白があれば `"` で囲む。コマンドはプロジェクトのルートから実行する。
 
 ## ファイル
 
@@ -19,9 +21,9 @@ uv run --script scripts/wiki_graph_extract.py wiki/ --out wiki/graph
 ## 作業の流れ
 
 1. wiki のページを書くか編集する。型付きの `graph.relationships` は、明示的なソースが裏づけている場合だけ追加する。
-2. `uv run --script scripts/wiki_graph_lint.py wiki/` を実行する。未知の述語、リンク切れの目的語の参照、証拠の欠落、エイリアスの衝突を検出する。
-3. `uv run --script scripts/wiki_graph_extract.py wiki/ --out wiki/graph` を実行する。上のファイルを生成し直す。
-4. `python scripts/wiki_graph_query.py wiki/ neighbors --node concept:消費税`（または `edges`、`path`、`facts`）でクエリする。
+2. `uv run --script "<skill-root>/scripts/wiki_graph_lint.py" wiki/` を実行する。未知の述語、リンク切れの目的語の参照、証拠の欠落、エイリアスの衝突を検出する。
+3. `uv run --script "<skill-root>/scripts/wiki_graph_extract.py" wiki/ --out wiki/graph` を実行する。上のファイルを生成し直す。
+4. `python "<skill-root>/scripts/wiki_graph_query.py" wiki/ neighbors --node concept:消費税`（または `edges`、`path`、`facts`）でクエリする。
 
 ## 避けるべきパターン
 
