@@ -29,7 +29,8 @@ PyYAML の固定した依存を持つので、`uv run --script` で実行する�
   current|historical|proposed|disputed|superseded のいずれかである。
 - 同じノード ID について、正本のノードが重複していない。
 - 別名が、異なる正本のノードの間で衝突していない。
-- `contradicts` と `supersedes` の参照が、既知のノードかエッジの ID に解決される。
+- `contradicts` と `supersedes` の参照が、既知のノード ID、ソースページのスラッグ、抽出したエッジの ID の
+  どれかに解決される。
 - frontmatter の `graph:` を読めなかったページ（YAML として読めない、マッピングでない）と、lint のパーサーが
   読めない書き方の最上位の欄（`type`、`kind`、`sources`、`raw`）がない。
 - 生成したグラフに、孤立した型付きノード（型付きのエッジが入ってくることも出ていくこともないノード）がない。
@@ -207,6 +208,16 @@ def lint(pages: list[dict], ontology: dict) -> dict:
         if len(owners) > 1:
             findings["alias_collisions"].append({"alias": alias, "owners": sorted(owners)})
 
+    # extract と同じ build_nodes と build_edges でエッジを作る。主語はページで引く（スラッグで引くと、別の
+    # ディレクトリの同じスラッグのページのノードになる）。エッジにしなかった参照は、下で診断として挙げる。
+    # contradicts と supersedes は別のページのエッジの ID も指すので、関係を調べる前に、すべてのエッジを作っておく。
+    diagnostics: list[dict] = []
+    _nodes, page_node_ids, _aliases = _extract.build_nodes(pages, ontology, diagnostics)
+    extracted_edges = _extract.build_edges(pages, page_node_ids, diagnostics)
+    # 参照先として認めるエッジの ID。extract が edges.jsonl に書くエッジと同じものである。
+    # 16 進 24 桁の形だけでは認めない。形が合っても、実在しないエッジの ID は挙げる。
+    edge_ids = {e["id"] for e in extracted_edges}
+
     # 関係を順に調べる
     for p in pages:
         graph_meta = p["meta"].get("graph") if isinstance(p["meta"].get("graph"), dict) else {}
@@ -274,23 +285,18 @@ def lint(pages: list[dict], ontology: dict) -> dict:
             if status and status not in ALLOWED_STATUS:
                 findings["invalid_status"].append({**here, "status": status})
 
-            # contradicts と supersedes の解決
+            # contradicts と supersedes の解決。ノード ID、ソースのスラッグ、エッジの ID のどれかに当たればよい。
             for ref_field, bucket in (("contradicts", "broken_contradicts"),
                                        ("supersedes", "broken_supersedes")):
                 ref = rel.get(ref_field)
                 if ref:
                     ref_str = str(ref)
-                    if ref_str not in node_by_id and ref_str not in source_slugs:
+                    if ref_str not in node_by_id and ref_str not in source_slugs and ref_str not in edge_ids:
                         findings[bucket].append({**here, ref_field: ref_str})
 
     # 孤立した型付きノード。`graph:` の frontmatter を宣言しているのに、
     # 抽出後に、型付きの（暗黙でない）エッジが1本もつながっていないページ。
     # ソースのノードは対象外である（暗黙のエッジでつながるため）。
-    # extract と同じ build_nodes と build_edges で作る。主語はページで引く（スラッグで引くと、別の
-    # ディレクトリの同じスラッグのページのノードになる）。エッジにしなかった参照は、診断として挙げる。
-    diagnostics: list[dict] = []
-    _nodes, page_node_ids, _aliases = _extract.build_nodes(pages, ontology, diagnostics)
-    extracted_edges = _extract.build_edges(pages, page_node_ids, diagnostics)
     for d in diagnostics:
         # duplicate_node_id は、上で duplicate_node_ids に挙げている。
         bucket = {"ambiguous_object": "ambiguous_object_refs", "ambiguous_source": "ambiguous_sources",
