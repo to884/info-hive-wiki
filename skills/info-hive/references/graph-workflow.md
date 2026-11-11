@@ -58,6 +58,17 @@ graph:
 
 関係に必須のフィールドは、`predicate`、`object`、`source`、`evidence`、`confidence`、`status` である。
 
+### 値の読み方
+
+グラフのスクリプト（extract と lint）は、frontmatter の最上位の欄（`type`、`kind`、`title`、`tags`、`sources`、`raw` など）を、wiki の lint、検索、統計と同じパーサーで読む。値は、書かれた文字のままの文字列か、その配列になる。`sources: [true]` は `true` というページ、`sources: [007]` は `007` というページを指し、`kind: 2024` は文字の `2024` である。wiki の lint が解決する `sources:` は、グラフでも同じページに解決する。`raw:` を配列で書くと、値 1 つにつき `summarizes_raw` が 1 本できる。
+
+`graph:` の欄だけは PyYAML で読む。そのうち、ページやノードを指す欄（`node_id`、`aliases`、関係の `object`、`source`、`contradicts`、`supersedes`）は、引用符のない `true`、`no`、数、日付も、書かれた文字で読む（`source: 007` は `007`、`object: no` は `no`）。`null`、`~`、値なしは、値がないものとして扱う。文字の `null` を指すには、`"null"` と引用符で囲む。ほかの欄（`canonical`、`valid_from`、`notes` など）は、YAML の値で読む。
+
+次のページは、グラフの lint が挙げる。抽出も、件数を標準エラーに書く。
+
+- `unreadable_graph`: `graph:` を書いたのに読めなかったページ。型付きの関係は 1 つもできない。`reason` が `yaml_error` なら、frontmatter が YAML として読めない（`title: a: b` のように引用符のない値に `: ` がある、タブがある）か、`graph:` の中に `valid_from: 2026-13-01` のような組み立てられない値がある。`not_mapping` なら、`graph:` の値がマッピングでない。`graph:` の外の値は、frontmatter が YAML として構文を読めれば、どう書いてあっても `graph:` の読み方に影響しない（`created: 2026-13-01` があっても読む）。
+- `unread_fields`: `type`、`kind`、`sources`、`raw`（日本語の別名を含む）のうち、YAML としては値があるのに、wiki の lint のパーサーが読めない書き方のもの（`field`）。字下げのない `- x` の配列、字下げ 4 つの配列、複数行にまたがる `[a,` … `]`、引用符つきのキー（`"type": x`）、`type : x`、最上位のマージキー（`<<`）だけで来た値である。lint、検索、統計と同じく、グラフもその値を読まない（`sources:` なら `sourced_from` ができない）。配列は 1 行の `["a", "b"]` か、字下げ 2 つの `  - "a"` の行で書く。
+
 `evidence` には、ソースの文をそのまま写す（言い換えない、訳さない）。英語のソースは英語のまま引く。引用は 1 文か、文の一部にとどめる。`--decide` を付けた lint は、引用がソースページの本文にあるかを照合する。照合では、大文字と小文字の違いと、日本語の文字どうしの間の改行や空白は吸収するが、英数字の間の空白は残し、全角と半角の違いは吸収しない。ソースが全角の「ＡＩ」なら、引用も「ＡＩ」と書く。
 
 `node_id` の形式は `<node_type>:<slug>` である。既定値は、オントロジーの `maps_from` ブロックを使って、ページの `type`/`kind` から決まる。スラッグが日本語なら、ノード ID も `concept:消費税` や `organization:国税庁` のように日本語を含む。lint、extract、query はこれをそのまま扱い、NFC にそろえてから照合する。英語の固有名詞のページは `person:andrej-karpathy` のように英小文字のスラッグのままでよい。
@@ -68,7 +79,7 @@ graph:
 
 `wiki/graph/ontology.yaml` は、グラフ層の取り決めである。次のものを宣言する。
 
-- `node_types[*].maps_from`: ページの `type`/`kind` をノードの種類にどう対応させるか。
+- `node_types[*].maps_from`: ページの `type`/`kind` をノードの種類にどう対応させるか。`type` と `kind` の値は、ページの値と同じく、書かれた文字で比べる（`kind: 2024` は、ページの `kind: 2024` に当たり、`kind: 2024.0` には当たらない）。
 - `predicates[*]`: 使ってよい述語。それぞれ `subject_types`、`object_types`、`requires_evidence` を持つ。`"*"` は、主語と目的語のどちらの側でもワイルドカードになる。
 
 分野に固有の新しい述語が必要になったら、オントロジーを編集する。`wiki_graph_lint.py` を再実行して検証する。既存の型付きエッジが合わなくなっていれば、それも検出される。
