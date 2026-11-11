@@ -2,6 +2,8 @@
 
 wiki のプラグインは、検索のためのローカルの MCP サーバーを持つ。埋め込みモデルの読み込み、埋め込み、索引の書き込みは、このサーバーだけが行う。wiki の Markdown は書き換えない。
 
+コマンドの `<skill-root>` は、このスキルのディレクトリ（`SKILL.md` のあるディレクトリ）の実際のパスに置き換える。書き方は `SKILL.md` の「スクリプトのパス」にある。
+
 この文書は、サーバーの仕組み、ツール、置き場所、困ったときの確かめ方をまとめる。コマンド（`/wiki:query`、`/wiki:lint`、`/wiki:stats`、`/wiki:graph`、`/wiki:ingest` のグラフの lint）は、まずこのサーバーのツールを使い、使えないときは CLI（`wiki_search.py` など）に戻る。使い分けの規則は `SKILL.md` の「MCP のツールと CLI の使い分け」にある。
 
 ## 仕組み
@@ -146,23 +148,23 @@ rag がチャンクを渡すためのツールである。wiki の Markdown は�
 サーバーの依存を取得できない、uv がない、などで MCP が使えないときは、今の CLI がそのまま使える。
 
 ```bash
-uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_search.py" "<検索語>" --wiki "<WIKI_ROOT>" --json
-python "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_search.py" "<検索語>" --wiki "<WIKI_ROOT>" --json --no-embed
+uv run --script "<skill-root>/scripts/wiki_search.py" "<検索語>" --wiki "<WIKI_ROOT>" --json
+python "<skill-root>/scripts/wiki_search.py" "<検索語>" --wiki "<WIKI_ROOT>" --json --no-embed
 ```
 
 CLI の埋め込み検索は、MCP のサーバーとは別のモデル（multilingual-e5-small）と別の索引（wiki の `.wiki-cache/`）を使う。
 
 ## 困ったとき
 
-- サーバーが起動しない: `logs/server.log` を見る。`uv run --script wiki_mcp_launch.py --ensure` を実行すると、サーバーを確かめ（なければ起動し）、トークンを除いた `server.json` の中身を表示する。
+- サーバーが起動しない: `logs/server.log` を見る。`uv run --script "<skill-root>/scripts/wiki_mcp_launch.py" --ensure` を実行すると、サーバーを確かめ（なければ起動し）、トークンを除いた `server.json` の中身を表示する。
 - 社内ネットワークで起動しない（`logs/launch.log` か uv の出力に `invalid peer certificate` や `UnknownIssuer` がある）: TLS を検査するプロキシの CA を uv が信頼していない。入口と中継は `UV_SYSTEM_CERTS=true`（古い uv では `UV_NATIVE_TLS=true`）で 1 回だけやり直すが、CLI の `uv run --script` はやり直さない。ユーザーに、環境変数 `UV_SYSTEM_CERTS=true` か、uv の `uv.toml` の `system-certs = true` を設定してもらう（README の「トラブルシューティング」）。その場で CLI を動かすときは、`uv run --system-certs --script ...` のように `--system-certs`（古い uv では `--native-tls`）を付ける。
 - プラグインを更新した: 中継は `server.json` のコードの版を見て、古いサーバーを止めて起動し直す。
 - uv の環境が壊れた（`Failed to read metadata from installed package` のような uv のエラーが出る）: 次の 2 つを実行して入れ直す。入口とサーバーは、起動のたびに同じことを自動で試す。
 
   ```bash
-  uv sync --reinstall --script "<プラグインのパス>/skills/info-hive/scripts/wiki_mcp_relay.py"
-  uv sync --reinstall --script "<プラグインのパス>/skills/info-hive/scripts/wiki_mcp_server.py"
+  uv sync --reinstall --script "<skill-root>/scripts/wiki_mcp_relay.py"
+  uv sync --reinstall --script "<skill-root>/scripts/wiki_mcp_server.py"
   ```
 
 - 直したのにツールが出ない: Claude Code は、接続に失敗した MCP のサーバーを覚えていて、しばらく起動しないことがある（`~/.claude/mcp-needs-auth-cache.json` に `plugin:wiki:wiki` が入る）。`/mcp` で wiki のサーバーをつなぎ直す。
-- Claude Code 以外のホスト（Codex など）: `CLAUDE_PLUGIN_ROOT` を持たないので、`uv run --script <プラグインのパス>/skills/info-hive/scripts/wiki_mcp_launch.py` を stdio の MCP サーバーとして登録する。
+- Claude Code 以外のホスト（Codex など）: `CLAUDE_PLUGIN_ROOT` を持たないので、`uv run --script "<skill-root>/scripts/wiki_mcp_launch.py"` を stdio の MCP サーバーとして登録する。

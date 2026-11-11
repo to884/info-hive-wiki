@@ -2,6 +2,8 @@
 
 任意で使える改善ループは、観測できるタスクの結果から学び、wiki にパターンとしてまとめ、1つのスキル全体に対する変更を提案し、検証の結果で改善を選ぶ。独立した最終テストを実行する前に、選んだスキルを固定する。インストール済みのスキルが変わるのは、ユーザーが得られた改善案を適用したときだけである。
 
+コマンドの `<skill-root>` は、このスキルのディレクトリ（`SKILL.md` のあるディレクトリ）の実際のパスに置き換える。書き方は `SKILL.md` の「スクリプトのパス」にある。
+
 ## 研究上の根拠と取り入れ方
 
 改善の仕組みは、Liyan Tang らによる [WikiSkill: Compiling Agent Experience into Persistent Knowledge for Skill Evolution](https://arxiv.org/html/2608.27454v1)（Google Research と Virginia Tech、2026 年）をもとにしている。論文の[手法](https://arxiv.org/html/2608.27454v1#S3)と LLM Wiki の実装は、次のように対応する。
@@ -41,7 +43,7 @@ flowchart LR
 プラグインのリポジトリから `eval/evolution/pilot/config.example.json` をコピーし、アダプターのパスと正確なモデル ID を書き換える。ロールごとに専用のランナーとモデルを設定する。推論（inference）はタスクを実行し、メンテナー（maintainer）は経験を統合し、プロポーザー（proposer）はスキルを変更し、ジャッジ（judge）は回答を検証する。推論を始める前に、承認済みの実行予算を設定する。
 
 ```bash
-python <skill-root>/scripts/wiki_evolve_loop.py \
+python "<skill-root>/scripts/wiki_evolve_loop.py" \
   --wiki /path/to/learning-wiki --raw /path/to/raw \
   --id query-cycle-01 --skill /path/to/working-skill \
   --suite /path/to/suite-v2.json --config /path/to/config.json
@@ -54,9 +56,9 @@ python <skill-root>/scripts/wiki_evolve_loop.py \
 実行が成功し、改善が選ばれると、`<run-id>-selected` ができる。これは既存のレビュー用・適用用のコマンドでそのまま扱える。
 
 ```bash
-python <skill-root>/scripts/wiki_evolve.py --wiki /path/to/learning-wiki show query-cycle-01-selected
-python <skill-root>/scripts/wiki_evolve.py --wiki /path/to/learning-wiki apply query-cycle-01-selected
-python <skill-root>/scripts/wiki_evolve.py --wiki /path/to/learning-wiki rollback query-cycle-01-selected
+python "<skill-root>/scripts/wiki_evolve.py" --wiki /path/to/learning-wiki show query-cycle-01-selected
+python "<skill-root>/scripts/wiki_evolve.py" --wiki /path/to/learning-wiki apply query-cycle-01-selected
+python "<skill-root>/scripts/wiki_evolve.py" --wiki /path/to/learning-wiki rollback query-cycle-01-selected
 ```
 
 `wiki_evolve.py history` と `show <run-id>` では、ループ全体の実行と、そこで残した判断も確認できる。実行が完了しても、変更が選ばれないことはある。実行時の失敗や予算切れでは、適用できる改善案は作られない。中断した実行は証拠を残すが、評価の入力をいったん見せたあとは、同じ ID で再開できない。
@@ -84,8 +86,10 @@ python <skill-root>/scripts/wiki_evolve.py --wiki /path/to/learning-wiki rollbac
 共通のアダプターは、`claude`、`codex`、`cursor`、`gemini`、`opencode`、`pi`、`omp`、`hermes`、`openclaw` に対応している。どのアダプターも、4つのロールの仕様を扱う。先に対応するホストをインストールして認証しておく。プロトコルのテストは、実際のアカウントでの確認の代わりにはならない。
 
 ```json
-{"argv":["python3","/absolute/skill/scripts/wiki_evolve_agent.py","codex"],"model":"EXACT_MODEL_ID"}
+{"argv":["python3","<skill-root>/scripts/wiki_evolve_agent.py","codex"],"model":"EXACT_MODEL_ID"}
 ```
+
+`argv` はシェルを通さずにそのまま実行するので、`<skill-root>` は絶対パスに置き換える。
 
 | アダプター | 実行方法とモデルの選択 | 使用量の記録 |
 | --- | --- | --- |
@@ -109,7 +113,7 @@ Hermes のランナーでは、`"options":{"home":"/absolute/hermes-eval-profile
 リクエストの前に金額の上限を守るには、**すべてのロールと転用のランナー**で、同梱の API ランナーを使うよう設定する。
 
 ```json
-{"argv":["python3","/absolute/skill/scripts/wiki_evolve_api.py"],"model":"claude-sonnet-5"}
+{"argv":["python3","<skill-root>/scripts/wiki_evolve_api.py"],"model":"claude-sonnet-5"}
 ```
 
 `budget.max_usd` を設定し、環境変数 `ANTHROPIC_API_KEY` を用意する。ランナーは Messages API へのリクエストのたびに、その前に、ドキュメントに記載された入力コンテキストの上限と最大出力の合計を、レビュー済みのファーストパーティの価格で予約する。予約できないリクエストは送らない。応答が返ってきたら、実際の使用量で精算する。応答がなかった場合は予約を残したまま、再試行せずに試験を中止する。十進数で計算するので、浮動小数点の誤差が積み重なって上限を超えることはない。予約は保守的に見積もるので、実際のリクエストのコストがずっと小さそうでも、Sonnet 5 では残額が少なくとも $2.08192 必要になる。
@@ -136,8 +140,8 @@ Hermes のランナーでは、`"options":{"home":"/absolute/hermes-eval-profile
 完了した実行は、持ち運べる1つのバンドルとしてエクスポートできる。
 
 ```bash
-python <skill-root>/scripts/wiki_evolve.py --wiki /path/to/wiki export query-cycle-01 --destination /path/to/new-bundle
-python <skill-root>/scripts/wiki_evolve.py verify-bundle /path/to/new-bundle
+python "<skill-root>/scripts/wiki_evolve.py" --wiki /path/to/wiki export query-cycle-01 --destination /path/to/new-bundle
+python "<skill-root>/scripts/wiki_evolve.py" verify-bundle /path/to/new-bundle
 ```
 
 バンドルには、`skill/`、`evidence/`、すべてのファイルを対象にした SHA-256 のマニフェストが含まれる。`PURPOSE.md`、パターンとの対応、観測できる実行の記録、却下された試行、固定したソースの文脈が一緒に持ち運ばれる。後で推論の作業領域に置いてよいのは `bundle/skill` だけである。監査用のアーカイブには結果を見たテストが含まれるので、スキルの指示として注入してはならない。検証で確かめるのはマニフェストであり、デジタル署名でも、元の観測が正しかったことの証明でもない。
@@ -149,7 +153,7 @@ python <skill-root>/scripts/wiki_evolve.py verify-bundle /path/to/new-bundle
 スキル全体の改善案を手動で作る場合は、候補のディレクトリを渡す。既存の1ファイルだけを対象にする場合は、引き続き `--target` を使う。
 
 ```bash
-python <skill-root>/scripts/wiki_evolve.py --wiki /path/to/wiki propose \
+python "<skill-root>/scripts/wiki_evolve.py" --wiki /path/to/wiki propose \
   --id query-manual-01 --skill /path/to/working-skill \
   --candidate /path/to/candidate-skill --evidence concepts/query-pattern.md \
   --reason "検証で確かめた失敗に対処する"

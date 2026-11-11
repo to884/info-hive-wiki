@@ -2,6 +2,8 @@
 
 wiki の構造を変える必要が出てくる閾値と、その移行の手順をまとめる。目的は、wiki が大きくなっても、1回のクエリにかかるコンテキストの量をほぼ一定に保つことである。wiki が大きくなったからといって、LLM が読むページの数やページの大きさが増えるようではいけない。
 
+コマンドの `<skill-root>` は、このスキルのディレクトリ（`SKILL.md` のあるディレクトリ）の実際のパスに置き換える。書き方は `SKILL.md` の「スクリプトのパス」にある。
+
 ## ボトルネック
 
 素朴な LLM Wiki の実装は、規模が大きくなると、いくつかの決まった失敗で破綻する。それぞれに構造上の対策がある。
@@ -35,8 +37,8 @@ wiki の構造を変える必要が出てくる閾値と、その移行の手順
 
 `scripts/wiki_search.py` には次の機能がある。
 
-- `uv run --script scripts/wiki_search.py "軽減税率の対象"`: セクション単位のローカルのハイブリッド検索の結果。
-- `python scripts/wiki_search.py "軽減税率の対象" --no-embed`: 依存パッケージを使わない語彙ベースの BM25（PEP 723 による依存解決を通さない）。
+- `uv run --script "<skill-root>/scripts/wiki_search.py" "軽減税率の対象"`: セクション単位のローカルのハイブリッド検索の結果。
+- `python "<skill-root>/scripts/wiki_search.py" "軽減税率の対象" --no-embed`: 依存パッケージを使わない語彙ベースの BM25（PEP 723 による依存解決を通さない）。
 - `--type concept`: frontmatter の type で絞り込む。
 - `--tag <tag>`: タグで絞り込む。
 - `--since 2026-01-01`: `updated` の日付で絞り込む。
