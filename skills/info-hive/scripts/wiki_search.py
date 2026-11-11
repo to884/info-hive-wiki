@@ -134,8 +134,9 @@ VECTOR_INDEX_NAME = "embeddings.sqlite"
 EMBED_INPUT_FORMAT = "prefix-v1"
 # パースキャッシュの形式。日本語のキーを英語に直すようにしたので 2 に、frontmatter の解析を
 # wiki_text の共通のパーサー（引用符の中のカンマと行末のコメントを扱う）に替えたので 3 に、
-# コードの中の wikilink を links に入れないようにしたので 4 に上げた。
-PARSE_CACHE_SCHEMA = 4
+# コードの中の wikilink を links に入れないようにしたので 4 に、wiki_text のパーサーが読む YAML の書き方
+# （字下げの違う配列、複数行の [...]、引用符つきのキー、エスケープ、ブロックのスカラー）を広げたので 5 に上げた。
+PARSE_CACHE_SCHEMA = 5
 
 
 def parse_frontmatter(text: str) -> tuple[dict, str]:
