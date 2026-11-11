@@ -226,55 +226,71 @@ def _graph_refs_as_written(graph_meta: dict, graph_node) -> dict:
     return out
 
 
-def _unread_fields(own_pairs: list, root, meta: dict, fm_text: str) -> list[str]:
+def _is_null_node(node) -> bool:
+    return isinstance(node, yaml.ScalarNode) and node.tag == _YAML_NULL_TAG
+
+
+def _unread_fields(own_pairs: list, root, raw_meta: dict, meta: dict, fm_text: str) -> list[str]:
     """YAML には値があるのに、lint のパーサーが読めなかった WATCHED_TOP_FIELDS の欄を返す。
 
     own_pairs は、マージキーを展開する前の最上位の (キーのノード, 値のノード) で、root は展開したあとの
-    最上位のノードである。次のどれかに当たる欄を返す。
-    - その欄を書いた回数（値なしを除く）が、lint のパーサーがキーの行として読んだ回数より多い
-      （`"type": x`、`type : x`。読めるキーと読めないキーで 2 度書いたものを含む）。
-    - YAML の配列の要素の数（2 度書いたら合計）より少ない数しか、lint のパーサーが読んでいない
-      （字下げのない `- x`、字下げ 4 つの `    - x`、複数行の `[a,` … `]`）。
+    最上位のノードである。raw_meta は lint のパーサーが返した、書かれたままのキーの辞書、meta はそれを
+    canonical_meta で英語のキーに直した辞書である。次のどれかに当たる欄を返す。
+    - その欄を書いた回数が、lint のパーサーがキーの行として読んだ回数より多い（`"type": x`、`type : x`。
+      読めるキーと読めないキーで 2 度書いたものを含む）。値のある宣言が 1 つもなければ、挙げない。
+    - 同じキーに書いた YAML の配列の要素の数より少ない数しか、lint のパーサーが読んでいない
+      （字下げのない `- x`、字下げ 4 つの `    - x`、複数行の `[a,` … `]`）。数え方は lint のパーサーに合わせる。
+      同じキーの配列はつなぎ、あとに書いた文字列は配列を置き換える。
     - マージキーで来た値があるのに、lint の形にその欄がない。
     値の中身は比べない。
     """
     written_times: dict[str, int] = {}
-    items: dict[str, int] = {}
+    has_value: set[str] = set()
+    expected: dict[str, "int | None"] = {}  # 書かれたままのキーから、lint が読むはずの配列の要素の数（配列でなければ None）
     for key_node, value_node in own_pairs:
         if not (isinstance(key_node, yaml.ScalarNode) and key_node.tag == _YAML_STR_TAG):
             continue
-        field = canonical_key(key_node.value)
+        key = key_node.value
+        field = canonical_key(key)
         if field not in WATCHED_TOP_FIELDS:
             continue
+        written_times[field] = written_times.get(field, 0) + 1
+        if not _is_null_node(value_node):
+            has_value.add(field)
         if isinstance(value_node, yaml.SequenceNode):
-            items[field] = items.get(field, 0) + len(value_node.value)
-        if not (isinstance(value_node, yaml.ScalarNode) and value_node.tag == _YAML_NULL_TAG):
-            written_times[field] = written_times.get(field, 0) + 1
+            expected[key] = (expected.get(key) or 0) + len(value_node.value)
+        elif _is_null_node(value_node):
+            expected[key] = expected.get(key) or 0  # 値のないキーは、lint のパーサーでは空の配列になる
+        else:
+            expected[key] = None
     read_times: dict[str, int] = {}
     for key in top_level_keys(fm_text):
         field = canonical_key(key)
         read_times[field] = read_times.get(field, 0) + 1
-    effective: set[str] = set()
-    for key_node, value_node in root.value:
-        if (isinstance(key_node, yaml.ScalarNode) and key_node.tag == _YAML_STR_TAG
-                and not (isinstance(value_node, yaml.ScalarNode) and value_node.tag == _YAML_NULL_TAG)):
-            effective.add(canonical_key(key_node.value))
+    short = set()
+    for key, count in expected.items():
+        value = raw_meta.get(key)
+        if count and not (isinstance(value, list) and len(value) >= count):
+            short.add(canonical_key(key))
+    effective = {canonical_key(key_node.value) for key_node, value_node in root.value
+                 if isinstance(key_node, yaml.ScalarNode) and key_node.tag == _YAML_STR_TAG
+                 and not _is_null_node(value_node)}
     found = []
     for field in WATCHED_TOP_FIELDS:
-        value = meta.get(field)
-        if (written_times.get(field, 0) > read_times.get(field, 0)
-                or (items.get(field) and not (isinstance(value, list) and len(value) >= items[field]))
+        if ((field in has_value and written_times.get(field, 0) > read_times.get(field, 0))
+                or field in short
                 or (field in effective and field not in meta)):
             found.append(field)
     return found
 
 
-def _read_graph(fm_text: str, meta: dict) -> "tuple[dict | None, list[dict]]":
+def _read_graph(fm_text: str, raw_meta: dict, meta: dict) -> "tuple[dict | None, list[dict]]":
     """frontmatter の `graph` の欄だけを PyYAML で読む。(graph のマッピングか None, 診断の一覧) を返す。
 
     PyYAML には frontmatter を構文として読ませ、値に組み立てるのは `graph` のノードだけにする。ほかの欄の値
-    （PyYAML が ValueError を出す `created: 2026-13-01` など）には左右されない。meta は lint の形の辞書で、
-    lint のパーサーが `graph` のキーを読んだかどうかと、unread_field の判定に使う。例外は外に出さない。
+    （PyYAML が ValueError を出す `created: 2026-13-01` など）には左右されない。raw_meta と meta は lint の形の
+    辞書（書かれたままのキーと、英語に直したキー）で、lint のパーサーが `graph` のキーを読んだかどうかと、
+    unread_field の判定に使う。例外は外に出さない。
     """
     # 構文として読めないときに、graph の欄がありそうか。あれば、関係を黙って失わないように挙げる。
     declared = "graph" in meta or bool(GRAPH_KEY_LINE_RE.search(fm_text))
@@ -299,9 +315,9 @@ def _read_graph(fm_text: str, meta: dict) -> "tuple[dict | None, list[dict]]":
         except Exception:
             pass  # 展開できないマージキー（`<<: 3`）は、ないものとして扱う。ほかの欄は読む。
         problems = [{"kind": "unread_field", "field": field}
-                    for field in _unread_fields(own_pairs, root, meta, fm_text)]
+                    for field in _unread_fields(own_pairs, root, raw_meta, meta, fm_text)]
         graph_node = _child(root, "graph")
-        if graph_node is None or (isinstance(graph_node, yaml.ScalarNode) and graph_node.tag == _YAML_NULL_TAG):
+        if graph_node is None or _is_null_node(graph_node):
             return None, problems
         if not isinstance(graph_node, yaml.MappingNode):
             return None, problems + [not_mapping]
@@ -335,8 +351,9 @@ def read_frontmatter(text: str) -> "tuple[dict, str, list[dict]]":
         return {}, text, []
     fm_text = m.group(1)
     body = text[m.end():]
-    meta, _conflicts = canonical_meta(parse_frontmatter_text(fm_text))
-    graph_meta, problems = _read_graph(fm_text, meta)
+    raw_meta = parse_frontmatter_text(fm_text)
+    meta, _conflicts = canonical_meta(raw_meta)
+    graph_meta, problems = _read_graph(fm_text, raw_meta, meta)
     # lint の形の graph（入れ子を読まないので []。字下げ 2 つの `  - x` が紛れ込むこともある）は使わない。
     meta.pop("graph", None)
     if graph_meta is not None:
