@@ -8,11 +8,15 @@ wiki を、日本語の CSS と、ナビゲーション、メタ欄、被リン�
 
 引数: $ARGUMENTS
 
-0. `<WIKI_ROOT>` は、ユーザーが明示したパス、もっとも近いプロジェクトの指示、グローバルなエージェントの指示の順に探し、どれにもなければ作業領域の設定（`.info-hive/workspace.json`）の `dirs.wiki`、それもなければ現在のプロジェクトの `wiki/` とする。指示が別の wiki を指定しているときに、`${PWD}/wiki` を前提にしてはならない。
+0. `<WIKI_ROOT>` は、ユーザーが明示したパス、もっとも近いプロジェクトの指示、グローバルなエージェントの指示の順に探し、どれにもなければ作業領域の設定（`.info-hive/workspace.json`）の `dirs.wiki`、それもなければ現在のプロジェクトの `wiki/` とする。指示が別の wiki を指定しているときに、`${PWD}/wiki` を前提にしてはならない。あわせて、`<WIKI_ROOT>` が指示や設定で何として登録されているかで、wiki のスコープを決める。どの指示のファイルで見つけたかでは決めず、wiki の場所から推し量ってもならない。
+   - グローバルなエージェントの指示が、ユーザースコープの wiki（どのプロジェクトにも属さない wiki）として指している場所なら、ユーザースコープ（`user`）とする。プロジェクトの指示が、共有のユーザースコープの wiki を使うと書いている場合も同じである。
+   - プロジェクトの指示が、そのプロジェクトの wiki として指している場所か、最後の既定（現在のプロジェクトの `wiki/`）なら、プロジェクト（`project`）とする。
+   - 作業領域の設定の `dirs.wiki` で `<WIKI_ROOT>` を見つけたときは、その設定の `kind` に従う。指示で見つけたときに、スコープのためだけに設定を読みには行かない。
+   - 手がかりが 1 つも当てはまらないとき、または手がかりどうしが食い違うとき（グローバルな指示がユーザースコープの wiki と書き、プロジェクトの指示がそのプロジェクトの wiki と書くなど）は、スコープを決めない。
 1. 引数が `--stop` なら、`uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_browse.py" stop "<WIKI_ROOT>"` を実行し、結果（標準出力の JSON の `stopped`）を伝えて終わる。止められなかったときは、標準エラーの文をそのまま伝える。
-2. それ以外なら、`uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_browse.py" serve "<WIKI_ROOT>"` を**裏で**（終わるのを待たずに）起動する。slug があれば `--page "<slug>"` を足す。Claude Code のデスクトップアプリでは `--no-open` を足し、URL をブラウザペインで開く。それ以外では、`--no-open` を付けずに起動すると、既定のブラウザで開く。
-3. 標準出力の最初の 1 行の JSON を読む。`url` を利用者に示す。`reused` が真なら、すでに動いていたサーバーを使い回した。`page` が `ambiguous` か `unresolved` なら、slug のページを 1 つに決められなかったので、索引を開いたことを伝える。起動に失敗したら（JSON が出ずにプロセスが終わったら）、標準エラーの文をそのまま伝える。
+2. それ以外なら、`uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_browse.py" serve "<WIKI_ROOT>"` を**裏で**（終わるのを待たずに）起動する。slug があれば `--page "<slug>"` を足す。スコープを決めたなら、`--scope user` か `--scope project` を足す。決めなかったら付けない。Claude Code のデスクトップアプリでは `--no-open` を足し、URL をブラウザペインで開く。それ以外では、`--no-open` を付けずに起動すると、既定のブラウザで開く。
+3. 標準出力の最初の 1 行の JSON を読む。`url` を利用者に示す。`scope` は、そのサーバーが wiki のページ（サイドバーの先頭とタブの題名）に出すスコープである。wiki を組み立てられないときは、画面はエラーになり、スコープは出ない。`user` ならユーザースコープの wiki、`project` ならプロジェクトの wiki を開いたと伝える。`null` なら、ページにスコープを出さない。`reused` が真なら、すでに動いていたサーバーを使い回した。使い回したサーバーは、前に起動したときのスコープを出している（スコープを出さない前の版のサーバーなら `null`）。`scope` が手順 2 で渡したものと違えば、そのことを伝え、`/wiki:browse --stop` で止めてから開き直すと、今のスコープで出ることを案内する。`page` が `ambiguous` か `unresolved` なら、slug のページを 1 つに決められなかったので、索引を開いたことを伝える。起動に失敗したら（JSON が出ずにプロセスが終わったら）、標準エラーの文をそのまま伝える。
 4. サーバーは、操作がない状態が 30 分続くと終わる（`--idle-timeout <秒>` で変えられる）。Claude Code を終えても終わる。止めるには `/wiki:browse --stop` を使う。サーバーの URL のトークンは起動ごとに変わるので、終わったあとに開いていたタブのリンクは動かない。もう一度 `/wiki:browse` を実行する。
 5. ページの内容に問題を見つけても、閲覧の画面からは直せない。lint（`/wiki:lint`）で確かめ、ページを編集する。サーバーは次の要求で新しい内容を表示する。
 
-持ち出せる静的の HTML が要るときは、`uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_browse.py" build "<WIKI_ROOT>" --out <書き出し先>` を実行する。書き出し先は、wiki の外の、空のディレクトリにする。`--out` を付けると、`raw:` の絶対パスは既定でファイル名だけになる（`--raw text|link|basename|none` で選べる）。
+持ち出せる静的の HTML が要るときは、`uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_browse.py" build "<WIKI_ROOT>" --out <書き出し先>` を実行する。書き出し先は、wiki の外の、空のディレクトリにする。`--out` を付けると、`raw:` の絶対パスは既定でファイル名だけになる（`--raw text|link|basename|none` で選べる）。手順 0 でスコープを決めたなら、serve と同じに `--scope` を足す。
