@@ -11,17 +11,25 @@ lint、検索（とそれを使う MCP の索引）、グラフ、統計、判�
 - wikilink は、閲覧が使う markdown-it（commonmark、html は無効、表は有効）が本文の文字とするところだけから
   拾う。コードブロックの中、インラインのコードの中、参照リンクの定義の中のものは数えない。
 - パスとリンクの行き先は NFC にそろえて比べ、大文字と小文字を区別する。
+- wiki をたどる経路は walk_markdown() の 1 つで、ページ（walk_pages）と索引のファイル（walk_index_files）は、
+  起点を変えて同じたどり方を使う。最上位の除く名前の項目には、どの OS の呼び出しもしない。OS の呼び出しの失敗は、
+  read_os() の 1 か所で「ない」「分からない」「そのほか（送出）」に分ける。設計は info-hive-dev の
+  `docs/plans/wiki-walk-excluded-dirs-2026-11-11.md`（7 版目）にある。
 """
 
 from __future__ import annotations
 
+import errno
 import functools
 import hashlib
+import os
 import re
+import stat
 import sys
 import unicodedata
 from collections import defaultdict
 from pathlib import Path, PurePosixPath
+from typing import NamedTuple
 
 from wiki_text import nfc, posix_rel
 
@@ -49,16 +57,274 @@ def is_page_path(rel: "str | PurePosixPath") -> bool:
     return parts[0] not in SKIP_TOP_LEVEL_DIRS
 
 
-def iter_page_files(wiki_root: Path) -> list[Path]:
-    """ページのファイルを、NFC の / 区切りの相対パスの順に返す。"""
+# ---------------------------------------------------------------------------
+# wiki をたどる
+# ---------------------------------------------------------------------------
+#
+# 走査が OS を呼ぶ口は、os.scandir()（開く、項目を 1 つ取り出す、閉じる）、項目の is_symlink()、is_dir()、
+# is_junction()、os.stat()、Windows の win_file_id() だけである。どれも、呼ぶたびに os から引いて呼ぶ
+# （試験が差し替えられるように）。pathlib の入出力、os.walk、os.path.realpath、os.path.isfile は使わない。内側で
+# いくつもの呼び出しをして、失敗を版ごとに違う形で読み替えるからである。口の各行の内側の扱いと、それが結果を
+# 変えない理由は、設計の「決めること」の 1 の表にある。
+
+NT = os.name == "nt"
+
+
+class MdFile(NamedTuple):
+    """名前が .md で終わる、ふつうのファイル（リンクの先がふつうのファイルのものを含む）。"""
+    rel: str        # wiki のルートからの相対パス（/ 区切り、ディスク上の綴り）
+    size: int       # ファイルかどうかを調べた os.stat() の値
+    mtime_ns: int
+
+
+class Walk(NamedTuple):
+    """走査の結果。知らせ（unlistable と unknown）がどちらも空なら、たどる間に変わらなかったものは欠けていない。"""
+    files: list            # MdFile の並び
+    unlistable: list       # 一覧を作れなかったディレクトリ（相対パス）
+    unknown: list          # 種類か、同じ場所を回っていないかを、調べられなかった項目（相対パス）
+
+
+class NoFileId(OSError):
+    """ファイルシステムが、識別子（FileIdInfo）を返さない。"""
+
+
+# 失敗の分け方（設計の「決めること」の 2）。今の実装の扱い（3.12 と 3.13 の pathlib の _ignore_error は ENOENT、ENOTDIR、
+# EBADF、ELOOP と Windows のエラー 21、123、1921 を無視する。3.14 の glob と os.path.isfile は、どの OSError も無視する）と
+# 並べて決めた。木の状態として、障害なしに必ず起きる失敗（解けないリンク）は、送出しない。
+_ABSENT = (FileNotFoundError, NotADirectoryError)
+_UNRESOLVABLE_ERRNOS = (errno.ELOOP,)       # 解けないリンク。ページにならない
+_UNRESOLVABLE_WINERRORS = (1921, 123)       # ERROR_CANT_RESOLVE_FILENAME、ERROR_INVALID_NAME
+_UNKNOWN_ERRNOS = (errno.EBADF,)            # 木の状態としては起きないはずだが、今の実装は無視する。送出はしない
+_UNKNOWN_WINERRORS = (21,)                  # ERROR_NOT_READY。準備のできていないドライブ。中身があるかが分からない
+
+
+def read_os(call, *args, **kwargs):
+    """OS の呼び出しの結果を (状態, 値) で返す。走査の失敗の読み替えは、ここだけで行う。
+
+    状態は "ok"、"absent"（ない）、"denied"（分からない）。そのほかの OSError は送出する。
+    """
+    try:
+        return "ok", call(*args, **kwargs)
+    except _ABSENT:
+        return "absent", None
+    except (PermissionError, NoFileId):
+        return "denied", None
+    except OSError as exc:
+        winerror = getattr(exc, "winerror", None)
+        if winerror in _UNRESOLVABLE_WINERRORS or (winerror is None and exc.errno in _UNRESOLVABLE_ERRNOS):
+            return "absent", None
+        if winerror in _UNKNOWN_WINERRORS or (winerror is None and exc.errno in _UNKNOWN_ERRNOS):
+            return "denied", None
+        raise
+
+
+# Windows の識別子（ctypes。標準ライブラリだけ）。os.stat() の識別子は使わない。Python 3.12 以降の os.stat() は、
+# FileIdInfo の取得の失敗を捨てて、st_dev を 64 ビットではなく 32 ビットの値にするからである。
+
+_UNSUPPORTED_WINERRORS = (1, 50, 87)  # ERROR_INVALID_FUNCTION、ERROR_NOT_SUPPORTED、ERROR_INVALID_PARAMETER
+_KERNEL32 = None
+
+
+def _kernel32():
+    global _KERNEL32
+    if _KERNEL32 is None:
+        import ctypes
+        from ctypes import wintypes
+        k = ctypes.WinDLL("kernel32", use_last_error=True)
+        k.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+                                  wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+        k.CreateFileW.restype = wintypes.HANDLE
+        k.GetFileInformationByHandleEx.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+        k.GetFileInformationByHandleEx.restype = wintypes.BOOL
+        k.CloseHandle.argtypes = [wintypes.HANDLE]
+        k.CloseHandle.restype = wintypes.BOOL
+
+        class FileIdInfo(ctypes.Structure):
+            _fields_ = [("VolumeSerialNumber", ctypes.c_ulonglong), ("FileId", ctypes.c_ubyte * 16)]
+        _KERNEL32 = (ctypes, k, FileIdInfo)
+    return _KERNEL32
+
+
+def win_file_id(path) -> "tuple[int, bytes]":
+    """(VolumeSerialNumber, FileId) を返す（Windows だけ）。リンクの先をたどる。どの失敗も OSError で送出し、読み替えない。
+
+    ないパスは FileNotFoundError、拒まれたパスは PermissionError（OSError の第 4 引数に Windows のエラーの番号を渡すと、
+    Python が分ける）。ファイルシステムが FileIdInfo を返さないときは NoFileId。
+    """
+    ctypes, k, FileIdInfo = _kernel32()
+    path = os.fspath(path)
+
+    def error():
+        code = ctypes.get_last_error()
+        return OSError(None, ctypes.FormatError(code).strip(), path, code)
+    # FILE_READ_ATTRIBUTES、読み書きと削除の共有、OPEN_EXISTING、FILE_FLAG_BACKUP_SEMANTICS（ディレクトリを開く）
+    handle = k.CreateFileW(path, 0x80, 0x7, None, 3, 0x02000000, None)
+    if handle in (None, ctypes.c_void_p(-1).value):
+        raise error()
+    try:
+        info = FileIdInfo()
+        if not k.GetFileInformationByHandleEx(handle, 18, ctypes.byref(info), ctypes.sizeof(info)):  # 18 は FileIdInfo
+            code = ctypes.get_last_error()
+            if code in _UNSUPPORTED_WINERRORS:
+                raise NoFileId(None, ctypes.FormatError(code).strip(), path, code)
+            raise error()
+        return info.VolumeSerialNumber, bytes(info.FileId)
+    finally:
+        if not k.CloseHandle(handle):
+            raise error()
+
+
+def _sort_key(rel: str) -> "tuple[str, str]":
+    """並びの鍵。今の iter_page_files() の鍵（posix_rel）に、同じ鍵のときの決め方（ディスク上の綴り）を足したもの。"""
+    return (posix_rel(rel), rel)
+
+
+def _stat_entry(path: str):
+    """(状態, stat の結果)。.md の項目と最上位の index.md がふつうのファイルかどうかを調べる os.stat()。
+
+    Windows の os.stat() は、属性の取得がエラー 1、50、87 で失敗すると、S_IFBLK の成功に読み替える。一覧に載る項目が
+    ボリュームや物理ディスクであることはないので、Windows で S_IFBLK が返ったら「分からない」にする。POSIX の S_IFBLK は
+    本物のデバイスのファイルなので、ふつうのファイルでない（今と同じ）。
+    """
+    state, st = read_os(os.stat, path)
+    if state == "ok" and NT and stat.S_ISBLK(st.st_mode):
+        return "denied", None
+    return state, st
+
+
+def _list_dir(directory: str) -> list:
+    # 項目を最後まで取り出してから閉じる。閉じるときの失敗は、CPython が捨てる（ScandirIterator_closedir が FindClose と
+    # closedir の戻り値を見ない）が、取り出し終えた一覧は変わらない。
+    with os.scandir(directory) as it:
+        return list(it)
+
+
+def _identity(path: str):
+    """(状態, 識別子)。識別子は win_file_id() の値。FileId がすべて 0 なら、分からない。Windows でだけ呼ばれる。"""
+    state, value = read_os(win_file_id, path)
+    if state != "ok":
+        return state, None
+    if not any(value[1]):
+        return "denied", None
+    return "ok", value
+
+
+def _chain_identities(chain: tuple):
+    """(状態, 識別子の並び)。chain の各ディレクトリの識別子を、起点から順に取る。"""
     found = []
-    # 拡張子の大文字と小文字を問わずに集める（Linux の rglob("*.md") は Upper.MD を返さない）。
-    for md_path in wiki_root.rglob("*.[mM][dD]"):
-        rel = md_path.relative_to(wiki_root).as_posix()
-        if is_page_path(rel) and md_path.is_file():
-            found.append((posix_rel(rel), md_path))
-    found.sort(key=lambda item: item[0])
-    return [path for _rel, path in found]
+    for path in chain:
+        state, one = _identity(path)
+        if state != "ok":
+            return state, None
+        found.append(one)
+    return "ok", tuple(found)
+
+
+def _is_junction(entry):
+    """(状態, ジャンクションか)。DirEntry.is_junction()（3.12 から）は、Windows では一覧の情報（再解析のタグ）から答え、
+    OS を呼ばない。Windows のほかでは、いつも偽を返す。"""
+    return read_os(entry.is_junction)
+
+
+def walk_markdown(start, prefix: str = "", skip_top: bool = False) -> Walk:
+    """start の下をたどり、名前が .md で終わるふつうのファイルと、知らせを返す。
+
+    - 起点には、リンクであっても降りる。途中のディレクトリのシンボリックリンクには降りない。ジャンクションには降りる
+      （どちらも 0.10 までの rglob と同じ）。
+    - skip_top が真なら、起点の直下の、名前が SKIP_TOP_LEVEL_DIRS に入っている項目には、どの呼び出しもしない。
+    - ジャンクションを 1 つでも通った道筋では、入ろうとするディレクトリの識別子が、起点からそこまでに通った
+      ディレクトリのどれかと同じなら、降りない（同じ場所を回る道筋）。識別子を取れなければ、unknown に入れて降りない。
+    - prefix は、返す相対パスの先頭に付ける。並びは posix_rel の順、同じなら綴りの順である。
+    """
+    files, unlistable, unknown = [], [], []
+    start = os.fspath(start)
+    # スタックの項目: (ディレクトリのパス, 相対パスの接頭辞, 起点からここまでのパスの並び, 識別子の並びか None)
+    stack = [(start, prefix, (start,), None)]
+    while stack:
+        directory, pre, chain, ids = stack.pop()
+        state, entries = read_os(_list_dir, directory)
+        if state == "absent":
+            continue
+        if state == "denied":
+            unlistable.append(pre.rstrip("/") or ".")
+            continue
+        for entry in entries:
+            name = entry.name
+            rel = pre + name
+            if skip_top and pre == prefix and name in SKIP_TOP_LEVEL_DIRS:
+                continue  # 名前だけで決める。リンクかどうかも、ディレクトリかどうかも調べない
+            is_link = is_dir = junction = False
+            state, is_link = read_os(entry.is_symlink)
+            if state == "ok":
+                state, is_dir = read_os(entry.is_dir)  # リンクの先で判定する
+            if state == "ok" and is_dir and not is_link:
+                state, junction = _is_junction(entry)
+            if state == "absent":
+                continue
+            if state == "denied":
+                unknown.append(rel)
+                continue
+            if is_dir:
+                if is_link:
+                    continue  # ディレクトリのシンボリックリンク。降りず、ファイルでもない
+                child_ids = None
+                if junction or ids is not None:
+                    state, child = _identity(entry.path)
+                    path_ids = ids
+                    if state == "ok" and path_ids is None:
+                        # このジャンクションで、道筋に初めて識別子が要る。起点からここまでの識別子を、
+                        # このジャンクションのためだけに取る。兄弟の項目には引き継がない。
+                        state, path_ids = _chain_identities(chain)
+                    if state == "absent":
+                        continue
+                    if state == "denied":
+                        unknown.append(rel)  # 同じ場所を回っていないかを、調べられなかった
+                        continue
+                    if child in path_ids:
+                        continue  # 道筋の上のディレクトリに戻る。降りない
+                    child_ids = path_ids + (child,)
+                stack.append((entry.path, rel + "/", chain + (entry.path,), child_ids))
+                continue
+            if name.lower().endswith(".md"):
+                state, st = _stat_entry(entry.path)
+                if state == "absent":
+                    continue  # 先のないリンク
+                if state == "denied":
+                    unknown.append(rel)
+                    continue
+                if stat.S_ISREG(st.st_mode):
+                    files.append(MdFile(rel, st.st_size, st.st_mtime_ns))
+    files.sort(key=lambda f: _sort_key(f.rel))
+    return Walk(files, sorted(unlistable, key=_sort_key), sorted(unknown, key=_sort_key))
+
+
+def walk_pages(wiki_root) -> Walk:
+    """ページのファイルと、知らせ。知らせは、たどった全体のものをそのまま返す。"""
+    found = walk_markdown(wiki_root, skip_top=True)
+    return Walk([f for f in found.files if is_page_path(f.rel)], found.unlistable, found.unknown)
+
+
+def walk_index_files(wiki_root) -> Walk:
+    """索引のファイル（最上位の index.md と、indexes を起点にした .md）と、知らせ。
+
+    indexes は、リンクであっても起点として降りる。ページの側とは別の呼び出しでたどるので、indexes がページの
+    ディレクトリを指していても、ページと索引の両方がそろう。
+    """
+    root = os.fspath(wiki_root)
+    files, unknown = [], []
+    state, st = _stat_entry(os.path.join(root, "index.md"))
+    if state == "denied":
+        unknown.append("index.md")
+    elif state == "ok" and stat.S_ISREG(st.st_mode):
+        files.append(MdFile("index.md", st.st_size, st.st_mtime_ns))
+    below = walk_markdown(os.path.join(root, "indexes"), prefix="indexes/")
+    return Walk(files + below.files, below.unlistable, unknown + below.unknown)
+
+
+def iter_page_files(wiki_root: Path) -> list[Path]:
+    """ページのファイルを、NFC の / 区切りの相対パスの順に返す（知らせは捨てる。知らせを見るなら walk_pages）。"""
+    wiki_root = Path(wiki_root)
+    return [wiki_root / f.rel for f in walk_pages(wiki_root).files]
 
 
 # ---------------------------------------------------------------------------

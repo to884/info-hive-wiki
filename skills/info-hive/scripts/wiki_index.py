@@ -34,6 +34,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import wiki_mcp_common as common  # noqa: E402
+import wiki_pages  # noqa: E402
 import wiki_search  # noqa: E402
 
 # 埋め込みモデル（ADR-0011）。重みは onnx-community の書き出し、トークナイザーと設定は cl-nagoya の固定の
@@ -812,15 +813,15 @@ def section_hash(section: dict) -> str:
 
 
 def stat_signature(root: Path) -> str:
-    """wiki の Markdown のパス、大きさ、更新時刻から作る印。変わっていなければ読み直さない。"""
+    """wiki の Markdown のパス、大きさ、更新時刻から作る印。変わっていなければ読み直さない。
+
+    ページと同じたどり方（wiki_pages.walk_markdown）で、最上位の除くディレクトリ（raw/、indexes/ など）には降りない。
+    その下のファイルはページではないので、印に入れなくてよい。最上位の index.md などのページでない Markdown は入る。
+    たどる途中の権限と消失のほかの OSError は送出し、refresh() は索引の行を消さずに失敗する。
+    """
     digest = hashlib.sha256()
-    # ページの走査（wiki_pages.iter_page_files）と同じく、拡張子の大文字と小文字を問わない。
-    for path in sorted(root.rglob("*.[mM][dD]")):
-        try:
-            st = path.stat()
-        except OSError:
-            continue
-        digest.update(f"{path.relative_to(root).as_posix()}\0{st.st_size}\0{st.st_mtime_ns}\n".encode("utf-8"))
+    for f in wiki_pages.walk_markdown(root, skip_top=True).files:
+        digest.update(f"{f.rel}\0{f.size}\0{f.mtime_ns}\n".encode("utf-8"))
     return digest.hexdigest()
 
 
@@ -954,7 +955,8 @@ def list_index(root: Path, name: str | None = None) -> dict:
     """index.md と indexes/ の一覧を返す。name を渡すと indexes/ の中のそのファイルを返す。"""
     if name:
         target = (root / "indexes" / name).resolve()
-        if target.suffix != ".md":
+        # 拡張子の大文字と小文字は問わない（一覧は Upper.MD も返す）。拡張子が .md でなければ、.md を付けたものとみなす。
+        if target.suffix.lower() != ".md":
             target = target.with_suffix(".md")
         if not target.is_relative_to((root / "indexes").resolve()) or not target.is_file():
             raise FileNotFoundError(f"indexes/ に {name} がない")
@@ -963,13 +965,16 @@ def list_index(root: Path, name: str | None = None) -> dict:
     index_md = root / "index.md"
     files = []
     folder = root / "indexes"
-    if folder.is_dir():
-        for path in sorted(folder.rglob("*.md")):
-            text = path.read_text(encoding="utf-8-sig")
-            meta, body = wiki_search.parse_frontmatter(text)
-            heading = next((line.lstrip("#").strip() for line in body.splitlines() if line.startswith("#")), None)
-            files.append({"name": path.relative_to(folder).as_posix(), "title": meta.get("title") or heading,
-                          "bytes": path.stat().st_size})
+    # 索引のファイルは lint と同じ集め方（wiki_pages.walk_index_files）にする。ふつうのファイルだけで、.md で終わる
+    # 名前のディレクトリで失敗しない。並びは今までどおり Path の順である。
+    found = [f for f in wiki_pages.walk_index_files(root).files if f.rel != "index.md"]
+    for f in sorted(found, key=lambda f: root / f.rel):
+        path = root / f.rel
+        text = path.read_text(encoding="utf-8-sig")
+        meta, body = wiki_search.parse_frontmatter(text)
+        heading = next((line.lstrip("#").strip() for line in body.splitlines() if line.startswith("#")), None)
+        files.append({"name": path.relative_to(folder).as_posix(), "title": meta.get("title") or heading,
+                      "bytes": f.size})
     return {"wiki": root.as_posix(),
             "index": index_md.read_text(encoding="utf-8-sig") if index_md.is_file() else None,
             "indexes": files}

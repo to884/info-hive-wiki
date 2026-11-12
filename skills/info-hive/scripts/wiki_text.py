@@ -17,7 +17,20 @@ wiki_text.py — 日本語の wiki を扱うための文字列の正規化と、
 from __future__ import annotations
 
 import re
+import sys
 import unicodedata
+
+# 同梱のスクリプトは Python 3.12 以上を対象にする（info-hive-dev の ADR-0018）。lint、stats、語彙の検索などの
+# 標準ライブラリだけのスクリプトは、利用者の python で直接動くので、ここで版を確かめ、古い版では理由を書いて止める。
+# どのスクリプトもこのモジュールを最初に読み込む。古い版でもここまで届くよう、このファイルと入口のスクリプトには、
+# 3.12 だけの構文（PEP 695 の型の宣言、PEP 701 の f 文字列の書き方など）を使わない。
+MIN_PYTHON = (3, 12)
+if sys.version_info < MIN_PYTHON:
+    sys.stderr.write(
+        f"info-hive の wiki のスクリプトには Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} 以上が必要である"
+        f"（今の Python は {sys.version.split()[0]}）。"
+        f"`uv run --python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} python <スクリプト>` で実行する。\n")
+    raise SystemExit(1)
 
 # frontmatter のキーの日本語の別名。値は英語のキー。
 # 比較の前に NFKC をかけるので、全角・半角の違いはここに並べなくてよい。

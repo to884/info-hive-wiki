@@ -94,6 +94,7 @@ from wiki_pages import (  # noqa: E402
     iter_page_files,
     ref_values,
     resolve_link,
+    walk_index_files,
 )
 
 
@@ -137,16 +138,14 @@ def heading_type(text: str) -> "str | None":
 def index_files(wiki_root: Path) -> list[Path]:
     """索引のファイル（index.md と、indexes/ の下の Markdown）を、読む順に返す。
 
-    lint の索引の検査と、閲覧のナビゲーションが、同じ集め方をする。
+    lint の索引の検査と、閲覧のナビゲーションが、同じ集め方をする。集め方は wiki_pages.walk_index_files で、
+    ふつうのファイルだけを返す（0.10.1 までは、rglob("*.md") が返す名前を、種類を確かめずに返していた）。
+    並びは今までどおり、index.md、そのあと indexes の下を Path の順にする。知らせは捨てる。
     """
-    files = []
-    top = wiki_root / "index.md"
-    if top.is_file():
-        files.append(top)
-    split_dir = wiki_root / "indexes"
-    if split_dir.is_dir():
-        files.extend(sorted(split_dir.rglob("*.md")))
-    return files
+    wiki_root = Path(wiki_root)
+    rels = [f.rel for f in walk_index_files(wiki_root).files]
+    top = [wiki_root / rel for rel in rels if rel == "index.md"]
+    return top + sorted(wiki_root / rel for rel in rels if rel != "index.md")
 
 
 def collect_index_entries(wiki_root: Path) -> list[dict]:
