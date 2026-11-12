@@ -17,10 +17,11 @@ wiki_stats.py — wiki の規模、構成、リンク密度の簡単な集計。
 
 import argparse
 import json
+import os
 import re
 import sys
 from collections import Counter
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 # スクリプトとして実行したときも、テストから importlib で読み込んだときも、
 # 同じディレクトリの wiki_text を import できるようにする。
@@ -31,7 +32,9 @@ from wiki_text import (  # noqa: E402
 )
 import wiki_workspace  # noqa: E402
 # ページの集合とリンクの抜き出しは、lint と同じ規則（wiki_pages）を使う。
-from wiki_pages import SKIP_TOP_LEVEL_DIRS, SKIP_TOP_LEVEL_FILES, WIKILINK_RE, extract_wikilinks, is_page_path  # noqa: E402,F401
+from wiki_pages import (  # noqa: E402,F401
+    SKIP_TOP_LEVEL_DIRS, SKIP_TOP_LEVEL_FILES, WIKILINK_RE, extract_wikilinks, is_page_path, read_os, walk_markdown,
+)
 
 
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
@@ -106,6 +109,12 @@ def scale_advice(total_pages: int, index_lines: int, has_indexes: bool) -> list[
     return advice
 
 
+def by_count(counter: Counter) -> list:
+    """件数の多い順、同じなら名前のコードポイントの順。Counter.most_common() は、同点を入れた順（ファイルを列挙した順）に
+    並べるので、同点のある wiki では環境によって並びが変わる。"""
+    return sorted(counter.items(), key=lambda item: (-item[1], item[0]))
+
+
 def compute_stats(wiki: Path) -> dict:
     """wiki の規模、構成、リンク密度を集計して返す。キーは英語のまま（--json と MCP の stats が使う）。"""
     wiki = Path(wiki)
@@ -120,19 +129,21 @@ def compute_stats(wiki: Path) -> dict:
     most_linked_in = Counter()
     index_lines = 0
 
-    for md_path in wiki.rglob("*.[mM][dD]"):  # 拡張子の大文字と小文字を問わない（wiki_pages と同じ）
-        rel = md_path.relative_to(wiki)
+    # ページと同じたどり方（wiki_pages.walk_markdown）で、最上位の除くディレクトリには降りない。読むのは、最上位の
+    # index.md（行数を数える）と、ページ（lint と同じ is_page_path）だけで、読むかどうかは読む前に決める。
+    for found in walk_markdown(wiki, skip_top=True).files:
+        top_index = found.rel == "index.md"
+        if not top_index and not is_page_path(found.rel):
+            continue
+        rel = PurePosixPath(found.rel)
         try:
             # 先頭に BOM があっても読めるようにする。
-            text = md_path.read_text(encoding="utf-8-sig")
+            text = (wiki / found.rel).read_text(encoding="utf-8-sig")
         except (UnicodeDecodeError, OSError):
             continue
 
-        if rel.name == "index.md" and len(rel.parts) == 1:
+        if top_index:
             index_lines = text.count("\n") + 1
-            continue
-        # ページの数え方は lint と同じ（wiki_pages）。
-        if not is_page_path(rel.as_posix()):
             continue
 
         total_pages += 1
@@ -167,6 +178,9 @@ def compute_stats(wiki: Path) -> dict:
     if total_pages:
         average = {"lines": total_lines // total_pages, "chars": total_chars // total_pages,
                    "words": total_words // total_pages, "links": round(total_links / total_pages, 1)}
+    # indexes があるか（推奨の文に使う）は、名前の項目そのものに os.lstat() を 1 回かけて決める。リンクの先もその下も
+    # 調べない。ないなら「ない」、権限で調べられなければ「ある」とみなし（分けることを勧めない）、ほかは送出する。
+    has_indexes = read_os(os.lstat, os.path.join(str(wiki), "indexes"))[0] != "absent"
     return {
         "wiki": str(wiki),
         "pages": total_pages,
@@ -176,12 +190,12 @@ def compute_stats(wiki: Path) -> dict:
         "links": total_links,
         "average": average,
         "index_lines": index_lines,
-        "pages_by_type": dict(pages_by_type.most_common()),
-        "pages_by_dir": dict(pages_by_dir.most_common()),
+        "pages_by_type": dict(by_count(pages_by_type)),
+        "pages_by_dir": dict(by_count(pages_by_dir)),
         "largest": [{"path": path, "chars": chars, "lines": lines, "size": size_level(lines, chars)}
                     for chars, lines, path in largest[:TOP_N]],
-        "most_linked": [{"slug": slug, "count": count} for slug, count in most_linked_in.most_common(TOP_N)],
-        "advice": scale_advice(total_pages, index_lines, (wiki / "indexes").exists()),
+        "most_linked": [{"slug": slug, "count": count} for slug, count in by_count(most_linked_in)[:TOP_N]],
+        "advice": scale_advice(total_pages, index_lines, has_indexes),
     }
 
 
