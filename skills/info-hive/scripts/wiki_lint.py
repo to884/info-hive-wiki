@@ -273,10 +273,14 @@ def missing_assets(body: str, md_path: Path, wiki_root: Path) -> list[dict]:
             rel = urllib.parse.unquote(rel)
             if not rel:
                 continue
+            # %00 のように、ファイルのパスにできない参照先。lint を止めずに報告する。
+            # NUL は自分で確かめる。Path.resolve() が NUL で ValueError を出すのは、Windows では 3.12 までである。
+            if "\0" in rel:
+                found.append({"target": target, "invalid": True})
+                continue
             try:
                 resolved = (md_path.parent / rel).resolve()
             except (ValueError, OSError):
-                # %00 のように、ファイルのパスにできない参照先。lint を止めずに報告する。
                 found.append({"target": target, "invalid": True})
                 continue
             inside = _inside(resolved, root)
