@@ -62,7 +62,7 @@ def is_page_path(rel: "str | PurePosixPath") -> bool:
 # ---------------------------------------------------------------------------
 #
 # 走査が OS を呼ぶ口は、os.scandir()（開く、項目を 1 つ取り出す、閉じる）、項目の is_symlink()、is_dir()、
-# stat(follow_symlinks=False)、os.stat()、Windows の win_file_id() だけである。どれも、呼ぶたびに os から引いて呼ぶ
+# is_junction()、os.stat()、Windows の win_file_id() だけである。どれも、呼ぶたびに os から引いて呼ぶ
 # （試験が差し替えられるように）。pathlib の入出力、os.walk、os.path.realpath、os.path.isfile は使わない。内側で
 # いくつもの呼び出しをして、失敗を版ごとに違う形で読み替えるからである。口の各行の内側の扱いと、それが結果を
 # 変えない理由は、設計の「決めること」の 1 の表にある。
@@ -88,7 +88,7 @@ class NoFileId(OSError):
     """ファイルシステムが、識別子（FileIdInfo）を返さない。"""
 
 
-# 失敗の分け方（設計の「決めること」の 2）。今の実装の扱い（3.10〜3.12 の pathlib の _ignore_error は ENOENT、ENOTDIR、
+# 失敗の分け方（設計の「決めること」の 2）。今の実装の扱い（3.12 と 3.13 の pathlib の _ignore_error は ENOENT、ENOTDIR、
 # EBADF、ELOOP と Windows のエラー 21、123、1921 を無視する。3.14 の glob と os.path.isfile は、どの OSError も無視する）と
 # 並べて決めた。木の状態として、障害なしに必ず起きる失敗（解けないリンク）は、送出しない。
 _ABSENT = (FileNotFoundError, NotADirectoryError)
@@ -221,14 +221,9 @@ def _chain_identities(chain: tuple):
 
 
 def _is_junction(entry):
-    """(状態, ジャンクションか)。Windows のほかでは、呼び出しをせずに偽を返す。DirEntry.is_junction() は 3.12 から。"""
-    if not NT:
-        return "ok", False
-    state, st = read_os(entry.stat, follow_symlinks=False)
-    if state != "ok":
-        return state, False
-    return "ok", bool(st.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT) \
-        and st.st_reparse_tag == stat.IO_REPARSE_TAG_MOUNT_POINT
+    """(状態, ジャンクションか)。DirEntry.is_junction()（3.12 から）は、Windows では一覧の情報（再解析のタグ）から答え、
+    OS を呼ばない。Windows のほかでは、いつも偽を返す。"""
+    return read_os(entry.is_junction)
 
 
 def walk_markdown(start, prefix: str = "", skip_top: bool = False) -> Walk:
