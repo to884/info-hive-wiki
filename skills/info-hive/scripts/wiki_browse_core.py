@@ -52,6 +52,19 @@ DATA_FILES = ("nav.js", "data/manifest.js", "data/diagnostics.js")
 EXTERNAL_SCHEMES = ("http", "https", "mailto")
 ONTOLOGY_REL = "graph/ontology.yaml"
 
+# wiki のスコープの表示。スコープは、wiki を選んだ側（/wiki:browse）が --scope で指定する。
+SCOPE_KINDS = ("user", "project")
+SCOPE_LABELS = {"user": "ユーザースコープ", "project": "プロジェクト"}
+SCOPE_HEADINGS = {"user": "ユーザースコープの wiki", "project": "プロジェクトの wiki"}
+
+
+def normalize_scope(value) -> "str | None":
+    """スコープの値を、描くもの（SCOPE_KINDS のどれか）か None（出さない）にそろえる。
+
+    中核、サーバー、使い回すサーバーの答えの読み取りは、どれもこの 1 つの規則を使う。
+    """
+    return value if isinstance(value, str) and value in SCOPE_KINDS else None
+
 
 _DISPLAY = wiki_pages.new_parser()
 
@@ -519,8 +532,11 @@ class Recorder:
 class Core:
     """1 つの写しから組み立てた中核。描く関数は静的の書き出しとサーバーで同じものを使う。"""
 
-    def __init__(self, snapshot: Snapshot, name_limit: int = NAME_LIMIT, record: bool = True):
+    def __init__(self, snapshot: Snapshot, name_limit: int = NAME_LIMIT, record: bool = True,
+                 scope: "str | None" = None):
         self.snapshot = snapshot
+        # wiki のスコープ（user か project）。呼び出し元の指定で、中核は決めない。None なら出さない。
+        self.scope = normalize_scope(scope)
         self.generation = snapshot.generation
         self.parser = wiki_pages.new_parser()
         self.diagnostics = []
@@ -1037,6 +1053,12 @@ class Core:
             lis.append(f"<li>{html.escape(' / '.join(map(str, parts)))}</li>")
         return f'<section id="_diagnostics"><h2>診断</h2><ul>{"".join(lis)}</ul></section>\n'
 
+    def _scope_html(self) -> str:
+        """サイドバーの先頭に置く、スコープの表示。スクリプトなしでも見える。"""
+        if not self.scope:
+            return ""
+        return f'<p id="_scope" class="scope scope-{self.scope}">{SCOPE_HEADINGS[self.scope]}</p>'
+
     def _head(self, path: str, title: str, stale: "str | None") -> str:
         prefix = root_prefix(path)
         self.recorder.add(path, title)
@@ -1044,14 +1066,16 @@ class Core:
         if stale:
             banner = (f'<p id="_stale" class="stale">Wiki の最新の内容を表示できていない。前の内容を表示している'
                       f"（{html.escape(stale)}）</p>\n")
+        full_title = f"{title} · {SCOPE_LABELS[self.scope]}" if self.scope else title
         return (f'<!doctype html>\n<html lang="ja" data-root="{prefix}" data-generation="{self.generation}">\n'
                 f'<head>\n<meta charset="utf-8">\n'
                 f'<meta http-equiv="Content-Security-Policy" content="{CSP}">\n'
                 f'<meta name="referrer" content="no-referrer">\n'
                 f'<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-                f"<title>{html.escape(title)}</title>\n"
+                f"<title>{html.escape(full_title)}</title>\n"
                 f'<link rel="stylesheet" href="{prefix}assets/style.css">\n</head>\n<body>\n'
-                f'<nav id="_nav"><noscript><a href="{prefix}index.html">索引へ</a></noscript></nav>\n'
+                f'<nav id="_nav">{self._scope_html()}'
+                f'<noscript><a href="{prefix}index.html">索引へ</a></noscript></nav>\n'
                 f'<main id="_main">\n{banner}')
 
     def _tail(self, path: str, extra_data: tuple = ()) -> str:

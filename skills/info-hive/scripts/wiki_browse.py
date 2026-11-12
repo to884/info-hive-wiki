@@ -8,8 +8,8 @@
 """
 wiki_browse.py — wiki の閲覧（browse）の入口。
 
-    uv run --script wiki_browse.py build <WIKI_ROOT> [--out DIR] [--raw text|link|basename|none]
-    uv run --script wiki_browse.py serve <WIKI_ROOT> [--page SLUG] [--no-open] [--idle-timeout 秒]
+    uv run --script wiki_browse.py build <WIKI_ROOT> [--out DIR] [--raw text|link|basename|none] [--scope user|project]
+    uv run --script wiki_browse.py serve <WIKI_ROOT> [--page SLUG] [--no-open] [--idle-timeout 秒] [--scope user|project]
     uv run --script wiki_browse.py stop <WIKI_ROOT>
     uv run --script wiki_browse.py core          （標準入力から 1 行に 1 つの JSON の要求を読む）
 
@@ -177,7 +177,7 @@ def write_tree(guard: fs.Guard, base: Path, files: dict) -> None:
         guard.write_bytes(target, data)
 
 
-def build(root: Path, out_arg: "str | None", raw: "str | None") -> dict:
+def build(root: Path, out_arg: "str | None", raw: "str | None", scope: "str | None" = None) -> dict:
     root = Path(root)
     key = common.wiki_key(root)
     bdir = browse_dir()
@@ -209,10 +209,11 @@ def build(root: Path, out_arg: "str | None", raw: "str | None") -> dict:
         with fs.Lock(guard, work / "build.lock") as work_lock:
             if not work_lock.try_acquire():
                 raise Failed("同じ書き出し先に、ほかの書き出しが動いている")
-            return _build_locked(guard, root, out, work, raw)
+            return _build_locked(guard, root, out, work, raw, scope)
 
 
-def _build_locked(guard: fs.Guard, root: Path, out: Path, work: Path, raw: str) -> dict:
+def _build_locked(guard: fs.Guard, root: Path, out: Path, work: Path, raw: str,
+                  scope: "str | None" = None) -> dict:
     started = time.perf_counter()
     fs.check_output_dir(out)
     fs.check_work_dir(work)
@@ -229,7 +230,7 @@ def _build_locked(guard: fs.Guard, root: Path, out: Path, work: Path, raw: str) 
         # 目印を最初に置く。組み立てが途中で失敗しても、作りかけの世代として見つけて消せる。
         guard.write_text(tmp / fs.GENERATION_MARKER,
                          json.dumps({"generation": snap.generation, "published_seq": seq}) + "\n")
-        c = core.Core(snap)
+        c = core.Core(snap, scope=scope)
         files = c.render_all(raw, generated_at)
         write_tree(guard, tmp, files)
         write_tree(guard, tmp, {name: core.asset_bytes(name) for name in core.ASSETS})
@@ -341,11 +342,16 @@ def _quote_path(name: str) -> str:
 class BrowseState:
     """サーバーが持つ中核と、作り直しの状態（設計の 8.3）。"""
 
-    def __init__(self, root: Path, guard: fs.Guard, state_dir: Path, raw: str = "text"):
+    def __init__(self, root: Path, guard: fs.Guard, state_dir: Path, raw: str = "text",
+                 scope: "str | None" = None):
         self.root = root
         self.guard = guard
         self.state_dir = state_dir
         self.raw = raw
+        # このサーバーが wiki のページ（サイドバーの先頭とタブの題名）に描くスコープ。サーバーは描くスコープを
+        # ここにだけ持つ。組み立てるどの中核にも同じものを渡し、操作の口の status と起動の出力もこれを書く。
+        # wiki を組み立てられないあいだは 503 を返してページを描かないが、この値は変わらない。
+        self.scope = core.normalize_scope(scope)
         self.current: "core.Core | None" = None
         self.failed: "str | None" = None
         self.build_lock = threading.Lock()
@@ -388,7 +394,7 @@ class BrowseState:
                     # 状態のディレクトリが守る場所と重なった。記録に触れずに終わる（設計の 6.1）。
                     self.shutdown_requested = True
                     return self._answer(cur, request_sig, "failed")
-                new = core.Core(snap, record=False)
+                new = core.Core(snap, record=False, scope=self.scope)
             except Exception as e:  # noqa: BLE001  前の中核を使い続ける
                 self.failed = type(e).__name__
                 return self._answer(cur, request_sig, "failed")
@@ -564,7 +570,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         app = self.server.app
         op = rest[0] if rest else ""
         if op == "status" and self.command in ("GET", "HEAD") and len(rest) == 1:
-            return self._json(200, {"instance": app.instance, "wiki_key": app.key})
+            # scope は BrowseState.scope である。使い回すときの起動の出力は、これを書く。
+            return self._json(200, {"instance": app.instance, "wiki_key": app.key, "scope": app.state.scope})
         if op == "stop" and self.command == "POST" and len(rest) == 1:
             self._json(200, {"stopping": True})
             app.request_shutdown()
@@ -603,7 +610,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 class App:
-    def __init__(self, root: Path, guard: fs.Guard, state_dir: Path, idle: float, verbose: bool = False):
+    def __init__(self, root: Path, guard: fs.Guard, state_dir: Path, idle: float, verbose: bool = False,
+                 scope: "str | None" = None):
         self.root = root
         self.key = common.wiki_key(root)
         self.guard = guard
@@ -613,7 +621,7 @@ class App:
         self.view_token = secrets.token_urlsafe(24)
         self.control_token = secrets.token_urlsafe(24)
         self.instance = secrets.token_hex(12)
-        self.state = BrowseState(root, guard, state_dir)
+        self.state = BrowseState(root, guard, state_dir, scope=scope)
         self.last = time.monotonic()
         self.httpd = None
         self.port = 0
@@ -661,14 +669,30 @@ def _http(port: int, method: str, path: str, timeout: float = 3.0):
         conn.close()
 
 
-def _status(rec: dict) -> "str | None":
+def _live_status(rec: dict) -> "dict | None":
+    """動いているサーバーに、操作の口で状態を聞く。答えなければ None。"""
     try:
         code, body = _http(int(rec["port"]), "GET", f"/{rec['control_token']}/control/status")
         if code != 200:
             return None
-        return json.loads(body).get("instance")
+        data = json.loads(body)
+        return data if isinstance(data, dict) else None
     except (OSError, ValueError, KeyError, TypeError, http.client.HTTPException):
         return None
+
+
+def _status(rec: dict) -> "str | None":
+    live = _live_status(rec)
+    return live.get("instance") if live else None
+
+
+def _drawn_scope(live: dict) -> "str | None":
+    """使い回すサーバーが操作の口で答えた、そのサーバーの BrowseState.scope。
+
+    答えにないもの（スコープなしで起動したサーバーと、スコープを出さない前の版のサーバー）と、正しくないものは
+    None とする。記録のファイル（server.json）からは読まない。記録は画面を描かないからである。
+    """
+    return core.normalize_scope(live.get("scope"))
 
 
 def _read_record(state_dir: Path) -> "dict | None":
@@ -710,8 +734,11 @@ def _locate(port: int, control_token: str, target: str) -> dict:
         return {"state": "unavailable"}
 
 
-def _emit(url: str, port: int, reused: bool, page_state: "str | None", open_browser: bool) -> None:
-    print(json.dumps({"url": url, "port": port, "reused": reused, "page": page_state}, ensure_ascii=False), flush=True)
+def _emit(url: str, port: int, reused: bool, page_state: "str | None", open_browser: bool,
+          drawn: "str | None") -> None:
+    """起動の出力。scope には、URL の先のサーバーの BrowseState.scope を書く。"""
+    print(json.dumps({"url": url, "port": port, "reused": reused, "page": page_state, "scope": drawn},
+                     ensure_ascii=False), flush=True)
     if open_browser:
         import webbrowser
         webbrowser.open(url)
@@ -738,19 +765,22 @@ def _refresh_guard(guard: fs.Guard, root: Path, state_dir: Path) -> None:
         raise fs.Refused("サーバーの状態の場所が、Wiki か Wiki が読む入力と重なる。何も書かずに止める")
 
 
-def serve(root: Path, page: "str | None", open_browser: bool, idle: float, verbose: bool = False) -> int:
+def serve(root: Path, page: "str | None", open_browser: bool, idle: float, verbose: bool = False,
+          scope: "str | None" = None) -> int:
     guard, state_dir = _prepare_state(root)
     lock = fs.Lock(guard, state_dir / "server.lock")
     deadline = time.monotonic() + RECORD_WAIT
     while not lock.try_acquire():
         rec = _read_record(state_dir)
-        if rec is not None and _status(rec) == rec["instance"]:
+        live = _live_status(rec) if rec is not None else None
+        if live is not None and live.get("instance") == rec["instance"]:
             key = rec.get("wiki_key") or common.wiki_key(root)
 
             def url_for(name, rec=rec, key=key):
                 return f"http://127.0.0.1:{rec['port']}/{rec['view_token']}/w/{key}/{_quote_path(name)}"
             url, state = _page_url(url_for, int(rec["port"]), rec["control_token"], page)
-            _emit(url, int(rec["port"]), True, state, open_browser)
+            # 今回の --scope ではなく、動いているサーバー自身が操作の口で答えたものを書く。
+            _emit(url, int(rec["port"]), True, state, open_browser, _drawn_scope(live))
             return EXIT_OK
         if time.monotonic() >= deadline:
             raise Failed("動いているサーバーを使い回せない。/wiki:browse --stop で止めてからやり直す")
@@ -760,7 +790,7 @@ def serve(root: Path, page: "str | None", open_browser: bool, idle: float, verbo
         # 守る場所を今の入力から決め直し、重なれば何も書かずに止まる（設計の 6.1）。
         _refresh_guard(guard, root, state_dir)
         guard.unlink(state_dir / "server.json")
-        app = App(root, guard, state_dir, idle, verbose)
+        app = App(root, guard, state_dir, idle, verbose, scope)
         httpd = _Server(("127.0.0.1", 0), Handler)
         httpd.app = app
         app.httpd = httpd
@@ -770,7 +800,7 @@ def serve(root: Path, page: "str | None", open_browser: bool, idle: float, verbo
         server_thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True)
         server_thread.start()
         url, state = _page_url(app.url, app.port, app.control_token, page)
-        _emit(url, app.port, False, state, open_browser)
+        _emit(url, app.port, False, state, open_browser, app.state.scope)
         server_thread.join()
         httpd.server_close()
         return _finish(root, app, guard, state_dir)
@@ -860,12 +890,13 @@ def main(argv=None) -> int:
     b.add_argument("--out", default=None, help="書き出し先（既定は <data_dir>/browse/<wiki_key>/）")
     b.add_argument("--raw", choices=core.RAW_MODES, default=None,
                    help="raw: の出し方（既定は、既定の書き出し先で link、--out で basename）")
+    _add_scope_arguments(b)
     sub.add_parser("core", help="中核を、標準入力と標準出力の JSON で呼ぶ")
     _add_server_commands(sub)
     args = parser.parse_args(argv)
     try:
         if args.cmd == "build":
-            report = build(wiki_root(args.wiki), args.out, args.raw)
+            report = build(wiki_root(args.wiki), args.out, args.raw, args.scope)
             print(json.dumps({"out": report["out"], "generation": report["generation"], "pages": report["pages"],
                               "warnings": len(report["warnings"])}, ensure_ascii=False), flush=True)
             return EXIT_OK
@@ -881,6 +912,13 @@ def main(argv=None) -> int:
         return EXIT_FAILED
 
 
+def _add_scope_arguments(p) -> None:
+    """画面に出す wiki のスコープ。wiki を選んだ側（/wiki:browse）が、その wiki が指示や設定で何として登録されて
+    いるかで決めて渡す。このスクリプトは、スコープを決めるために何も読まず、wiki の場所から推し量らない。"""
+    p.add_argument("--scope", choices=core.SCOPE_KINDS, default=None,
+                   help="wiki のスコープ（user か project）。省くと画面に出さない")
+
+
 def _add_server_commands(sub) -> None:
     """serve と stop（設計の 8）。"""
     s = sub.add_parser("serve", help="127.0.0.1 のサーバーを起動して開く（動いていれば使い回す）")
@@ -889,13 +927,15 @@ def _add_server_commands(sub) -> None:
     s.add_argument("--no-open", action="store_true", help="ブラウザで開かない（URL を出すだけ）")
     s.add_argument("--idle-timeout", type=float, default=DEFAULT_IDLE, help="操作がないときに終わるまでの秒数（既定 1800）")
     s.add_argument("--verbose", action="store_true", help="要求の方法、口の種類、状態の番号を標準エラーに出す")
+    _add_scope_arguments(s)
     t = sub.add_parser("stop", help="動いているサーバーを止める")
     t.add_argument("wiki")
 
 
 def _run_server_command(args) -> int:
     if args.cmd == "serve":
-        return serve(wiki_root(args.wiki), args.page, not args.no_open, args.idle_timeout, args.verbose)
+        return serve(wiki_root(args.wiki), args.page, not args.no_open, args.idle_timeout, args.verbose,
+                     args.scope)
     if args.cmd == "stop":
         return stop(wiki_root(args.wiki))
     raise Failed(f"未対応のコマンド: {args.cmd}")
