@@ -3,8 +3,10 @@
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -169,6 +171,128 @@ class EmptyTokenQueryTest(unittest.TestCase):
         proc = self.run_search()
         self.assertEqual(proc.stdout, b"")
         self.assertIn("クエリに検索できる語がない。", proc.stderr.decode("utf-8", "replace"))
+
+
+# --json の結果の tags と sources に入る frontmatter の書き方と、期待する値。
+# 値が 1 つだけの書き方（`tags: 検索`）も、1 要素の配列にする。空の文字と空白だけの要素は除く。
+LIST_FIELD_PAGES = {
+    "single": ("tags: 検索\nsources: paper", ["検索"], ["paper"]),
+    "alias": ("タグ: 検索\n出典: paper", ["検索"], ["paper"]),
+    "empty_value": ("tags:\nsources:", [], []),
+    "empty_string": ('tags: ""\nsources: ""', [], []),
+    "empty_array": ("tags: []\nsources: []", [], []),
+    "array": ("tags: [a, b]\nsources: [p, q]", ["a", "b"], ["p", "q"]),
+    "number": ("tags: 2024\nsources: 7", ["2024"], ["7"]),
+    "blank_items": ('tags: ["", " x "]\nsources: [" ", y]', ["x"], ["y"]),
+    "missing": ("", [], []),
+}
+LIST_FIELD_QUERY = "共通語"
+
+
+def is_string_list(value) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+class JsonListFieldsContractTest(unittest.TestCase):
+    """--json の結果の tags と sources は、frontmatter の書き方によらず、いつも文字の配列にする。
+
+    browse の埋め込みの検索の契約（info-hive-dev の tests/wiki/browse/search_result_contract.json）が、
+    この形を前提にする。MCP の query も同じ json_result() で結果を作る。
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.wiki = Path(self._tmp.name) / "wiki"
+        (self.wiki / "concepts").mkdir(parents=True)
+        for name, (fields, _tags, _sources) in LIST_FIELD_PAGES.items():
+            text = f"---\ntitle: {name}\n{fields}\n---\n{LIST_FIELD_QUERY}の本文。\n"
+            (self.wiki / "concepts" / f"{name}.md").write_bytes(text.encode("utf-8"))
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def search(self, granularity: str, *extra) -> list[dict]:
+        # 判定のバックエンドを止めておく。--decide はどの行も残し（fail open）、外には何も送らない。
+        env = {**os.environ, "INFO_HIVE_DECISIONS": "off"}
+        proc = subprocess.run(
+            [sys.executable, "-X", "utf8", str(SCRIPT), LIST_FIELD_QUERY, "--wiki", str(self.wiki), "--no-embed",
+             "--json", "--granularity", granularity, "--top", "100", *extra],
+            capture_output=True, cwd=str(REPO), env=env,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr.decode("utf-8", "replace"))
+        results = json.loads(proc.stdout.decode("utf-8"))["results"]
+        self.assertEqual({row["slug"] for row in results}, set(LIST_FIELD_PAGES))
+        return results
+
+    def assert_list_fields(self, results: list[dict], expected: dict | None = None) -> None:
+        for row in results:
+            with self.subTest(slug=row["slug"]):
+                self.assertTrue(is_string_list(row["tags"]), row["tags"])
+                self.assertTrue(is_string_list(row["sources"]), row["sources"])
+                if expected is not None:
+                    self.assertEqual((row["tags"], row["sources"]), expected[row["slug"]])
+
+    def test_section_and_page_granularity(self):
+        expected = {name: (tags, sources) for name, (_fields, tags, sources) in LIST_FIELD_PAGES.items()}
+        for granularity in ("section", "page"):
+            with self.subTest(granularity=granularity):
+                self.assert_list_fields(self.search(granularity), expected)
+
+    def test_decide(self):
+        # --decide の行は、判定の結果を足す前に json_result() で作る。
+        expected = {name: (tags, sources) for name, (_fields, tags, sources) in LIST_FIELD_PAGES.items()}
+        for granularity in ("section", "page"):
+            with self.subTest(granularity=granularity):
+                self.assert_list_fields(self.search(granularity, "--decide", "--decide-pool", "100"), expected)
+
+    def test_parse_cache(self):
+        # 2 回目は、パースキャッシュに残した meta から結果を作る。
+        expected = {name: (tags, sources) for name, (_fields, tags, sources) in LIST_FIELD_PAGES.items()}
+        cache = Path(self._tmp.name) / "cache.json"
+        for _ in range(2):
+            self.assert_list_fields(self.search("section", "--cache", str(cache)), expected)
+
+    def test_parse_cache_with_non_string_values(self):
+        # キャッシュの meta は辞書であることしか確かめないので、文字でない値が入っていても配列にする。
+        cache = Path(self._tmp.name) / "cache.json"
+        self.search("section", "--cache", str(cache))
+        payload = json.loads(cache.read_text(encoding="utf-8"))
+        values = {"single": 5, "alias": None, "array": [1, None, "a"], "number": 2.5, "empty_value": True,
+                  "empty_string": {"k": "v"}}
+        for name, value in values.items():
+            meta = payload["files"][f"concepts/{name}.md"]["meta"]
+            meta["tags"] = value
+            meta["sources"] = value
+        cache.write_bytes(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+        results = self.search("section", "--cache", str(cache))
+        self.assert_list_fields(results)
+        by_slug = {row["slug"]: row for row in results}
+        self.assertEqual(by_slug["single"]["tags"], ["5"])
+        self.assertEqual(by_slug["alias"]["tags"], [])
+        self.assertEqual(by_slug["array"]["tags"], ["1", "a"])
+
+    def test_json_result_direct(self):
+        # パーサーは文字か文字の配列しか返さないが、json_result() は渡された meta の値によらず配列を返す。
+        sections = [{"heading_path": [], "level": 0, "text": "本文", "links": [], "section_index": 0}]
+        cases = [
+            ("検索", ["検索"]), ("[a, b", ["[a, b"]), ("", []), ("  ", []), (None, []), ([], []),
+            (["x"], ["x"]), ([1, None, "a", " "], ["1", "a"]), (5, ["5"]), (2.5, ["2.5"]), (True, None),
+            ({"k": "v"}, None),
+        ]
+        for value, expected in cases:
+            for key in ("tags", "sources"):
+                with self.subTest(key=key, value=value):
+                    page = {"slug": "p", "rel_path": "concepts/p.md", "meta": {"title": "t", key: value},
+                            "sections": sections}
+                    for row in (WIKI_SEARCH.json_result(1.0, page),
+                                WIKI_SEARCH.json_result(1.0, page, sections[0], sections, ["bm25"])):
+                        self.assertTrue(is_string_list(row[key]), row[key])
+                        if expected is not None:
+                            self.assertEqual(row[key], expected)
+        # キーがないときも空の配列にする。
+        page = {"slug": "p", "rel_path": "concepts/p.md", "meta": {}, "sections": sections}
+        row = WIKI_SEARCH.json_result(1.0, page)
+        self.assertEqual((row["tags"], row["sources"]), ([], []))
 
 
 if __name__ == "__main__":

@@ -72,6 +72,7 @@ from wiki_pages import (  # noqa: E402
     split_lines,
     extract_wikilinks,
     iter_page_files,
+    ref_values,
     resolve_link,
 )
 
@@ -831,8 +832,10 @@ def json_result(
         "retrievers": retrievers or ["bm25"],
         "snippet": snippet,
         "updated": meta.get("updated"),
-        "tags": meta.get("tags", []) or [],
-        "sources": meta.get("sources", []) or [],
+        # tags と sources は、値を 1 つだけ書いたページ（tags: 検索）でも文字の配列にする。lint が sources を
+        # 読むのと同じ wiki_pages.ref_values() を使う。MCP の query も、この関数で結果を作る。
+        "tags": ref_values(meta.get("tags")),
+        "sources": ref_values(meta.get("sources")),
         "neighbors": {"prev": prev_heading, "next": next_heading},
     }
 
