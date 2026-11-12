@@ -955,7 +955,8 @@ def list_index(root: Path, name: str | None = None) -> dict:
     """index.md と indexes/ の一覧を返す。name を渡すと indexes/ の中のそのファイルを返す。"""
     if name:
         target = (root / "indexes" / name).resolve()
-        if target.suffix != ".md":
+        # 拡張子の大文字と小文字は問わない（一覧は Upper.MD も返す）。拡張子が .md でなければ、.md を付けたものとみなす。
+        if target.suffix.lower() != ".md":
             target = target.with_suffix(".md")
         if not target.is_relative_to((root / "indexes").resolve()) or not target.is_file():
             raise FileNotFoundError(f"indexes/ に {name} がない")
