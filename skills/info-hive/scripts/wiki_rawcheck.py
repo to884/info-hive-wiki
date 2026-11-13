@@ -698,6 +698,10 @@ TRANSLATED_WORDS = {
     "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
     "Created", "Source", "Photo", "Image", "Figure", "Fig", "Credit", "Credits",
 }
+# 日本語の文でふつうに使う英字の略語。原文の英語を訳すと、原文にない形で現れる（laptop → ノート PC）。
+# 「原文にない英字か記号」の警告で数えない。2 回の試行（sonnet-trial.md、sonnet-trial-2.md）で、`PC` の警告は
+# どれも空振りだった。
+JAPANESE_ABBREVIATIONS = {"PC", "OS", "IT", "AI", "ID", "CPU", "GPU", "SNS", "URL", "Web"}
 
 
 def link_diff_message(src: list[tuple[str, str]], out: list[tuple[str, str]]) -> str:
@@ -776,14 +780,18 @@ def compare(a: Node, b: Node, translate: bool, errors: list[dict], warnings: lis
                 errors.append({"kind": "text", **detail, "message": "訳さないページで本文が変わった"})
         else:
             src_tokens = [x.lower() for x in TOKEN_RE.findall(src_text)]
-            # 同じ語のくり返し、大文字と小文字の違い、原文の語の頭に当たる語（BLOBs → BLOB）は数えない。
-            new = sorted({t for t in TOKEN_RE.findall(out_text) if not any(s.startswith(t.lower()) for s in src_tokens)})
+            # 同じ語のくり返し、大文字と小文字の違い、原文の語の頭に当たる語（BLOBs → BLOB）、日本語の文で
+            # ふつうに使う略語（JAPANESE_ABBREVIATIONS）は数えない。
+            new = sorted({t for t in TOKEN_RE.findall(out_text)
+                          if t not in JAPANESE_ABBREVIATIONS and not any(s.startswith(t.lower()) for s in src_tokens)})
             if new:
                 warnings.append({"kind": "new_tokens", **detail, "message": f"原文にない英字か記号: {new}"})
             title_case_ok = a.type not in ("heading", "th", "td")
             missing = [w for w in dict.fromkeys(names_of(src_text, title_case_ok)) if w not in out_text]
             if missing:
-                warnings.append({"kind": "missing_names", **detail, "message": f"訳文にない名前: {missing}"})
+                warnings.append({"kind": "missing_names", **detail,
+                                 "message": f"訳文にない名前: {missing}（人名、製品名、地名、手法や検定の名前は英語表記に"
+                                 "戻す。一般の語を訳したなら、このブロックで原語を括弧で添える）"})
             letters = len(re.findall(r"[A-Za-z]", src_text))
             if letters >= 40 and len(re.sub(r"\s", "", out_text)) < letters * 0.2:
                 warnings.append({"kind": "short", **detail, "message": "訳文が原文に比べて極端に短い"})
