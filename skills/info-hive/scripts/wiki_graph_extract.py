@@ -1120,7 +1120,7 @@ def main():
     # SCHEMA.md のないディレクトリは、初期化された wiki とみなさない（ADR-0019）。graph/ を作る前に確かめる。
     wiki_initialized.require_or_exit(args.wiki)
 
-    formats =[f.strip().lower() for f in args.formats.split(",") if f.strip()]
+    formats = [f.strip().lower() for f in args.formats.split(",") if f.strip()]
     unknown = [f for f in formats if f not in DEFAULT_FORMATS]
     if unknown:
         print(f"未知の形式: {', '.join(unknown)}。使える形式: {', '.join(DEFAULT_FORMATS)}", file=sys.stderr)

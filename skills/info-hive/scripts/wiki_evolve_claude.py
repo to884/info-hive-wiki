@@ -7,6 +7,9 @@
 tool-use のイベントを数える。モデルの推論には自分の Claude アカウントを使い、ローカルでは行わない。
 
 ランナーの argv の JSON: ["python3", "/absolute/skill/scripts/wiki_evolve_claude.py"]
+
+リクエストの wiki_root は、評価ループが事実情報のコーパスを一時ディレクトリに写したものである。利用者の wiki
+ではないので、初期化された wiki か（SCHEMA.md があるか）は確かめない（info-hive-dev の ADR-0019）。
 """
 
 import json

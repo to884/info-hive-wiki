@@ -180,6 +180,17 @@ def install_runtime(wiki: Path) -> None:
 
 
 def init_wiki(project_root: Path, wiki_dir: str, raw_dir: str, upgrade: bool = False) -> None:
+    # アップグレードは初期化された wiki（SCHEMA.md がある）だけを対象にする（ADR-0019）。ほかの用途の wiki/ に
+    # 一式を作らないよう、ディレクトリもファイルも作らず、実行環境も入れずに止まる。基準のディレクトリを解決する
+    # 前に、渡されたとおりのパスで確かめる（解決で縮んだ別の場所を確かめないため）。基準のディレクトリがない
+    # ときも、ここで止まって /wiki:init を案内する。
+    if upgrade:
+        found = wiki_initialized.problem(Path(project_root) / wiki_dir)
+        if found is not None:
+            print(f"エラー: アップグレードする wiki がない。{found}\n"
+                  "/wiki:init で初期化する。既定と違う名前で作った wiki なら、--wiki-dir と --raw-dir で指す。",
+                  file=sys.stderr)
+            sys.exit(1)
     project_root = project_root.resolve()
     created_base = False
     if not project_root.exists():
@@ -195,17 +206,7 @@ def init_wiki(project_root: Path, wiki_dir: str, raw_dir: str, upgrade: bool = F
     wiki = project_root / wiki_dir
     raw = project_root / raw_dir
 
-    # アップグレードは初期化された wiki（SCHEMA.md がある）だけを対象にする（ADR-0019）。ほかの用途の wiki/ に
-    # 一式を作らないよう、ディレクトリもファイルも作らず、実行環境も入れずに止まる。
-    if upgrade:
-        found = wiki_initialized.problem(wiki)
-        if found is not None:
-            print(f"エラー: アップグレードする wiki がない。{found}\n"
-                  "/wiki:init で初期化する。既定と違う名前で作った wiki なら、--wiki-dir と --raw-dir で指す。",
-                  file=sys.stderr)
-            sys.exit(1)
-
-    action ="アップグレードする" if upgrade else "初期化する"
+    action = "アップグレードする" if upgrade else "初期化する"
     print(f"LLM Wiki を{action}: {project_root}")
     labels = [("wiki のディレクトリ:", wiki), ("raw ソースのディレクトリ:", raw)]
     width = max(display_width(label) for label, _ in labels)

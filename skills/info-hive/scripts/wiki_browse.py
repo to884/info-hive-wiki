@@ -71,14 +71,10 @@ def wiki_root(arg: str) -> Path:
     """初期化された wiki のルート。SCHEMA.md のないディレクトリは断る（ADR-0019）。build、serve、stop、core の
     どれも通る。stop も通すのは、未初期化のディレクトリのためにデータの場所に状態のディレクトリを作らないためである。
     判定は、パスを解決するより前に行う。解決の失敗も、同じ理由の文と案内で止める。"""
-    root = Path(arg).expanduser()
-    found = initialized.problem(root)
-    if found is not None:
-        raise Failed(f"{found}\n{initialized.INIT_HINT}")
     try:
-        return root.resolve(strict=True)
-    except OSError as e:
-        raise Failed(f"wiki のディレクトリを確かめられない: {arg}（{type(e).__name__}）\n{initialized.INIT_HINT}") from e
+        return initialized.resolve(Path(arg).expanduser())
+    except initialized.NotInitialized as e:
+        raise Failed(str(e)) from e
 
 
 def browse_dir() -> Path:

@@ -694,9 +694,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.command in ("ask", "check"):
             return 1
         client = None
-    if args.command in ("shortlist", "contradictions") and args.wiki is None:
-        args.wiki = wiki_workspace.default_wiki_or_exit()
-    if args.command in ("shortlist", "contradictions"):
+    # --wiki を持つサブコマンド（shortlist、contradictions）は、振り分けの前に wiki の判定を通る。新しいサブコマンドも、
+    # --wiki を足せば既定で通る。
+    if hasattr(args, "wiki"):
+        if args.wiki is None:
+            args.wiki = wiki_workspace.default_wiki_or_exit()
         # SCHEMA.md のないディレクトリは、初期化された wiki とみなさない（ADR-0019）。
         try:
             wiki_initialized.require(args.wiki)

@@ -20,6 +20,7 @@ from types import SimpleNamespace
 from wiki_evolve import (atomic, copy_tree, digest, encode, event, finite, inside, locked,
                          propose, read_json, require, run_runner, slug, tree, capture)
 from wiki_text import format_fm_value, format_frontmatter, localize_argparse, quote_in_text
+import wiki_initialized
 
 
 def contract(suite, corpus):
@@ -698,8 +699,11 @@ def main():
     parser.add_argument('--id', required=True)
     parser.add_argument('--raw', type=Path, help='変更できない経験の記録を置くディレクトリ（既定: wiki と同じ階層の raw）')
     args = localize_argparse(parser).parse_args()
-    args.wiki, args.skill = args.wiki.resolve(), args.skill.absolute()
+    args.skill = args.skill.absolute()
     try:
+        # 判定してから同じパスを解決する（ADR-0019）。先に解決すると、ない途中のディレクトリと .. が縮んで、
+        # 別の wiki に .evolution/ を作りうる。
+        args.wiki = wiki_initialized.resolve(args.wiki)
         with locked(args.wiki) as state:
             print(encode(run(args, state)), end='')
     except (ValueError, KeyError, TypeError, OSError) as exc:

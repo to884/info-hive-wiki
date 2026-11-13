@@ -12,7 +12,11 @@ wiki のパスを受け取る入口（CLI、MCP のツール、閲覧、Web ペ�
     import wiki_initialized
     wiki = wiki_initialized.require_or_exit(args.wiki)   # CLI: 理由と案内を標準エラーに書き、終了コード 1
     wiki_initialized.require(path)                       # 未初期化なら NotInitialized（ValueError）を送出する
+    wiki = wiki_initialized.resolve(path)                # 判定してから同じパスを解決する（自分で先に解決しない）
     wiki_initialized.problem(path)                       # 未初期化の理由の文。初期化済みなら None
+
+サブコマンドを持つ入口は、判定をサブコマンドの振り分けより前の 1 か所に置き、判定しないサブコマンドを名前で
+除く。新しいサブコマンドは、既定で判定を通る。
 """
 
 from __future__ import annotations
@@ -67,6 +71,20 @@ def require(root: str | os.PathLike) -> Path:
     if found is not None:
         raise NotInitialized(f"{found}\n{INIT_HINT}")
     return Path(root)
+
+
+def resolve(root: str | os.PathLike) -> Path:
+    """判定してから、同じパスを解決（strict）して返す。パスを解決して使う入口は、自分で解決せずにこれを使う。
+
+    解決を先にすると、ない途中のディレクトリと `..` を含むパス（`kb/ない/..`）が、POSIX では解決で縮んで
+    初期化された wiki になりうる。判定した文字列と、使うパスを同じにするために、判定を先にする。
+    解決の失敗（アクセス権など）も NotInitialized にする。
+    """
+    path = require(root)
+    try:
+        return path.resolve(strict=True)
+    except OSError as exc:
+        raise NotInitialized(f"wiki のディレクトリを確かめられない: {path}（{_reason(exc)}）\n{INIT_HINT}") from exc
 
 
 def require_or_exit(root: str | os.PathLike) -> Path:
