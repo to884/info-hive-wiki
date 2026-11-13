@@ -1018,6 +1018,8 @@ def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text
     新しい本文と画像は一時の場所に書き、古い画像を退避してから、新しい画像と本文を置く。
     どこかで失敗したら、置いた新しい画像を消して、退避した古い画像を戻す。
     名前の変更（退避、配置、本文の置き換え、戻し）は replace_with_retry で行う。
+    退避した古い画像を消すのは、本文を置き換えたあとだけである。戻しきれなかった古い画像は、
+    ただ 1 つの写しなので退避の場所に残し、その場所を例外の注記（add_note）で知らせる。
     書き込み先はすべて RAW_ROOT の中に限り、シンボリックリンクを通して外に書かない。
     RAW_ROOT そのものは作らない。初期化（init_wiki.py）が作る（ADR-0019）。
     """
@@ -1039,6 +1041,7 @@ def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text
     old_files = sorted(asset_dir.glob(f"{slug}-*")) if asset_dir.is_dir() else []
     placed: list[Path] = []
     moved: list[tuple[Path, Path]] = []
+    replaced = False
     try:
         with tmp.open("w", encoding="utf-8", newline="") as f:
             f.write(text)
@@ -1058,22 +1061,33 @@ def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text
                 replace_with_retry(staging / name, asset_dir / name)
                 placed.append(asset_dir / name)
         replace_with_retry(tmp, target)
+        replaced = True
     except BaseException:
-        for path in placed:
-            if path.exists():
-                path.unlink()
-        for dest, original in moved:
-            if dest.exists():
-                replace_with_retry(dest, original)
+        try:
+            for path in placed:
+                if path.exists():
+                    path.unlink()
+            for dest, original in moved:
+                if dest.exists():
+                    replace_with_retry(dest, original)
+        except BaseException as exc:
+            if any(dest.exists() for dest, _original in moved):
+                exc.add_note(f"古い画像を戻しきれなかった。戻していない古い画像を {backup} に残した。"
+                             f"{asset_dir} に移すと元に戻る")
+            raise
         raise
     finally:
         if tmp.exists():
             tmp.unlink()
-        for d in (staging, backup):
+        # 退避の場所の中身を消すのは、本文を置き換えたあとだけにする。失敗したときに残っているのは、
+        # 戻しきれなかった古い画像のただ 1 つの写しなので消さない。空になった場所だけを消す。
+        for d, drop_files in ((staging, True), (backup, replaced)):
             if d.is_dir():
-                for leftover in d.iterdir():
-                    leftover.unlink()
-                d.rmdir()
+                if drop_files:
+                    for leftover in d.iterdir():
+                        leftover.unlink()
+                if not any(d.iterdir()):
+                    d.rmdir()
 
 
 def build(args) -> tuple[int, dict]:
@@ -1299,7 +1313,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"取得に失敗した: {exc}", file=sys.stderr)
         return 2
     except OSError as exc:
-        print(f"ファイルを書けない: {exc}", file=sys.stderr)
+        # 注記（write_outputs が戻しきれなかった古い画像の置き場所を書く）も出す。
+        notes = "".join(f"\n{note}" for note in getattr(exc, "__notes__", ()))
+        print(f"ファイルを書けない: {exc}{notes}", file=sys.stderr)
         return 1
     except RecursionError:
         message = "HTML の入れ子が深すぎて変換できない"
