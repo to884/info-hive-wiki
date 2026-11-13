@@ -14,6 +14,7 @@ wiki のパスを受け取る入口（CLI、MCP のツール、閲覧、Web ペ�
     wiki_initialized.require(path)                       # 未初期化なら NotInitialized（ValueError）を送出する
     wiki = wiki_initialized.resolve(path)                # 判定してから同じパスを解決する（自分で先に解決しない）
     wiki_initialized.problem(path)                       # 未初期化の理由の文。初期化済みなら None
+    wiki_initialized.check(path)                         # 理由の種類つき（Finding）。初期化済みなら None
 
 サブコマンドを持つ入口は、判定をサブコマンドの振り分けより前の 1 か所に置き、判定しないサブコマンドを名前で
 除く。新しいサブコマンドは、既定で判定を通る。
@@ -25,10 +26,34 @@ import os
 import stat
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 MARKER = "SCHEMA.md"
 INIT_HINT = ("/wiki:init で初期化する（ユーザースコープの wiki は /wiki:init --user。スクリプトだけで使うときは "
              "init_wiki.py）。初期化した wiki が別の場所にあるなら、そのパスを指定する。")
+
+# 理由の種類と、パスを含まない短い文。閲覧のサーバーの応答のように、パスを出さないところで使う。
+REASONS = {
+    "missing": "wiki のディレクトリが見つからない",
+    "not_dir": "wiki のルートがディレクトリではない",
+    "root_unreadable": "wiki のディレクトリを確かめられない",
+    "no_marker": f"初期化された wiki ではない（{MARKER} がない）",
+    "marker_not_file": f"初期化された wiki ではない（{MARKER} が通常のファイルではない）",
+    "marker_unreadable": f"初期化された wiki か確かめられない（{MARKER} を調べられない）",
+}
+# 調べられなかったもの。未初期化と決まったわけではない（アクセス権や一時的な読み取りの障害）。
+UNCERTAIN = frozenset({"root_unreadable", "marker_unreadable"})
+
+
+class Finding(NamedTuple):
+    """未初期化の理由。kind は REASONS のキー、message はパスを含む文。"""
+    kind: str
+    message: str
+
+    @property
+    def certain(self) -> bool:
+        """調べたうえで未初期化と決まった。偽なら、調べられなかった。"""
+        return self.kind not in UNCERTAIN
 
 
 class NotInitialized(ValueError):
@@ -39,8 +64,8 @@ def _reason(exc: OSError) -> str:
     return exc.strerror or type(exc).__name__
 
 
-def problem(root: str | os.PathLike) -> str | None:
-    """root が初期化された wiki でなければ理由の文を、初期化済みなら None を返す。
+def check(root: str | os.PathLike) -> Finding | None:
+    """root が初期化された wiki でなければ理由（Finding）を、初期化済みなら None を返す。
 
     調べ方は os.stat()（リンクをたどる）の 1 回ずつで、FileNotFoundError と NotADirectoryError を「ない」、
     それ以外の OSError を「調べられない」とする。Path.is_file() は失敗の扱いが Python の版で違うので使わない。
@@ -49,20 +74,27 @@ def problem(root: str | os.PathLike) -> str | None:
     try:
         st = os.stat(path)
     except (FileNotFoundError, NotADirectoryError):
-        return f"wiki のディレクトリが見つからない: {path}"
+        return Finding("missing", f"{REASONS['missing']}: {path}")
     except OSError as exc:
-        return f"wiki のディレクトリを確かめられない: {path}（{_reason(exc)}）"
+        return Finding("root_unreadable", f"{REASONS['root_unreadable']}: {path}（{_reason(exc)}）")
     if not stat.S_ISDIR(st.st_mode):
-        return f"wiki のルートがディレクトリではない: {path}"
+        return Finding("not_dir", f"{REASONS['not_dir']}: {path}")
     try:
         st = os.stat(path / MARKER)
     except (FileNotFoundError, NotADirectoryError):
-        return f"初期化された wiki ではない（{MARKER} がない）: {path}"
+        return Finding("no_marker", f"{REASONS['no_marker']}: {path}")
     except OSError as exc:
-        return f"初期化された wiki か確かめられない（{MARKER} を調べられない: {_reason(exc)}）: {path}"
+        return Finding("marker_unreadable",
+                       f"初期化された wiki か確かめられない（{MARKER} を調べられない: {_reason(exc)}）: {path}")
     if not stat.S_ISREG(st.st_mode):
-        return f"初期化された wiki ではない（{MARKER} が通常のファイルではない）: {path}"
+        return Finding("marker_not_file", f"{REASONS['marker_not_file']}: {path}")
     return None
+
+
+def problem(root: str | os.PathLike) -> str | None:
+    """root が初期化された wiki でなければ理由の文を、初期化済みなら None を返す。"""
+    found = check(root)
+    return None if found is None else found.message
 
 
 def require(root: str | os.PathLike) -> Path:
@@ -84,7 +116,7 @@ def resolve(root: str | os.PathLike) -> Path:
     try:
         return path.resolve(strict=True)
     except OSError as exc:
-        raise NotInitialized(f"wiki のディレクトリを確かめられない: {path}（{_reason(exc)}）\n{INIT_HINT}") from exc
+        raise NotInitialized(f"{REASONS['root_unreadable']}: {path}（{_reason(exc)}）\n{INIT_HINT}") from exc
 
 
 def require_or_exit(root: str | os.PathLike) -> Path:

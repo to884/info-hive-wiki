@@ -704,6 +704,11 @@ def main():
         # 判定してから同じパスを解決する（ADR-0019）。先に解決すると、ない途中のディレクトリと .. が縮んで、
         # 別の wiki に .evolution/ を作りうる。
         args.wiki = wiki_initialized.resolve(args.wiki)
+        # 学習の証拠を書く raw のディレクトリは作らない（初期化が作る）。費用のかかる評価を始める前に確かめる。
+        # publish_learning() の mkdir は、この確かめのあとでは、ある raw の下の experiences/ にしか効かない。
+        raw = args.raw or args.wiki.parent / 'raw'
+        require(raw.is_dir(), f'raw のディレクトリがない: {raw}。--raw が正しいかを確かめる。'
+                              '初期化した wiki の raw をなくしたときは、/wiki:upgrade で作り直せる')
         with locked(args.wiki) as state:
             print(encode(run(args, state)), end='')
     except (ValueError, KeyError, TypeError, OSError) as exc:
