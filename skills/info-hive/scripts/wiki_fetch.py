@@ -44,6 +44,7 @@ import re
 import socket
 import struct
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -988,12 +989,35 @@ def _md_url(url: str) -> str:
     return url.replace(" ", "%20").replace("(", "%28").replace(")", "%29")
 
 
+# Windows では、ほかのプロセス（ウイルス対策の検査、検索の索引、エディター）が移動元か移動先を開いていると、
+# os.replace が PermissionError（WinError 5 か 32）で失敗する。開いている時間は短いので、間を置いて試し直す。
+# 待つ時間は合わせて 1 秒である。Windows のほかでは、PermissionError は権限の不足なので試し直さない。
+_REPLACE_RETRY_DELAYS = (0.05, 0.1, 0.15, 0.2, 0.25, 0.25)
+_RETRY_REPLACE_ON_WINDOWS = os.name == "nt"
+
+
+def replace_with_retry(src: Path, dst: Path) -> None:
+    """os.replace(src, dst) を行う。Windows で PermissionError になったときだけ、間を置いて試し直す。
+
+    ほかの例外は試し直さずに上げる。試し直しても失敗したら、最後の PermissionError を上げる。
+    ファイルは消さない。失敗したときの後始末は呼び出し側が行う。
+    """
+    for delay in _REPLACE_RETRY_DELAYS if _RETRY_REPLACE_ON_WINDOWS else ():
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            time.sleep(delay)
+    os.replace(src, dst)
+
+
 def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text: str,
                   images: list[tuple[str, bytes]]) -> None:
     """本文と画像を書く。途中で失敗したら、前の本文と画像をそのまま残す。
 
     新しい本文と画像は一時の場所に書き、古い画像を退避してから、新しい画像と本文を置く。
     どこかで失敗したら、置いた新しい画像を消して、退避した古い画像を戻す。
+    名前の変更（退避、配置、本文の置き換え、戻し）は replace_with_retry で行う。
     書き込み先はすべて RAW_ROOT の中に限り、シンボリックリンクを通して外に書かない。
     RAW_ROOT そのものは作らない。初期化（init_wiki.py）が作る（ADR-0019）。
     """
@@ -1026,21 +1050,21 @@ def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text
             backup.mkdir(parents=True, exist_ok=True)
             for old in old_files:
                 dest = backup / old.name
-                os.replace(old, dest)
+                replace_with_retry(old, dest)
                 moved.append((dest, old))
         if images:
             asset_dir.mkdir(parents=True, exist_ok=True)
             for name, _data in images:
-                os.replace(staging / name, asset_dir / name)
+                replace_with_retry(staging / name, asset_dir / name)
                 placed.append(asset_dir / name)
-        os.replace(tmp, target)
+        replace_with_retry(tmp, target)
     except BaseException:
         for path in placed:
             if path.exists():
                 path.unlink()
         for dest, original in moved:
             if dest.exists():
-                os.replace(dest, original)
+                replace_with_retry(dest, original)
         raise
     finally:
         if tmp.exists():
