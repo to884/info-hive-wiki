@@ -378,13 +378,15 @@ class BrowseState:
         要求のたびに wiki を読み直すので、要求のたびに初期化を確かめる（ADR-0019）。起動のあとで SCHEMA.md が
         なくなったら（調べたうえで未初期化と決まったら）、前の中核も使わずに (None, "uninitialized") を返し、理由の
         種類を uninitialized_kind に置く。中核は捨てない。SCHEMA.md が戻れば、入力の印が同じならそのまま使う。
-        調べられなかったとき（アクセス権や一時的な読み取りの障害）は、未初期化と決めず、今までどおり進む。
-        入力を読めなければ、前の中核を古いと示して使う。
+        調べられなかったとき（アクセス権、読み取りの障害、循環するリンクなど）は、初期化されていると確かめられて
+        いないので、新しい中核を組み立てない。前の中核があれば古いと示して使い、なければ組み立てられないと答える。
         """
         found = initialized.check(self.root)
-        if found is not None and found.certain:
-            self.uninitialized_kind = found.kind
-            return None, "uninitialized"
+        if found is not None:
+            if found.certain:
+                self.uninitialized_kind = found.kind
+                return None, "uninitialized"
+            return self._answer(self.current, None, "failed")
         wait = BUILD_WAIT if wait is None else wait
         request_sig = self._signature()
         cur = self.current
