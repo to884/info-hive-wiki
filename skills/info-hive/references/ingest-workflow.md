@@ -113,7 +113,9 @@ python "<skill-root>/scripts/wiki_fetch.py" "<URL>" --wiki wiki --raw-root raw -
 
 `check --finish` は、誤りがなければ作業用の写しを消す。作業用の写しを消すときは、途中の段がリンクかジャンクションでないこと、wiki の中にあることを確かめる。
 
-取り込みの途中で止まって raw だけが残り、作業用の写しがないときは、同じ URL を取り直すと `"unchanged": true` と `"work_dir": false` になる。取り込み直すなら `--force` で写しと raw の両方を作り直す。
+取り込みの途中で止まったあとに同じ URL を取り直すと、`"unchanged": true` になる。作業用の写しがそろっていれば `"work_dir": true` と、どの段まで進んだか（`"work_stage"`: `fetched` は削除の前、`frozen` は削除を固定したあと）と、前の取得の `needs_translation` と `images` を返す。`fetched` なら雑音の削除から、`frozen` なら訳と補足から続ける。写しがなければ `"work_dir": false` になる。取り込み直すなら `--force` で写しと raw の両方を作り直す。
+
+雑音の削除の段で表の列を消すときは、見出しとすべての行から消す。見出しより多いセルのある行は、パーサーが捨てて見えなくなるので、`freeze` が誤りにする。
 
 #### 翻訳
 

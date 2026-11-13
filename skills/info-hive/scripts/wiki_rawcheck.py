@@ -397,6 +397,15 @@ def freeze(wiki: Path, raw_root: Path, slug: str) -> tuple[int, dict]:
         # 書き足しは、木には現れないためである。
         errors.append({"kind": "edit", "message": "取得した内容にない文字を書き足した（木に現れない部分、"
                        "たとえば表の列数を超えるセルへの書き足しを含む）"})
+    # パーサーが捨てる内容を raw に残させない。見出しより多いセルのある行は、木に現れず、訳と補足の段で
+    # 照らせないためである（見出しの列だけを消したときに起きる）。
+    out_lines = out_body.split("\n")
+    for table in (n for n in walk(out_tree) if n.type == "table"):
+        cells = table_cells(out_lines, table)
+        if cells and any(c > cells[0] for c in cells[2:]):
+            errors.append({"kind": "table", "line": table.line,
+                           "message": "表に、見出しより多いセルのある行がある（パーサーが捨てるセルは見えない。"
+                           "列を消すときは、見出しとすべての行から消す）"})
     # 題名（最初の h1 の見出し）は、そのまま残す。
     src_title = next((n for n in walk(src_tree) if n.type == "heading" and n.tag == "h1"), None)
     if src_title is not None:
@@ -499,7 +508,9 @@ def strip_captions(node: Node, fetched: dict[str, str], base: Path, errors: list
             if any(images_of(p.inline) for p in walk(quote)):
                 errors.append({"kind": "caption", "line": quote.line,
                                "message": "補足の中に画像がある。補足は文だけで書く"})
-            later = [inline_text(p.inline, newline="\n") for p in walk(quote) if p is not quote.children[0] and p.inline]
+            # 最初の段落と同じ読み方（インラインのコードも含める）で、後ろの段落の補足の始まりを探す。
+            later = [inline_text(p.inline, newline="\n", code=True) for p in walk(quote)
+                     if p is not quote.children[0] and p.inline]
             if re.search(r"\n[^\n]{1,60}?" + re.escape(CAPTION_MARK), body) or \
                     any(CAPTION_HEAD_RE.match(text) for text in later):
                 errors.append({"kind": "caption", "line": quote.line,

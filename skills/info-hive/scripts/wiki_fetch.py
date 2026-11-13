@@ -1236,7 +1236,16 @@ def build(args) -> tuple[int, dict]:
         if old == sha:
             result["unchanged"] = True
             if wiki is not None:
-                result["work_dir"] = wiki_rawcheck.work_dir_complete(wiki, args.slug)
+                complete = wiki_rawcheck.work_dir_complete(wiki, args.slug)
+                result["work_dir"] = complete
+                if complete:
+                    # 途中から続けるために、どの段まで進んだかと、後の手順が使う値を返す。
+                    wd = wiki_rawcheck.work_dir(wiki, args.slug)
+                    result["work_stage"] = "frozen" if (wd / "cleaned.md").is_file() else "fetched"
+                    saved = wiki_rawcheck.load_fetch(wd)
+                    for key in ("needs_translation", "images", "removed_by_rule", "title", "source_lang", "ja_ratio"):
+                        if key in saved:
+                            result[key] = saved[key]
             return 0, result
         suggestion = f"{args.slug}-{datetime.now().strftime('%Y%m%d')}"
         result["suggested_slug"] = suggestion
