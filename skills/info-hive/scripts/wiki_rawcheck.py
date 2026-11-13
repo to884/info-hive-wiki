@@ -686,8 +686,24 @@ def strip_captions(node: Node, fetched: dict[str, str], base: Path, errors: list
 
 TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_'.-]*[A-Za-z0-9]|[A-Za-z]|[<>=!&|]{1,3}")
 NAME_RE = re.compile(r"\b(?:[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*|[A-Z]{2,}[A-Z0-9]*|[A-Z][a-z]+)\b")
-DESU_RE = re.compile(r"(?:です|ます|でした|ました|ません|でしょう|ください)[。！？]")
-DEARU_RE = re.compile(r"(?<!ま)(?<!でし)(?:である|だ|た|る|ない|う|い)[。！？]")
+# 文体は、文ごとに 1 回だけ分ける。文の終わり（。！？）の前の語尾が、です・ます調ならです・ます調、そうでなく
+# である調の語尾ならである調にする。です・ます調の語尾の末尾（ください → い、ました → た、でしょう → う）は、
+# である調の語尾にも当たるので、2 つの型を別々に数えると、です・ます調の文を両方に数えてしまう。
+SENTENCE_RE = re.compile(r"([^。！？\n]*)[。！？]")
+DESU_END_RE = re.compile(r"(?:です|ます|でした|ました|ません|でしょう|ください)\Z")
+DEARU_END_RE = re.compile(r"(?:である|だ|た|る|ない|う|い)\Z")
+
+
+def sentence_styles(text: str) -> Counter:
+    """文の数を、です・ます調（desu）とである調（dearu）に分けて数える。どちらでもない文は数えない。"""
+    out: Counter = Counter()
+    for m in SENTENCE_RE.finditer(text):
+        head = m.group(1)
+        if DESU_END_RE.search(head):
+            out["desu"] += 1
+        elif DEARU_END_RE.search(head):
+            out["dearu"] += 1
+    return out
 
 # 文の途中で大文字で始まっても、固有の名前ではないことが多い語。
 FUNCTION_WORDS = {
@@ -808,8 +824,7 @@ def compare(a: Node, b: Node, translate: bool, errors: list[dict], warnings: lis
             letters = len(re.findall(r"[A-Za-z]", src_text))
             if letters >= 40 and len(re.sub(r"\s", "", out_text)) < letters * 0.2:
                 warnings.append({"kind": "short", **detail, "message": "訳文が原文に比べて極端に短い"})
-            style["desu"] += len(DESU_RE.findall(out_text))
-            style["dearu"] += len(DEARU_RE.findall(out_text))
+            style.update(sentence_styles(out_text))
     for ca, cb in zip(a.children, b.children):
         compare(ca, cb, translate, errors, warnings, style)
 
