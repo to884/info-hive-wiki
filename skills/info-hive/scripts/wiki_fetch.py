@@ -364,7 +364,7 @@ def drop_mediawiki_parts(doc: Node) -> list[dict]:
 HEADER_PHRASES = {"Member-only story": "medium_member_only", "Top highlight": "medium_top_highlight"}
 # 本文のどこにあっても落とす段落の文字列。Medium の図の部品で、本文の文としては現れない。
 ANYWHERE_PHRASES = {"Press enter or click to view image in full size": "medium_view_image"}
-_MD_LINK_RE = re.compile(r"\[(?:[^\[\]]|\[[^\]]*\])*\]\(((?:[^()\s]|\([^()]*\))+)(?:\s+\"[^\"]*\")?\)")
+_MD_LINK_RE = re.compile(r"\[(?:\\.|[^\[\]\\]|\[(?:\\.|[^\]\\])*\])*\]\(((?:[^()\s]|\([^()]*\))+)(?:\s+\"[^\"]*\")?\)")
 
 
 def _is_plain_paragraph(block: str) -> bool:
@@ -372,8 +372,11 @@ def _is_plain_paragraph(block: str) -> bool:
 
 
 def _text_without_links(block: str) -> str:
-    """リンクと、強調やコードの記号を除いた文字（本文の前の部分の判定に使う）。"""
-    return re.sub(r"[\s*_`]+", "", _MD_LINK_RE.sub("", block))
+    """リンクと、強調（`*`）とコード（`` ` ``）の記号を除いた文字（本文の前の部分の判定に使う）。
+
+    変換は強調を `**` で書くので、`_` は本文の文字として数える。
+    """
+    return re.sub(r"[\s*`]+", "", _MD_LINK_RE.sub("", block))
 
 
 def apply_block_rules(blocks: list[str], title: str) -> tuple[list[str], list[dict]]:

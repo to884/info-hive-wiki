@@ -36,7 +36,6 @@ import os
 import re
 import shutil
 import sys
-import urllib.parse
 from collections import Counter
 from pathlib import Path
 
@@ -129,9 +128,13 @@ def load_fetch(wd: Path) -> dict:
     return json.loads(read_text(wd / "fetch.json"))
 
 
-def fetched_images(fetch: dict) -> set[str]:
-    """取得して保存した画像のパス（raw のファイルからの相対パス）。"""
-    return {img["path"] for img in fetch.get("images", []) if img.get("path")}
+def fetched_images(fetch: dict) -> dict[str, str]:
+    """取得して保存した画像の、パーサーが正規化したパスから、元のパス（raw のファイルからの相対パス）への対応。
+
+    本文の画像のパスは、パーサーが正規化する（日本語は %E6… になり、%20 はそのまま残る）。fetch.json の
+    パスにも同じ正規化をかけてから比べ、ファイルがあるかは元のパスで確かめる。
+    """
+    return {_PARSER.normalizeLink(img["path"]): img["path"] for img in fetch.get("images", []) if img.get("path")}
 
 
 # ---------------------------------------------------------------- トークンの木
@@ -156,9 +159,9 @@ class Node:
 
     def signature(self) -> tuple:
         """木の形として比べる値。段落の中身や行番号は含めない。"""
+        # 記法（見出しの # と下線、フェンスの ``` と ~~~、リストの記号）も比べる。消すことだけでは変わらない。
         attrs = {k: v for k, v in self.attrs.items() if k in ("start", "style")}
-        return (self.type, self.tag, self.markup if self.type in ("bullet_list", "ordered_list", "list_item") else "",
-                tuple(sorted(attrs.items())))
+        return (self.type, self.tag, self.markup, tuple(sorted(attrs.items())))
 
 
 def parse_tree(body: str) -> Node:
@@ -189,19 +192,33 @@ def links_of(children: list) -> list[str]:
 
 
 def image_src(token) -> str:
-    """画像のパス。パーサーは日本語などを %E6… と符号化するので、fetch.json のパスと同じ形に戻す。"""
-    return urllib.parse.unquote(token.attrGet("src") or "")
+    """画像のパス（パーサーが正規化したもの）。fetch.json のパスとは、fetched_images() が同じ正規化をかけて
+    から比べる。符号化を戻す向きで比べると、パスそのものに %20 などがあるときに別のパスになる。"""
+    return token.attrGet("src") or ""
 
 
 def images_of(children: list) -> list[tuple[str, str, str]]:
     return [(image_src(c), c.content, c.attrGet("title") or "") for c in children if c.type == "image"]
 
 
-def references_of(body: str) -> dict:
-    """参照の定義（`[x]: https://…`）。木には残らないので、別に比べる。"""
+REFERENCE_LINE_RE = re.compile(r"^[ >]*\[(?:\\.|[^\]\\])+\]:\s*\S")
+
+
+def references_of(body: str) -> Counter:
+    """参照の定義。木には残らないので、別に比べる。
+
+    パーサーが読んだ定義（ラベル、URL、title。行番号は含めない）と、定義の行そのもの（パーサーは同じラベルの
+    2 つ目の定義を捨てるので、書き足しを見つけるために行も数える）の多重集合を返す。
+    """
     env: dict = {}
     _PARSER.parse(body, env)
-    return dict(env.get("references", {}))
+    out: Counter = Counter()
+    for label, ref in env.get("references", {}).items():
+        out[("ref", label, ref.get("href", ""), ref.get("title", ""))] += 1
+    for line in body.split("\n"):
+        if REFERENCE_LINE_RE.match(line):
+            out[("line", line.strip(" >"))] += 1
+    return out
 
 
 def code_spans_of(children: list) -> list[str]:
@@ -325,8 +342,7 @@ def freeze(wiki: Path, raw_root: Path, slug: str) -> tuple[int, dict]:
     if src_fm != out_fm:
         errors.append({"kind": "frontmatter", "message": "frontmatter が変わった"})
 
-    src_refs, out_refs = references_of(src_body), references_of(out_body)
-    if any(k not in src_refs or src_refs[k] != v for k, v in out_refs.items()):
+    if references_of(out_body) - references_of(src_body):
         errors.append({"kind": "edit", "message": "参照の定義（[x]: …）を書き足したか、変えた"})
     src_tree, out_tree = parse_tree(src_body), parse_tree(out_body)
     failure: list[Node] = []
@@ -346,11 +362,11 @@ def freeze(wiki: Path, raw_root: Path, slug: str) -> tuple[int, dict]:
     # 画像のファイルは、残った画像から参照されるかで決まる。
     refs = Counter(src for n in walk(parse_tree(out_body)) for src, _a, _t in images_of(n.inline))
     base = raw_path.parent
-    for rel in sorted(fetched_images(fetch)):
+    for norm, rel in sorted(fetched_images(fetch).items()):
         exists = (base / rel).is_file()
-        if refs.get(rel) and not exists:
+        if refs.get(norm) and not exists:
             errors.append({"kind": "image_file", "message": f"残した画像が参照するファイルがない: {rel}"})
-        if not refs.get(rel) and exists:
+        if not refs.get(norm) and exists:
             errors.append({"kind": "image_file", "message": f"画像を消したのに、ファイルが残っている: {rel}"})
 
     # 消したもの（人が読むための行の差分）。
@@ -399,7 +415,7 @@ def caption_of(node: Node) -> tuple[str, str] | None:
     return m.group(1).strip(), m.group(2)
 
 
-def strip_captions(node: Node, fetched: set[str], base: Path, errors: list[dict], names: set[str],
+def strip_captions(node: Node, fetched: dict[str, str], base: Path, errors: list[dict], names: set[str],
                    removed: list[tuple[int, int]]) -> None:
     """木から補足の引用を取り除き、画像ごとの補足の数と表示名を調べる。
 
@@ -420,9 +436,9 @@ def strip_captions(node: Node, fetched: set[str], base: Path, errors: list[dict]
         needed = []
         for src, _alt, _title in images:
             if src in fetched:
-                if not (base / src).is_file():
+                if not (base / fetched[src]).is_file():
                     errors.append({"kind": "image_file", "line": child.line,
-                                   "message": f"取得した画像のファイルがない: {src}"})
+                                   "message": f"取得した画像のファイルがない: {fetched[src]}"})
                 needed.append(src)
         found = 0
         while found < len(needed) and i < len(node.children) and caption_of(node.children[i]) is not None:
@@ -579,14 +595,15 @@ def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: s
     strip_captions(out_tree, fetched_images(fetch), raw_path.parent, errors, names, caption_ranges)
     if not translate:
         # 訳さないページは、補足の行を除いた本文が、文字どおり同じでなければならない（記法の書き換えも含めて）。
+        # 入れ物の記号だけの空の行（空の行、`>`、字下げだけの行）は、補足を挟むと増えるので比べない。
+        # 段落の分け方とブロックの数は、木の比較（compare）で別に照らしている。
         lines = out_body.split("\n")
         drop: set[int] = set()
         for start, end in caption_ranges:
             drop.update(range(start, end))
-            if end < len(lines) and not lines[end].strip():
-                drop.add(end)
-        kept = "\n".join(line for k, line in enumerate(lines) if k not in drop)
-        if kept.strip() != src_body.strip():
+        kept = [line for k, line in enumerate(lines) if k not in drop and line.strip(" \t>")]
+        original = [line for line in src_body.split("\n") if line.strip(" \t>")]
+        if kept != original:
             errors.append({"kind": "text", "message": "訳さないページで、補足のほかに本文を変えた"})
     if len(names) > 1:
         errors.append({"kind": "caption", "message": f"補足の表示名がそろっていない: {sorted(names)}"})
