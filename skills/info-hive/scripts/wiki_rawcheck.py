@@ -138,7 +138,8 @@ def work_dir(wiki: Path, slug: str) -> Path:
 
 
 def work_dir_complete(wiki: Path, slug: str) -> bool:
-    """作業用の写しがそろっているか。wiki_fetch.py は fetch.json を最後に書く。"""
+    """作業用の写しがそろっているか。wiki_fetch.py は fetch.json を最後に、raw を書き終えてから置く。そろって
+    いれば、raw はこの写しと同じ取得で書いたものである（raw をあとで書き換えたかは、freeze と check が照らす）。"""
     wd = work_dir(wiki, slug)
     if not ((wd / "fetched.md").is_file() and (wd / "fetch.json").is_file()):
         return False
@@ -227,16 +228,18 @@ def remaining_images(fetch: dict, tree: "Node", offset: int) -> list[dict]:
     """本文に残った、取得して保存した画像の記録（本文の順。同じ画像を 2 か所で使えば 2 つ）。補足を書く対象である。
 
     取得の記録（fetch.json の images）は、雑音の削除で消した画像も含むので、削除のあとの本文から選び直す。
-    line は、その画像を含むブロックの始まりの、ファイルの中の行番号（frontmatter の offset 行を足す）。
+    記録は保存先のパスごとではなく出現ごとにある（同じ画像を alt を変えて 2 か所で使うことがある）ので、alt と
+    元の URL は、本文に残った画像の記法そのもの（取得器は元の URL を title に書く）から取る。記録からは保存先の
+    パスだけを使う。line は、その画像を含むブロックの始まりの、ファイルの中の行番号（frontmatter の offset 行を足す）。
     """
     fetched = fetched_images(fetch)
-    records = {img["path"]: img for img in fetch.get("images", []) if img.get("path")}
     out = []
     for node in walk(tree):
-        for src, _alt, _title in images_of(node.inline):
+        for src, alt, title in images_of(node.inline):
             rel = fetched.get(src)
             if rel is not None:
-                out.append({**records[rel], "line": offset + node.line if node.line else None})
+                out.append({"path": rel, "url": title, "alt": alt,
+                            "line": offset + node.line if node.line else None})
     return out
 
 
@@ -258,11 +261,11 @@ def frontmatter_lines(text: str) -> list[str]:
 
 
 def work_dir_matches_raw(wiki: Path, slug: str, raw_path: Path) -> bool:
-    """作業用の写しが、raw と同じ取得のものか。
+    """raw の frontmatter が、作業用の写しの fetched.md と同じか（translated_by は除く）。
 
-    写しの fetched.md と raw の frontmatter（取得の日時と原文のハッシュを含む。translated_by は除く）が同じなら、
-    同じ取得で書いたものとする。--force の取り直しで写しを書いたあと、raw を書けずに止まると、写しだけが新しい
-    取得のものになる。写しがそろっているだけでは、raw と同じ取得のものとは限らない。
+    同じ取得で書いたことの保証は、写しがそろった印を raw のあとに置く書き込みの順（work_dir_complete）にある。
+    frontmatter は同じ秒の取り直しでは同じになりうるので、取得の同一性の印にはしない。これは、写しをそろえた
+    あとで raw の frontmatter を書き換えたか、raw を別の版に戻したもの（手で戻した、など）を見分ける。
     """
     try:
         return frontmatter_lines(read_text(work_dir(wiki, slug) / "fetched.md")) == \
@@ -313,7 +316,12 @@ def parse_tree(body: str) -> Node:
         elif tok.nesting == -1:
             stack.pop()
         elif tok.type == "inline":
-            stack[-1].inline = list(tok.children or [])
+            node = stack[-1]
+            node.inline = list(tok.children or [])
+            # 表のセル（th、td）の開始トークンは行の位置（map）を持たず、中の inline が持つ。開始トークンに位置が
+            # なければ、inline の位置を節点の位置にする（誤りと警告に行番号を付けるため）。
+            if node.line is None and tok.map:
+                node.line, node.end = tok.map[0] + 1, tok.map[1]
         else:
             stack[-1].children.append(Node(tok))
     return root
@@ -754,6 +762,10 @@ def compare(a: Node, b: Node, translate: bool, errors: list[dict], warnings: lis
     if a.type in ("fence", "code_block") and (a.content != b.content or a.info != b.info):
         errors.append({"kind": "code", **where, "message": "コードブロックの中身が変わった",
                        "source": a.content[:200], "raw": b.content[:200]})
+    elif a.info != b.info:
+        # コードブロックのほかで info を持つのは、番号つきのリストの項目（項目の番号）。freeze（derivable）と同じく照らす。
+        errors.append({"kind": "structure", **where,
+                       "message": f"番号つきのリストの項目の番号が変わった（{a.info} → {b.info}）"})
     if a.type == "tr" and len(a.children) != len(b.children):
         errors.append({"kind": "table", **where,
                        "message": f"表の行のセルの数が違う（取得 {len(a.children)}、raw {len(b.children)}）。"
@@ -765,7 +777,8 @@ def compare(a: Node, b: Node, translate: bool, errors: list[dict], warnings: lis
     if a.inline or b.inline:
         ia, ib = a.inline, b.inline
         src_text, out_text = inline_text(ia), inline_text(ib)
-        detail = {**where, "source": src_text[:200], "raw": out_text[:200]}
+        # 出力に添える文は、インラインのコードも含める（コードの誤りの場所と中身が分かるように）。
+        detail = {**where, "source": inline_text(ia, code=True)[:200], "raw": inline_text(ib, code=True)[:200]}
         if images_of(ia) != images_of(ib):
             errors.append({"kind": "image", **detail, "message": "画像（パス、alt、title）が変わった"})
         if Counter(links_of(ia)) != Counter(links_of(ib)):

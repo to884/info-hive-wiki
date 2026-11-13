@@ -1236,7 +1236,8 @@ def build(args) -> tuple[int, dict]:
         if old == sha:
             result["unchanged"] = True
             if wiki is not None:
-                # 写しがそろい、raw と同じ取得のもの（frontmatter が同じ）のときだけ、途中から続けられる。
+                # 写しがそろい（そろった印は raw を書いたあとに置くので、raw と同じ取得で書いたもの）、raw の
+                # frontmatter を書き換えていないときだけ、途中から続けられる。
                 complete = wiki_rawcheck.work_dir_complete(wiki, args.slug) and \
                     wiki_rawcheck.work_dir_matches_raw(wiki, args.slug, target)
                 result["work_dir"] = complete
@@ -1401,18 +1402,22 @@ def build(args) -> tuple[int, dict]:
     })
 
     # 検査（wiki_rawcheck.py）の基準になる作業用の写しを、raw より先に書く。写しを書けなければ raw も書かない。
+    # 写しがそろった印（fetch.json）は、raw を書き終えてから置く。写しがそろっていれば、raw はその写しと同じ取得で
+    # 書いたものである。raw を書けずに止まると（--force の取り直しで、前の raw が残るときも）、写しはそろわず、
+    # 取り直しは work_dir を偽にする。写しがそろったかは、fetched.md と、JSON として読める fetch.json の両方で
+    # 判定する（wiki_rawcheck.work_dir_complete）。
+    tmp = None
     if wiki is not None:
         wiki_rawcheck.remove_work_dir(wiki, args.slug)
         wd = wiki_rawcheck.work_dir(wiki, args.slug)
         wd.mkdir(parents=True)
         result["work_dir"] = True
         (wd / "fetched.md").write_bytes(text.encode("utf-8"))
-        # fetch.json は最後に、一時の名前で書き終えてから名前を変える。写しがそろったかは、fetched.md と、
-        # JSON として読める fetch.json の両方で判定する（wiki_rawcheck.work_dir_complete）。
         tmp = wd / "fetch.json.tmp"
         tmp.write_bytes(json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"))
-        os.replace(tmp, wd / "fetch.json")
     write_outputs(raw_root, target, asset_dir, args.slug, text, pending)
+    if tmp is not None:
+        os.replace(tmp, tmp.with_name("fetch.json"))
     return 0, result
 
 
