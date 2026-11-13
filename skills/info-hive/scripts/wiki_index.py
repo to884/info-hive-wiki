@@ -973,8 +973,8 @@ def list_index(root: Path, name: str | None = None) -> dict:
         text = path.read_text(encoding="utf-8-sig")
         meta, body = wiki_search.parse_frontmatter(text)
         heading = next((line.lstrip("#").strip() for line in body.splitlines() if line.startswith("#")), None)
-        files.append({"name": path.relative_to(folder).as_posix(), "title": meta.get("title") or heading,
-                      "bytes": f.size})
+        files.append({"name": path.relative_to(folder).as_posix(),
+                      "title": wiki_pages.text_value(meta.get("title")) or heading, "bytes": f.size})
     return {"wiki": root.as_posix(),
             "index": index_md.read_text(encoding="utf-8-sig") if index_md.is_file() else None,
             "indexes": files}
