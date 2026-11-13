@@ -568,6 +568,32 @@ FUNCTION_WORDS = {
     "He", "She", "I", "My", "Our", "Your", "Their", "Not", "No", "All", "Any", "Some", "Each", "Every",
     "Also", "Note", "See", "Update", "Example", "Examples",
 }
+# 大文字で始まるが、日本語に訳すのがふつうの語（月と曜日の名前、図の出典の定型）。
+# Sonnet 5.5 で試したとき（docs/agent-runs/2026-11-13-wiki-web-ingest-check-review/sonnet-trial.md）、
+# この語の警告はすべて空振りだった。
+TRANSLATED_WORDS = {
+    "January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+    "November", "December", "Jan", "Feb", "Mar", "Apr", "Jun", "Jul", "Aug", "Sep", "Sept", "Oct", "Nov", "Dec",
+    "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+    "Created", "Source", "Photo", "Image", "Figure", "Fig", "Credit", "Credits",
+}
+
+
+def link_diff_message(src: list[tuple[str, str]], out: list[tuple[str, str]]) -> str:
+    """リンクの誤りの文。足りないリンクと、増えたリンクを並べる（どれを直せばよいかが分かるように）。"""
+
+    def show(pairs: Counter) -> str:
+        return "、".join(f"{href}" + (f"（title: {title}）" if title else "") + (f" ×{n}" if n > 1 else "")
+                        for (href, title), n in sorted(pairs.items()))
+
+    missing = Counter(src) - Counter(out)
+    added = Counter(out) - Counter(src)
+    parts = [f"リンクの数: 取得 {len(src)}、raw {len(out)}"]
+    if missing:
+        parts.append(f"足りないリンク: {show(missing)}")
+    if added:
+        parts.append(f"増えたリンク: {show(added)}")
+    return "リンク先の URL か title が違う（" + "。".join(parts) + "）"
 
 
 def names_of(text: str, title_case_ok: bool = True) -> list[str]:
@@ -575,13 +601,15 @@ def names_of(text: str, title_case_ok: bool = True) -> list[str]:
 
     title_case_ok が False（見出しと表のセル）のときは、CamelCase の語とすべて大文字の語だけを返す。
     見出しと表の見出しは語ごとに大文字で始まるので、固有の名前と見分けられないためである。
+    月と曜日の名前、図の出典の定型の語は、訳すのがふつうなので数えない。用語を説明するリストの
+    「**用語** - 説明」の区切り（` - `、` – `、` — `）のあとも、文の先頭として扱う。
     """
     out = []
-    for sentence in re.split(r"(?<=[.!?:])\s+|\n", text):
+    for sentence in re.split(r"(?<=[.!?:])\s+|\n|\s[-–—]\s", text):
         for m in NAME_RE.finditer(sentence):
             word = m.group(0)
             plain = bool(re.fullmatch(r"[A-Z][a-z]+", word))
-            if plain and (not title_case_ok or word in FUNCTION_WORDS):
+            if plain and (not title_case_ok or word in FUNCTION_WORDS or word in TRANSLATED_WORDS):
                 continue
             at_start = not sentence[: m.start()].strip(" \t\"'(*_[-+0123456789.")
             if at_start and plain:
@@ -612,7 +640,7 @@ def compare(a: Node, b: Node, translate: bool, errors: list[dict], warnings: lis
         if images_of(ia) != images_of(ib):
             errors.append({"kind": "image", **detail, "message": "画像（パス、alt、title）が変わった"})
         if Counter(links_of(ia)) != Counter(links_of(ib)):
-            errors.append({"kind": "links", **detail, "message": "リンク先の URL か title が違う"})
+            errors.append({"kind": "links", **detail, "message": link_diff_message(links_of(ia), links_of(ib))})
         if Counter(code_spans_of(ia)) != Counter(code_spans_of(ib)):
             errors.append({"kind": "code_span", **detail, "message": "インラインのコードが変わった"})
         if sum(c.type == "hardbreak" for c in ia) != sum(c.type == "hardbreak" for c in ib):
