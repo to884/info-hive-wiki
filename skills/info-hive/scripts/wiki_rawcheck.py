@@ -61,6 +61,13 @@ def write_text(path: Path, text: str) -> None:
     path.write_bytes(text.encode("utf-8"))
 
 
+def write_atomic(path: Path, text: str) -> None:
+    """一時の名前で書き終えてから、名前を変える。途中で止まっても、書きかけのファイルは正式な名前に現れない。"""
+    tmp = path.with_name(path.name + ".tmp")
+    write_text(tmp, text)
+    os.replace(tmp, path)
+
+
 def work_dir(wiki: Path, slug: str) -> Path:
     return wiki.joinpath(*WORK_SUBDIR, slug)
 
@@ -128,13 +135,27 @@ def load_fetch(wd: Path) -> dict:
     return json.loads(read_text(wd / "fetch.json"))
 
 
-def fetched_images(fetch: dict) -> dict[str, str]:
-    """取得して保存した画像の、パーサーが正規化したパスから、元のパス（raw のファイルからの相対パス）への対応。
+def parsed_image_src(rel: str) -> str:
+    """wiki_fetch.py が本文に書くとおりの画像の記法を、パーサーで読んだときのパス。
 
-    本文の画像のパスは、パーサーが正規化する（日本語は %E6… になり、%20 はそのまま残る）。fetch.json の
-    パスにも同じ正規化をかけてから比べ、ファイルがあるかは元のパスで確かめる。
+    パーサーはパスに、符号化（日本語は %E6…）や文字参照の復号（&amp; は &）をかける。正規化の一部をまねると
+    取りこぼすので、同じ書き方の記法を同じパーサーで読んで、本文の画像のパスと同じものを作る。
     """
-    return {_PARSER.normalizeLink(img["path"]): img["path"] for img in fetch.get("images", []) if img.get("path")}
+    import wiki_fetch  # wiki_fetch.py が wiki_rawcheck を読み込むので、使うときに読み込む
+    tokens = _PARSER.parseInline(f"![]({wiki_fetch._md_url(rel)})")
+    for tok in tokens:
+        for child in tok.children or []:
+            if child.type == "image":
+                return image_src(child)
+    return rel
+
+
+def fetched_images(fetch: dict) -> dict[str, str]:
+    """取得して保存した画像の、パーサーが読んだパスから、元のパス（raw のファイルからの相対パス）への対応。
+
+    本文の画像のパスと、記録のパスを、同じパーサーを通してから比べ、ファイルがあるかは元のパスで確かめる。
+    """
+    return {parsed_image_src(img["path"]): img["path"] for img in fetch.get("images", []) if img.get("path")}
 
 
 # ---------------------------------------------------------------- トークンの木
@@ -238,20 +259,23 @@ def code_spans_of(children: list) -> list[str]:
     return [c.content for c in children if c.type == "code_inline"]
 
 
-def table_cells(lines: list[str], node: Node) -> list[int]:
-    """表の節点の、元の行ごとのセルの数（エスケープしていない | で区切る）。"""
+def table_pipes(lines: list[str], node: Node) -> list[int]:
+    """表の節点の、元の行ごとの、エスケープしていない | の数。
+
+    セルの区切りの数で、パーサーが捨てるセルも数えに入る。入れ物の記号（リストの `- `、引用の `>`）は | を
+    含まないので、行の先頭の入れ物を推し量らずに、取得と raw の同じ行どうしで比べられる。
+    """
     if node.line is None or node.end is None:
         return []
-    counts = []
-    for line in lines[node.line - 1:node.end]:
-        row = re.sub(r"^[ \t>]*", "", line).strip()
-        cells = re.split(r"(?<!\\)\|", row)
-        if cells and not cells[0].strip():
-            cells = cells[1:]
-        if cells and not cells[-1].strip():
-            cells = cells[:-1]
-        counts.append(len(cells))
-    return counts
+    return [len(re.findall(r"(?<!\\)\|", line)) for line in lines[node.line - 1:node.end]]
+
+
+def table_columns(node: Node) -> int:
+    """表の列の数（パーサーが読んだ、見出しの行のセルの数）。"""
+    for child in walk(node):
+        if child.type == "tr":
+            return sum(1 for c in child.children if c.type in ("th", "td"))
+    return 0
 
 
 def walk(node: Node):
@@ -397,15 +421,16 @@ def freeze(wiki: Path, raw_root: Path, slug: str) -> tuple[int, dict]:
         # 書き足しは、木には現れないためである。
         errors.append({"kind": "edit", "message": "取得した内容にない文字を書き足した（木に現れない部分、"
                        "たとえば表の列数を超えるセルへの書き足しを含む）"})
-    # パーサーが捨てる内容を raw に残させない。見出しより多いセルのある行は、木に現れず、訳と補足の段で
-    # 照らせないためである（見出しの列だけを消したときに起きる）。
-    out_lines = out_body.split("\n")
-    for table in (n for n in walk(out_tree) if n.type == "table"):
-        cells = table_cells(out_lines, table)
-        if cells and any(c > cells[0] for c in cells[2:]):
-            errors.append({"kind": "table", "line": table.line,
-                           "message": "表に、見出しより多いセルのある行がある（パーサーが捨てるセルは見えない。"
-                           "列を消すときは、見出しとすべての行から消す）"})
+    # 表の列の数（見出しのセルの数。パーサーのトークンで数える）は変えさせない。取得器は表のすべての行を
+    # 見出しと同じセルの数にそろえて書くので、列が変わらず、文字を書き足せない（上の部分列の検査）限り、
+    # パーサーが捨てる見えないセルは生まれない。見出しの列だけを消すと、データ行の余ったセルが見えなくなる。
+    src_cols = [table_columns(n) for n in walk(src_tree) if n.type == "table"]
+    out_tables = [n for n in walk(out_tree) if n.type == "table"]
+    if any(table_columns(n) not in src_cols for n in out_tables) or \
+            not is_subsequence([table_columns(n) for n in out_tables], src_cols):
+        errors.append({"kind": "table", "line": next((n.line for n in out_tables), None),
+                       "message": "表の列の数が変わった。表の列は消せない（見出しの列だけを消すと、データ行の"
+                       "余ったセルがパーサーに捨てられて見えなくなる）。表は、行ごとか表ごと消す"})
     # 題名（最初の h1 の見出し）は、そのまま残す。
     src_title = next((n for n in walk(src_tree) if n.type == "heading" and n.tag == "h1"), None)
     if src_title is not None:
@@ -437,9 +462,11 @@ def freeze(wiki: Path, raw_root: Path, slug: str) -> tuple[int, dict]:
               "removed_lines": removed, "shortened_lines": changed,
               "removed_by_rule": fetch.get("removed_by_rule", [])}
     if not errors:
-        write_text(wd / "cleaned.md", out_text)
-        write_text(wd / "removed.json", json.dumps({"removed_lines": removed, "shortened_lines": changed},
-                                                   ensure_ascii=False, indent=1))
+        # どちらも一時の名前で書き終えてから名前を変える。cleaned.md は最後に置く。cleaned.md があることを、
+        # 削除を固定し終えた印にする（wiki_fetch.py の work_stage）。書きかけの cleaned.md は残らない。
+        write_atomic(wd / "removed.json", json.dumps({"removed_lines": removed, "shortened_lines": changed},
+                                                     ensure_ascii=False, indent=1))
+        write_atomic(wd / "cleaned.md", out_text)
     return (0 if not errors else 1), result
 
 
@@ -675,15 +702,17 @@ def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: s
 
     style: Counter = Counter()
     compare(src_tree, out_tree, translate, errors, warnings, style)
-    # パーサーは表の列数を超えるセルを捨てるので、表の行ごとのセルの数を、元の行から数えて比べる。
+    # パーサーは表の列数を超えるセルを捨てるので、表の行ごとのセルの区切り（エスケープしていない |）の数を、
+    # 元の行から数えて比べる（削除の段で列は変えられないので、固定した内容に見えないセルはない）。
     src_tables = [n for n in walk(src_tree) if n.type == "table"]
     out_tables = [n for n in walk(out_tree) if n.type == "table"]
     if len(src_tables) == len(out_tables):
         src_lines, out_lines = src_body.split("\n"), out_body.split("\n")
         for ta, tb in zip(src_tables, out_tables):
-            if table_cells(src_lines, ta) != table_cells(out_lines, tb):
+            if table_pipes(src_lines, ta) != table_pipes(out_lines, tb):
                 errors.append({"kind": "table", "line": tb.line,
-                               "message": "表の行ごとのセルの数が違う（列数を超えるセルへの書き足しを含む）"})
+                               "message": "表の行ごとのセルの区切り（|）の数が違う（列数を超えるセルへの書き足しを含む。"
+                               "訳文の中の | は \\| と書く）"})
     total = style["desu"] + style["dearu"]
     if total and min(style["desu"], style["dearu"]) > total * 0.1:
         warnings.append({"kind": "style",
