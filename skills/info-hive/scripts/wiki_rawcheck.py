@@ -185,14 +185,17 @@ def parse_tree(body: str) -> Node:
     return root
 
 
-def inline_text(children: list, newline: str = " ") -> str:
-    """インラインの文字（コードと画像を除く。リンクの文言は含める）。改行は newline にする。"""
-    return "".join(c.content if c.type == "text" else (newline if c.type in ("softbreak", "hardbreak") else "")
+def inline_text(children: list, newline: str = " ", code: bool = False) -> str:
+    """インラインの文字（画像を除く。リンクの文言は含める。code が真ならインラインのコードも含める）。
+    改行は newline にする。"""
+    kinds = ("text", "code_inline") if code else ("text",)
+    return "".join(c.content if c.type in kinds else (newline if c.type in ("softbreak", "hardbreak") else "")
                    for c in children)
 
 
-def links_of(children: list) -> list[str]:
-    return [c.attrGet("href") or "" for c in children if c.type == "link_open"]
+def links_of(children: list) -> list[tuple[str, str]]:
+    """リンク先と title の組。title も原文のまま残すものとして比べる。"""
+    return [(c.attrGet("href") or "", c.attrGet("title") or "") for c in children if c.type == "link_open"]
 
 
 def image_src(token) -> str:
@@ -325,33 +328,43 @@ def is_subsequence(short: list, long: list, same=lambda a, b: a == b) -> bool:
     return True
 
 
-def derivable(src: Node, out: Node, failure: list[Node]) -> bool:
+def derivable(src: Node, out: Node, failure: list[Node] | None = None,
+              memo: dict[tuple[int, int], bool] | None = None) -> bool:
     """out が、src から消すことだけで作れるか。
 
     ブロックの種類と属性は同じ。コードブロックは中身も同じ。インラインは、単位の並びが部分列。子のブロックは、
     out の子の並びが src の子の部分列で、対応する子どうしも消すことだけで作れる。
+
+    節点の組ごとの結果を memo に覚え、同じ組を 2 度照らさない（入れ子が深いと、照らし直しで呼び出しが指数的に
+    増えるため）。failure を渡したときだけ、対応の取れない最初の子を探して入れる（memo の結果を使い、照らし直さない）。
     """
+    if memo is None:
+        memo = {}
+    key = (id(src), id(out))
+    if key in memo and failure is None:
+        return memo[key]
+    ok = True
     if src.signature(with_start=False) != out.signature(with_start=False) or src.info != out.info \
             or src.content != out.content:
-        return False
-    if (src.inline or out.inline) and not is_subsequence(inline_units(out.inline), inline_units(src.inline), same_unit):
-        return False
+        ok = False
+    elif (src.inline or out.inline) and not is_subsequence(inline_units(out.inline), inline_units(src.inline), same_unit):
+        ok = False
+    else:
+        def same(a: Node, b: Node) -> bool:
+            return derivable(a, b, None, memo)
 
-    def same(a: Node, b: Node) -> bool:
-        return derivable(a, b, [])
-
-    if not is_subsequence(out.children, src.children, same):
-        # どの子で崩れたかを示すために、対応の取れない最初の子を探す。
-        i = 0
-        for child in out.children:
-            while i < len(src.children) and not same(src.children[i], child):
+        ok = is_subsequence(out.children, src.children, same)
+        if not ok and failure is not None:
+            i = 0
+            for child in out.children:
+                while i < len(src.children) and not same(src.children[i], child):
+                    i += 1
+                if i >= len(src.children):
+                    failure.append(child)
+                    break
                 i += 1
-            if i >= len(src.children):
-                failure.append(child)
-                break
-            i += 1
-        return False
-    return True
+    memo[key] = ok
+    return ok
 
 
 def freeze(wiki: Path, raw_root: Path, slug: str) -> tuple[int, dict]:
@@ -441,7 +454,7 @@ def caption_of(node: Node) -> tuple[str, str] | None:
     if node.type != "blockquote" or not node.children or node.children[0].type != "paragraph":
         return None
     # 表示名は、引用の最初の行の、60 文字以内の名前。本文の途中に「補足:」がある普通の引用とは見分ける。
-    m = CAPTION_HEAD_RE.match(inline_text(node.children[0].inline, newline="\n"))
+    m = CAPTION_HEAD_RE.match(inline_text(node.children[0].inline, newline="\n", code=True))
     if not m:
         return None
     return m.group(1).strip(), m.group(2)
@@ -482,6 +495,10 @@ def strip_captions(node: Node, fetched: dict[str, str], base: Path, errors: list
             if any(p.type != "paragraph" for p in quote.children):
                 errors.append({"kind": "caption", "line": quote.line,
                                "message": "補足の中に段落のほかのブロック（引用、リストなど）がある。補足は段落だけで書く"})
+            # 補足は丸ごと取り除くので、中の画像はファイルの有無や画像の比較から外れてしまう。画像は書かせない。
+            if any(images_of(p.inline) for p in walk(quote)):
+                errors.append({"kind": "caption", "line": quote.line,
+                               "message": "補足の中に画像がある。補足は文だけで書く"})
             later = [inline_text(p.inline, newline="\n") for p in walk(quote) if p is not quote.children[0] and p.inline]
             if re.search(r"\n[^\n]{1,60}?" + re.escape(CAPTION_MARK), body) or \
                     any(CAPTION_HEAD_RE.match(text) for text in later):
@@ -557,7 +574,7 @@ def compare(a: Node, b: Node, translate: bool, errors: list[dict], warnings: lis
         if images_of(ia) != images_of(ib):
             errors.append({"kind": "image", **detail, "message": "画像（パス、alt、title）が変わった"})
         if Counter(links_of(ia)) != Counter(links_of(ib)):
-            errors.append({"kind": "links", **detail, "message": "リンク先の URL が違う"})
+            errors.append({"kind": "links", **detail, "message": "リンク先の URL か title が違う"})
         if Counter(code_spans_of(ia)) != Counter(code_spans_of(ib)):
             errors.append({"kind": "code_span", **detail, "message": "インラインのコードが変わった"})
         if sum(c.type == "hardbreak" for c in ia) != sum(c.type == "hardbreak" for c in ib):
