@@ -1236,16 +1236,23 @@ def build(args) -> tuple[int, dict]:
         if old == sha:
             result["unchanged"] = True
             if wiki is not None:
-                complete = wiki_rawcheck.work_dir_complete(wiki, args.slug)
+                # 写しがそろい、raw と同じ取得のもの（frontmatter が同じ）のときだけ、途中から続けられる。
+                complete = wiki_rawcheck.work_dir_complete(wiki, args.slug) and \
+                    wiki_rawcheck.work_dir_matches_raw(wiki, args.slug, target)
                 result["work_dir"] = complete
                 if complete:
                     # 途中から続けるために、どの段まで進んだかと、後の手順が使う値を返す。
                     wd = wiki_rawcheck.work_dir(wiki, args.slug)
-                    result["work_stage"] = "frozen" if (wd / "cleaned.md").is_file() else "fetched"
+                    frozen = (wd / "cleaned.md").is_file()
+                    result["work_stage"] = "frozen" if frozen else "fetched"
                     saved = wiki_rawcheck.load_fetch(wd)
                     for key in ("needs_translation", "images", "removed_by_rule", "title", "source_lang", "ja_ratio"):
                         if key in saved:
                             result[key] = saved[key]
+                    if frozen:
+                        # 削除を固定したあとは、補足を書く画像は、削除のあとの本文に残ったものだけ（freeze の出力と同じ）。
+                        fm, body = wiki_rawcheck.split_frontmatter(wiki_rawcheck.read_text(wd / "cleaned.md"))
+                        result["images"] = wiki_rawcheck.remaining_images(saved, wiki_rawcheck.parse_tree(body), len(fm))
             return 0, result
         suggestion = f"{args.slug}-{datetime.now().strftime('%Y%m%d')}"
         result["suggested_slug"] = suggestion
@@ -1413,7 +1420,8 @@ def render_text(code: int, result: dict) -> str:
     if result.get("unchanged"):
         note = ""
         if result.get("work_dir") is False:
-            note = "\n作業用の写しがない。取り込みの途中なら、--force で取り直す（写しと raw の両方を作り直す）"
+            note = ("\n作業用の写しがないか、raw と別の取得のもの。取り込みの途中なら、--force で取り直す"
+                    "（写しと raw の両方を作り直す）")
         return f"内容は前回と同じなので、書き込まなかった: {result['path']}{note}"
     if code == 3:
         return (f"同じスラッグのファイルがあり、内容が違う: {result['path']}\n"

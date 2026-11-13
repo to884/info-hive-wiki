@@ -17,12 +17,14 @@ wiki_rawcheck.py — Web ページの raw を、取得した直後の内容と�
 トークンで照らす。行の接頭辞や正規表現で、入れ物や構造を推し量らない。
 
 作業用のフォルダーは <WIKI_ROOT>/.wiki-cache/ingest/<スラッグ>/ で、wiki_fetch.py が作る。
-check --finish は、誤りがなければこのフォルダーを消す。
+check --finish は、誤りも警告もなければ（警告を受け入れる --accept-warnings を付ければ、誤りがなければ）
+このフォルダーを消す。
 
 使い方:
     python wiki_rawcheck.py freeze --wiki <WIKI_ROOT> --raw-root <RAW_ROOT> --slug <スラッグ> [--json]
     python wiki_rawcheck.py check  --wiki <WIKI_ROOT> --raw-root <RAW_ROOT> --slug <スラッグ> [--json]
-                                   [--language-override translate|keep --reason <理由>] [--finish]
+                                   [--language-override translate|keep --reason <理由>]
+                                   [--finish [--accept-warnings]]
 
 終了コード: 0 = 通った（警告があってもよい）、1 = 規則に反している、またはファイルのエラー。
 """
@@ -31,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import importlib
 import json
 import os
 import re
@@ -47,7 +50,41 @@ import wiki_pages  # noqa: E402
 WORK_SUBDIR = (".wiki-cache", "ingest")
 CAPTION_MARK = " 補足: "
 CAPTION_HEAD_RE = re.compile(r"([^\s][^\n]{0,59}?)" + re.escape(CAPTION_MARK) + r"(.*)\Z", re.S)
+
+# 表の規則（同梱の markdown-it-py）。パッケージの属性の table は関数なので、モジュールは import_module で取る。
+_TABLE_RULE = importlib.import_module("markdown_it.rules_block.table")
+
+
+def _table_noting_surplus_cells(state, start_line: int, end_line: int, silent: bool) -> bool:
+    """表の規則に、見出しより多いセルを持つ行を記録させる。
+
+    パーサーは、表の行のうち見出しの列数を超えるセルを捨て、トークンを作らない。そのセルの文字は木に現れず、
+    画面にも出ない。表の規則そのものの行の取り出し（getLine。リストや引用の中でも、入れ物の字下げを除いた行）
+    と分け方（escapedSplit と、両端の空のセルの除き方）で、行ごとのセルの数を数え直し、列数を超える行の
+    番号（1 始まり）を table_open の meta に入れる。トークンの並びは変えない。
+    """
+    start = len(state.tokens)
+    if not _TABLE_RULE.table(state, start_line, end_line, silent):
+        return False
+    if not silent:
+        table_open = state.tokens[start]
+        columns = sum(1 for tok in state.tokens[start:] if tok.type == "th_open")
+        rows = []
+        for line in range(table_open.map[0] + 2, table_open.map[1]):
+            cells = _TABLE_RULE.escapedSplit(_TABLE_RULE.getLine(state, line).strip())
+            if cells and cells[0] == "":
+                cells.pop(0)
+            if cells and cells[-1] == "":
+                cells.pop()
+            if len(cells) > columns:
+                rows.append(line + 1)
+        table_open.meta["surplus_cell_rows"] = rows
+    return True
+
+
 _PARSER = wiki_pages.new_parser()
+# wiki_pages.new_parser() の表の規則と同じ位置、同じ代わりの連鎖（段落と参照の定義を終わらせる）で差し替える。
+_PARSER.block.ruler.at("table", _table_noting_surplus_cells, {"alt": ["paragraph", "reference"]})
 
 
 # ---------------------------------------------------------------- ファイルと作業場所
@@ -158,13 +195,62 @@ def fetched_images(fetch: dict) -> dict[str, str]:
     return {parsed_image_src(img["path"]): img["path"] for img in fetch.get("images", []) if img.get("path")}
 
 
+def remaining_images(fetch: dict, tree: "Node", offset: int) -> list[dict]:
+    """本文に残った、取得して保存した画像の記録（本文の順。同じ画像を 2 か所で使えば 2 つ）。補足を書く対象である。
+
+    取得の記録（fetch.json の images）は、雑音の削除で消した画像も含むので、削除のあとの本文から選び直す。
+    line は、その画像を含むブロックの始まりの、ファイルの中の行番号（frontmatter の offset 行を足す）。
+    """
+    fetched = fetched_images(fetch)
+    records = {img["path"]: img for img in fetch.get("images", []) if img.get("path")}
+    out = []
+    for node in walk(tree):
+        for src, _alt, _title in images_of(node.inline):
+            rel = fetched.get(src)
+            if rel is not None:
+                out.append({**records[rel], "line": offset + node.line if node.line else None})
+    return out
+
+
+def to_file_lines(items: list[dict], offset: int) -> None:
+    """誤りと警告の行番号（本文の中の行番号）を、raw のファイルの行番号にする（frontmatter の offset 行を足す）。
+
+    木の行番号は本文の中で数える（補足の行の範囲など、本文の行を指すのに使う）。人とモデルが開くのはファイル
+    なので、出力するときにだけ直す。取得の写しと raw の frontmatter の行の数は同じである（translated_by の値だけが違う）。
+    """
+    for item in items:
+        if item.get("line"):
+            item["line"] += offset
+
+
+def frontmatter_lines(text: str) -> list[str]:
+    """frontmatter の行（translated_by の行を除く）。取得の世代を見分けるのに使う。"""
+    fm, _body = split_frontmatter(text.replace("\r\n", "\n"))
+    return [line for line in fm if not line.startswith("translated_by:")]
+
+
+def work_dir_matches_raw(wiki: Path, slug: str, raw_path: Path) -> bool:
+    """作業用の写しが、raw と同じ取得のものか。
+
+    写しの fetched.md と raw の frontmatter（取得の日時と原文のハッシュを含む。translated_by は除く）が同じなら、
+    同じ取得で書いたものとする。--force の取り直しで写しを書いたあと、raw を書けずに止まると、写しだけが新しい
+    取得のものになる。写しがそろっているだけでは、raw と同じ取得のものとは限らない。
+    """
+    try:
+        return frontmatter_lines(read_text(work_dir(wiki, slug) / "fetched.md")) == \
+            frontmatter_lines(read_text(raw_path))
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
 # ---------------------------------------------------------------- トークンの木
 
 
 class Node:
     """ブロックのトークンの木の節点。inline はインラインのトークン（子）の並び。"""
 
-    __slots__ = ("type", "tag", "markup", "info", "attrs", "content", "children", "inline", "line", "end")
+    __slots__ = ("type", "tag", "markup", "info", "attrs", "content", "children", "inline", "line", "end",
+                 "surplus_cell_rows")
 
     def __init__(self, tok=None):
         self.type = tok.type.removesuffix("_open") if tok else "root"
@@ -177,6 +263,8 @@ class Node:
         self.inline: list = []
         self.line = (tok.map[0] + 1) if tok is not None and tok.map else None
         self.end = tok.map[1] if tok is not None and tok.map else None
+        # 表の、見出しより多いセルを持つ行（本文の中の行番号）。パーサーはそのセルを捨てる。
+        self.surplus_cell_rows = list(tok.meta.get("surplus_cell_rows", [])) if tok is not None and tok.meta else []
 
     def signature(self, with_start: bool = True) -> tuple:
         """木の形として比べる値。段落の中身や行番号は含めない。
@@ -259,23 +347,20 @@ def code_spans_of(children: list) -> list[str]:
     return [c.content for c in children if c.type == "code_inline"]
 
 
-def table_pipes(lines: list[str], node: Node) -> list[int]:
-    """表の節点の、元の行ごとの、エスケープしていない | の数。
+def surplus_cell_errors(tree: Node) -> list[dict]:
+    """表の行に、見出しより多いセルがあれば誤りにする。
 
-    セルの区切りの数で、パーサーが捨てるセルも数えに入る。入れ物の記号（リストの `- `、引用の `>`）は | を
-    含まないので、行の先頭の入れ物を推し量らずに、取得と raw の同じ行どうしで比べられる。
+    パーサーはそのセルを捨てるので、木を照らす検査からも、画面からも見えない。取得器は、表のすべての行を
+    見出しと同じセルの数にそろえ、セルの中の | を \\| と書くので、取得した内容にはない。木に現れない文字を
+    残さないために、どちらの段でも、raw の中にあれば止める。
     """
-    if node.line is None or node.end is None:
+    rows = [row for n in walk(tree) if n.type == "table" for row in n.surplus_cell_rows]
+    if not rows:
         return []
-    return [len(re.findall(r"(?<!\\)\|", line)) for line in lines[node.line - 1:node.end]]
-
-
-def table_columns(node: Node) -> int:
-    """表の列の数（パーサーが読んだ、見出しの行のセルの数）。"""
-    for child in walk(node):
-        if child.type == "tr":
-            return sum(1 for c in child.children if c.type in ("th", "td"))
-    return 0
+    return [{"kind": "table", "line": rows[0],
+             "message": f"表の行に、見出しより多いセルがある（{len(rows)} 行）。パーサーは見出しの列数を超えるセルを"
+             "捨てるので、表示されず、検査もできない。セルの中の | は \\| と書く（\\| の \\ を消すとセルが増える）。"
+             "行の先頭と末尾の | を消さない"}]
 
 
 def walk(node: Node):
@@ -337,19 +422,47 @@ def same_unit(src, out) -> bool:
     return src == out
 
 
-def is_subsequence(short: list, long: list, same=lambda a, b: a == b) -> bool:
-    """short が long の部分列か（same で対応を決める）。先頭から貪欲に照らす。
+def first_unmatched(short: list, long: list, same=lambda a, b: a == b) -> int | None:
+    """short を long の部分列として対応させ、対応の取れない最初の short の位置を返す（すべて取れれば None）。
 
-    対応の関係が何であっても、部分列があるかの判定は、いちばん早く対応するものを選ぶ貪欲で正しい。
+    先頭から貪欲に照らす。対応の関係が何であっても、部分列があるかの判定は、いちばん早く対応するものを選ぶ
+    貪欲で正しい。
     """
     i = 0
-    for x in short:
+    for k, x in enumerate(short):
         while i < len(long) and not same(long[i], x):
             i += 1
         if i >= len(long):
-            return False
+            return k
         i += 1
-    return True
+    return None
+
+
+def is_subsequence(short: list, long: list, same=lambda a, b: a == b) -> bool:
+    """short が long の部分列か（same で対応を決める）。"""
+    return first_unmatched(short, long, same) is None
+
+
+_LISTS = ("bullet_list", "ordered_list")
+
+
+def block_units(children: list[Node]) -> list[tuple[tuple | None, Node]]:
+    """子のブロックを、削除の検査で対応させる単位の並びにする。
+
+    リストは項目に開き、項目にリストの種類（記号と種類。開始番号は除く）を添える。CommonMark は、同じ記号の
+    リストの間のブロックを消すと、前後のリストを 1 つにまとめる（リストの項目の間には空の行があってよい）。
+    消すことしかしていなくても、取得のリスト 1 つと raw のリスト 1 つは対応しなくなるので、項目を単位にして、
+    raw のリストの項目の並びを、取得の前後のリストの項目をつないだ並びと照らす。リストの外のブロックは、項目と
+    対応しない（入れ子を変えて、項目の中身をリストの外に出すことはできない）。
+    """
+    out: list[tuple[tuple | None, Node]] = []
+    for c in children:
+        if c.type in _LISTS:
+            kind = c.signature(with_start=False)
+            out.extend((kind, item) for item in c.children)
+        else:
+            out.append((None, c))
+    return out
 
 
 def derivable(src: Node, out: Node, failure: list[Node] | None = None,
@@ -357,36 +470,36 @@ def derivable(src: Node, out: Node, failure: list[Node] | None = None,
     """out が、src から消すことだけで作れるか。
 
     ブロックの種類と属性は同じ。コードブロックは中身も同じ。インラインは、単位の並びが部分列。子のブロックは、
-    out の子の並びが src の子の部分列で、対応する子どうしも消すことだけで作れる。
+    out の子の並びが src の子の部分列で（リストは項目を単位にする。block_units）、対応する子どうしも消すことだけで
+    作れる。表の行だけは、セルを位置で対応させる（セルの数が同じで、同じ位置のセルどうしが消すことだけで作れる）。
+    セルを消すと、後ろのセルが前の列にずれるためである（表の列は消せない）。
 
     節点の組ごとの結果を memo に覚え、同じ組を 2 度照らさない（入れ子が深いと、照らし直しで呼び出しが指数的に
-    増えるため）。failure を渡したときだけ、対応の取れない最初の子を探して入れる（memo の結果を使い、照らし直さない）。
+    増えるため）。failure を渡したときは、対応の取れない最初の子（表の行ならその行）を入れる。
     """
     if memo is None:
         memo = {}
     key = (id(src), id(out))
     if key in memo and failure is None:
         return memo[key]
-    ok = True
+    bad: Node | None = None
     if src.signature(with_start=False) != out.signature(with_start=False) or src.info != out.info \
             or src.content != out.content:
-        ok = False
+        bad = out
     elif (src.inline or out.inline) and not is_subsequence(inline_units(out.inline), inline_units(src.inline), same_unit):
-        ok = False
+        bad = out
+    elif src.type == "tr":
+        if len(src.children) != len(out.children) or \
+                not all(derivable(a, b, None, memo) for a, b in zip(src.children, out.children)):
+            bad = out
     else:
-        def same(a: Node, b: Node) -> bool:
-            return derivable(a, b, None, memo)
-
-        ok = is_subsequence(out.children, src.children, same)
-        if not ok and failure is not None:
-            i = 0
-            for child in out.children:
-                while i < len(src.children) and not same(src.children[i], child):
-                    i += 1
-                if i >= len(src.children):
-                    failure.append(child)
-                    break
-                i += 1
+        out_units, src_units = block_units(out.children), block_units(src.children)
+        k = first_unmatched(out_units, src_units,
+                            lambda s, o: s[0] == o[0] and derivable(s[1], o[1], None, memo))
+        bad = out_units[k][1] if k is not None else None
+    ok = bad is None
+    if not ok and failure is not None:
+        failure.append(bad)
     memo[key] = ok
     return ok
 
@@ -404,33 +517,32 @@ def freeze(wiki: Path, raw_root: Path, slug: str) -> tuple[int, dict]:
     out_fm, out_body = split_frontmatter(out_text)
     errors: list[dict] = []
     if src_fm != out_fm:
-        errors.append({"kind": "frontmatter", "message": "frontmatter が変わった"})
+        errors.append({"kind": "frontmatter", "message": "frontmatter が変わった（frontmatter は書き換えない。"
+                       "raw と作業用の写しが別の取得のものなら、wiki_fetch.py に --force を付けて取り直す）"})
 
     if references_of(out_body) - references_of(src_body):
         errors.append({"kind": "edit", "message": "参照の定義（[x]: …）を書き足したか、変えた"})
     src_tree, out_tree = parse_tree(src_body), parse_tree(out_body)
+    # 木に現れない文字（パーサーが捨てる、見出しより多いセル）は、raw に残させない。木を照らす検査が見る範囲を、
+    # raw の本文のすべてにする。
+    errors.extend(surplus_cell_errors(out_tree))
     failure: list[Node] = []
     if not derivable(src_tree, out_tree, failure):
         bad = failure[0] if failure else out_tree
-        errors.append({"kind": "edit", "line": bad.line,
+        kind, hint = "edit", ""
+        if bad.type in ("table", "thead", "tbody", "tr", "th", "td"):
+            kind, hint = "table", "。表では、セル（列）を消せない。表は、行ごとか表ごと消す"
+        elif bad.type == "paragraph":
+            hint = "。2 つの段落が 1 つにつながっていれば、間の空の行を残す（行ごと消すときも、空の行は残す）"
+        errors.append({"kind": kind, "line": bad.line,
                        "message": "取得した内容から消すことだけをしたものになっていない"
-                       "（書き足し、書き換え、並べ替え、入れ子の変更、コード・画像・リンク・インラインのコードの一部だけの変更）",
+                       "（書き足し、書き換え、並べ替え、入れ子の変更、コード・画像・リンク・インラインのコードの一部だけの変更）"
+                       + hint,
                        "raw": (inline_text(bad.inline) or bad.content)[:200]})
     elif not is_subsequence(out_body, src_body):
-        # 木の比較に加えて、本文全体を文字の上でも照らす。パーサーが捨てる部分（表の列数を超えるセルなど）への
-        # 書き足しは、木には現れないためである。
-        errors.append({"kind": "edit", "message": "取得した内容にない文字を書き足した（木に現れない部分、"
-                       "たとえば表の列数を超えるセルへの書き足しを含む）"})
-    # 表の列の数（見出しのセルの数。パーサーのトークンで数える）は変えさせない。取得器は表のすべての行を
-    # 見出しと同じセルの数にそろえて書くので、列が変わらず、文字を書き足せない（上の部分列の検査）限り、
-    # パーサーが捨てる見えないセルは生まれない。見出しの列だけを消すと、データ行の余ったセルが見えなくなる。
-    src_cols = [table_columns(n) for n in walk(src_tree) if n.type == "table"]
-    out_tables = [n for n in walk(out_tree) if n.type == "table"]
-    if any(table_columns(n) not in src_cols for n in out_tables) or \
-            not is_subsequence([table_columns(n) for n in out_tables], src_cols):
-        errors.append({"kind": "table", "line": next((n.line for n in out_tables), None),
-                       "message": "表の列の数が変わった。表の列は消せない（見出しの列だけを消すと、データ行の"
-                       "余ったセルがパーサーに捨てられて見えなくなる）。表は、行ごとか表ごと消す"})
+        # 消すことだけをしたなら、本文は文字の上でも取得の部分列になる。木はこれより粗い（文字の参照や、意味を
+        # 変えないエスケープは、読んだ後の文字が同じになる）ので、文字の上でも照らす。
+        errors.append({"kind": "edit", "message": "取得した内容にない文字を書き足したか、文字を並べ替えた"})
     # 題名（最初の h1 の見出し）は、そのまま残す。
     src_title = next((n for n in walk(src_tree) if n.type == "heading" and n.tag == "h1"), None)
     if src_title is not None:
@@ -439,7 +551,7 @@ def freeze(wiki: Path, raw_root: Path, slug: str) -> tuple[int, dict]:
             errors.append({"kind": "title", "message": "題名の見出しを消したか、変えた"})
 
     # 画像のファイルは、残った画像から参照されるかで決まる。
-    refs = Counter(src for n in walk(parse_tree(out_body)) for src, _a, _t in images_of(n.inline))
+    refs = Counter(src for n in walk(out_tree) for src, _a, _t in images_of(n.inline))
     base = raw_path.parent
     for norm, rel in sorted(fetched_images(fetch).items()):
         exists = (base / rel).is_file()
@@ -458,9 +570,11 @@ def freeze(wiki: Path, raw_root: Path, slug: str) -> tuple[int, dict]:
     if body_chars and removed_chars > body_chars * 0.2:
         warnings.append({"kind": "removed_much",
                          "message": f"消した文字が本文の 2 割を超える（{removed_chars} / {body_chars} 文字）。本文を消していないかを確かめる"})
+    to_file_lines(errors + warnings, len(out_fm))
     result = {"stage": "freeze", "ok": not errors, "errors": errors, "warnings": warnings,
               "removed_lines": removed, "shortened_lines": changed,
-              "removed_by_rule": fetch.get("removed_by_rule", [])}
+              "removed_by_rule": fetch.get("removed_by_rule", []),
+              "images": remaining_images(fetch, out_tree, len(out_fm))}
     if not errors:
         # どちらも一時の名前で書き終えてから名前を変える。cleaned.md は最後に置く。cleaned.md があることを、
         # 削除を固定し終えた印にする（wiki_fetch.py の work_stage）。書きかけの cleaned.md は残らない。
@@ -629,7 +743,11 @@ def compare(a: Node, b: Node, translate: bool, errors: list[dict], warnings: lis
     if a.type in ("fence", "code_block") and (a.content != b.content or a.info != b.info):
         errors.append({"kind": "code", **where, "message": "コードブロックの中身が変わった",
                        "source": a.content[:200], "raw": b.content[:200]})
-    if len(a.children) != len(b.children):
+    if a.type == "tr" and len(a.children) != len(b.children):
+        errors.append({"kind": "table", **where,
+                       "message": f"表の行のセルの数が違う（取得 {len(a.children)}、raw {len(b.children)}）。"
+                       "訳文の中の | は \\| と書く"})
+    elif len(a.children) != len(b.children):
         errors.append({"kind": "blocks", **where,
                        "message": f"{a.type or '本文'} の中のブロックの数が違う（取得 {len(a.children)}、raw {len(b.children)}）。"
                        "段落を分けたり、つなげたり、消したり、入れ子を変えたりしていないか、補足の置き方を確かめる"})
@@ -729,23 +847,15 @@ def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: s
         errors.append({"kind": "caption", "message": f"補足の表示名が translated_by と違う: {sorted(names)}"})
 
     style: Counter = Counter()
+    # 木に現れない文字（パーサーが捨てる、見出しより多いセル）は、raw に残させない（freeze と同じ）。
+    errors.extend(surplus_cell_errors(out_tree))
     compare(src_tree, out_tree, translate, errors, warnings, style)
-    # パーサーは表の列数を超えるセルを捨てるので、表の行ごとのセルの区切り（エスケープしていない |）の数を、
-    # 元の行から数えて比べる（削除の段で列は変えられないので、固定した内容に見えないセルはない）。
-    src_tables = [n for n in walk(src_tree) if n.type == "table"]
-    out_tables = [n for n in walk(out_tree) if n.type == "table"]
-    if len(src_tables) == len(out_tables):
-        src_lines, out_lines = src_body.split("\n"), out_body.split("\n")
-        for ta, tb in zip(src_tables, out_tables):
-            if table_pipes(src_lines, ta) != table_pipes(out_lines, tb):
-                errors.append({"kind": "table", "line": tb.line,
-                               "message": "表の行ごとのセルの区切り（|）の数が違う（列数を超えるセルへの書き足しを含む。"
-                               "訳文の中の | は \\| と書く）"})
     total = style["desu"] + style["dearu"]
     if total and min(style["desu"], style["dearu"]) > total * 0.1:
         warnings.append({"kind": "style",
                          "message": f"です・ます調（{style['desu']} 文）とである調（{style['dearu']} 文）が混ざっている"})
 
+    to_file_lines(errors + warnings, len(out_fm))
     result = {"stage": "check", "ok": not errors, "needs_translation": translate,
               "language_override": {"value": override, "reason": reason} if override else None,
               "translated_by": translator, "caption_names": sorted(names),
@@ -768,7 +878,16 @@ def render(result: dict) -> str:
     for w in result["warnings"]:
         loc = f"{w['line']} 行目のあたり: " if w.get("line") else ""
         out.append(f"警告: {loc}{w['message']}")
+    if result.get("work_dir_kept") == "warnings":
+        out.append("警告があるので、作業用の写しを残した。直したら --finish を付けて再検査する。直さない警告は、"
+                   "理由を log.md の取り込みの行のサブ行に書いてから、--finish --accept-warnings で再検査する")
+    elif result.get("work_dir_kept") == "errors":
+        out.append("誤りがあるので、作業用の写しを残した。直して再検査する")
+    elif result.get("work_dir_removed"):
+        out.append("作業用の写しを消した")
     if result["stage"] == "freeze":
+        for img in result.get("images", []):
+            out.append(f"補足を書く画像: {img.get('line') or '?'} 行目のあたり: {img['path']}  alt: {img.get('alt') or '（なし）'}")
         for r in result.get("removed_by_rule", []):
             out.append(f"規則で消した（{r.get('rule')}）: {str(r.get('text'))[:160]}")
         for line in result.get("removed_lines", []):
@@ -792,7 +911,10 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--language-override", choices=("translate", "keep"),
                            help="訳すかどうかの判定（fetch.json の needs_translation）を覆す")
             p.add_argument("--reason", help="--language-override の理由")
-            p.add_argument("--finish", action="store_true", help="誤りがなければ作業用のフォルダーを消す")
+            p.add_argument("--finish", action="store_true",
+                           help="誤りも警告もなければ、作業用のフォルダーを消す（検査の基準も消えるので、再検査はできなくなる）")
+            p.add_argument("--accept-warnings", action="store_true",
+                           help="--finish で、警告が残っていても消す。直さない警告の理由を log.md に書いてから付ける")
     args = parser.parse_args(argv)
     # 作業用のフォルダーを読み書きする前に、初期化された wiki かを確かめる（ADR-0019）。
     found = wiki_initialized.problem(args.wiki)
@@ -807,9 +929,19 @@ def main(argv: list[str] | None = None) -> int:
             if args.language_override and not args.reason:
                 print("--language-override には --reason で理由を付ける", file=sys.stderr)
                 return 1
+            if args.accept_warnings and not args.finish:
+                print("--accept-warnings は --finish と一緒に付ける", file=sys.stderr)
+                return 1
             code, result = check(args.wiki, args.raw_root, args.slug, args.language_override, args.reason)
-            if args.finish and code == 0:
-                result["work_dir_removed"] = remove_work_dir(args.wiki, args.slug)
+            if args.finish:
+                # 作業用のフォルダーは検査の基準なので、直す作業が残るあいだは消さない。誤りがあれば直して再検査する。
+                # 警告は、直して再検査するか、直さない理由を残して受け入れる（--accept-warnings）まで残す。
+                if code != 0:
+                    result["work_dir_kept"] = "errors"
+                elif result["warnings"] and not args.accept_warnings:
+                    result["work_dir_kept"] = "warnings"
+                else:
+                    result["work_dir_removed"] = remove_work_dir(args.wiki, args.slug)
     except (FileNotFoundError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
