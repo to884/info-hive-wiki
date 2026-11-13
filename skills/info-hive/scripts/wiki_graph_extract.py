@@ -77,6 +77,7 @@ from wiki_pages import (  # noqa: E402
     link_candidates,
     link_lookup,
     ref_values,
+    text_value,
 )
 from wiki_pages import resolve_link as resolve_link_slug  # noqa: E402
 
@@ -574,7 +575,7 @@ def build_nodes(pages: list[dict], ontology: dict,
         node = {
             "id": node_id,
             "slug": p["slug"],
-            "title": meta.get("title") or p["slug"],
+            "title": text_value(meta.get("title")) or p["slug"],
             "page_type": meta.get("type") or "",
             "node_type": node_type,
             "kind": meta.get("kind") or "",

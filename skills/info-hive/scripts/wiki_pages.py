@@ -545,6 +545,18 @@ def ref_values(value) -> list[str]:
     return [str(v).strip() for v in value if v is not None and str(v).strip()]
 
 
+def text_value(value) -> str:
+    """frontmatter の 1 つの文字を入れる欄（title など）の値を、文字にする。
+
+    パーサーは書かれた形のまま返すので、`title:` は空の配列、`title: [WIP]` は 1 要素の配列になる。
+    文字はそのまま（前後の空白も変えずに）返す。それ以外は ref_values() でそろえ、要素を「, 」でつなぐ。
+    値がないか、空でない要素がなければ "" を返す。呼ぶ側は、"" ならスラッグなどを使う。
+    """
+    if isinstance(value, str):
+        return value
+    return ", ".join(ref_values(value))
+
+
 def ref_link(ref: str) -> str:
     """frontmatter のページへの参照（`sources:` の値など）を、wikilink の中身にする。
 
