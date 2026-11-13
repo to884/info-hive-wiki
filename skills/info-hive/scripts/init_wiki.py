@@ -17,7 +17,8 @@ SCHEMA.md は決して上書きしない。スキーマはユーザーと一緒�
     python init_wiki.py <base-dir> [--wiki-dir wiki] [--raw-dir raw] [--upgrade]
 
 <base-dir> がまだなく、その親のディレクトリがあれば、初期化では <base-dir> を作る（~/info-hive の初回など）。
-親もないときは、パスの誤りとみなして止める。アップグレードでは <base-dir> が必要である。
+親もないときは、パスの誤りとみなして止める。アップグレードでは <base-dir> と、初期化された wiki
+（<base-dir>/<wiki-dir>/SCHEMA.md がある）が必要である。なければ、何も作らずに止める（ADR-0019）。
 
 例:
     python init_wiki.py .
@@ -38,6 +39,7 @@ from datetime import date
 # 同じディレクトリの wiki_text を import できるようにする。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wiki_text import display_width, ljust_display, localize_argparse  # noqa: E402
+import wiki_initialized  # noqa: E402
 
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
@@ -178,6 +180,17 @@ def install_runtime(wiki: Path) -> None:
 
 
 def init_wiki(project_root: Path, wiki_dir: str, raw_dir: str, upgrade: bool = False) -> None:
+    # アップグレードは初期化された wiki（SCHEMA.md がある）だけを対象にする（ADR-0019）。ほかの用途の wiki/ に
+    # 一式を作らないよう、ディレクトリもファイルも作らず、実行環境も入れずに止まる。基準のディレクトリを解決する
+    # 前に、渡されたとおりのパスで確かめる（解決で縮んだ別の場所を確かめないため）。基準のディレクトリがない
+    # ときも、ここで止まって /wiki:init を案内する。
+    if upgrade:
+        found = wiki_initialized.problem(Path(project_root) / wiki_dir)
+        if found is not None:
+            print(f"エラー: アップグレードする wiki がない。{found}\n"
+                  "/wiki:init で初期化する。既定と違う名前で作った wiki なら、--wiki-dir と --raw-dir で指す。",
+                  file=sys.stderr)
+            sys.exit(1)
     project_root = project_root.resolve()
     created_base = False
     if not project_root.exists():

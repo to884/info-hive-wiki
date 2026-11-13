@@ -6,6 +6,20 @@
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-13
+
+### Changed
+
+- `/wiki:init` をしていないディレクトリを、wiki として扱わないようにした。初期化された wiki とみなすのは、ルートに `SCHEMA.md` があるディレクトリだけである（`init_wiki.py` が初期化で必ず作るファイル）。今までは、`SCHEMA.md` のない `wiki/`（GitHub の wiki の写しなど）があると、lint と統計が普通に報告し、検索の `--cache` がその中に `.wiki-cache/search-index.json` を書き、MCP の `query` と `stats` がデータの場所に索引を作っていた。判定は新しいモジュール `wiki_initialized.py` の 1 か所に置いた。**互換でない変更**: 今まで答えていた `SCHEMA.md` のないディレクトリを、次のどれも断る。
+  - lint、統計、検索、グラフの lint・抽出・クエリ、判定（`shortlist`、`contradictions`）、セットアップ（`setup_wiki.py`）、改善（`wiki_evolve.py`、`wiki_evolve_loop.py`）、閲覧（`wiki_browse.py` の `build`、`serve`、`stop`、`core`）は、理由と `/wiki:init` の案内を標準エラーに書き、何も書かずに終了コード 1 で止まる。ただし閲覧の `core` は、要求ごとに標準出力に `{"ok": false, "error": "no_wiki"}` を返し、続けて次の要求を読む（終了コードと標準エラーは今までどおり）。
+  - MCP の `query`（`wiki` を渡したとき）、`get_page`、`list_index`、`lint`、`stats`、`graph` は、同じ理由と案内のエラーを返し、索引を作らない。`collection` を渡す `query` と `index_chunks` は、今までどおり wiki なしで動く。サーバーは呼び出しのたびに確かめるので、あとで `SCHEMA.md` を消した wiki にも答えない。
+  - 動いている閲覧のサーバーも、要求のたびに確かめる。起動のあとで `SCHEMA.md` がなくなったら、前の内容を出さずに 503 で案内する。`SCHEMA.md` を調べられないとき（アクセス権、循環するリンクなど）は、新しい内容を組み立てず、前の内容があれば古いと示して出す。
+  - ないパスやディレクトリでないものを渡したときも、同じ判定の文と案内で止まる（パスを解決する前に確かめる）。
+- `init_wiki.py --upgrade` は、`SCHEMA.md` のない wiki のディレクトリに一式を作らなくなった。何も作らず、実行環境も入れずに終了コード 1 で止まり、`/wiki:init` を案内する（基準のディレクトリがないときも同じ）。今までは、基準のディレクトリがあれば実質の初期化になっていた。`SCHEMA.md` だけを消した wiki は、同じ場所で `/wiki:init` を実行すると、既存のファイルを上書きせずに戻せる。
+- **互換でない変更**: Web ページの取得（`wiki_fetch.py`）は、取り込み先の wiki を `--wiki` で必ず受け取り、初期化を確かめるようになった。raw のルート（`--raw-root`）も作らなくなり、なければ止まる。どちらも、ネットにつなぐ前に、何も書かずに終了コード 1 で止まる。`--wiki` を省くと、引数の誤り（終了コード 2）になる。
+- **互換でない変更**: 経験の記録（`wiki_evolve.py capture`）は、記録先の wiki（`--wiki`、なければ作業領域の設定、なければ `./wiki`）の初期化を確かめるようになった。評価ループ（`wiki_evolve_loop.py`）も、raw のディレクトリ（`--raw`、なければ wiki と同じ階層の `raw`）がなければ、評価を始める前に止まり、作らなくなった。raw のディレクトリがないときの文を「先に作っておく」から、`--raw` を確かめ、初期化した wiki なら `/wiki:upgrade` で作り直せる、に替えた。
+- コマンド（`/wiki:query`、`lint`、`stats`、`graph`、`browse`、`ingest`、`learn`、`evolve`、`upgrade`）とスキルの指示に、同じ手順を入れた。`<WIKI_ROOT>/SCHEMA.md` がなければ、ツールもスクリプトも呼ばず、何も書かずに止まり、`/wiki:init`（ユーザースコープなら `/wiki:init --user`）を提案する。スキルの「wiki がない場合は、下の初期化の手順を実行する」を、初期化を提案し、ユーザーが望んだら実行する、に直した。`/wiki:init` は、選んだ場所に `SCHEMA.md` のない、中身のある wiki のディレクトリがあれば、そこを wiki にするか、`--wiki-dir` で別の名前にするかを聞く。
+
 ## [0.12.2] - 2026-11-13
 
 ### Fixed

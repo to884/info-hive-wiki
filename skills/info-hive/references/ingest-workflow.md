@@ -60,7 +60,7 @@ Web ページは、下の「Web ページ」の手順で `wiki_fetch.py` を使�
 | モデル | 残った雑音の削除、言語の判定、翻訳、画像の補足、`translated_by` の記入 |
 
 ```bash
-python "<skill-root>/scripts/wiki_fetch.py" "<URL>" --raw-root raw --slug "<スラッグ>" --json
+python "<skill-root>/scripts/wiki_fetch.py" "<URL>" --wiki wiki --raw-root raw --slug "<スラッグ>" --json
 ```
 
 スクリプトは `raw/<スラッグ>.md` と、本文の画像を `raw/assets/<スラッグ>/<スラッグ>-NN.<拡張子>` に出現順で書く。原文の HTML は保存しない。32px 以下の画像、`data:` の画像、本文の外の画像は保存しない。ページが内部のアドレス（ループバック、LAN、リンクローカル）にない限り、内部のアドレスを指す画像とリダイレクトは取得しない。表の中の画像は、表のすぐ下に独立した行として置く。`ja_ratio` は、コードを除いた文章でかなと漢字が占める割合で、かなを 1 文字も含まないとき（中国語のページなど）は 0 になる。frontmatter は次の形になる。

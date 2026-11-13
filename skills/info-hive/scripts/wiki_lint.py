@@ -79,6 +79,7 @@ from wiki_text import (  # noqa: E402
     strip_fences_and_images,
     unquoted_string_keys,
 )
+import wiki_initialized  # noqa: E402
 import wiki_workspace  # noqa: E402
 # ページの集合とリンクの規則は wiki_pages の 1 か所に置く（ADR-0010 の決定の 1）。ほかのスクリプトと試験が
 # wiki_lint.resolve_link などの名前で使うので、同じ名前で読み込んでおく。
@@ -764,10 +765,8 @@ def main():
     args = parser.parse_args()
     if args.wiki is None:
         args.wiki = wiki_workspace.default_wiki_or_exit()
-
-    if not args.wiki.exists():
-        print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
-        sys.exit(1)
+    # SCHEMA.md のないディレクトリ（ほかの用途の wiki/ など）は、初期化された wiki とみなさない（ADR-0019）。
+    wiki_initialized.require_or_exit(args.wiki)
 
     pages = collect_pages(args.wiki)
     required_fm = [f.strip() for f in args.required_fm.split(",") if f.strip()]

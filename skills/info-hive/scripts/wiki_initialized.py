@@ -1,0 +1,128 @@
+"""wiki_initialized.py — 初期化された wiki かを決める（info-hive-dev の ADR-0019）。
+
+初期化された wiki は、ルートがディレクトリで、その直下の `SCHEMA.md` が通常のファイル（シンボリックリンクなら、
+リンクの先が通常のファイル）であるものとする。`SCHEMA.md` は `init_wiki.py` が初期化で必ず作り、上書きしない。
+中身は読まない。
+
+wiki のパスを受け取る入口（CLI、MCP のツール、閲覧、Web ページの取得、経験の記録、アップグレード）は、どれも
+ここで確かめる。ライブラリの関数（lint や索引の関数）は確かめない。
+
+標準ライブラリだけを使う。読み込む入口は、先に `wiki_text` を読み込む（Python の版の確かめ）。
+
+    import wiki_initialized
+    wiki = wiki_initialized.require_or_exit(args.wiki)   # CLI: 理由と案内を標準エラーに書き、終了コード 1
+    wiki_initialized.require(path)                       # 未初期化なら NotInitialized（ValueError）を送出する
+    wiki = wiki_initialized.resolve(path)                # 判定してから同じパスを解決する（自分で先に解決しない）
+    wiki_initialized.problem(path)                       # 未初期化の理由の文。初期化済みなら None
+    wiki_initialized.check(path)                         # 理由の種類つき（Finding）。初期化済みなら None
+
+サブコマンドを持つ入口は、判定をサブコマンドの振り分けより前の 1 か所に置き、判定しないサブコマンドを名前で
+除く。新しいサブコマンドは、既定で判定を通る。
+"""
+
+from __future__ import annotations
+
+import os
+import stat
+import sys
+from pathlib import Path
+from typing import NamedTuple
+
+MARKER = "SCHEMA.md"
+INIT_HINT = ("/wiki:init で初期化する（ユーザースコープの wiki は /wiki:init --user。スクリプトだけで使うときは "
+             "init_wiki.py）。初期化した wiki が別の場所にあるなら、そのパスを指定する。")
+
+# 理由の種類と、パスを含まない短い文。閲覧のサーバーの応答のように、パスを出さないところで使う。
+REASONS = {
+    "missing": "wiki のディレクトリが見つからない",
+    "not_dir": "wiki のルートがディレクトリではない",
+    "root_unreadable": "wiki のディレクトリを確かめられない",
+    "no_marker": f"初期化された wiki ではない（{MARKER} がない）",
+    "marker_not_file": f"初期化された wiki ではない（{MARKER} が通常のファイルではない）",
+    "marker_unreadable": f"初期化された wiki か確かめられない（{MARKER} を調べられない）",
+}
+# 調べられなかったもの。未初期化と決まったわけではない（アクセス権や一時的な読み取りの障害）。
+UNCERTAIN = frozenset({"root_unreadable", "marker_unreadable"})
+
+
+class Finding(NamedTuple):
+    """未初期化の理由。kind は REASONS のキー、message はパスを含む文。"""
+    kind: str
+    message: str
+
+    @property
+    def certain(self) -> bool:
+        """調べたうえで未初期化と決まった。偽なら、調べられなかった。"""
+        return self.kind not in UNCERTAIN
+
+
+class NotInitialized(ValueError):
+    """初期化された wiki ではない。文は理由と、次の行の案内からなる。"""
+
+
+def _reason(exc: OSError) -> str:
+    return exc.strerror or type(exc).__name__
+
+
+def check(root: str | os.PathLike) -> Finding | None:
+    """root が初期化された wiki でなければ理由（Finding）を、初期化済みなら None を返す。
+
+    調べ方は os.stat()（リンクをたどる）の 1 回ずつで、FileNotFoundError と NotADirectoryError を「ない」、
+    それ以外の OSError を「調べられない」とする。Path.is_file() は失敗の扱いが Python の版で違うので使わない。
+    """
+    path = Path(root)
+    try:
+        st = os.stat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return Finding("missing", f"{REASONS['missing']}: {path}")
+    except OSError as exc:
+        return Finding("root_unreadable", f"{REASONS['root_unreadable']}: {path}（{_reason(exc)}）")
+    if not stat.S_ISDIR(st.st_mode):
+        return Finding("not_dir", f"{REASONS['not_dir']}: {path}")
+    try:
+        st = os.stat(path / MARKER)
+    except (FileNotFoundError, NotADirectoryError):
+        return Finding("no_marker", f"{REASONS['no_marker']}: {path}")
+    except OSError as exc:
+        return Finding("marker_unreadable",
+                       f"初期化された wiki か確かめられない（{MARKER} を調べられない: {_reason(exc)}）: {path}")
+    if not stat.S_ISREG(st.st_mode):
+        return Finding("marker_not_file", f"{REASONS['marker_not_file']}: {path}")
+    return None
+
+
+def problem(root: str | os.PathLike) -> str | None:
+    """root が初期化された wiki でなければ理由の文を、初期化済みなら None を返す。"""
+    found = check(root)
+    return None if found is None else found.message
+
+
+def require(root: str | os.PathLike) -> Path:
+    """初期化された wiki なら root を Path にして返す。そうでなければ NotInitialized を送出する。"""
+    found = problem(root)
+    if found is not None:
+        raise NotInitialized(f"{found}\n{INIT_HINT}")
+    return Path(root)
+
+
+def resolve(root: str | os.PathLike) -> Path:
+    """判定してから、同じパスを解決（strict）して返す。パスを解決して使う入口は、自分で解決せずにこれを使う。
+
+    解決を先にすると、ない途中のディレクトリと `..` を含むパス（`kb/ない/..`）が、POSIX では解決で縮んで
+    初期化された wiki になりうる。判定した文字列と、使うパスを同じにするために、判定を先にする。
+    解決の失敗（アクセス権など）も NotInitialized にする。
+    """
+    path = require(root)
+    try:
+        return path.resolve(strict=True)
+    except OSError as exc:
+        raise NotInitialized(f"{REASONS['root_unreadable']}: {path}（{_reason(exc)}）\n{INIT_HINT}") from exc
+
+
+def require_or_exit(root: str | os.PathLike) -> Path:
+    """require() と同じ。未初期化なら理由と案内を標準エラーに書き、終了コード 1 で止まる。"""
+    try:
+        return require(root)
+    except NotInitialized as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(1)

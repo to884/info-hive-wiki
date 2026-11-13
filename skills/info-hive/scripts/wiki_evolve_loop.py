@@ -20,6 +20,7 @@ from types import SimpleNamespace
 from wiki_evolve import (atomic, copy_tree, digest, encode, event, finite, inside, locked,
                          propose, read_json, require, run_runner, slug, tree, capture)
 from wiki_text import format_fm_value, format_frontmatter, localize_argparse, quote_in_text
+import wiki_initialized
 
 
 def contract(suite, corpus):
@@ -698,8 +699,16 @@ def main():
     parser.add_argument('--id', required=True)
     parser.add_argument('--raw', type=Path, help='変更できない経験の記録を置くディレクトリ（既定: wiki と同じ階層の raw）')
     args = localize_argparse(parser).parse_args()
-    args.wiki, args.skill = args.wiki.resolve(), args.skill.absolute()
+    args.skill = args.skill.absolute()
     try:
+        # 判定してから同じパスを解決する（ADR-0019）。先に解決すると、ない途中のディレクトリと .. が縮んで、
+        # 別の wiki に .evolution/ を作りうる。
+        args.wiki = wiki_initialized.resolve(args.wiki)
+        # 学習の証拠を書く raw のディレクトリは作らない（初期化が作る）。費用のかかる評価を始める前に確かめる。
+        # publish_learning() の mkdir は、この確かめのあとでは、ある raw の下の experiences/ にしか効かない。
+        raw = args.raw or args.wiki.parent / 'raw'
+        require(raw.is_dir(), f'raw のディレクトリがない: {raw}。--raw が正しいかを確かめる。'
+                              '初期化した wiki の raw をなくしたときは、/wiki:upgrade で作り直せる')
         with locked(args.wiki) as state:
             print(encode(run(args, state)), end='')
     except (ValueError, KeyError, TypeError, OSError) as exc:

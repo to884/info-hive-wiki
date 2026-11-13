@@ -36,6 +36,8 @@ class WikiFixture:
     def __init__(self, pages):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
+        # CLI は SCHEMA.md のないディレクトリを断る（ADR-0019）。SCHEMA.md はページに数えない。
+        (self.root / "SCHEMA.md").write_bytes("# スキーマ\n".encode("utf-8"))
         for rel, text in pages.items():
             path = self.root / rel
             path.parent.mkdir(parents=True, exist_ok=True)

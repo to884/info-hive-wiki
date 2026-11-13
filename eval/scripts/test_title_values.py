@@ -68,6 +68,8 @@ class TitleWiki:
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name) / "wiki"
         (self.root / "concepts").mkdir(parents=True)
+        # CLI は SCHEMA.md のないディレクトリを断る（info-hive-dev の ADR-0019）。SCHEMA.md はページに数えない。
+        (self.root / "SCHEMA.md").write_bytes("# スキーマ\n".encode("utf-8"))
         for slug, (fields, _title) in TITLE_PAGES.items():
             link = "[[one_item]]" if slug == "plain" else "[[plain]]"
             text = (f'---\n{fields}\ntype: "concept"\ntags: ["a"]\ncreated: 2026-01-01\nupdated: 2026-01-01\n---\n'

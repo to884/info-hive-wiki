@@ -62,6 +62,7 @@ from wiki_text import (  # noqa: E402
     top_level_keys,
 )
 import wiki_graph_common as common  # noqa: E402
+import wiki_initialized  # noqa: E402
 
 
 # ページの集合とリンクの規則は wiki_pages の 1 か所に置く（ADR-0010 の決定の 1）。
@@ -1117,9 +1118,8 @@ def main():
     localize_argparse(parser)
     args = parser.parse_args()
 
-    if not args.wiki.exists():
-        print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
-        sys.exit(1)
+    # SCHEMA.md のないディレクトリは、初期化された wiki とみなさない（ADR-0019）。graph/ を作る前に確かめる。
+    wiki_initialized.require_or_exit(args.wiki)
 
     formats = [f.strip().lower() for f in args.formats.split(",") if f.strip()]
     unknown = [f for f in formats if f not in DEFAULT_FORMATS]

@@ -6,7 +6,7 @@
 同時に行われた編集があれば拒否する。ローカルのランナーは信頼された実行ファイルであり、サンドボックスではない。
 
 例:
-  python wiki_evolve.py capture --raw ~/info-hive/raw --record experience.json
+  python wiki_evolve.py --wiki ~/info-hive/wiki capture --raw ~/info-hive/raw --record experience.json
   python wiki_evolve.py --wiki ~/info-hive/wiki propose --id query-v1 --skill ./my-skill \
     --target references/query.md --candidate /tmp/query.md \
     --evidence concepts/stale-decisions.md --reason '置き換わった決定を見分ける'
@@ -36,9 +36,12 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wiki_text import localize_argparse, normalize_quote  # noqa: E402
+import wiki_initialized  # noqa: E402
 import wiki_workspace  # noqa: E402
 
 IGNORED = {'.git', '__pycache__', '.wiki-cache', '.evolution', 'node_modules', '.wiki-evolve-lock'}
+# wiki を使わない操作。ほかの操作はどれも、振り分けの前に wiki の判定を通る。
+WIKI_FREE_ACTIONS = frozenset({'verify-bundle'})
 
 
 def require(condition, message):
@@ -123,7 +126,8 @@ def copy_tree(source, dest):
 
 @contextmanager
 def locked(wiki):
-    require((wiki / 'SCHEMA.md').is_file(), 'SCHEMA.md がない。初期化済みの wiki を指定する')
+    # SCHEMA.md のないディレクトリに .evolution/ を作らない（ADR-0019）。NotInitialized は ValueError である。
+    wiki_initialized.require(wiki)
     state = wiki / '.evolution'
     require(not state.is_symlink(), '.evolution のディレクトリをシンボリックリンクにはできない')
     state.mkdir(exist_ok=True)
@@ -165,7 +169,9 @@ def capture(args):
     for key in ('hypothesis', 'counterexamples'):
         require(isinstance(record.get(key, ''), str), f'{key} は文字列にする')
     raw = args.raw.resolve()
-    require(raw.is_dir(), 'raw のディレクトリがない。先に作っておく')
+    # raw のディレクトリは作らない。初期化（init_wiki.py）が作る。
+    require(raw.is_dir(), f'raw のディレクトリがない: {raw}。--raw が正しいかを確かめる。'
+                          '初期化した wiki の raw をなくしたときは、/wiki:upgrade で作り直せる')
     folder = raw / 'experiences'
     require(not folder.is_symlink(), 'experiences のディレクトリをシンボリックリンクにはできない')
     folder.mkdir(exist_ok=True)
@@ -557,16 +563,20 @@ def main():
     p.add_argument('--destination', type=Path, required=True)
     sub.add_parser('verify-bundle', help='書き出した証拠とスキルのファイルをすべて検証する').add_argument('path', type=Path)
     args = localize_argparse(parser).parse_args()
-    # wiki を使わない verify-bundle と capture では、作業領域の設定を読まない。
-    if args.wiki is None and args.action not in ('verify-bundle', 'capture'):
+    # wiki を使わない操作（verify-bundle）だけを名前で除く。新しい操作は、既定で wiki の判定を通る。
+    uses_wiki = args.action not in WIKI_FREE_ACTIONS
+    if args.wiki is None and uses_wiki:
         args.wiki = wiki_workspace.default_wiki_or_exit()
     try:
+        if uses_wiki:
+            # 振り分けより前の 1 か所で、判定してから同じパスを解決する（ADR-0019）。capture の記録も、あとで
+            # この wiki にソースとして取り込むので、SCHEMA.md のない wiki には書かない。
+            args.wiki = wiki_initialized.resolve(args.wiki)
         if args.action == 'verify-bundle':
             result = verify_bundle(args.path)
         elif args.action == 'capture':
             result = capture(args)
         else:
-            args.wiki = args.wiki.resolve()
             with locked(args.wiki) as state:
                 if args.action == 'propose':
                     result = propose(args, state)

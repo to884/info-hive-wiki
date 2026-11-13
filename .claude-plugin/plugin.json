@@ -1,6 +1,6 @@
 {
   "name": "wiki",
-  "version": "0.12.2",
+  "version": "0.13.0",
   "description": "日本語による Markdown の wiki を構築し、ローカルのハイブリッド検索、出典つきの回答、グラフ、タスクの経験からのスキル改善を提供する。praneybehl/llm-wiki-plugin v4.0.1 の日本語向け移植版。",
   "author": {
     "name": "to884"

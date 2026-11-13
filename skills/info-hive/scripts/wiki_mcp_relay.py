@@ -281,7 +281,9 @@ async def serve() -> None:
     from mcp.server.lowlevel import NotificationOptions, Server
     from mcp.server.stdio import stdio_server
 
-    server = Server("wiki", instructions="info-hive の wiki を検索し、ページと索引を読むためのツール。")
+    server = Server("wiki", instructions="info-hive の wiki を検索し、ページと索引を読むためのツール。"
+                                         "wiki には初期化された wiki（ルートに SCHEMA.md がある）のルートを渡す。"
+                                         "SCHEMA.md のないディレクトリはエラーになるので、/wiki:init を提案する。")
 
     async with anyio.create_task_group() as tg:
         upstream = Upstream(tg)

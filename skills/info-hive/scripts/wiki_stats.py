@@ -30,6 +30,7 @@ from wiki_text import (  # noqa: E402
     canonical_meta, char_count, ljust_display, localize_argparse, nfc, parse_frontmatter_text, posix_rel,
     rjust_display, strip_fences_and_images,
 )
+import wiki_initialized  # noqa: E402
 import wiki_workspace  # noqa: E402
 # ページの集合とリンクの抜き出しは、lint と同じ規則（wiki_pages）を使う。
 from wiki_pages import (  # noqa: E402,F401
@@ -259,10 +260,8 @@ def main():
     args = parser.parse_args()
     if args.wiki is None:
         args.wiki = wiki_workspace.default_wiki_or_exit()
-
-    if not args.wiki.exists():
-        print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
-        sys.exit(1)
+    # SCHEMA.md のないディレクトリは、初期化された wiki とみなさない（ADR-0019）。
+    wiki_initialized.require_or_exit(args.wiki)
 
     stats = compute_stats(args.wiki)
     if args.json:

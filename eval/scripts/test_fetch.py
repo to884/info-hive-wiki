@@ -139,14 +139,20 @@ class FetchTests(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
+        # 取得は、初期化された wiki（SCHEMA.md がある）と、すでにある raw のルートを求める（ADR-0019）。
+        self.wiki = Path(self.tmp.name) / "wiki"
+        self.wiki.mkdir()
+        (self.wiki / "SCHEMA.md").write_bytes("# スキーマ\n".encode("utf-8"))
         self.raw = Path(self.tmp.name) / "raw"
+        self.raw.mkdir()
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def run_fetch(self, url, slug, *extra):
         proc = subprocess.run(
-            [sys.executable, str(SCRIPT), url, "--raw-root", str(self.raw), "--slug", slug, "--json", *extra],
+            [sys.executable, str(SCRIPT), url, "--wiki", str(self.wiki), "--raw-root", str(self.raw), "--slug", slug,
+             "--json", *extra],
             capture_output=True, encoding="utf-8", timeout=60,
         )
         out = json.loads(proc.stdout) if proc.stdout.strip() else {}

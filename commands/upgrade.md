@@ -10,7 +10,7 @@ argument-description: "`--user` を付けるとユーザースコープの wiki 
 
 `--global` は `--user` に改名して受け付けなくなったので、`--global` が渡されたら何も実行せず、`--user` を使うように伝えて止める。
 
-1. `<WIKI_ROOT>` と `<RAW_ROOT>` は、`--user`、明示されたパス、もっとも近いプロジェクトの指示、グローバルなエージェントの指示の順に探し、どれにもなければ現在のプロジェクトの `wiki/` と `raw/` とする。wiki があることを確認する。ない場合は、代わりに対応する `/wiki:init --user` か `/wiki:init` を提案する。
+1. `<WIKI_ROOT>` と `<RAW_ROOT>` は、`--user`、明示されたパス、もっとも近いプロジェクトの指示、グローバルなエージェントの指示の順に探し、どれにもなければ現在のプロジェクトの `wiki/` と `raw/` とする。`<WIKI_ROOT>/SCHEMA.md` がなければ、初期化された wiki ではない（ほかの用途の `wiki/` のこともある）。MCP のツールもスクリプトも呼ばず、何も書かずに止まり、ユーザースコープの wiki なら `/wiki:init --user`、プロジェクトの wiki なら `/wiki:init` を提案する。別の場所の wiki に黙って切り替えたり、`SCHEMA.md` を自分で作ったりしてはならない。ツールやスクリプトが「初期化された wiki ではない」と返したときも同じにする。`init_wiki.py --upgrade` も実行しない（スクリプトも、`SCHEMA.md` のない wiki には何も作らずに終了コード 1 で止まる）。`SCHEMA.md` だけを消してしまった wiki は、同じ場所で `/wiki:init` を実行すると、既存のファイルを上書きせずに `SCHEMA.md` を足して戻せる。
 2. ベースディレクトリと、特定したルートとちょうど一致する wiki と raw の相対パスを指定して、`init_wiki.py` を実行する。ユーザースコープの標準の構成（`~/info-hive/wiki/` と `~/info-hive/raw/`）では `python "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/init_wiki.py" "<absolute-home-directory>/info-hive" --upgrade` を使う。以前の既定（`~/wiki/` と `~/wiki/raw/`）で作った wiki は `"<absolute-home-directory>" --wiki-dir wiki --raw-dir wiki/raw --upgrade` のまま使い、移動はしない。プロジェクトの既定の構成では、プロジェクトルートの絶対パスに `--upgrade` を付ける。プラグインのディレクトリに対して実行してはならない。実行環境の JSON が `"status": "ready"` を示していない限り、アップグレードの完了を報告してはならない。
 3. スクリプトの "Upgrade required: <SCHEMA.md>" の出力を読む。そこに挙がっている、SCHEMA.md に欠けているセクションごとに、次のことを行う。
    - `skills/info-hive/assets/SCHEMA.md.template` を開き、見出しが一致するセクションを探す。

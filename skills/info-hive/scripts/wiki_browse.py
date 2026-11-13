@@ -43,6 +43,7 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 import wiki_browse_core as core  # noqa: E402
 import wiki_browse_fs as fs  # noqa: E402
+import wiki_initialized as initialized  # noqa: E402
 import wiki_mcp_common as common  # noqa: E402
 from wiki_text import localize_argparse  # noqa: E402
 
@@ -67,10 +68,13 @@ def say(message: str) -> None:
 
 
 def wiki_root(arg: str) -> Path:
-    root = Path(arg).expanduser()
-    if not root.is_dir():
-        raise Failed(f"Wiki のルートがない: {arg}")
-    return root.resolve()
+    """初期化された wiki のルート。SCHEMA.md のないディレクトリは断る（ADR-0019）。build、serve、stop、core の
+    どれも通る。stop も通すのは、未初期化のディレクトリのためにデータの場所に状態のディレクトリを作らないためである。
+    判定は、パスを解決するより前に行う。解決の失敗も、同じ理由の文と案内で止める。"""
+    try:
+        return initialized.resolve(Path(arg).expanduser())
+    except initialized.NotInitialized as e:
+        raise Failed(str(e)) from e
 
 
 def browse_dir() -> Path:
@@ -357,6 +361,8 @@ class BrowseState:
         self.build_lock = threading.Lock()
         self.attempts: dict = {}
         self.shutdown_requested = False
+        # 最後に未初期化と決まった理由の種類（wiki_initialized.REASONS のキー）。応答の文に使う。
+        self.uninitialized_kind = "no_marker"
 
     def _should_retry(self) -> bool:
         cur = self.current
@@ -367,7 +373,20 @@ class BrowseState:
         return last is not None and time.monotonic() - last < RETRY_INTERVAL
 
     def get(self, wait: "float | None" = None) -> "tuple[core.Core | None, str | None]":
-        """答えに使う中核と、古いときの理由（"failed" か "building"）を返す。中核がなければ (None, 理由)。"""
+        """答えに使う中核と、古いときの理由（"failed" か "building"）を返す。中核がなければ (None, 理由)。
+
+        要求のたびに wiki を読み直すので、要求のたびに初期化を確かめる（ADR-0019）。起動のあとで SCHEMA.md が
+        なくなったら（調べたうえで未初期化と決まったら）、前の中核も使わずに (None, "uninitialized") を返し、理由の
+        種類を uninitialized_kind に置く。中核は捨てない。SCHEMA.md が戻れば、入力の印が同じならそのまま使う。
+        調べられなかったとき（アクセス権、読み取りの障害、循環するリンクなど）は、初期化されていると確かめられて
+        いないので、新しい中核を組み立てない。前の中核があれば古いと示して使い、なければ組み立てられないと答える。
+        """
+        found = initialized.check(self.root)
+        if found is not None:
+            if found.certain:
+                self.uninitialized_kind = found.kind
+                return None, "uninitialized"
+            return self._answer(self.current, None, "failed")
         wait = BUILD_WAIT if wait is None else wait
         request_sig = self._signature()
         cur = self.current
@@ -535,6 +554,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if app.state.shutdown_requested:
             app.request_shutdown()
             return self._text(503, "終わるところである")
+        if c is None and stale == "uninitialized":
+            # 応答にパスを出さない（設計の 8.1）。理由はパスを含まない短い文にする。
+            reason = initialized.REASONS.get(app.state.uninitialized_kind, initialized.REASONS["no_marker"])
+            return self._text(503, f"{reason}。{initialized.INIT_HINT}", {"Retry-After": "5"})
         if c is None:
             return self._text(503, "Wiki を組み立てている。少し待ってから再読み込みする" if stale == "building"
                               else "Wiki を組み立てられない。lint で確かめる", {"Retry-After": "5"})
@@ -895,15 +918,19 @@ def main(argv=None) -> int:
     _add_server_commands(sub)
     args = parser.parse_args(argv)
     try:
+        # wiki のパスを受け取るサブコマンド（build、serve、stop）は、振り分けの前の 1 か所で判定する（ADR-0019）。
+        # 新しいサブコマンドも、wiki を引数に取れば既定でここを通る。core は要求ごとに wiki を受け取り、要求ごとに
+        # 判定する（core_loop）。
+        root = wiki_root(args.wiki) if hasattr(args, "wiki") else None
         if args.cmd == "build":
-            report = build(wiki_root(args.wiki), args.out, args.raw, args.scope)
+            report = build(root, args.out, args.raw, args.scope)
             print(json.dumps({"out": report["out"], "generation": report["generation"], "pages": report["pages"],
                               "warnings": len(report["warnings"])}, ensure_ascii=False), flush=True)
             return EXIT_OK
         if args.cmd == "core":
             sys.stdin.reconfigure(encoding="utf-8")
             return core_loop(sys.stdin, sys.stdout)
-        return _run_server_command(args)
+        return _run_server_command(args, root)
     except (Failed, fs.Refused, core.NameCollision) as e:
         say(str(e))
         return EXIT_FAILED
@@ -932,12 +959,12 @@ def _add_server_commands(sub) -> None:
     t.add_argument("wiki")
 
 
-def _run_server_command(args) -> int:
+def _run_server_command(args, root: Path) -> int:
+    """root は、main() が判定した wiki のルート。"""
     if args.cmd == "serve":
-        return serve(wiki_root(args.wiki), args.page, not args.no_open, args.idle_timeout, args.verbose,
-                     args.scope)
+        return serve(root, args.page, not args.no_open, args.idle_timeout, args.verbose, args.scope)
     if args.cmd == "stop":
-        return stop(wiki_root(args.wiki))
+        return stop(root)
     raise Failed(f"未対応のコマンド: {args.cmd}")
 
 

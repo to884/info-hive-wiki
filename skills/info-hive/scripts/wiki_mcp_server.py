@@ -88,13 +88,24 @@ class Activity:
 
 
 def wiki_root(wiki: str) -> Path:
-    """ツールに渡された wiki のルートを確かめて返す。なければ ValueError（ツールのエラーになる）。"""
+    """ツールに渡された wiki のルートを確かめて返す。なければ ValueError（ツールのエラーになる）。
+
+    SCHEMA.md のないディレクトリは、初期化された wiki とみなさない（ADR-0019）。索引のキャッシュ（State.wikis）を
+    引く前に毎回確かめるので、あとで SCHEMA.md を消した wiki にも答えない。判定はパスを解決するより前に行い、
+    ない、ディレクトリでない、調べられないも、同じ理由の文と案内で返す。
+    """
+    import unicodedata
+
+    import wiki_initialized
     if not wiki:
         raise ValueError("wiki（wiki のルートのパス）を指定する")
+    # 正規化と同じく NFC にそろえてから確かめる（normalize_wiki_root はそのあとで同じパスを解決する）。
+    wiki_initialized.require(Path(unicodedata.normalize("NFC", wiki)).expanduser())
     try:
         return common.normalize_wiki_root(wiki)
-    except (FileNotFoundError, NotADirectoryError) as exc:
-        raise ValueError(f"wiki のルートが見つからない: {wiki}") from exc
+    except OSError as exc:
+        raise ValueError(f"wiki のディレクトリを確かめられない: {wiki}（{type(exc).__name__}）\n"
+                         f"{wiki_initialized.INIT_HINT}") from exc
 
 
 def plain(value):
@@ -290,7 +301,8 @@ def build_app(state: State, token: str, port: int):
         "info-hive-wiki", host="127.0.0.1", port=port, json_response=True, log_level="WARNING",
         max_request_body_size=MAX_REQUEST_BYTES,
         instructions="info-hive の wiki を検索し、ページと索引を読み、lint、統計、グラフの問い合わせを行うためのツール。"
-                     "wiki の Markdown は書き換えない。",
+                     "wiki の Markdown は書き換えない。wiki には初期化された wiki（ルートに SCHEMA.md がある）のルートを"
+                     "渡す。SCHEMA.md のないディレクトリはエラーになるので、/wiki:init を提案する。",
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=True,
                                                      allowed_hosts=[f"127.0.0.1:{port}"], allowed_origins=[]),
     )
@@ -308,7 +320,8 @@ def build_app(state: State, token: str, port: int):
                     docs: list[str] | None = None, max_distance: float | None = None) -> dict:
         """wiki をハイブリッド検索（語彙の BM25 と埋め込み、RRF）し、セクション単位の証拠の行を返す。
 
-        wiki には wiki のルートのパスを渡す。結果の形は `wiki_search.py --json` と同じ（results の各行に slug、
+        wiki には wiki のルートのパスを渡す。初期化された wiki（ルートに SCHEMA.md がある）でなければエラーになり、
+        索引も作らない。結果の形は `wiki_search.py --json` と同じ（results の各行に slug、
         rel_path、heading_path、snippet、score、retrievers など）。type、tags、since で絞り込める。
         collection を渡すと、wiki ではなく index_chunks で入れたチャンクを検索する。そのときは query_tokens
         （index_chunks と同じ作り方のトークン）を渡し、docs で文書を絞り込める。

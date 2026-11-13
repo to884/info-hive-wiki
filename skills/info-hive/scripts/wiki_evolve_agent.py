@@ -4,6 +4,10 @@
 ランナーの argv での使い方: ["python3", "/absolute/wiki_evolve_agent.py", "codex"]
 認証はインストール済みの CLI が行う。Codex が報告するのはトークン数で、USD ではない。
 サブスクリプションを使う試行では、max_usd=null として、呼び出し回数と時間の予算を使う。
+
+リクエストの wiki_root は、評価ループ（wiki_evolve_loop.py、wiki_evolve.py evaluate）が suite.json の事実情報の
+コーパスを一時ディレクトリに写したものである。利用者の wiki ではないので、初期化された wiki か（SCHEMA.md が
+あるか）は確かめない（info-hive-dev の ADR-0019）。手で動かすときも、利用者の wiki を直接渡さない。
 """
 import argparse
 import json

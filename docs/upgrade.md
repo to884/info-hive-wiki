@@ -94,4 +94,4 @@ flowchart TD
 
 > **注意**
 >
-> まだ wiki がない場合は、アップグレードするものがない。代わりに [`/wiki:init`](./getting-started.md) を実行する。
+> まだ wiki がない（wiki のディレクトリに `SCHEMA.md` がない）場合は、アップグレードするものがない。`init_wiki.py --upgrade` も、何も作らずに止まる。代わりに [`/wiki:init`](./getting-started.md) を実行する。
