@@ -44,6 +44,7 @@ import re
 import socket
 import struct
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -1018,6 +1019,7 @@ def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text
     新しい本文と画像は一時の場所に書き、古い画像を退避してから、新しい画像と本文を置く。
     どこかで失敗したら、置いた新しい画像を消して、退避した古い画像を戻す。
     名前の変更（退避、配置、本文の置き換え、戻し）は replace_with_retry で行う。
+    退避の場所は呼び出しごとに新しく作り、前の呼び出しが残した退避の場所は使わない。
     退避した古い画像を消すのは、本文を置き換えたあとだけである。戻しきれなかった古い画像は、
     ただ 1 つの写しなので退避の場所に残し、その場所を例外の注記（add_note）で知らせる。
     書き込み先はすべて RAW_ROOT の中に限り、シンボリックリンクを通して外に書かない。
@@ -1028,7 +1030,8 @@ def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text
     pid = os.getpid()
     tmp = raw_root / f".{slug}.md.{pid}.tmp"
     staging = asset_dir.parent / f".{slug}.{pid}.new"
-    backup = asset_dir.parent / f".{slug}.{pid}.old"
+    # 退避の場所（.<スラッグ>.<プロセス ID>.<乱数>.old）は、古い画像があるときに mkdtemp で作る。
+    backup: Path | None = None
     if target.is_symlink():
         raise ValueError(f"保存先がシンボリックリンクになっている: {target}")
     for path in [tmp, asset_dir] + [asset_dir / name for name, _ in images]:
@@ -1050,11 +1053,14 @@ def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text
             for name, data in images:
                 (staging / name).write_bytes(data)
         if old_files:
-            backup.mkdir(parents=True, exist_ok=True)
+            # 前の呼び出しが戻しきれずに残した退避の場所（同じプロセス ID のこともある）を使い回すと、
+            # そこにある古い画像を上書きするか、後始末で消す。毎回、まだない名前の場所を作る。
+            backup = Path(tempfile.mkdtemp(prefix=f".{slug}.{pid}.", suffix=".old", dir=asset_dir.parent))
             for old in old_files:
                 dest = backup / old.name
-                replace_with_retry(old, dest)
+                # 移す前に記録する。移した直後に止められても、戻しと注記がその画像を知っている。
                 moved.append((dest, old))
+                replace_with_retry(old, dest)
         if images:
             asset_dir.mkdir(parents=True, exist_ok=True)
             for name, _data in images:
@@ -1082,7 +1088,7 @@ def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text
         # 退避の場所の中身を消すのは、本文を置き換えたあとだけにする。失敗したときに残っているのは、
         # 戻しきれなかった古い画像のただ 1 つの写しなので消さない。空になった場所だけを消す。
         for d, drop_files in ((staging, True), (backup, replaced)):
-            if d.is_dir():
+            if d is not None and d.is_dir():
                 if drop_files:
                     for leftover in d.iterdir():
                         leftover.unlink()
