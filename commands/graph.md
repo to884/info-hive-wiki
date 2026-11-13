@@ -8,7 +8,7 @@ argument-description: "最初の語でサブコマンドを選ぶ。`extract` �
 
 引数: $ARGUMENTS
 
-0. `<WIKI_ROOT>` は、ユーザーが明示したパス、もっとも近いプロジェクトの指示、グローバルなエージェントの指示の順に探し、どれにもなければ作業領域の設定（`.info-hive/workspace.json`）の `dirs.wiki`、それもなければ現在のプロジェクトの `wiki/` とする。指示が別の wiki を指定しているときに、`${PWD}/wiki` を前提にしてはならない。
+0. `<WIKI_ROOT>` は、ユーザーが明示したパス、もっとも近いプロジェクトの指示、グローバルなエージェントの指示の順に探し、どれにもなければ作業領域の設定（`.info-hive/workspace.json`）の `dirs.wiki`、それもなければ現在のプロジェクトの `wiki/` とする。指示が別の wiki を指定しているときに、`${PWD}/wiki` を前提にしてはならない。`<WIKI_ROOT>/SCHEMA.md` がなければ、初期化された wiki ではない（ほかの用途の `wiki/` のこともある）。MCP のツールもスクリプトも呼ばず、何も書かずに止まり、ユーザースコープの wiki なら `/wiki:init --user`、プロジェクトの wiki なら `/wiki:init` を提案する。別の場所の wiki に黙って切り替えたり、`SCHEMA.md` を自分で作ったりしてはならない。ツールやスクリプトが「初期化された wiki ではない」と返したときも同じにする。
 1. `<WIKI_ROOT>/graph/ontology.yaml` があるかを確認する。ない場合は、グラフ層を導入する前の wiki である。スクリプトを実行しても、何も書き出さずに終了コード 1 で止まる（MCP のツールでは、`lint` の `graph.state` が `disabled` になり、`graph` はエラーを返す）。`/wiki:upgrade` で `graph/` を足すことを提案し、オントロジーの項目をでっち上げてはならない。
 2. 最初の引数に応じて、次の処理を実行する。MCP のツールと CLI の使い分けは、`info-hive` スキルの「MCP のツールと CLI の使い分け」に従う。ツール名は接続に表示されたものを使う（Claude Code では `mcp__plugin_wiki_wiki__graph` など）。どのツールにも `wiki=<WIKI_ROOT の絶対パス>` を渡す。ツールが使えない場合は、矢印の右の CLI を実行する。
    - `extract` → いつも CLI で実行する（wiki の `graph/` に書き込むので、ツールにはない）。`uv run --script "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_graph_extract.py" "<WIKI_ROOT>"`
