@@ -75,6 +75,7 @@ from wiki_pages import (  # noqa: E402
     iter_page_files,
     ref_values,
     resolve_link,
+    text_value,
 )
 
 
@@ -286,7 +287,7 @@ def collect_pages(wiki_root: Path, cache_path: Path | None = None) -> list[dict]
                 continue
             meta, body = parse_frontmatter(text)
             links = extract_wikilinks(body)
-            title = meta.get("title") or slug_from_path(md_path, wiki_root)
+            title = text_value(meta.get("title")) or slug_from_path(md_path, wiki_root)
             sections = split_sections(title, body)
         next_cache[rel_path] = {
             "sha256": digest,
@@ -308,7 +309,7 @@ def collect_pages(wiki_root: Path, cache_path: Path | None = None) -> list[dict]
             "slug": slug_from_path(md_path, wiki_root),
             "meta": meta,
             "body": body,
-            "tokens": tokenize(body + " " + meta.get("title", "")),
+            "tokens": tokenize(body + " " + text_value(meta.get("title"))),
             "links": links,
             "sections": [
                 {**section, "section_index": index}
@@ -377,7 +378,7 @@ def collect_sections(pages: list[dict]) -> list[dict]:
     """ページを、検索できるセクションの行に、決まった順序で展開する。"""
     rows = []
     for page in pages:
-        title = page["meta"].get("title") or page["slug"]
+        title = text_value(page["meta"].get("title")) or page["slug"]
         for section in page.get("sections") or split_sections(title, page["body"]):
             searchable = title + " " + " ".join(section["heading_path"]) + " " + section["text"]
             rows.append({
@@ -826,7 +827,7 @@ def json_result(
         "slug": page["slug"],
         "rel_path": page["rel_path"],
         "type": meta.get("type"),
-        "title": meta.get("title") or page["slug"],
+        "title": text_value(meta.get("title")) or page["slug"],
         "heading_path": heading_path,
         "section_index": section_index,
         "score": round(score, 4),
@@ -962,7 +963,7 @@ def cmd_search(args, pages: list[dict]) -> None:
         print(results_heading(args.query, len(top)))
         print()
         for score, page in top:
-            title = page["meta"].get("title") or page["slug"]
+            title = text_value(page["meta"].get("title")) or page["slug"]
             page_type = page["meta"].get("type", "?")
             print(f"  [{score:6.2f}] [{type_cell(page_type)}] {title}")
             print(f"             {page['rel_path']}")
@@ -1064,7 +1065,7 @@ def cmd_search(args, pages: list[dict]) -> None:
     print()
     for score, section, _retrievers in top_sections:
         page = section["page"]
-        title = page["meta"].get("title") or page["slug"]
+        title = text_value(page["meta"].get("title")) or page["slug"]
         page_type = page["meta"].get("type", "?")
         print(f"  [{score:6.2f}] [{type_cell(page_type)}] {title}")
         print(f"             {page['rel_path']}")
@@ -1085,7 +1086,7 @@ def cmd_backlinks(args, pages: list[dict]) -> None:
         return
     print(f"[[{target}]] にリンクしているページ（{len(inbound)} 件）:")
     for page in inbound:
-        title = page["meta"].get("title") or page["slug"]
+        title = text_value(page["meta"].get("title")) or page["slug"]
         print(f"  - {title}  ({page['rel_path']})")
 
 
@@ -1105,7 +1106,7 @@ def cmd_top_linked(args, pages: list[dict]) -> None:
     for slug, count in top:
         # タイトルに対応するページを探す
         match = next((p for p in pages if p["slug"] == slug), None)
-        title = (match["meta"].get("title") if match else None) or slug
+        title = (text_value(match["meta"].get("title")) if match else "") or slug
         marker = "" if match else "  ［リンク切れ］"
         print(f"  {count:4d}  {title}  ({slug}){marker}")
 

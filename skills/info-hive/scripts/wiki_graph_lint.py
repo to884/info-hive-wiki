@@ -64,6 +64,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 import wiki_graph_extract as _extract  # noqa: E402
 import wiki_graph_common as common  # noqa: E402
+from wiki_pages import text_value  # noqa: E402
 from wiki_text import localize_argparse, nfc  # noqa: E402
 import wiki_initialized  # noqa: E402
 import wiki_workspace  # noqa: E402
@@ -353,7 +354,8 @@ def decide_evidence(pages: list[dict], ontology: dict, threshold: float | None) 
         client = None
     predicates = ontology.get("predicates", {})
     sources = {p["slug"]: p for p in pages if p["meta"].get("type") == "source"}
-    titles = {derive_node_id(p["meta"], p["slug"], ontology): p["meta"].get("title") or p["slug"] for p in pages}
+    titles = {derive_node_id(p["meta"], p["slug"], ontology): text_value(p["meta"].get("title")) or p["slug"]
+              for p in pages}
     items = []
     for p in pages:
         graph_meta = p["meta"].get("graph") if isinstance(p["meta"].get("graph"), dict) else {}

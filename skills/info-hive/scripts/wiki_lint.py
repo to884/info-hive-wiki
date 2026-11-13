@@ -95,6 +95,7 @@ from wiki_pages import (  # noqa: E402
     iter_page_files,
     ref_values,
     resolve_link,
+    text_value,
     walk_index_files,
 )
 
@@ -622,7 +623,7 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
                 phrase_pages[phrase].add(p["slug"])
 
         # 絞り込みに使うタイトルの集合
-        existing_titles = {nfkc(p["meta"].get("title", "")).lower() for p in pages}
+        existing_titles = {nfkc(text_value(p["meta"].get("title"))).lower() for p in pages}
         existing_slugs_normalized = {nfkc(s).lower().replace("-", " ") for s in all_slugs}
 
         candidates = []

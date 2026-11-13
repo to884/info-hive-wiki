@@ -477,7 +477,7 @@ def strip_frontmatter(text: str) -> tuple[str, str]:
     """Markdown ファイルの (title, body) を返す。"""
     ws = load_search_module()
     meta, body = ws.parse_frontmatter(text)
-    title = meta.get("title") if isinstance(meta, dict) else None
+    title = ws.text_value(meta.get("title")) if isinstance(meta, dict) else ""
     if not title:
         m = re.search(r"^#\s+(.+)$", body, re.MULTILINE)
         title = m.group(1).strip() if m else ""
@@ -544,10 +544,11 @@ def contradiction_pairs(wiki: Path, max_pairs: int) -> list[tuple[str, dict, dic
     ws = load_search_module()
     pages = ws.collect_pages(wiki)
     by_path, by_slug = ws.build_link_index(pages)
-    entity_titles = {p["slug"]: p["meta"].get("title") or p["slug"] for p in pages if p["meta"].get("type") == "entity"}
+    entity_titles = {p["slug"]: ws.text_value(p["meta"].get("title")) or p["slug"]
+                     for p in pages if p["meta"].get("type") == "entity"}
     mentions: dict[str, list[dict]] = {}
     for page in pages:
-        title = page["meta"].get("title") or page["slug"]
+        title = ws.text_value(page["meta"].get("title")) or page["slug"]
         for section in page["sections"]:
             linked = set()
             # セクションの links は、本文全体の解析から集めたもの（コードの中と参照リンクの定義の中は数えない）。
