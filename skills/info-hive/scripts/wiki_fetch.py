@@ -345,7 +345,7 @@ def drop_mediawiki_parts(doc: Node) -> list[dict]:
         if "hidden" in node.attrs:
             return
         node.attrs["hidden"] = ""
-        removed.append({"rule": rule, "text": _clean_inline(text_of(node, skip_dropped=False))[:300]})
+        removed.append({"rule": rule, "text": _clean_inline(text_of(node, skip_dropped=False))})
 
     for node in list(doc.iter()):
         names = set(node.attrs.get("class", "").split()) | {node.attrs.get("id", "")}
@@ -399,7 +399,7 @@ def apply_block_rules(blocks: list[str], title: str) -> tuple[list[str], list[di
                 elif text.startswith("Read this story for free:") and any("source=friends_link" in u for u in urls):
                     rule = "medium_friend_link"
         if rule:
-            removed.append({"rule": rule, "text": text[:300]})
+            removed.append({"rule": rule, "text": text})
         else:
             kept.append(block)
     return kept, removed
@@ -1209,7 +1209,7 @@ def build(args) -> tuple[int, dict]:
         if old == sha:
             result["unchanged"] = True
             if wiki is not None:
-                result["work_dir"] = wiki_rawcheck.work_dir(wiki, args.slug).is_dir()
+                result["work_dir"] = wiki_rawcheck.work_dir_complete(wiki, args.slug)
             return 0, result
         suggestion = f"{args.slug}-{datetime.now().strftime('%Y%m%d')}"
         result["suggested_slug"] = suggestion
@@ -1364,6 +1364,7 @@ def build(args) -> tuple[int, dict]:
         wd.mkdir(parents=True)
         result["work_dir"] = True
         (wd / "fetched.md").write_bytes(text.encode("utf-8"))
+        # fetch.json は最後に書く。写しがそろったかは、fetched.md と fetch.json の両方で判定する。
         (wd / "fetch.json").write_bytes(json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"))
     write_outputs(raw_root, target, asset_dir, args.slug, text, pending)
     return 0, result
