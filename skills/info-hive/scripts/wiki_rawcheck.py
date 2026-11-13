@@ -36,6 +36,7 @@ import os
 import re
 import shutil
 import sys
+import urllib.parse
 from collections import Counter
 from pathlib import Path
 
@@ -68,7 +69,13 @@ def work_dir(wiki: Path, slug: str) -> Path:
 def work_dir_complete(wiki: Path, slug: str) -> bool:
     """作業用の写しがそろっているか。wiki_fetch.py は fetch.json を最後に書く。"""
     wd = work_dir(wiki, slug)
-    return (wd / "fetched.md").is_file() and (wd / "fetch.json").is_file()
+    if not ((wd / "fetched.md").is_file() and (wd / "fetch.json").is_file()):
+        return False
+    try:
+        json.loads(read_text(wd / "fetch.json"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return True
 
 
 def _is_link(path: Path) -> bool:
@@ -78,11 +85,20 @@ def _is_link(path: Path) -> bool:
     return bool(is_junction and is_junction())
 
 
+def check_slug(slug: str) -> None:
+    """スラッグを検査する（wiki_fetch.py と同じ規則）。.. や区切りを含むスラッグで、作業用のフォルダーの外を
+    指せないようにする。"""
+    import wiki_fetch  # wiki_fetch.py が wiki_rawcheck を読み込むので、使うときに読み込む
+    wiki_fetch.check_slug(slug)
+
+
 def remove_work_dir(wiki: Path, slug: str) -> bool:
-    """作業用のフォルダーを消す。途中の段がリンクか、wiki の外に解決されるなら、消さずに ValueError。
+    """作業用のフォルダーを消す。スラッグが規則に反するか、途中の段がリンクか、消す先が作業用のフォルダーの
+    置き場（.wiki-cache/ingest）の直下でなければ、消さずに ValueError。
 
     返り値は、消したかどうか（もともとなければ False）。
     """
+    check_slug(slug)
     target = work_dir(wiki, slug)
     step = wiki
     for part in (*WORK_SUBDIR, slug):
@@ -91,10 +107,10 @@ def remove_work_dir(wiki: Path, slug: str) -> bool:
             return False
         if _is_link(step):
             raise ValueError(f"作業用のフォルダーの途中がリンクなので消さない: {step}")
-    root = os.path.realpath(wiki)
+    parent = os.path.realpath(wiki.joinpath(*WORK_SUBDIR))
     real = os.path.realpath(target)
-    if os.path.commonpath([root, real]) != root:
-        raise ValueError(f"作業用のフォルダーが wiki の外にあるので消さない: {real}")
+    if os.path.dirname(real) != parent:
+        raise ValueError(f"作業用のフォルダーの置き場の直下ではないので消さない: {real}")
     shutil.rmtree(target)
     return True
 
@@ -124,7 +140,7 @@ def fetched_images(fetch: dict) -> set[str]:
 class Node:
     """ブロックのトークンの木の節点。inline はインラインのトークン（子）の並び。"""
 
-    __slots__ = ("type", "tag", "markup", "info", "attrs", "content", "children", "inline", "line")
+    __slots__ = ("type", "tag", "markup", "info", "attrs", "content", "children", "inline", "line", "end")
 
     def __init__(self, tok=None):
         self.type = tok.type.removesuffix("_open") if tok else "root"
@@ -136,6 +152,7 @@ class Node:
         self.children: list[Node] = []
         self.inline: list = []
         self.line = (tok.map[0] + 1) if tok is not None and tok.map else None
+        self.end = tok.map[1] if tok is not None and tok.map else None
 
     def signature(self) -> tuple:
         """木の形として比べる値。段落の中身や行番号は含めない。"""
@@ -171,8 +188,20 @@ def links_of(children: list) -> list[str]:
     return [c.attrGet("href") or "" for c in children if c.type == "link_open"]
 
 
+def image_src(token) -> str:
+    """画像のパス。パーサーは日本語などを %E6… と符号化するので、fetch.json のパスと同じ形に戻す。"""
+    return urllib.parse.unquote(token.attrGet("src") or "")
+
+
 def images_of(children: list) -> list[tuple[str, str, str]]:
-    return [(c.attrGet("src") or "", c.content, c.attrGet("title") or "") for c in children if c.type == "image"]
+    return [(image_src(c), c.content, c.attrGet("title") or "") for c in children if c.type == "image"]
+
+
+def references_of(body: str) -> dict:
+    """参照の定義（`[x]: https://…`）。木には残らないので、別に比べる。"""
+    env: dict = {}
+    _PARSER.parse(body, env)
+    return dict(env.get("references", {}))
 
 
 def code_spans_of(children: list) -> list[str]:
@@ -188,18 +217,18 @@ def walk(node: Node):
 # ---------------------------------------------------------------- freeze
 
 
-def inline_units(children: list) -> list[tuple]:
+def inline_units(children: list) -> list:
     """インラインを、削除の検査の単位の並びにする。
 
-    画像、リンク（開きから閉じまで）、インラインのコード、強調（開きから閉じまで）は、それぞれ 1 つの単位
-    （丸ごと残すか丸ごと消すか）。そのほかの文字は 1 文字ずつの単位。
+    画像、リンク（開きから閉じまで）、インラインのコードは、それぞれ 1 つの単位（丸ごと残すか丸ごと消すか）。
+    強調（強い強調、取り消し線など）は、中の単位の並びを持つ 1 つの単位で、中は再帰的に照らす（強調の中の
+    雑音だけを消せるように）。そのほかの文字は 1 文字ずつの単位。
     """
-    out: list[tuple] = []
+    out: list = []
     i = 0
     while i < len(children):
         c = children[i]
         if c.nesting == 1:
-            # 開きから、対応する閉じまでを 1 つの単位にする（リンク、強い強調、強調など）。
             depth, j = 0, i
             while j < len(children):
                 depth += children[j].nesting
@@ -207,12 +236,16 @@ def inline_units(children: list) -> list[tuple]:
                     break
                 j += 1
             inner = children[i:j + 1]
-            out.append(("span", tuple((x.type, x.content, x.markup, tuple(sorted((x.attrs or {}).items())))
-                                      for x in inner)))
+            if c.type == "link_open":
+                # リンクは文言も含めて丸ごと 1 つの単位にする。
+                out.append(("link", tuple((x.type, x.content, x.markup, tuple(sorted((x.attrs or {}).items())))
+                                          for x in inner)))
+            else:
+                out.append(("span", c.type, c.markup, inline_units(inner[1:-1])))
             i = j + 1
             continue
         if c.type == "image":
-            out.append(("image", c.attrGet("src") or "", c.content, c.attrGet("title") or ""))
+            out.append(("image", image_src(c), c.content, c.attrGet("title") or ""))
         elif c.type == "code_inline":
             out.append(("code", c.content, c.markup))
         elif c.type == "text":
@@ -225,6 +258,13 @@ def inline_units(children: list) -> list[tuple]:
             out.append((c.type, c.content, c.markup))
         i += 1
     return out
+
+
+def same_unit(src, out) -> bool:
+    """インラインの単位の対応。強調は、種類が同じで、中が消すことだけで作れること。"""
+    if src[0] == "span" and out[0] == "span":
+        return src[1:3] == out[1:3] and is_subsequence(out[3], src[3], same_unit)
+    return src == out
 
 
 def is_subsequence(short: list, long: list, same=lambda a, b: a == b) -> bool:
@@ -250,7 +290,7 @@ def derivable(src: Node, out: Node, failure: list[Node]) -> bool:
     """
     if src.signature() != out.signature() or src.info != out.info or src.content != out.content:
         return False
-    if (src.inline or out.inline) and not is_subsequence(inline_units(out.inline), inline_units(src.inline)):
+    if (src.inline or out.inline) and not is_subsequence(inline_units(out.inline), inline_units(src.inline), same_unit):
         return False
 
     def same(a: Node, b: Node) -> bool:
@@ -285,6 +325,9 @@ def freeze(wiki: Path, raw_root: Path, slug: str) -> tuple[int, dict]:
     if src_fm != out_fm:
         errors.append({"kind": "frontmatter", "message": "frontmatter が変わった"})
 
+    src_refs, out_refs = references_of(src_body), references_of(out_body)
+    if any(k not in src_refs or src_refs[k] != v for k, v in out_refs.items()):
+        errors.append({"kind": "edit", "message": "参照の定義（[x]: …）を書き足したか、変えた"})
     src_tree, out_tree = parse_tree(src_body), parse_tree(out_body)
     failure: list[Node] = []
     if not derivable(src_tree, out_tree, failure):
@@ -297,7 +340,7 @@ def freeze(wiki: Path, raw_root: Path, slug: str) -> tuple[int, dict]:
     src_title = next((n for n in walk(src_tree) if n.type == "heading" and n.tag == "h1"), None)
     if src_title is not None:
         out_title = next((n for n in walk(out_tree) if n.type == "heading" and n.tag == "h1"), None)
-        if out_title is None or inline_units(out_title.inline) != inline_units(src_title.inline):
+        if out_title is None or inline_units(out_title.inline) != inline_units(src_title.inline):  # 完全一致
             errors.append({"kind": "title", "message": "題名の見出しを消したか、変えた"})
 
     # 画像のファイルは、残った画像から参照されるかで決まる。
@@ -356,8 +399,14 @@ def caption_of(node: Node) -> tuple[str, str] | None:
     return m.group(1).strip(), m.group(2)
 
 
-def strip_captions(node: Node, fetched: set[str], base: Path, errors: list[dict], names: set[str]) -> None:
-    """木から補足の引用を取り除き、画像ごとの補足の数と表示名を調べる。"""
+def strip_captions(node: Node, fetched: set[str], base: Path, errors: list[dict], names: set[str],
+                   removed: list[tuple[int, int]]) -> None:
+    """木から補足の引用を取り除き、画像ごとの補足の数と表示名を調べる。
+
+    補足は、画像を含むブロックのすぐあとに続く、補足の形の引用である。取り除くのは、そのブロックの取得した
+    画像の数までに限る。それより後ろの補足の形の引用は、原文の引用かもしれないので、取り除かずに原文と照らす
+    （モデルが足したものなら、ブロックの数の違いとして誤りになる）。取り除いた引用の行の範囲を removed に足す。
+    """
     new_children: list[Node] = []
     i = 0
     while i < len(node.children):
@@ -366,38 +415,40 @@ def strip_captions(node: Node, fetched: set[str], base: Path, errors: list[dict]
         i += 1
         images = images_of(child.inline)
         if not images:
-            strip_captions(child, fetched, base, errors, names)
+            strip_captions(child, fetched, base, errors, names, removed)
             continue
         needed = []
-        for src, alt, _title in images:
+        for src, _alt, _title in images:
             if src in fetched:
                 if not (base / src).is_file():
                     errors.append({"kind": "image_file", "line": child.line,
                                    "message": f"取得した画像のファイルがない: {src}"})
                 needed.append(src)
         found = 0
-        while i < len(node.children) and caption_of(node.children[i]) is not None:
-            name, body = caption_of(node.children[i])
+        while found < len(needed) and i < len(node.children) and caption_of(node.children[i]) is not None:
+            quote = node.children[i]
+            name, body = caption_of(quote)
             names.add(name)
             if not body.strip():
-                errors.append({"kind": "caption", "line": node.children[i].line, "message": "補足の本文が空"})
-            later = [inline_text(p.inline, newline="\n") for p in node.children[i].children[1:] if p.inline]
+                errors.append({"kind": "caption", "line": quote.line, "message": "補足の本文が空"})
+            if any(p.type != "paragraph" for p in quote.children):
+                errors.append({"kind": "caption", "line": quote.line,
+                               "message": "補足の中に段落のほかのブロック（引用、リストなど）がある。補足は段落だけで書く"})
+            later = [inline_text(p.inline, newline="\n") for p in walk(quote) if p is not quote.children[0] and p.inline]
             if re.search(r"\n[^\n]{1,60}?" + re.escape(CAPTION_MARK), body) or \
                     any(CAPTION_HEAD_RE.match(text) for text in later):
-                errors.append({"kind": "caption", "line": node.children[i].line,
+                errors.append({"kind": "caption", "line": quote.line,
                                "message": "1 つの引用に 2 つ以上の補足がある（補足は 1 つずつ別の引用にする）"})
+            if quote.line is not None and quote.end is not None:
+                removed.append((quote.line - 1, quote.end))
             found += 1
             i += 1
-        if found != len(needed):
-            if not needed:
-                message = "取得できなかった画像に補足がある"
-            elif found < len(needed):
-                message = f"画像の補足が足りない（画像 {len(needed)}、補足 {found}）"
-            else:
-                message = f"画像の補足が多すぎる（画像 {len(needed)}、補足 {found}）"
-            errors.append({"kind": "caption", "line": child.line, "message": message,
+        if found < len(needed):
+            errors.append({"kind": "caption", "line": child.line,
+                           "message": f"画像の補足が足りない（取得した画像 {len(needed)}、補足 {found}）。"
+                           "補足は、画像を含むブロック（段落）のすぐあとに、同じ入れ物の中で書く",
                            "raw": ", ".join(src for src, _a, _t in images)[:200]})
-        strip_captions(child, fetched, base, errors, names)
+        strip_captions(child, fetched, base, errors, names, removed)
     node.children = new_children
 
 
@@ -520,9 +571,23 @@ def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: s
     if not translate and translator:
         errors.append({"kind": "translated_by", "message": "訳さないページなのに translated_by がある"})
 
+    if references_of(src_body) != references_of(out_body):
+        errors.append({"kind": "references", "message": "参照の定義（[x]: …）が変わった"})
     src_tree, out_tree = parse_tree(src_body), parse_tree(out_body)
     names: set[str] = set()
-    strip_captions(out_tree, fetched_images(fetch), raw_path.parent, errors, names)
+    caption_ranges: list[tuple[int, int]] = []
+    strip_captions(out_tree, fetched_images(fetch), raw_path.parent, errors, names, caption_ranges)
+    if not translate:
+        # 訳さないページは、補足の行を除いた本文が、文字どおり同じでなければならない（記法の書き換えも含めて）。
+        lines = out_body.split("\n")
+        drop: set[int] = set()
+        for start, end in caption_ranges:
+            drop.update(range(start, end))
+            if end < len(lines) and not lines[end].strip():
+                drop.add(end)
+        kept = "\n".join(line for k, line in enumerate(lines) if k not in drop)
+        if kept.strip() != src_body.strip():
+            errors.append({"kind": "text", "message": "訳さないページで、補足のほかに本文を変えた"})
     if len(names) > 1:
         errors.append({"kind": "caption", "message": f"補足の表示名がそろっていない: {sorted(names)}"})
     if translate and names and translator and names != {translator}:
@@ -589,6 +654,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{found}\n{wiki_initialized.INIT_HINT}", file=sys.stderr)
         return 1
     try:
+        check_slug(args.slug)
         if args.command == "freeze":
             code, result = freeze(args.wiki, args.raw_root, args.slug)
         else:

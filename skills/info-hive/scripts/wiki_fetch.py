@@ -372,7 +372,8 @@ def _is_plain_paragraph(block: str) -> bool:
 
 
 def _text_without_links(block: str) -> str:
-    return re.sub(r"\s+", "", _MD_LINK_RE.sub("", block))
+    """リンクと、強調やコードの記号を除いた文字（本文の前の部分の判定に使う）。"""
+    return re.sub(r"[\s*_`]+", "", _MD_LINK_RE.sub("", block))
 
 
 def apply_block_rules(blocks: list[str], title: str) -> tuple[list[str], list[dict]]:
@@ -1364,8 +1365,11 @@ def build(args) -> tuple[int, dict]:
         wd.mkdir(parents=True)
         result["work_dir"] = True
         (wd / "fetched.md").write_bytes(text.encode("utf-8"))
-        # fetch.json は最後に書く。写しがそろったかは、fetched.md と fetch.json の両方で判定する。
-        (wd / "fetch.json").write_bytes(json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"))
+        # fetch.json は最後に、一時の名前で書き終えてから名前を変える。写しがそろったかは、fetched.md と、
+        # JSON として読める fetch.json の両方で判定する（wiki_rawcheck.work_dir_complete）。
+        tmp = wd / "fetch.json.tmp"
+        tmp.write_bytes(json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"))
+        os.replace(tmp, wd / "fetch.json")
     write_outputs(raw_root, target, asset_dir, args.slug, text, pending)
     return 0, result
 
