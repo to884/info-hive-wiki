@@ -204,6 +204,8 @@ class JsonListFieldsContractTest(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.wiki = Path(self._tmp.name) / "wiki"
         (self.wiki / "concepts").mkdir(parents=True)
+        # CLI は SCHEMA.md のないディレクトリを断る（ADR-0019）。SCHEMA.md はページに数えない。
+        (self.wiki / "SCHEMA.md").write_bytes("# スキーマ\n".encode("utf-8"))
         for name, (fields, _tags, _sources) in LIST_FIELD_PAGES.items():
             text = f"---\ntitle: {name}\n{fields}\n---\n{LIST_FIELD_QUERY}の本文。\n"
             (self.wiki / "concepts" / f"{name}.md").write_bytes(text.encode("utf-8"))

@@ -43,6 +43,7 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 import wiki_browse_core as core  # noqa: E402
 import wiki_browse_fs as fs  # noqa: E402
+import wiki_initialized as initialized  # noqa: E402
 import wiki_mcp_common as common  # noqa: E402
 from wiki_text import localize_argparse  # noqa: E402
 
@@ -67,10 +68,17 @@ def say(message: str) -> None:
 
 
 def wiki_root(arg: str) -> Path:
+    """初期化された wiki のルート。SCHEMA.md のないディレクトリは断る（ADR-0019）。build、serve、stop、core の
+    どれも通る。stop も通すのは、未初期化のディレクトリのためにデータの場所に状態のディレクトリを作らないためである。
+    判定は、パスを解決するより前に行う。解決の失敗も、同じ理由の文と案内で止める。"""
     root = Path(arg).expanduser()
-    if not root.is_dir():
-        raise Failed(f"Wiki のルートがない: {arg}")
-    return root.resolve()
+    found = initialized.problem(root)
+    if found is not None:
+        raise Failed(f"{found}\n{initialized.INIT_HINT}")
+    try:
+        return root.resolve(strict=True)
+    except OSError as e:
+        raise Failed(f"wiki のディレクトリを確かめられない: {arg}（{type(e).__name__}）\n{initialized.INIT_HINT}") from e
 
 
 def browse_dir() -> Path:
@@ -367,7 +375,14 @@ class BrowseState:
         return last is not None and time.monotonic() - last < RETRY_INTERVAL
 
     def get(self, wait: "float | None" = None) -> "tuple[core.Core | None, str | None]":
-        """答えに使う中核と、古いときの理由（"failed" か "building"）を返す。中核がなければ (None, 理由)。"""
+        """答えに使う中核と、古いときの理由（"failed" か "building"）を返す。中核がなければ (None, 理由)。
+
+        要求のたびに wiki を読み直すので、要求のたびに初期化を確かめる（ADR-0019）。起動のあとで SCHEMA.md が
+        なくなったら、前の中核も使わずに (None, "uninitialized") を返す。中核は捨てない。SCHEMA.md が戻れば、
+        入力の印が同じならそのまま使う。
+        """
+        if initialized.problem(self.root) is not None:
+            return None, "uninitialized"
         wait = BUILD_WAIT if wait is None else wait
         request_sig = self._signature()
         cur = self.current
@@ -535,6 +550,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if app.state.shutdown_requested:
             app.request_shutdown()
             return self._text(503, "終わるところである")
+        if c is None and stale == "uninitialized":
+            return self._text(503, "初期化された wiki ではない（SCHEMA.md がない）。" + initialized.INIT_HINT,
+                              {"Retry-After": "5"})
         if c is None:
             return self._text(503, "Wiki を組み立てている。少し待ってから再読み込みする" if stale == "building"
                               else "Wiki を組み立てられない。lint で確かめる", {"Retry-After": "5"})

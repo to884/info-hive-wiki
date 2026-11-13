@@ -56,6 +56,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 # import したときも見つかるようにする。
 sys.path.insert(0, str(SCRIPT_DIR))
 from wiki_text import localize_argparse, quote_in_text  # noqa: E402
+import wiki_initialized  # noqa: E402
 import wiki_workspace  # noqa: E402
 QUESTIONS_PATH = SCRIPT_DIR.parent / "assets" / "decision-questions.json"
 
@@ -695,9 +696,13 @@ def main(argv: list[str] | None = None) -> int:
         client = None
     if args.command in ("shortlist", "contradictions") and args.wiki is None:
         args.wiki = wiki_workspace.default_wiki_or_exit()
-    if args.command in ("shortlist", "contradictions") and not args.wiki.exists():
-        print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
-        return 1
+    if args.command in ("shortlist", "contradictions"):
+        # SCHEMA.md のないディレクトリは、初期化された wiki とみなさない（ADR-0019）。
+        try:
+            wiki_initialized.require(args.wiki)
+        except wiki_initialized.NotInitialized as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
     handlers = {
         "ask": cmd_ask,
         "screen": cmd_screen,

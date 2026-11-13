@@ -20,6 +20,7 @@ import yaml
 
 import wiki_search
 from wiki_text import localize_argparse  # wiki_search が同じディレクトリを sys.path に加える
+import wiki_initialized
 import wiki_workspace
 
 
@@ -71,8 +72,9 @@ def main() -> None:
     if args.wiki is None:
         args.wiki = wiki_workspace.default_wiki_or_exit()
 
-    if not args.wiki.is_dir():
-        parser.error(f"wiki のディレクトリが見つからない: {args.wiki}")
+    # SCHEMA.md のないディレクトリに、キャッシュと埋め込みを書かない（ADR-0019）。init と upgrade は、
+    # SCHEMA.md を置いてからこのスクリプトを呼ぶ。
+    wiki_initialized.require_or_exit(args.wiki)
     cache_path = None
     if args.cache:
         cache_path = args.wiki / ".wiki-cache" / "search-index.json" if args.cache == "AUTO" else Path(args.cache)

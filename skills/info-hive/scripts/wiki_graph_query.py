@@ -41,6 +41,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wiki_text import localize_argparse, nfc  # noqa: E402
 import wiki_graph_common as common  # noqa: E402
+import wiki_initialized  # noqa: E402
 
 
 EVIDENCE_SNIPPET_LEN = 140
@@ -279,9 +280,8 @@ def main():
     localize_argparse(parser)
     args = parser.parse_args()
 
-    if not args.wiki.exists():
-        print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
-        sys.exit(1)
+    # SCHEMA.md のないディレクトリは、初期化された wiki とみなさない（ADR-0019）。
+    wiki_initialized.require_or_exit(args.wiki)
     try:
         result = run_query(args.wiki, args.command, node=getattr(args, "node", None),
                            subject=getattr(args, "subject", None), predicate=getattr(args, "predicate", None),

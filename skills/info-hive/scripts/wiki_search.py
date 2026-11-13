@@ -58,6 +58,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wiki_text import (  # noqa: E402
     canonical_meta, ljust_display, localize_argparse, nfc, normalize_tags, parse_frontmatter_text, posix_rel,
 )
+import wiki_initialized  # noqa: E402
 import wiki_workspace  # noqa: E402
 # ページの集合とリンクの規則は wiki_pages の 1 か所に置く（ADR-0010 の決定の 1）。wiki_index、wiki_decide、
 # 試験が wiki_search.resolve_link などの名前で使うので、同じ名前で読み込んでおく。
@@ -1137,13 +1138,11 @@ def main():
     args = parser.parse_args()
     if args.wiki is None:
         args.wiki = wiki_workspace.default_wiki_or_exit()
+    # SCHEMA.md のないディレクトリは、初期化された wiki とみなさない（ADR-0019）。パースキャッシュを書く前に確かめる。
+    wiki_initialized.require_or_exit(args.wiki)
     cache_path = None
     if args.cache:
         cache_path = args.wiki / ".wiki-cache" / "search-index.json" if args.cache == "AUTO" else Path(args.cache)
-
-    if not args.wiki.exists():
-        print(f"wiki のディレクトリが見つからない: {args.wiki}", file=sys.stderr)
-        sys.exit(1)
 
     pages = collect_pages(args.wiki, cache_path)
     if not pages:

@@ -412,6 +412,8 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp) / "wiki"
         write_fixture(root, FIXTURE_PAGES)
+        # stats の CLI は SCHEMA.md のないディレクトリを断る（info-hive-dev の ADR-0019）。SCHEMA.md はページではない。
+        write_fixture(root, {"SCHEMA.md": "# スキーマ\n"})
         check_fixture_lint(root, failures)
         check_fixture_search(root, failures)
         check_fixture_stats(root, failures)
