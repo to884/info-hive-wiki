@@ -53,38 +53,66 @@ CAPTION_HEAD_RE = re.compile(r"([^\s][^\n]{0,59}?)" + re.escape(CAPTION_MARK) + 
 
 # 表の規則（同梱の markdown-it-py）。パッケージの属性の table は関数なので、モジュールは import_module で取る。
 _TABLE_RULE = importlib.import_module("markdown_it.rules_block.table")
+_Token = importlib.import_module("markdown_it.token").Token
 
 
-def _table_noting_surplus_cells(state, start_line: int, end_line: int, silent: bool) -> bool:
-    """表の規則に、見出しより多いセルを持つ行を記録させる。
+def _row_cells(state, line: int) -> list[str]:
+    """表の行の、本文に実際にあるセル。表の規則と同じ行の取り出し（getLine。リストや引用の中でも、入れ物の
+    字下げを除いた行）と分け方（escapedSplit と、両端の空のセルの除き方）で分ける。"""
+    cells = _TABLE_RULE.escapedSplit(_TABLE_RULE.getLine(state, line).strip())
+    if cells and cells[0] == "":
+        cells.pop(0)
+    if cells and cells[-1] == "":
+        cells.pop()
+    return cells
 
-    パーサーは、表の行のうち見出しの列数を超えるセルを捨て、トークンを作らない。そのセルの文字は木に現れず、
-    画面にも出ない。表の規則そのものの行の取り出し（getLine。リストや引用の中でも、入れ物の字下げを除いた行）
-    と分け方（escapedSplit と、両端の空のセルの除き方）で、行ごとのセルの数を数え直し、列数を超える行の
-    番号（1 始まり）を table_open の meta に入れる。トークンの並びは変えない。
+
+def _table_with_real_cells(state, start_line: int, end_line: int, silent: bool) -> bool:
+    """表の規則を呼び、データの行のセルを、本文の行に実際にあるセルだけにする。
+
+    パーサーは、データの行のセルを見出しの列数にそろえる。多いセルは捨て（トークンを作らない。画面にも出ない）、
+    足りないセルは空のセルで補う。そのままの木では、捨てたセルの文字を照らせず、セルを消して後ろのセルが前の
+    列にずれたことも分からない。検査に使う木では、補った空のセルを除き、捨てたセルを足して、行の子の数を本文の
+    行のセルの数にする。セルの数の違いは、取得と raw の木の対応（freeze の行の位置の対応、check の比較）の
+    中で見つかる。足したセルも、ふつうのセルと同じくインラインの解析を通る（この規則は、インラインの解析の前に動く）。
     """
     start = len(state.tokens)
     if not _TABLE_RULE.table(state, start_line, end_line, silent):
         return False
-    if not silent:
-        table_open = state.tokens[start]
-        columns = sum(1 for tok in state.tokens[start:] if tok.type == "th_open")
-        rows = []
-        for line in range(table_open.map[0] + 2, table_open.map[1]):
-            cells = _TABLE_RULE.escapedSplit(_TABLE_RULE.getLine(state, line).strip())
-            if cells and cells[0] == "":
-                cells.pop(0)
-            if cells and cells[-1] == "":
-                cells.pop()
-            if len(cells) > columns:
-                rows.append(line + 1)
-        table_open.meta["surplus_cell_rows"] = rows
+    if silent:
+        return True
+    tokens = state.tokens[start:]
+    out = []
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        out.append(tok)
+        i += 1
+        if tok.type != "tr_open" or not tok.map or tok.map[0] < start_line + 2:
+            continue  # 見出しの行のセルの数は、表の規則が見出しと区切りの行で確かめている
+        cells: list[list] = []
+        while tokens[i].type == "td_open":  # td_open、inline、td_close の組
+            cells.append(tokens[i:i + 3])
+            i += 3
+        real = _row_cells(state, tok.map[0])
+        for group in cells[:len(real)]:
+            out.extend(group)
+        for text in real[len(cells):]:
+            level = cells[0][0].level if cells else tok.level + 1
+            td_open, inline, td_close = _Token("td_open", "td", 1), _Token("inline", "", 0), _Token("td_close", "td", -1)
+            td_open.level, inline.level, td_close.level = level, level + 1, level
+            inline.content, inline.children = text.strip(), []
+            for t in (td_open, inline, td_close):
+                t.map, t.block = list(tok.map), True
+            out.extend((td_open, inline, td_close))
+    state.tokens[start:] = out
     return True
 
 
 _PARSER = wiki_pages.new_parser()
 # wiki_pages.new_parser() の表の規則と同じ位置、同じ代わりの連鎖（段落と参照の定義を終わらせる）で差し替える。
-_PARSER.block.ruler.at("table", _table_noting_surplus_cells, {"alt": ["paragraph", "reference"]})
+# 差し替えるのは、このスクリプトの検査に使うパーサーだけである（lint と閲覧のパーサーは変えない）。
+_PARSER.block.ruler.at("table", _table_with_real_cells, {"alt": ["paragraph", "reference"]})
 
 
 # ---------------------------------------------------------------- ファイルと作業場所
@@ -249,8 +277,7 @@ def work_dir_matches_raw(wiki: Path, slug: str, raw_path: Path) -> bool:
 class Node:
     """ブロックのトークンの木の節点。inline はインラインのトークン（子）の並び。"""
 
-    __slots__ = ("type", "tag", "markup", "info", "attrs", "content", "children", "inline", "line", "end",
-                 "surplus_cell_rows")
+    __slots__ = ("type", "tag", "markup", "info", "attrs", "content", "children", "inline", "line", "end")
 
     def __init__(self, tok=None):
         self.type = tok.type.removesuffix("_open") if tok else "root"
@@ -263,8 +290,6 @@ class Node:
         self.inline: list = []
         self.line = (tok.map[0] + 1) if tok is not None and tok.map else None
         self.end = tok.map[1] if tok is not None and tok.map else None
-        # 表の、見出しより多いセルを持つ行（本文の中の行番号）。パーサーはそのセルを捨てる。
-        self.surplus_cell_rows = list(tok.meta.get("surplus_cell_rows", [])) if tok is not None and tok.meta else []
 
     def signature(self, with_start: bool = True) -> tuple:
         """木の形として比べる値。段落の中身や行番号は含めない。
@@ -345,22 +370,6 @@ def references_of(body: str) -> Counter:
 
 def code_spans_of(children: list) -> list[str]:
     return [c.content for c in children if c.type == "code_inline"]
-
-
-def surplus_cell_errors(tree: Node) -> list[dict]:
-    """表の行に、見出しより多いセルがあれば誤りにする。
-
-    パーサーはそのセルを捨てるので、木を照らす検査からも、画面からも見えない。取得器は、表のすべての行を
-    見出しと同じセルの数にそろえ、セルの中の | を \\| と書くので、取得した内容にはない。木に現れない文字を
-    残さないために、どちらの段でも、raw の中にあれば止める。
-    """
-    rows = [row for n in walk(tree) if n.type == "table" for row in n.surplus_cell_rows]
-    if not rows:
-        return []
-    return [{"kind": "table", "line": rows[0],
-             "message": f"表の行に、見出しより多いセルがある（{len(rows)} 行）。パーサーは見出しの列数を超えるセルを"
-             "捨てるので、表示されず、検査もできない。セルの中の | は \\| と書く（\\| の \\ を消すとセルが増える）。"
-             "行の先頭と末尾の | を消さない"}]
 
 
 def walk(node: Node):
@@ -523,15 +532,13 @@ def freeze(wiki: Path, raw_root: Path, slug: str) -> tuple[int, dict]:
     if references_of(out_body) - references_of(src_body):
         errors.append({"kind": "edit", "message": "参照の定義（[x]: …）を書き足したか、変えた"})
     src_tree, out_tree = parse_tree(src_body), parse_tree(out_body)
-    # 木に現れない文字（パーサーが捨てる、見出しより多いセル）は、raw に残させない。木を照らす検査が見る範囲を、
-    # raw の本文のすべてにする。
-    errors.extend(surplus_cell_errors(out_tree))
     failure: list[Node] = []
     if not derivable(src_tree, out_tree, failure):
         bad = failure[0] if failure else out_tree
         kind, hint = "edit", ""
-        if bad.type in ("table", "thead", "tbody", "tr", "th", "td"):
-            kind, hint = "table", "。表では、セル（列）を消せない。表は、行ごとか表ごと消す"
+        if bad.type in ("table", "thead", "tbody", "tr", "th", "td") or any(n.type == "table" for n in walk(bad)):
+            # 対応の取れないブロックが表か、表を含む（リストの項目の中の表など）。誤りの場所の手がかりで、判定は変えない。
+            kind, hint = "table", "。表では、セル（列）を消せない（セルの区切りの | も、\\| の \\ も消さない）。表は、行ごとか表ごと消す"
         elif bad.type == "paragraph":
             hint = "。2 つの段落が 1 つにつながっていれば、間の空の行を残す（行ごと消すときも、空の行は残す）"
         errors.append({"kind": kind, "line": bad.line,
@@ -746,7 +753,7 @@ def compare(a: Node, b: Node, translate: bool, errors: list[dict], warnings: lis
     if a.type == "tr" and len(a.children) != len(b.children):
         errors.append({"kind": "table", **where,
                        "message": f"表の行のセルの数が違う（取得 {len(a.children)}、raw {len(b.children)}）。"
-                       "訳文の中の | は \\| と書く"})
+                       "セルの区切りの | を足したり消したりしない。訳文の中の | は \\| と書く"})
     elif len(a.children) != len(b.children):
         errors.append({"kind": "blocks", **where,
                        "message": f"{a.type or '本文'} の中のブロックの数が違う（取得 {len(a.children)}、raw {len(b.children)}）。"
@@ -847,8 +854,6 @@ def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: s
         errors.append({"kind": "caption", "message": f"補足の表示名が translated_by と違う: {sorted(names)}"})
 
     style: Counter = Counter()
-    # 木に現れない文字（パーサーが捨てる、見出しより多いセル）は、raw に残させない（freeze と同じ）。
-    errors.extend(surplus_cell_errors(out_tree))
     compare(src_tree, out_tree, translate, errors, warnings, style)
     total = style["desu"] + style["dearu"]
     if total and min(style["desu"], style["dearu"]) > total * 0.1:
