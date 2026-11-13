@@ -54,6 +54,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wiki_text import format_fm_value, localize_argparse, parse_frontmatter_text  # noqa: E402
 import wiki_initialized  # noqa: E402
+import wiki_pages  # noqa: E402
 import wiki_rawcheck  # noqa: E402
 
 FETCHED_BY = "wiki_fetch.py 0.1"
@@ -364,19 +365,40 @@ def drop_mediawiki_parts(doc: Node) -> list[dict]:
 HEADER_PHRASES = {"Member-only story": "medium_member_only", "Top highlight": "medium_top_highlight"}
 # 本文のどこにあっても落とす段落の文字列。Medium の図の部品で、本文の文としては現れない。
 ANYWHERE_PHRASES = {"Press enter or click to view image in full size": "medium_view_image"}
-_MD_LINK_RE = re.compile(r"\[(?:\\.|[^\[\]\\]|\[(?:\\.|[^\]\\])*\])*\]\(((?:[^()\s]|\([^()]*\))+)(?:\s+\"[^\"]*\")?\)")
+
+
+_BLOCK_PARSER = wiki_pages.new_parser()
+
+
+def _parse_block(block: str):
+    """ブロックを、lint と同じ設定のパーサーで読む。段落 1 つだけなら、そのインラインのトークンを返す。"""
+    tokens = _BLOCK_PARSER.parse(block)
+    if len(tokens) == 3 and tokens[0].type == "paragraph_open" and tokens[1].type == "inline":
+        return tokens[1].children or []
+    return None
 
 
 def _is_plain_paragraph(block: str) -> bool:
-    return not re.match(r"^(?:#|>|\||[-*+]\s|\d+[.)]\s|```|~~~|!\[)", block)
+    return _parse_block(block) is not None
 
 
 def _text_without_links(block: str) -> str:
-    """リンクと、強調（`*`）とコード（`` ` ``）の記号を除いた文字（本文の前の部分の判定に使う）。
+    """表示上の文字から、リンクの文言と空白を除いたもの（本文の前の部分の判定に使う）。
 
-    変換は強調を `**` で書くので、`_` は本文の文字として数える。
+    記法の記号は数えない。パーサーで読むので、`_` やコードの中の `*` は文字として数える。
     """
-    return re.sub(r"[\s*`]+", "", _MD_LINK_RE.sub("", block))
+    children = _parse_block(block)
+    if children is None:
+        return ""
+    out, depth = [], 0
+    for c in children:
+        if c.type == "link_open":
+            depth += 1
+        elif c.type == "link_close":
+            depth -= 1
+        elif depth == 0 and c.type in ("text", "code_inline"):
+            out.append(c.content)
+    return re.sub(r"\s+", "", "".join(out))
 
 
 def apply_block_rules(blocks: list[str], title: str) -> tuple[list[str], list[dict]]:
@@ -392,12 +414,13 @@ def apply_block_rules(blocks: list[str], title: str) -> tuple[list[str], list[di
             if text in ANYWHERE_PHRASES:
                 rule = ANYWHERE_PHRASES[text]
             elif i < header_end:
-                urls = _MD_LINK_RE.findall(text)
+                children = _parse_block(block) or []
+                urls = [c.attrGet("href") or "" for c in children if c.type == "link_open"]
                 if title and text == title:
                     rule = "duplicate_title"
                 elif text in HEADER_PHRASES:
                     rule = HEADER_PHRASES[text]
-                elif urls and not _MD_LINK_RE.sub("", text).strip() and all(
+                elif urls and not _text_without_links(block) and all(
                         re.search(r"/tags?/", urllib.parse.urlsplit(u).path) for u in urls):
                     rule = "tag_links"
                 elif text.startswith("Read this story for free:") and any("source=friends_link" in u for u in urls):

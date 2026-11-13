@@ -40,7 +40,7 @@ from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from wiki_text import localize_argparse  # noqa: E402
+from wiki_text import localize_argparse, parse_frontmatter_text  # noqa: E402
 import wiki_initialized  # noqa: E402
 import wiki_pages  # noqa: E402
 
@@ -157,10 +157,14 @@ class Node:
         self.line = (tok.map[0] + 1) if tok is not None and tok.map else None
         self.end = tok.map[1] if tok is not None and tok.map else None
 
-    def signature(self) -> tuple:
-        """木の形として比べる値。段落の中身や行番号は含めない。"""
-        # 記法（見出しの # と下線、フェンスの ``` と ~~~、リストの記号）も比べる。消すことだけでは変わらない。
-        attrs = {k: v for k, v in self.attrs.items() if k in ("start", "style")}
+    def signature(self, with_start: bool = True) -> tuple:
+        """木の形として比べる値。段落の中身や行番号は含めない。
+
+        記法（見出しの # と下線、フェンスの ``` と ~~~、リストの記号）も比べる。消すことだけでは変わらない。
+        番号つきのリストの開始番号（start）は、先頭の項目を消すと変わるので、削除の段では比べない（with_start）。
+        """
+        keys = ("start", "style") if with_start else ("style",)
+        attrs = {k: v for k, v in self.attrs.items() if k in keys}
         return (self.type, self.tag, self.markup, tuple(sorted(attrs.items())))
 
 
@@ -201,28 +205,50 @@ def images_of(children: list) -> list[tuple[str, str, str]]:
     return [(image_src(c), c.content, c.attrGet("title") or "") for c in children if c.type == "image"]
 
 
-REFERENCE_LINE_RE = re.compile(r"^[ >]*\[(?:\\.|[^\]\\])+\]:\s*\S")
+# 中身の行を持つブロック。参照の定義の行は、これらのどれにも覆われない（パーサーはトークンを作らない）。
+_LEAF_BLOCKS = {"paragraph_open", "heading_open", "fence", "code_block", "hr", "table_open", "html_block"}
 
 
 def references_of(body: str) -> Counter:
     """参照の定義。木には残らないので、別に比べる。
 
     パーサーが読んだ定義（ラベル、URL、title。行番号は含めない）と、定義の行そのもの（パーサーは同じラベルの
-    2 つ目の定義を捨てるので、書き足しを見つけるために行も数える）の多重集合を返す。
+    2 つ目の定義を捨てるので、書き足しを見つけるために行も数える）の多重集合を返す。定義の行は、正規表現で
+    推し量らず、中身の行を持つブロックのどれにも覆われない行とする（入れ物の記号だけの行は除く）。
     """
     env: dict = {}
-    _PARSER.parse(body, env)
+    tokens = _PARSER.parse(body, env)
     out: Counter = Counter()
     for label, ref in env.get("references", {}).items():
         out[("ref", label, ref.get("href", ""), ref.get("title", ""))] += 1
-    for line in body.split("\n"):
-        if REFERENCE_LINE_RE.match(line):
-            out[("line", line.strip(" >"))] += 1
+    covered: set[int] = set()
+    for tok in tokens:
+        if tok.type in _LEAF_BLOCKS and tok.map:
+            covered.update(range(tok.map[0], tok.map[1]))
+    for k, line in enumerate(body.split("\n")):
+        if k not in covered and line.strip(" \t>"):
+            out[("line", line.strip(" \t>"))] += 1
     return out
 
 
 def code_spans_of(children: list) -> list[str]:
     return [c.content for c in children if c.type == "code_inline"]
+
+
+def table_cells(lines: list[str], node: Node) -> list[int]:
+    """表の節点の、元の行ごとのセルの数（エスケープしていない | で区切る）。"""
+    if node.line is None or node.end is None:
+        return []
+    counts = []
+    for line in lines[node.line - 1:node.end]:
+        row = re.sub(r"^[ \t>]*", "", line).strip()
+        cells = re.split(r"(?<!\\)\|", row)
+        if cells and not cells[0].strip():
+            cells = cells[1:]
+        if cells and not cells[-1].strip():
+            cells = cells[:-1]
+        counts.append(len(cells))
+    return counts
 
 
 def walk(node: Node):
@@ -305,7 +331,8 @@ def derivable(src: Node, out: Node, failure: list[Node]) -> bool:
     ブロックの種類と属性は同じ。コードブロックは中身も同じ。インラインは、単位の並びが部分列。子のブロックは、
     out の子の並びが src の子の部分列で、対応する子どうしも消すことだけで作れる。
     """
-    if src.signature() != out.signature() or src.info != out.info or src.content != out.content:
+    if src.signature(with_start=False) != out.signature(with_start=False) or src.info != out.info \
+            or src.content != out.content:
         return False
     if (src.inline or out.inline) and not is_subsequence(inline_units(out.inline), inline_units(src.inline), same_unit):
         return False
@@ -352,6 +379,11 @@ def freeze(wiki: Path, raw_root: Path, slug: str) -> tuple[int, dict]:
                        "message": "取得した内容から消すことだけをしたものになっていない"
                        "（書き足し、書き換え、並べ替え、入れ子の変更、コード・画像・リンク・インラインのコードの一部だけの変更）",
                        "raw": (inline_text(bad.inline) or bad.content)[:200]})
+    elif not is_subsequence(out_body, src_body):
+        # 木の比較に加えて、本文全体を文字の上でも照らす。パーサーが捨てる部分（表の列数を超えるセルなど）への
+        # 書き足しは、木には現れないためである。
+        errors.append({"kind": "edit", "message": "取得した内容にない文字を書き足した（木に現れない部分、"
+                       "たとえば表の列数を超えるセルへの書き足しを含む）"})
     # 題名（最初の h1 の見出し）は、そのまま残す。
     src_title = next((n for n in walk(src_tree) if n.type == "heading" and n.tag == "h1"), None)
     if src_title is not None:
@@ -580,8 +612,11 @@ def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: s
 
     if without_translator(src_fm) != without_translator(out_fm):
         errors.append({"kind": "frontmatter", "message": "frontmatter が translated_by のほかで変わった"})
-    line = next((x for x in out_fm if x.startswith("translated_by:")), "")
-    translator = line.split(":", 1)[1].strip().strip('"') if line else ""
+    # 値は、ほかのスクリプトと同じ frontmatter のパーサーで読む。キーが 2 つあれば誤りにする（読み方で値が変わる）。
+    if sum(x.startswith("translated_by:") for x in out_fm) > 1:
+        errors.append({"kind": "translated_by", "message": "translated_by が 2 つ以上ある"})
+    value = parse_frontmatter_text("\n".join(out_fm[1:-1])).get("translated_by") if out_fm else None
+    translator = value.strip() if isinstance(value, str) else ""
     if translate and not translator:
         errors.append({"kind": "translated_by", "message": "訳すページなのに translated_by が空"})
     if not translate and translator:
@@ -612,6 +647,15 @@ def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: s
 
     style: Counter = Counter()
     compare(src_tree, out_tree, translate, errors, warnings, style)
+    # パーサーは表の列数を超えるセルを捨てるので、表の行ごとのセルの数を、元の行から数えて比べる。
+    src_tables = [n for n in walk(src_tree) if n.type == "table"]
+    out_tables = [n for n in walk(out_tree) if n.type == "table"]
+    if len(src_tables) == len(out_tables):
+        src_lines, out_lines = src_body.split("\n"), out_body.split("\n")
+        for ta, tb in zip(src_tables, out_tables):
+            if table_cells(src_lines, ta) != table_cells(out_lines, tb):
+                errors.append({"kind": "table", "line": tb.line,
+                               "message": "表の行ごとのセルの数が違う（列数を超えるセルへの書き足しを含む）"})
     total = style["desu"] + style["dearu"]
     if total and min(style["desu"], style["dearu"]) > total * 0.1:
         warnings.append({"kind": "style",
