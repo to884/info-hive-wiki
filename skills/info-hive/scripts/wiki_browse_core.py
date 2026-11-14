@@ -211,6 +211,18 @@ def is_reserved_windows(name: str) -> bool:
     return name.split(".")[0].rstrip(" .").upper() in WINDOWS_RESERVED
 
 
+def looks_like_short_name(name: str) -> bool:
+    """name が、`~` を含む 8.3 の形（基の部分が 1〜8 文字、拡張子が 3 文字以内、点は 1 つまで）なら真。
+
+    Windows が付ける短い名前は、どれも `~` を含む 8.3 の形である。この形でない名前は、ほかの項目の短い名前と
+    同じ綴りにならないので、短い名前で別の項目に届くことがない。
+    """
+    if "~" not in name or name.count(".") > 1:
+        return False
+    base, _dot, ext = name.partition(".")
+    return 1 <= len(base) <= 8 and len(ext) <= 3
+
+
 def safe_component(part: str, key: str, limit: int, is_dir: bool, top: bool) -> str:
     """1 つの名前の要素を、どの OS でも作れる名前にする。変えたときだけ ~<key の SHA-256 の先頭 8 桁> を付ける。"""
     changed = False
@@ -237,6 +249,11 @@ def safe_component(part: str, key: str, limit: int, is_dir: bool, top: bool) -> 
     if SUFFIX_RE.search(name):
         changed = True
     if is_dir and name.lower().endswith(".html"):
+        changed = True
+    if is_dir and looks_like_short_name(name):
+        # Windows の 8.3 の短い名前と同じ形のディレクトリの名前は、ほかの出力のディレクトリに付く短い名前で、同じ
+        # ディレクトリに届きうる（実装の 6 回目のレビューの重大 1）。接尾辞を付けて、8.3 の形でなくする。ファイルの
+        # 名前は拡張子が .html（4 文字）なので、8.3 の形にならない
         changed = True
     if name.lower().startswith(".browse-"):   # Windows と macOS では大文字の名前も目印と同じ場所になる
         changed = True
