@@ -1242,6 +1242,21 @@ def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text
                     d.rmdir()
 
 
+OLD_WORK_DIR_NOTE = ("0.14.1 までの版で始めた取り込みの途中の作業用の写しがあるが、この版では続けられない。"
+                     "取り直すなら --force を付ける（写しと raw の両方を作り直し、途中の削除や訳は消える）")
+
+
+def has_old_work_dir(args, target: Path) -> bool:
+    """0.14.1 までの版が書いた、取り込みの途中の作業用の写しがあるか（--force のときは問わない）。
+
+    この版では続けられないことを、取得の結果（原文が同じ、違う、取得の失敗）によらず知らせるために、build と
+    main の両方がこれで決める。続けるかの判定ではない（それは wiki_rawcheck.resumable_fetch が決める）。
+    """
+    wiki = getattr(args, "wiki", None)
+    return (wiki is not None and not args.force and target.exists()
+            and wiki_rawcheck.old_version_work_dir(wiki, args.slug, target))
+
+
 def build(args) -> tuple[int, dict]:
     raw_root: Path = args.raw_root
     check_slug(args.slug)
@@ -1291,6 +1306,9 @@ def build(args) -> tuple[int, dict]:
     # ブラウザで取り直すかを、これで決める（dom なら、もうブラウザで取ってある）。
     result: dict = {"path": target.as_posix(), "url": args.url, "final_url": final_url, "source_sha256": sha,
                     "source_sha256_of": "dom" if html_file else "html", "unchanged": False, "warnings": []}
+    if has_old_work_dir(args, target):
+        # 原文が同じでも違っても（終了コード 3）、続けられない旧版の写しがあることを知らせる。
+        result["old_work_dir"] = True
 
     if target.exists() and not args.force:
         old = existing_sha(target)
@@ -1505,14 +1523,21 @@ def render_text(code: int, result: dict) -> str:
             out = [f"内容は前回と同じなので、書き込まなかった: {result['path']}"]
         if result.get("work_dir"):
             out.extend(_resume_lines(result))
+        elif result.get("old_work_dir"):
+            out.append(OLD_WORK_DIR_NOTE)
         elif result.get("work_dir") is False:
             out.append("作業用の写しがないか、続けられない写し（raw と別の取得のもの、0.14.1 までの版が書いたものなど）。"
                        "取り込みの途中なら、--force で取り直す"
                        "（写しと raw の両方を作り直す）")
         return "\n".join(out)
     if code == 3:
-        return (f"同じスラッグのファイルがあり、内容が違う: {result['path']}\n"
+        text = (f"同じスラッグのファイルがあり、内容が違う: {result['path']}\n"
                 f"別版として取り込むなら --slug {result['suggested_slug']} を付け、上書きするなら --force を付ける。")
+        if result.get("old_work_dir"):
+            # 旧版の写しの取り込みでは、原文の違いはページの更新とは限らない（DOM と HTML のハッシュは違う）。
+            text += (f"\n{OLD_WORK_DIR_NOTE}。原文が違うのは、ページが更新されたからとは限らない"
+                     "（ブラウザで保存した HTML から取った取り込みを、URL で取り直したときなど）")
+        return text
     out = [
         f"保存した: {result['path']}",
         f"題名: {result['title']}",
@@ -1573,9 +1598,14 @@ def main(argv: list[str] | None = None) -> int:
         print(str(exc), file=sys.stderr)
         return 1
     except FetchError as exc:
+        # 続けられない旧版の写しがあることは、取得に失敗したときも知らせる（build の結果の old_work_dir と同じ）。
+        old = has_old_work_dir(args, args.raw_root / f"{args.slug}.md")
         if args.json:
-            print(json.dumps({"error": "fetch_failed", "message": str(exc)}, ensure_ascii=False))
-        print(f"取得に失敗した: {exc}", file=sys.stderr)
+            failed = {"error": "fetch_failed", "message": str(exc)}
+            if old:
+                failed["old_work_dir"] = True
+            print(json.dumps(failed, ensure_ascii=False))
+        print(f"取得に失敗した: {exc}" + (f"\n{OLD_WORK_DIR_NOTE}" if old else ""), file=sys.stderr)
         return 2
     except OSError as exc:
         # 注記（write_outputs が戻しきれなかった古い画像の置き場所を書く）も出す。

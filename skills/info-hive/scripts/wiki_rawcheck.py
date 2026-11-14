@@ -353,6 +353,22 @@ def resumable_fetch(wiki: Path, slug: str, raw_path: Path) -> dict | None:
     return saved
 
 
+def old_version_work_dir(wiki: Path, slug: str, raw_path: Path) -> bool:
+    """0.14.1 までの版が書いた、取り込みの途中の作業用の写しか。
+
+    写しがそろい、raw の frontmatter が写しと同じで、fetch.json が辞書だが fetched_sha256 がないもの。この版では
+    続けられない（resumable_fetch が None を返す）。wiki_fetch.py が、そのことを取得の結果によらず知らせるのに使う。
+    読めないときは False を返す（知らせないだけで、続けるかの判定は resumable_fetch が決める）。
+    """
+    try:
+        if not (work_dir_complete(wiki, slug) and work_dir_matches_raw(wiki, slug, raw_path)):
+            return False
+        saved = load_fetch(work_dir(wiki, slug))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return isinstance(saved, dict) and "fetched_sha256" not in saved
+
+
 def deletion_report(fetch: dict, src_body: str, out_body: str, out_tree: "Node", offset: int) -> dict:
     """取得した直後の本文（src_body）から、削除のあとの本文（out_body）までに消したものの報告。
 
