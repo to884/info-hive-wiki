@@ -64,11 +64,11 @@ EXIT_USAGE = 2
 def _load() -> None:
     global core, fs, initialized, common
     if core is None:
-        import wiki_browse_core as _core  # noqa: PLC0415
-        import wiki_browse_fs as _fs  # noqa: PLC0415
-        import wiki_initialized as _initialized  # noqa: PLC0415
-        import wiki_mcp_common as _common  # noqa: PLC0415
-        core, fs, initialized, common = _core, _fs, _initialized, _common
+        # global の名前に直接取り込む（入口の判定の試験が、wiki_initialized の関数の呼び出しを名前で見つける）
+        import wiki_browse_core as core  # noqa: PLC0415
+        import wiki_browse_fs as fs  # noqa: PLC0415
+        import wiki_initialized as initialized  # noqa: PLC0415
+        import wiki_mcp_common as common  # noqa: PLC0415
 
 
 class Failed(Exception):
