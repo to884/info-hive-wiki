@@ -279,9 +279,10 @@ def work_dir_matches_raw(wiki: Path, slug: str, raw_path: Path) -> bool:
 # 作ったものすべてである（警告もここに入る。続きの手順は、前の取得の出力を見て、本文を取れたかを確かめる）。
 RESUME_KEYS = ("source_sha256_of", "title", "source_lang", "encoding", "content_root", "ja_ratio",
                "needs_translation", "chars", "images", "dropped_images", "removed_by_rule", "warnings")
-# 続けるときに使う、取得の記録のキーと型。取得器はいつもこれを書く（fetched_sha256 は 0.14.0 の写しにはない）。
-_FETCH_TYPES = {"url": str, "final_url": str, "source_sha256": str, "needs_translation": bool,
-                "images": list, "removed_by_rule": list, "warnings": list}
+# 続けるときに使う、取得の記録のキーと型。取得器はいつもこれを書く。0.14.0 が書いた記録には fetched_sha256 と
+# source_sha256_of がないので、続けられない記録になる（fetch.json と fetched.md を結べず、どの取得かも分からない）。
+_FETCH_TYPES = {"url": str, "final_url": str, "source_sha256": str, "fetched_sha256": str, "source_sha256_of": str,
+                "needs_translation": bool, "images": list, "removed_by_rule": list, "warnings": list}
 
 
 def snapshot_sha256(data: bytes) -> str:
@@ -294,8 +295,6 @@ def _fetch_record_ok(saved) -> bool:
     if not isinstance(saved, dict):
         return False
     if any(not isinstance(saved.get(key), kind) for key, kind in _FETCH_TYPES.items()):
-        return False
-    if "fetched_sha256" in saved and not isinstance(saved["fetched_sha256"], str):
         return False
     return (all(isinstance(img, dict) and isinstance(img.get("path"), str) for img in saved["images"])
             and all(isinstance(r, dict) and isinstance(r.get("rule"), str) and isinstance(r.get("text"), str)
@@ -315,14 +314,15 @@ def resumable_fetch(wiki: Path, slug: str, raw_path: Path) -> dict | None:
     違う fetch.json で例外にはしない）。続けられるのは、次のすべてを満たすときだけである。
 
     - 写しがそろい（work_dir_complete）、raw の frontmatter が写しの fetched.md と同じ（work_dir_matches_raw）。
-    - fetch.json が取得器の書いた形である（_fetch_record_ok）。
+    - fetch.json が取得器の書いた形である（_fetch_record_ok）。0.14.0 が書いた写しは、fetched_sha256 がなく、
+      fetch.json と fetched.md を結べないので、続けない（取得して原文が同じでも、別の設定で取った記録かを
+      見分けられない）。
     - fetch.json の fetched_sha256 が、fetched.md のバイト列のハッシュと同じ（取得器は、fetched.md に書いた
-      バイト列のハッシュを記録する）。0.14.0 が書いた写しにはこの値がないので、ないときは照らさない
-      （wiki_fetch.build は、その写しを、取得して原文を比べた枝でだけ続ける。取得の前には続けない）。
+      バイト列のハッシュを記録する）。
     - fetch.json の取得元とハッシュ（url、final_url、source_sha256）が、fetched.md の frontmatter と同じ。
     - cleaned.md があれば、freeze が通す内容である。frontmatter が fetched.md と同じで、本文が fetched.md から
       消すことだけで作れる（deletion_errors。画像のファイルは、あとで raw の側で変わりうるので見ない）。
-      止まった 2 回目の freeze の前の cleaned.md も、0.14.0 の freeze が書いた cleaned.md も、これを満たす。
+      止まった 2 回目の freeze の前の cleaned.md も、これを満たす。
     """
     if not (work_dir_complete(wiki, slug) and work_dir_matches_raw(wiki, slug, raw_path)):
         return None
@@ -335,7 +335,7 @@ def resumable_fetch(wiki: Path, slug: str, raw_path: Path) -> dict | None:
         src_fm, src_body = split_frontmatter(data.decode("utf-8").replace("\r\n", "\n"))
     except (OSError, UnicodeDecodeError):
         return None
-    if "fetched_sha256" in saved and saved["fetched_sha256"] != snapshot_sha256(data):
+    if saved["fetched_sha256"] != snapshot_sha256(data):
         return None
     fm = parse_frontmatter_text("\n".join(src_fm[1:-1]))
     final_url = fm["final_url"] if "final_url" in fm else fm.get("url")  # final_url は url と違うときだけ書く
