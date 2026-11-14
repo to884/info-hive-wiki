@@ -33,7 +33,7 @@ import re
 import sys
 from pathlib import Path
 from typing import NamedTuple
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlsplit
 
 # スクリプトとして実行したときも、テストから importlib で読み込んだときも、
 # 同じディレクトリの wiki_text を import できるようにする。
@@ -64,7 +64,6 @@ FENCE_CLOSE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})[ \t]*$")
 LINK_RE = re.compile(
     r"(!?\[(?:[^\[\]\\\n]|\\.|\[(?:[^\[\]\\\n]|\\.)*\])*\]\()([^()\s<][^()\s]*)(\))"
 )
-SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 # CommonMark のバックスラッシュのエスケープ（ASCII の記号）。
 BACKSLASH_ESCAPE_RE = re.compile(r"\\([!-/:-@\[-`{-~])")
 # plugin.json の repository と version。
@@ -282,10 +281,25 @@ def find_doc_section(text: str, plugin: str, name: str) -> tuple[Section | None,
 
 # ---- 個別のヘルプ: リンクの書き換え ----
 
-def docs_base_url(root: Path) -> tuple[str | None, list[str]]:
-    """GitHub の、導入した版のタグの木の URL（`https://github.com/<owner>/<repo>/blob/v<version>`）を返す。
+class RepoRef(NamedTuple):
+    """GitHub のリポジトリと、導入した版のタグ。"""
+    owner: str
+    repo: str
+    tag: str
 
-    `plugin.json` の repository が GitHub の URL でないか、version が版の番号でなければ None と警告を返す。
+    def blob(self) -> str:
+        """文書のページ（見出しのアンカーが効く）の URL の前の部分。"""
+        return f"https://github.com/{self.owner}/{self.repo}/blob/{self.tag}"
+
+    def raw(self) -> str:
+        """ファイルそのもの（画像）の URL の前の部分。"""
+        return f"https://raw.githubusercontent.com/{self.owner}/{self.repo}/{self.tag}"
+
+
+def repo_ref(root: Path) -> tuple[RepoRef | None, list[str]]:
+    """`plugin.json` の repository と version から、GitHub のリポジトリと `v<version>` のタグを返す。
+
+    repository が GitHub の URL でないか、version が版の番号でなければ None と警告を返す。
     """
     manifest = read_manifest(root)
     repository, version = manifest.get("repository"), manifest.get("version")
@@ -294,28 +308,32 @@ def docs_base_url(root: Path) -> tuple[str | None, list[str]]:
         return None, [f"plugin.json の repository が GitHub の URL でないので、リンクを書き換えない: {repository!r}"]
     if not (isinstance(version, str) and VERSION_RE.match(version)):
         return None, [f"plugin.json の version が版の番号でないので、リンクを書き換えない: {version!r}"]
-    return f"https://github.com/{m.group(1)}/{m.group(2)}/blob/v{version}", []
+    return RepoRef(m.group(1), m.group(2), f"v{version}"), []
 
 
-def link_url(dest: str, root: Path, docs_dir: Path, base: str, image: bool) -> tuple[str, Path] | None:
+def link_url(dest: str, root: Path, docs_dir: Path, ref: RepoRef, image: bool) -> tuple[str, Path] | None:
     """リンクの宛先（エスケープと文字参照を戻したもの。百分率符号化は残っていてよい）を、GitHub の URL にする。
 
-    戻り値は (URL, 指すファイル)。空の宛先、スキームのある宛先、`/` で始まる宛先は None（変えない）。
-    `#frag` だけの宛先は `docs/commands.md` を指す。プラグインのルートの外を指す宛先は ValueError。
-    リンクのフラグメントは残す（GitHub の見出しのアンカー）。画像は `?raw=true` を付けて、画像そのものを指す。
-    `#` で分けてから、パスとフラグメントのそれぞれの百分率符号化を戻す（`%23` を区切りと読まない）。
+    宛先は URL として部分に分ける（`urlsplit`）。パスだけを、百分率符号化を戻してファイルにし、
+    プラグインのルートからの相対パスを百分率符号化しなおす。クエリとフラグメントは、書かれたまま付ける
+    （`%23` や `%3F` を区切りと読み違えない）。リンクは文書のページ（blob）、画像はファイルそのもの（raw）を指す。
+
+    戻り値は (URL, 指すファイル)。空の宛先、スキームかホストのある宛先、`/` で始まる宛先は None（変えない）。
+    パスのない宛先（`#frag` だけ）は `docs/commands.md` を指す。プラグインのルートの外を指す宛先は ValueError。
     """
-    if not dest or SCHEME_RE.match(dest) or dest.startswith("/"):
+    if not dest or dest.startswith("/"):
         return None
-    path_part, sep, frag = dest.partition("#")
-    path_part, frag = unquote(path_part), unquote(frag)
-    file = (docs_dir / path_part).resolve() if path_part else (docs_dir / COMMANDS_DOC.name).resolve()
+    parts = urlsplit(dest)
+    if parts.scheme or parts.netloc:
+        return None
+    path = unquote(parts.path)
+    file = (docs_dir / path).resolve() if path else (docs_dir / COMMANDS_DOC.name).resolve()
     rel = file.relative_to(root)  # ルートの外なら ValueError
-    url = f"{base}/{quote(rel.as_posix(), safe='/')}"
-    if image:
-        url += "?raw=true"
-    elif sep and frag:
-        url += "#" + quote(frag, safe="")
+    url = f"{ref.raw() if image else ref.blob()}/{quote(rel.as_posix(), safe='/')}"
+    if parts.query:
+        url += "?" + parts.query
+    if parts.fragment:
+        url += "#" + parts.fragment
     return url, file
 
 
@@ -368,7 +386,7 @@ def mask_code_spans(line: str) -> str:
     return "".join(out)
 
 
-def rewrite_links(body: str, root: Path, docs_dir: Path, base: str) -> tuple[str, list[str]]:
+def rewrite_links(body: str, root: Path, docs_dir: Path, ref: RepoRef) -> tuple[str, list[str]]:
     """節の本文の相対リンクを、GitHub の URL に書き換える。戻り値は (本文, 警告の一覧)。
 
     最上位のコードフェンスの中と、インラインコードの中は変えない。
@@ -386,7 +404,7 @@ def rewrite_links(body: str, root: Path, docs_dir: Path, base: str) -> tuple[str
         for m in LINK_RE.finditer(masked):
             raw = line[m.start(2):m.end(2)]
             try:
-                resolved = link_url(raw_destination(raw), root, docs_dir, base, m.group(1).startswith("!"))
+                resolved = link_url(raw_destination(raw), root, docs_dir, ref, m.group(1).startswith("!"))
             except ValueError:
                 warnings.append(f"{COMMANDS_DOC.as_posix()}: リンクがプラグインの外を指すので、書き換えない: {raw}")
                 continue
@@ -417,7 +435,11 @@ def section_tokens(tokens: list, section: Section) -> list:
 
 
 def token_shape(tokens: list) -> tuple[list, list]:
-    """トークンの木を、(リンクの宛先を除いた形の並び, リンクと画像の宛先の並び) にする。"""
+    """トークンの木を、(リンクの宛先を除いた形の並び, リンクと画像の宛先の並び) にする。
+
+    画像の子（代替テキストを読んだトークン）はたどらない。代替テキストは文字として描かれ、その中のリンクの
+    記法は宛先にならないので、代替テキストは画像の content（文字だけにしたもの）で比べる。
+    """
     shape: list = []
     dests: list = []
 
@@ -431,18 +453,20 @@ def token_shape(tokens: list) -> tuple[list, list]:
             # inline の content は元の文字列なので、宛先の違いを含む。中身は children で比べる。
             content = "" if t.type == "inline" else t.content
             shape.append((t.type, t.tag, t.nesting, t.info, t.markup, content, sorted(attrs.items())))
-            if t.children:
+            if t.children and t.type != "image":
                 walk(t.children)
 
     walk(tokens)
     return shape, dests
 
 
-def verify_rewrite(doc_text: str, section: Section, rewritten: str, root: Path, docs_dir: Path, base: str) -> list[str]:
+def verify_rewrite(doc_text: str, section: Section, rewritten: str, root: Path, docs_dir: Path, ref: RepoRef) -> list[str]:
     """書き換えの前後を、同梱の Markdown のパーサーで読み、リンクの宛先のほかが同じかを確かめる。
 
     前は文書の全体を読んで節の行のトークンを取り（節の外にある参照リンクの定義も効く）、後は書き換えた本文だけを
-    読む（チャットに出す形）。形が違うか、どれかの宛先が link_url() の答えと違えば、理由の一覧を返す。
+    読む（チャットに出す形）。形が違うか、どれかの宛先が期待する宛先と違えば、理由の一覧を返す。
+    宛先は復号せずに比べる。後の宛先はパーサーが正規化したもの、期待する宛先は、前の宛先（パーサーが正規化した
+    もの）を link_url() で書き換え、同じパーサーの normalizeLink() で正規化したもの（変えない宛先は前の宛先）。
     """
     parser = new_parser()
     before_shape, before_dests = token_shape(section_tokens(parser.parse(doc_text, {}), section))
@@ -453,12 +477,11 @@ def verify_rewrite(doc_text: str, section: Section, rewritten: str, root: Path, 
     problems: list[str] = []
     for (kind, before), (_, after) in zip(before_dests, after_dests):
         try:
-            # パーサーの宛先は、エスケープと文字参照を戻し、百分率符号化したもの。
-            resolved = link_url(before, root, docs_dir, base, kind == "image")
+            resolved = link_url(before, root, docs_dir, ref, kind == "image")
         except ValueError:
             resolved = None
-        expected = resolved[0] if resolved else before
-        if unquote(after) != unquote(expected):
+        expected = parser.normalizeLink(resolved[0]) if resolved else before
+        if after != expected:
             problems.append(f"{COMMANDS_DOC.as_posix()}: リンクを書き換えられなかった: {unquote(before)}")
     return problems
 
@@ -476,12 +499,12 @@ def command_details(root: Path, plugin: str, name: str) -> tuple[str | None, lis
     section, warnings = find_doc_section(text, plugin, name)
     if section is None:
         return None, warnings + [f"{COMMANDS_DOC.as_posix()} に /{plugin}:{name} の節がない"]
-    base, base_warnings = docs_base_url(root)
-    if base is None:
-        return section.body, warnings + base_warnings
+    ref, ref_warnings = repo_ref(root)
+    if ref is None:
+        return section.body, warnings + ref_warnings
     docs_dir = doc.parent.resolve()
-    body, link_warnings = rewrite_links(section.body, root, docs_dir, base)
-    problems = verify_rewrite(text, section, body, root, docs_dir, base)
+    body, link_warnings = rewrite_links(section.body, root, docs_dir, ref)
+    problems = verify_rewrite(text, section, body, root, docs_dir, ref)
     if problems:
         return section.body, warnings + link_warnings + problems + ["リンクを書き換えずに、節をそのまま出す"]
     return body, warnings + link_warnings
