@@ -330,40 +330,60 @@ class Redactions:
                 self.needles.append((rule, v))
 
 
+def find_secrets(text: str) -> list:
+    """自動の伏せ字の規則に当たる範囲を、元の文の上で見つける。返り値は（開始, 終わり, 置き換え, 規則, 探す文字列）
+    の並び。規則は当てる順に見て、先に見つけた範囲と重なるものは捨てる。"""
+    found: list = []
+
+    def take(start, end, place, rule, needles):
+        if all(end <= s or e <= start for s, e, *_ in found):
+            found.append((start, end, place, rule, [n for n in needles if n]))
+
+    for m in RE_PEM.finditer(text):
+        # 塊の全体に加えて、本体の各行も探す（本体だけを書き戻しても見つけるため）。行は元の改行で分ける。
+        body = [ln.strip() for ln in m.group(0).split("\n") if ln.strip() and "-----" not in ln]
+        take(m.start(), m.end(), PLACE_SECRET, "auto_secret", [m.group(0), *body])
+    for rx in (RE_PREFIX, RE_JWT):
+        for m in rx.finditer(text):
+            take(m.start(), m.end(), PLACE_SECRET, "auto_secret", [m.group(0)])
+    for m in RE_NAMED.finditer(text):
+        take(m.start(3), m.end(3), PLACE_SECRET, "auto_secret", [m.group(3)])
+    for m in RE_EMAIL.finditer(text):
+        take(m.start(), m.end(), PLACE_EMAIL, "auto_email", [m.group(0), m.group(1)])
+    for rx in (RE_HOME_WIN, RE_HOME_POSIX):
+        for m in rx.finditer(text):
+            take(m.start(), m.end(), PLACE_HOME, "auto_home", [m.group(1)])
+    return sorted(found)
+
+
+def redact_parts(parts: list, red: Redactions | None = None, joiner: str = "\n\n") -> list:
+    """いくつかの部品をつないだ元の文の全体で規則を当て、見つけた範囲を部品ごとに切り分けて伏せる。部品の境目を
+    またぐ秘密は、またいだ両方の部品で伏せる。形を変える処理（改行を空白にする、切る）は、このあとに行う。"""
+    red = red if red is not None else Redactions()
+    joined = joiner.join(parts)
+    matches = find_secrets(joined)
+    for _s, _e, _place, rule, needles in matches:
+        red.add(rule, *needles)
+    out, offset = [], 0
+    for part in parts:
+        p0, p1 = offset, offset + len(part)
+        pieces, pos = [], p0
+        for s, e, place, _rule, _n in matches:
+            if e <= p0 or s >= p1:
+                continue
+            a, b = max(s, p0), min(e, p1)
+            pieces.append(joined[pos:a])
+            pieces.append(place)
+            pos = b
+        pieces.append(joined[pos:p1])
+        out.append("".join(pieces))
+        offset = p1 + len(joiner)
+    return out
+
+
 def redact(text: str, red: Redactions | None = None) -> str:
     """自動の伏せ字をかける。red があれば、置き換えた数と元の文字列を足す。"""
-    red = red if red is not None else Redactions()
-
-    def secret(m):
-        red.add("auto_secret", m.group(0))
-        return PLACE_SECRET
-
-    def pem(m):
-        # 塊の全体に加えて、本体の各行も探す（本体だけを書き戻しても見つけるため）。
-        body = [ln.strip() for ln in m.group(0).split("\n") if ln.strip() and "-----" not in ln]
-        red.add("auto_secret", m.group(0), *body)
-        return PLACE_SECRET
-
-    def named(m):
-        red.add("auto_secret", m.group(3))
-        return m.group(1) + m.group(2) + PLACE_SECRET
-
-    def email(m):
-        red.add("auto_email", m.group(0), m.group(1))
-        return PLACE_EMAIL
-
-    def home(m):
-        red.add("auto_home", m.group(1))
-        return PLACE_HOME
-
-    text = RE_PEM.sub(pem, text)
-    text = RE_PREFIX.sub(secret, text)
-    text = RE_JWT.sub(secret, text)
-    text = RE_NAMED.sub(named, text)
-    text = RE_EMAIL.sub(email, text)
-    text = RE_HOME_WIN.sub(home, text)
-    text = RE_HOME_POSIX.sub(home, text)
-    return text
+    return redact_parts([text], red)[0]
 
 
 PATTERN_RULES = (("pattern_secret", RE_PEM), ("pattern_secret", RE_PREFIX), ("pattern_secret", RE_JWT),
@@ -393,7 +413,7 @@ RE_COMMAND_PART = re.compile(r"<(command-name|command-message|command-args)>(.*?
 RE_APP_ELEMENT = re.compile(r"\A\s*<(" + "|".join(APP_ELEMENTS) + r")>.*?</\1>\s*\Z", re.DOTALL)
 
 
-def human_text(rec: dict, keep_reminders: bool, excluded: Counter, warn) -> str:
+def human_text(rec: dict, keep_reminders: bool, excluded: Counter, warn, red: "Redactions") -> str:
     """人の発言の本文を、設計の 5 節の順に加工する。伏せ字はまだかけない。"""
     if rec.get("type") == "attachment":
         text = rec["attachment"]["prompt"]
@@ -412,7 +432,9 @@ def human_text(rec: dict, keep_reminders: bool, excluded: Counter, warn) -> str:
                 else:
                     excluded[f"user:block:{_safe_key(btype)}"] += 1
         text = "\n\n".join(parts)
-    text = normalize_newlines(text)
+    # 伏せ字は、加工（差し込みを除く、コマンドの要素を 1 行にする）の前の元の文で当てる。加工のあとにも、
+    # 呼び出し側がもう一度当てる。
+    text = redact(normalize_newlines(text), red)
     if not keep_reminders:
         m = RE_REMINDERS.match(text)
         if m:
@@ -434,16 +456,21 @@ def human_text(rec: dict, keep_reminders: bool, excluded: Counter, warn) -> str:
     return text if text.strip() else ""
 
 
-def tool_summary(block: dict, red: Redactions) -> str:
+def tool_parts(block: dict) -> tuple[str, str]:
+    """ツールの呼び出しの、要約に使う名前と値（元の文。改行を残す）。"""
     name = block.get("name") if isinstance(block.get("name"), str) else "不明"
-    name = " ".join(normalize_newlines(name).split()) or "不明"
-    key = TOOL_FIELDS.get(name)
+    key = TOOL_FIELDS.get(" ".join(normalize_newlines(name).split()))
     inputs = block.get("input") if isinstance(block.get("input"), dict) else {}
     value = inputs.get(key) if key else None
-    line = f"[ツール] {redact(name, red)}"
-    if isinstance(value, str) and value.strip():
-        flat = " ".join(normalize_newlines(value).split("\n")).strip()
-        flat = redact(flat, red)
+    return normalize_newlines(name), normalize_newlines(value) if isinstance(value, str) else ""
+
+
+def tool_line(name: str, value: str) -> str:
+    """伏せ字をかけたあとの名前と値から、1 行の要約を作る（改行を空白にし、値を切る）。"""
+    name = " ".join(name.split()) or "不明"
+    line = f"[ツール] {name}"
+    flat = " ".join(value.split("\n")).strip()
+    if flat:
         if len(flat) > TOOL_VALUE_MAX:
             flat = flat[:TOOL_VALUE_MAX] + "…"
         line += " " + flat
@@ -657,17 +684,18 @@ def extract(rng: Range, opts: Options) -> Extract:
             if how == "text":
                 text = normalize_newlines(block["text"]).strip("\n")
                 if text.strip():
-                    pieces.append(("text", text))  # 伏せ字は、つないだ本文の全体にかける
+                    pieces.append(("text", text, "", True))  # 伏せ字は、ターンの元の文の全体で見つける
             elif how == "tool":
-                if opts.tools == "summary":
-                    pieces.append(("tool", tool_summary(block, red)))
-                else:
+                name, value = tool_parts(block)
+                # --tools none でも、値は伏せ字を見つける文に入れる（出力はしない）。
+                pieces.append(("tool", name, value, opts.tools == "summary"))
+                if opts.tools != "summary":
                     excluded["assistant:block:tool_use"] += 1
             else:
                 btype = block.get("type") if isinstance(block, dict) else None
                 excluded[f"assistant:block:{_safe_key(btype)}"] += 1
         if pieces:
-            bodies[uid] = pieces
+            bodies[uid] = pieces  # 出力しない部品（--tools none のツールの値）だけの記録も、伏せ字を見つける文に入れる
 
     # 返答の宛先
     limit = len(by_uuid)
@@ -695,7 +723,9 @@ def extract(rng: Range, opts: Options) -> Extract:
         targets[uid] = target
         if target is None:
             unknown_key[uid] = ("?", parent if isinstance(parent, str) else last)
-    referenced = {t for t in targets.values() if t is not None and by_uuid[t][1] == X}
+    visible = {uid for uid, pieces in bodies.items() if any(piece[3] for piece in pieces)}
+    referenced = {t for uid, t in targets.items() if uid in visible and t is not None and by_uuid[t][1] == X}
+    hidden: dict = {}  # 宛先ごとの、まだターンのない出力しない部品
 
     # ターン
     turns: list = []
@@ -713,7 +743,7 @@ def extract(rng: Range, opts: Options) -> Extract:
         dt = _time(rec.get("timestamp"), tz)
         if kind == H:
             pending_warn.clear()
-            text = human_text(rec, opts.keep_reminders, excluded, lambda code: pending_warn.append(code))
+            text = human_text(rec, opts.keep_reminders, excluded, lambda code: pending_warn.append(code), red)
             text = redact(text, red) if text else ""
             turn = new_turn("user", dt, text) if text else new_turn("marker", dt, MARK_EMPTY_HUMAN)
             for code in pending_warn:
@@ -724,6 +754,15 @@ def extract(rng: Range, opts: Options) -> Extract:
             turn_of[uid] = new_turn("marker", dt, MARK_INTERRUPT).n
         elif kind == X and uid in referenced:
             turn_of[uid] = new_turn("marker", dt, boundary_mark(rec)).n
+        elif kind == A and uid in bodies and uid not in visible:
+            # 出力しない部品だけの記録は、ターンも印も作らず、同じ宛先のターンの「見つける文」にだけ入れる。
+            target = targets[uid]
+            group = target if target is not None and target in turn_of else unknown_key.get(uid, ("?", target))
+            last = turns[-1] if turns else None
+            if last is not None and last.kind == "claude" and getattr(last, "_group", None) == group:
+                last._pieces.extend(bodies[uid])
+            else:
+                hidden.setdefault(group, []).extend(bodies[uid])
         elif kind == A and uid in bodies:
             target = targets[uid]
             if target is not None and target not in turn_of:
@@ -741,16 +780,14 @@ def extract(rng: Range, opts: Options) -> Extract:
             model = model if isinstance(model, str) and MODEL_RE.match(model) else "不明"
             last = turns[-1] if turns else None
             if last is not None and last.kind == "claude" and getattr(last, "_group", None) == group:
-                last._pieces.extend(bodies[uid])
+                last._pieces.extend(hidden.pop(group, []) + bodies[uid])
             else:
                 turn = new_turn("claude", dt, "", model=model, reply_to=reply_to)
                 turn._group = group
-                turn._pieces = list(bodies[uid])
+                turn._pieces = hidden.pop(group, []) + list(bodies[uid])
     for turn in turns:
         if turn.kind == "claude":
-            # 伏せ字は、raw に出す単位（つないだ本文）の全体にかける。ブロックごとにかけると、複数の行や
-            # ブロックにまたがる規則（秘密の鍵の塊）が、つなぐ前の単位では当たらない。
-            turn.body = redact(join_pieces(turn._pieces), red)
+            turn.body = claude_body(turn._pieces, red)
             del turn._pieces, turn._group
 
     # frontmatter の値
@@ -768,8 +805,9 @@ def extract(rng: Range, opts: Options) -> Extract:
             times.append(dt)
         if isinstance(rec.get("version"), str) and VERSION_RE.match(rec["version"]):
             versions.add(rec["version"])
-    cwd = redact(" ".join(normalize_newlines(cwd).split("\n")), red)
-    git_branch = redact(" ".join(normalize_newlines(git_branch).split("\n")), red)
+    # 改行を空白にする前の元の文で当て、1 行にしたあとにもう一度当てる。
+    cwd = redact(" ".join(redact(normalize_newlines(cwd), red).split("\n")), red)
+    git_branch = redact(" ".join(redact(normalize_newlines(git_branch), red).split("\n")), red)
     return Extract(
         session_id=session_id, turns=turns, cwd=cwd, git_branch=git_branch,
         started_at=min(times).isoformat(timespec="seconds") if times else "",
@@ -777,6 +815,26 @@ def extract(rng: Range, opts: Options) -> Extract:
         versions=", ".join(sorted(versions)), source_sha256=rng.sha256, source_bytes=len(rng.data),
         cut_before=rng.before or "", options=opts, excluded=excluded, ignored=ignored, redactions=red,
         warnings=warnings, broken_lines=broken, humans=humans, not_objects=not_objects, untyped=untyped)
+
+
+def claude_body(pieces: list, red: Redactions) -> str:
+    """アシスタントのターンの本文。形を変える前の元の文（text と、改行を残したツールの名前と値）をつないだ全体で
+    伏せ字の規則を当て、見つけた範囲を部品ごとに伏せてから、ツールの要約を 1 行にして切る。部品ごとや、形を
+    変えたあとで当てると、ブロックをまたぐ秘密の鍵の塊や、改行で分かれた本体の行を見逃す。"""
+    units = []
+    for kind, a, b, _shown in pieces:
+        units += [a] if kind == "text" else [a, b]
+    done = iter(redact_parts(units, red))
+    out = []
+    for kind, _a, _b, shown in pieces:
+        if kind == "text":
+            out.append(("text", next(done)))
+        else:
+            name, value = next(done), next(done)
+            if shown:
+                out.append(("tool", tool_line(name, value)))
+    # 形を変えたあとにも、もう一度当てる（1 行にしたことで規則に当たるようになったもの）。
+    return redact(join_pieces(out), red)
 
 
 def join_pieces(pieces: list) -> str:
@@ -1603,7 +1661,8 @@ def segment_map(line: str) -> tuple[list, list]:
 
 
 def scan_text(text: str, ex: Extract, spans: list, allow: list) -> tuple[list, int]:
-    """書く予定の文から、伏せた文字列と規則に当たる文字列を探す。返り値は（見つけた場所, 短くて探さない数）。"""
+    """書く予定の文から、伏せた文字列と規則に当たる文字列を探す。返り値は（見つけた場所, 短くて探さない数）。
+    見つけた場所の列は、正規化で切れない塊（結合文字などを含む）の先頭の位置である。行は正しい。"""
     needles: dict = {}
     for s in manual_strings(ex, spans):
         n = norm(s)
