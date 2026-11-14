@@ -1534,7 +1534,10 @@ def cmd_show(args) -> int:
 def cmd_decide(args) -> int:
     if args.action == "list":
         dec = load_decisions(Path(args.decisions))
-        result = {"spans": dec.spans, "drop": [f"T{n}" for n in sorted(set(dec.drop))]}
+        d = dec.data
+        # どの取り込みのものかを、名前ではなく中身で見分けられるように出す（伏せる文字列は出さない）。
+        result = {"session_id": d["session_id"], "source_sha256": d["source_sha256"], "cut_before": d["cut_before"],
+                  "spans": dec.spans, "drop": [f"T{n}" for n in sorted(set(dec.drop))]}
         out_json(result) if args.json else out_lines(result)
         return 0
     if args.action == "init":
@@ -1549,7 +1552,9 @@ def cmd_decide(args) -> int:
             if os.path.lexists(step) and (_is_link(step) or not os.path.isdir(step)):
                 raise Fail(f"決定のファイルの置き場所がリンクか、ディレクトリではない: {step}")
         folder.mkdir(parents=True, exist_ok=True)
-        path = folder / f"{args.slug}-{secrets.token_hex(4)}.json"
+        # 名前に利用者が決めた文字列（スラッグ）を入れない。確認の前の文字列がディスクのパスに残るため。
+        # どの取り込みのものかは、中身（session_id、source_sha256、cut_before）で見分ける。
+        path = folder / f"{secrets.token_hex(8)}.json"
         data = (json.dumps(new_decisions(ex), ensure_ascii=False, indent=2) + "\n").encode("utf-8")
         with open(path, "xb") as fh:
             fh.write(data)
