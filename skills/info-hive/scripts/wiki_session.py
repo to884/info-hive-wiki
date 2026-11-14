@@ -128,10 +128,11 @@ PLACE_HOME = "~"
 PLACE_MANUAL = "［伏せ字］"
 
 # 自動の伏せ字の規則。記録と引数だけで決まり、実行する PC の値は使わない。当てる順にならべる。
-# 秘密の鍵の塊。終わりの行があればそこまで。なければ、鍵の本体の形の行（16 文字以上の Base64 の文字だけ。間の空の
-# 行は飛ばす）が続くところまで（文の最後までにすると、あとに続く人の発言や終了タグまで巻き込む）。
-RE_PEM = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:.*?-----END [A-Z0-9 ]*PRIVATE KEY-----"
-                    r"|(?:\n(?:[ \t]*\n)*[ \t]*[A-Za-z0-9+/=]{16,}[ \t]*(?=\n|\Z))*)", re.DOTALL)
+# 秘密の鍵の塊。終わりの行があればそこまで、なければ文の最後まで（終わりを行の形から推さない。推すと、短い最終行
+# や、間に入った別の文のあとが伏せ残る）。構造（差し込み、コマンドの要素）の判定は伏せ字の前の元の文で行うので、
+# 最後までを伏せても構造は壊れない。終わりのない塊は最後まで当たるので、終わりを探し直す計算は文の長さに比例する。
+RE_PEM = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:.*?-----END [A-Z0-9 ]*PRIVATE KEY-----|.*\Z)", re.DOTALL)
+RE_KEY_LINE = re.compile(r"^[A-Za-z0-9+/=]{4,}$")
 RE_PREFIX = re.compile(r"(?<![A-Za-z0-9_-])(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
                        r"|xox[abposr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})(?![A-Za-z0-9])")
 RE_JWT = re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}")
@@ -349,7 +350,10 @@ def find_secrets(text: str) -> tuple[list, list]:
 
     for m in RE_PEM.finditer(text):
         # 塊の全体に加えて、本体の各行も探す（本体だけを書き戻しても見つけるため）。行は元の改行で分ける。
-        body = [ln.strip() for ln in m.group(0).split("\n") if ln.strip() and "-----" not in ln]
+        # 探す文字列は、鍵の本体らしい行（Base64 の文字だけで、16 文字以上か、4 文字以上で数字か + / = を含む）だけに
+        # する。終わりのない塊は文の最後までなので、続く文や英単語を探す文字列にしないため。
+        body = [ln.strip() for ln in m.group(0).split("\n")
+                if RE_KEY_LINE.match(ln.strip()) and (len(ln.strip()) >= 16 or re.search(r"[0-9+/=]", ln))]
         add(m.start(), m.end(), PLACE_SECRET, "auto_secret", [m.group(0), *body])
     for rx in (RE_PREFIX, RE_JWT):
         for m in rx.finditer(text):
@@ -1144,12 +1148,13 @@ def check_title(title: str, ex: Extract, spans: list) -> None:
 
 
 def check_no_secret(label: str, value: str, ex: Extract, spans: list) -> None:
-    if pattern_hits(value):
-        raise Fail(f"{label}に、自動の伏せ字の規則に当たる文字列がある")
-    nv = norm(value)
-    for s in manual_strings(ex, spans):
-        if norm(s) and norm(s) in nv:
-            raise Fail(f"{label}に、伏せた区間の文字列がある")
+    """題名とスラッグを、scan と同じ関数（同じ禁じる文字列の集合）で確かめる。人が伏せた文字列、自動で伏せた
+    値の元の文字列、自動の伏せ字の規則のどれかに当たれば拒む。別の小さい集合で確かめると、名前に続く値から
+    切り出した秘密（password=… の値）のように、単独では規則に当たらないものを通してしまう。"""
+    rows, _short = scan_text(value, ex, spans, [])
+    if rows:
+        rules = "、".join(sorted({r["rule"] for r in rows}))
+        raise Fail(f"{label}に、伏せた文字列か、自動の伏せ字の規則に当たる文字列がある（{rules}）")
 
 
 def check_slug_value(slug: str, ex: Extract, spans: list) -> None:
@@ -1179,14 +1184,8 @@ def path_within(inner: str, outer: str) -> bool:
 def check_destination(wiki: Path, raw_root: Path, target: Path) -> None:
     """raw の行き先を確かめる（設計の 9 節の手順 4）。"""
     raw_abs = Path(os.path.abspath(raw_root))
-    stop = Path(os.path.abspath(wiki)).parent
-    chain = [raw_abs]
-    if raw_abs.is_relative_to(stop):
-        p = raw_abs.parent
-        while p != stop and p.is_relative_to(stop):
-            chain.append(p)
-            p = p.parent
-    for p in chain:
+    # raw のルートと、そのすべての祖先（wiki の親の外にあっても）を見る（設計の 9 節の手順 4）。
+    for p in (raw_abs, *raw_abs.parents):
         if _is_link(p):
             raise Fail(f"raw のルートか、その途中の階層がリンクかジャンクションなので書かない: {p}")
     if os.path.lexists(target) and (_is_link(target) or not stat.S_ISREG(os.lstat(target).st_mode)):
