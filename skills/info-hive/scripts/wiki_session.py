@@ -41,6 +41,7 @@ ADR-0020）。記録から会話だけを許可リストで抜き出し、自動
 from __future__ import annotations
 
 import argparse
+import bisect
 import hashlib
 import json
 import os
@@ -888,11 +889,14 @@ def apply_spans(text: str, intervals: list) -> str:
 
 
 def manual_strings(ex: Extract, spans: list) -> list:
-    """人が伏せた区間の元の文字列（メモリの中だけで使う）。"""
+    """人が伏せた文字列（メモリの中だけで使う）。指定ごとの文字列で返す。区間をまとめた文字列にすると、
+    隣り合う 2 つの指定（顧客A と 顧客B）が「顧客A顧客B」になり、片方だけを書き戻したのを見逃すため。"""
     out = []
-    for target, intervals in merged_spans(spans).items():
-        text = ex.target_text(target) or ""
-        out.extend(text[s:e] for s, e in intervals)
+    for s in spans:
+        text = ex.target_text(s["target"]) or ""
+        value = text[s["start"]:s["end"]]
+        if value and value not in out:
+            out.append(value)
     return out
 
 
@@ -1020,18 +1024,15 @@ def self_check(text: str, fields: dict, turns: list) -> None:
 # ---------------------------------------------------------------- 題名とスラッグ
 
 
-def nfkc_map(text: str) -> tuple[str, list]:
-    """1 文字ずつ NFKC と大文字・小文字の統一をかけた文字列と、各文字の元の位置。"""
-    out, index = [], []
-    for i, ch in enumerate(text):
-        norm = unicodedata.normalize("NFKC", ch).casefold()
-        out.append(norm)
-        index.extend([i] * len(norm))
-    return "".join(out), index
+def _norm_line(line: str) -> str:
+    return unicodedata.normalize("NFKC", unicodedata.normalize("NFKC", line).casefold())
 
 
 def norm(text: str) -> str:
-    return nfkc_map(text)[0]
+    """NFKC と大文字・小文字の統一を、行ごとに、行の全体へかける。1 文字ずつかけると、半角カナと濁点
+    （ｶﾞ）のように隣の文字と合成されるものが、全体にかけたときと違う文字列になる。改行の前後では合成が
+    起きないので、行で分けても全体にかけたときと同じになる。"""
+    return "\n".join(_norm_line(line) for line in text.split("\n"))
 
 
 def check_title(title: str, ex: Extract, spans: list) -> None:
@@ -1067,6 +1068,14 @@ def _is_link(path: Path) -> bool:
     return os.path.islink(path) or os.path.isjunction(path)
 
 
+def path_within(inner: str, outer: str) -> bool:
+    """inner が outer と同じか、その中にあるか。ドライブの違うパス（Windows の C: と D:）は、中にない。"""
+    try:
+        return os.path.commonpath([inner, outer]) == outer
+    except ValueError:
+        return False
+
+
 def check_destination(wiki: Path, raw_root: Path, target: Path) -> None:
     """raw の行き先を確かめる（設計の 9 節の手順 4）。"""
     raw_abs = Path(os.path.abspath(raw_root))
@@ -1084,7 +1093,7 @@ def check_destination(wiki: Path, raw_root: Path, target: Path) -> None:
         raise Fail(f"raw の行き先がリンクか、ふつうのファイルではないので書かない: {target}")
     real_raw = os.path.normcase(os.path.realpath(raw_abs))
     real_wiki = os.path.normcase(os.path.realpath(wiki))
-    if os.path.commonpath([real_raw, real_wiki]) in (real_raw, real_wiki):
+    if path_within(real_raw, real_wiki) or path_within(real_wiki, real_raw):
         raise Fail(f"raw のルートと wiki のルートの一方が、他方の中にある（raw のルート {real_raw}、wiki {real_wiki}）。"
                    "raw のルートには /wiki:init が作る raw/ などを使う")
 
@@ -1563,34 +1572,51 @@ def scan_text(text: str, ex: Extract, spans: list, allow: list) -> tuple[list, i
             short.add(n)
             continue
         needles.setdefault(n, rule)
-    allow_norm = [norm(a) for a in allow if a]
+    # 文の全体の上で探す（伏せた文字列は改行を含みうる）。改行は \n にそろえる。
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
+    ntext = norm(text)
+    nlines = ntext.split("\n")
+    ostarts, nstarts, o, n_ = [], [], 0, 0
+    for line, nline in zip(lines, nlines):
+        ostarts.append(o)
+        nstarts.append(n_)
+        o += len(line) + 1
+        n_ += len(nline) + 1
+
+    def where(starts: list, offset: int, normalized: bool) -> tuple[int, int]:
+        idx = bisect.bisect_right(starts, offset) - 1
+        within = offset - starts[idx]
+        if not normalized:
+            return idx + 1, within + 1
+        line = lines[idx]
+        k = 0
+        while k < len(line) and len(_norm_line(line[:k + 1])) <= within:
+            k += 1
+        return idx + 1, k + 1
+
+    def occurrences(haystack: str, needle: str) -> list:
+        out, start = [], haystack.find(needle)
+        while start != -1:
+            out.append((start, start + len(needle)))
+            start = haystack.find(needle, start + 1)
+        return out
+
+    # 許可は、1 つの許可の文字列の出現が、見つけた範囲の全体を含むときだけにする（出現の和集合では除かない）。
+    allowed_norm = [iv for a in allow if a for iv in occurrences(ntext, norm(a))]
+    allowed_raw = [iv for a in allow if a for iv in occurrences(text, a)]
+
+    def exempt(intervals: list, start: int, end: int) -> bool:
+        return any(a <= start and end <= b for a, b in intervals)
+
     findings = set()
-    for line_no, line in enumerate(text.split("\n"), 1):
-        line = line[:-1] if line.endswith("\r") else line
-        nline, index = nfkc_map(line)
-        masked = set()
-        for a in allow_norm:
-            start = nline.find(a)
-            while start != -1:
-                masked.update(range(start, start + len(a)))
-                start = nline.find(a, start + 1)
-        raw_masked = set()
-        for a in allow:
-            if not a:
-                continue
-            start = line.find(a)
-            while start != -1:
-                raw_masked.update(range(start, start + len(a)))
-                start = line.find(a, start + 1)
-        for n, rule in needles.items():
-            start = nline.find(n)
-            while start != -1:
-                if not set(range(start, start + len(n))) <= masked:
-                    findings.add((line_no, index[start] + 1, rule))
-                start = nline.find(n, start + 1)
-        for rule, start, end in pattern_hits(line):
-            if not set(range(start, end)) <= raw_masked:
-                findings.add((line_no, start + 1, rule))
+    for n, rule in needles.items():
+        for start, end in occurrences(ntext, n):
+            if not exempt(allowed_norm, start, end):
+                findings.add((*where(nstarts, start, True), rule))
+    for rule, start, end in pattern_hits(text):
+        if not exempt(allowed_raw, start, end):
+            findings.add((*where(ostarts, start, False), rule))
     rows = [{"line": ln, "column": col, "rule": rule} for ln, col, rule in sorted(findings)]
     return rows, len(short)
 
