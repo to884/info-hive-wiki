@@ -899,12 +899,14 @@ def _within(inner, outer) -> bool:
     return [n.casefold() for n in inner_tail[:len(outer_tail)]] == [n.casefold() for n in outer_tail]
 
 
-def _check_not_nested(place) -> None:
-    """browse が作る場所（領分の根、書き出し先、作業用のディレクトリ）を、ほかの browse のディレクトリ（目印を持つ
-    ディレクトリ）の中に置かない（設計の 6.1 の入れ子）。
+def _check_not_nested(place, own=None) -> None:
+    """browse が作る場所（領分の根、書き出し先、作業用と状態のディレクトリ）を、ほかの browse のディレクトリ（目印を
+    持つディレクトリ）の中に置かない（設計の 6.1 の入れ子）。
 
-    作られる予定の場所の、今ある祖先から根までの、解いたパスのそれぞれに、目印があるかを見る。書き出し先の側だけ
-    でなく、データの場所の側にも当てる（実装の 3 回目のレビューの重大 1。データの場所が、ほかの世代の中にあった）。
+    作られる予定の場所そのもの（今あれば）と、その今ある祖先から根までの、解いたパスのそれぞれに、目印があるかを見る。
+    場所そのものに置いてよい目印は、その場所の種類の目印（own）だけである。書き出し先は世代の一覧、作業用は
+    `.browse-work`、状態のディレクトリは `.browse-server`、領分の根は、どれも置かない（実装の 3 回目と 4 回目の
+    レビューの重大 1。データの場所が、ほかの世代の中にあった、ほかの世代そのものだった）。
     """
     p = place
     while kind(p) == "absent":
@@ -912,7 +914,12 @@ def _check_not_nested(place) -> None:
         if parent == p:
             raise failure(Unknown, "今ある祖先がない", place)
         p = parent
-    p = x("realpath", os.path.dirname(p) if p == place and kind(p) == "dir" else p)
+    if p == place:
+        for marker in MARKERS:
+            if marker != own and kind(os.path.join(place, marker)) != "absent":
+                raise Stop(f"ほかの browse のディレクトリを、別の目的で使わない: {place}")
+        p = os.path.dirname(place)
+    p = x("realpath", p)
     while True:
         for marker in MARKERS:
             if kind(os.path.join(p, marker)) != "absent":
@@ -932,8 +939,8 @@ def _check_nesting(out, browse_root, default=False) -> None:
     守りではない。入れ子にすると、外側の世代が「一覧にない項目がある」として次の書き出しで止まるので、先に知らせる。
     何も作る前に呼ぶ。どの場所も、まだなければ、作られる予定の場所で照らす。
     """
-    for place in (browse_root, out, out + ".browse-work"):
-        _check_not_nested(place)
+    for place, own in ((browse_root, None), (out, MANIFEST), (out + ".browse-work", WORK_MARKER)):
+        _check_not_nested(place, own)
     if default:
         return
     data = _planned(browse_root)
@@ -1178,6 +1185,7 @@ def _enter_state(root, browse_root, state_dir, owner, create=False) -> bool:
     if not enter_root(browse_root, create):
         return False
     if create:
+        _check_not_nested(state_dir, SERVER_MARKER)
         # 状態のディレクトリと記録は、ほかの利用者に読ませない（トークンを持つ。POSIX の権限。0.10.0 と同じ）
         use_territory(state_dir, SERVER_MARKER, owner=owner, lock_name="server.lock", mode=0o700)
         return True
@@ -1286,23 +1294,20 @@ def remove_record(root, browse_root, state_dir, owner, instance) -> None:
     自身の終了が消せなかった記録（Windows で、読んでいるほかのプロセスがいると消せない）を残さないためである。
     何も作らない。消せなければ、警告を出して続ける（次の起動が置き換える）。
     """
-    if not _enter_state(root, browse_root, state_dir, owner):
-        return
-    if lock_held(os.path.join(state_dir, "server.lock")):
-        return
+    # サーバーは止まっている。ここから先は片付けなので、どの失敗も警告にする（設計の 7.1。実装の 4 回目のレビュー）
     try:
+        if not _enter_state(root, browse_root, state_dir, owner):
+            return
+        if lock_held(os.path.join(state_dir, "server.lock")):
+            return
         rec = read_record(state_dir)
-    except Unknown as e:
-        warn(f"記録を読めなかった（{e}）。次の起動が置き換える")
-        return
-    if rec is None or rec.get("instance") != instance or rec.get("owner") != owner:
-        return
-    try:
+        if rec is None or rec.get("instance") != instance or rec.get("owner") != owner:
+            return
         w("unlink", os.path.join(state_dir, "server.json"))
     except Absent:
         pass
-    except (Unknown, Stop) as e:
-        warn(f"記録を消せなかった（{e}）。次の起動が置き換える")
+    except Exception as e:  # noqa: BLE001  止めたあとの片付けの境界
+        warn(f"記録を消せなかった（{type(e).__name__}: {e}）。次の起動が置き換える")
 
 
 # ---------------------------------------------------------------------------

@@ -77,6 +77,8 @@ class Failed(Exception):
 
 def say(message: str) -> None:
     """標準エラーへの知らせ（通信）。書けなくても、終了コードを変えない（設計の 7）。"""
+    if sys.stderr is None:
+        return
     try:
         print(message, file=sys.stderr, flush=True)
     except (OSError, ValueError):
@@ -822,17 +824,20 @@ def main(argv=None) -> int:
 
 
 def _final_flush() -> None:
-    """標準出力を最後にフラッシュする（通信）。出せなければ、知らせを捨てて、終了コードを変えない（設計の 7）。
+    """標準出力と標準エラーを最後にフラッシュする（通信）。出せなければ、知らせを捨てて、終了コードを変えない（設計の 7）。
 
     フラッシュに失敗した出力はバッファーに残り、Python が終わるときにもう一度フラッシュして、終了コード 120 で
-    終わる（実装の 3 回目のレビューの重大 2）。標準出力を None にすると、終わるときのフラッシュはしない。
+    終わる（実装の 3 回目と 4 回目のレビューの重大 2）。None にした流れは、終わるときにフラッシュしない。
     """
-    try:
-        if sys.stdout is not None:
-            sys.stdout.flush()
-    except (OSError, ValueError):
-        sys.stdout = None
-        say("標準出力に出せなかった。知らせを捨てる")
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name)
+        if stream is None:
+            continue
+        try:
+            stream.flush()
+        except (OSError, ValueError):
+            setattr(sys, name, None)
+            say(f"{name} に出せなかった。知らせを捨てる")
 
 
 def _dispatch(args) -> int:
