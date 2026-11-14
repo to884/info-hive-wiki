@@ -54,6 +54,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wiki_text import format_fm_value, localize_argparse, parse_frontmatter_text  # noqa: E402
 import wiki_initialized  # noqa: E402
+import wiki_pages  # noqa: E402
+import wiki_rawcheck  # noqa: E402
 
 FETCHED_BY = "wiki_fetch.py 0.1"
 USER_AGENT = "Mozilla/5.0 (compatible; info-hive-wiki-fetch/0.1; +https://github.com/to884/info-hive-wiki)"
@@ -309,6 +311,134 @@ def is_dropped(node: Node) -> bool:
     if node.tag in ("picture", "figure"):
         return False
     return bool(words & NOISE_WORDS)
+
+
+# MediaWiki のページだけで落とす部品。class か id の名前全体で比べる（語に分けない）。
+MEDIAWIKI_PARTS = {"mw-jump-link": "mediawiki_skip_link", "mw-logo": "mediawiki_logo",
+                   "siteSub": "mediawiki_site_sub"}
+
+
+def is_mediawiki(doc: Node) -> bool:
+    return any(n.tag == "meta" and n.attrs.get("name", "").lower() == "generator"
+               and n.attrs.get("content", "").startswith("MediaWiki") for n in doc.iter())
+
+
+def _nearest_table(node: Node) -> "Node | None":
+    n = node.parent
+    while n is not None and n.tag != "table":
+        n = n.parent
+    return n
+
+
+def drop_mediawiki_parts(doc: Node) -> list[dict]:
+    """MediaWiki のページの部品（本文へのスキップ、ロゴ、「出典: …」、曖昧さ回避や告知の表）を落とす。
+
+    要素は捨てずに hidden を付ける（is_dropped が本文の外とみなす）。落としたものを返す。
+    MediaWiki で作られたページでなければ何もしない。
+    """
+    if not is_mediawiki(doc):
+        return []
+    removed: list[dict] = []
+
+    def drop(node: Node, rule: str) -> None:
+        # in_dropped() は使わない。祖先の <html> や <body> の class が NOISE_WORDS に当たるページ
+        # （Wikipedia など）では、ページのすべての要素が「落ちている」と判定されるためである。
+        if "hidden" in node.attrs:
+            return
+        node.attrs["hidden"] = ""
+        removed.append({"rule": rule, "text": _clean_inline(text_of(node, skip_dropped=False))})
+
+    for node in list(doc.iter()):
+        names = set(node.attrs.get("class", "").split()) | {node.attrs.get("id", "")}
+        for name, rule in MEDIAWIKI_PARTS.items():
+            if name in names:
+                drop(node, rule)
+                break
+        if node.tag in ("td", "th") and "metadata" in node.attrs.get("class", "").split():
+            table = _nearest_table(node)
+            if table is not None:
+                drop(table, "mediawiki_metadata_table")
+    return removed
+
+
+# 本文の前の部分（リンクを除いた文字が 80 文字以上ある最初の段落より前）でだけ落とす段落の文字列。
+HEADER_PHRASES = {"Member-only story": "medium_member_only", "Top highlight": "medium_top_highlight"}
+# 本文のどこにあっても落とす段落の文字列。Medium の図の部品で、本文の文としては現れない。
+ANYWHERE_PHRASES = {"Press enter or click to view image in full size": "medium_view_image"}
+
+
+_BLOCK_PARSER = wiki_pages.new_parser()
+
+
+def _parse_block(block: str):
+    """ブロックを、lint と同じ設定のパーサーで読む。段落 1 つだけなら、そのインラインのトークンを返す。"""
+    tokens = _BLOCK_PARSER.parse(block)
+    if len(tokens) == 3 and tokens[0].type == "paragraph_open" and tokens[1].type == "inline":
+        return tokens[1].children or []
+    return None
+
+
+def _is_plain_paragraph(block: str) -> bool:
+    return _parse_block(block) is not None
+
+
+def _text_without_links(block: str) -> str:
+    """表示上の文字から、リンクの文言と空白を除いたもの（本文の前の部分の判定に使う）。
+
+    記法の記号は数えない。パーサーで読むので、`_` やコードの中の `*` は文字として数える。
+    """
+    children = _parse_block(block)
+    if children is None:
+        return ""
+    out, depth = [], 0
+    for c in children:
+        if c.type == "link_open":
+            depth += 1
+        elif c.type == "link_close":
+            depth -= 1
+        elif depth == 0 and c.type in ("text", "code_inline"):
+            out.append(c.content)
+    return re.sub(r"\s+", "", "".join(out))
+
+
+def apply_block_rules(blocks: list[str], title: str) -> tuple[list[str], list[dict]]:
+    """変換したあとのブロックに、サイトに共通の雑音の規則を当てる。残すブロックと、落としたものを返す。"""
+    header_end = next((i for i, b in enumerate(blocks)
+                       if _is_plain_paragraph(b) and len(_text_without_links(b)) >= 80), len(blocks))
+    kept: list[str] = []
+    removed: list[dict] = []
+    for i, block in enumerate(blocks):
+        text = block.strip()
+        rule = None
+        if _is_plain_paragraph(block):
+            if text in ANYWHERE_PHRASES:
+                rule = ANYWHERE_PHRASES[text]
+            elif i < header_end:
+                children = _parse_block(block) or []
+                urls = [c.attrGet("href") or "" for c in children if c.type == "link_open"]
+                if title and text == title:
+                    rule = "duplicate_title"
+                elif text in HEADER_PHRASES:
+                    rule = HEADER_PHRASES[text]
+                elif urls and not _text_without_links(block) and all(
+                        re.search(r"/tags?/", urllib.parse.urlsplit(u).path) for u in urls):
+                    rule = "tag_links"
+                elif text.startswith("Read this story for free:") and any("source=friends_link" in u for u in urls):
+                    rule = "medium_friend_link"
+        if rule:
+            removed.append({"rule": rule, "text": text})
+        else:
+            kept.append(block)
+    return kept, removed
+
+
+def needs_translation(source_lang: str, ja_ratio: float) -> bool:
+    """訳すかどうか。source_lang が空か、本文の日本語の割合と食い違えば、割合で決める（取り込みの手順と同じ）。"""
+    lang_is_ja = source_lang.lower().startswith("ja")
+    ratio_is_ja = ja_ratio >= 0.5
+    if not source_lang or lang_is_ja != ratio_is_ja:
+        return not ratio_is_ja
+    return not lang_is_ja
 
 
 def in_dropped(node: Node) -> bool:
@@ -958,9 +1088,25 @@ def japanese_text_ratio(text: str) -> float:
 _BAD_SLUG_RE = re.compile(r'[\\/:*?"<>|#\[\]^()\s\x00-\x1f｜＃]')
 
 
+_RESERVED_SLUG_RE = re.compile(r"^(?:CON|PRN|AUX|NUL|(?:COM|LPT)[0-9¹²³])(?:\..*)?$", re.IGNORECASE)
+
+
+def is_reserved_name(name: str) -> bool:
+    """Windows の予約された名前（CON、NUL、COM1 など。拡張子つきも含む）か。"""
+    isreserved = getattr(os.path, "isreserved", None)
+    if os.name == "nt" and isreserved is not None and isreserved(name):
+        return True
+    return bool(_RESERVED_SLUG_RE.match(name))
+
+
 def check_slug(slug: str) -> None:
     if not slug or slug in (".", "..") or ".." in slug or _BAD_SLUG_RE.search(slug) or slug != slug.strip():
         raise ValueError(f"スラッグに使えない文字がある: {slug!r}（/ \\ .. や、ファイル名と wikilink に使えない記号は使わない）")
+    # Windows は名前の末尾のピリオドを無視するので、x. と x が同じフォルダーを指してしまう。
+    if slug.endswith("."):
+        raise ValueError(f"スラッグの末尾にピリオドは使えない: {slug!r}")
+    if is_reserved_name(slug):
+        raise ValueError(f"スラッグに Windows の予約された名前は使えない: {slug!r}")
 
 
 def inside(root: Path, path: Path) -> bool:
@@ -1063,18 +1209,51 @@ def build(args) -> tuple[int, dict]:
     # 内部のアドレスを取るかは、ユーザーが渡した URL で決める。公開のページが内部のアドレスへ
     # リダイレクトしても、その先は取らない。ユーザーが内部のページを直接渡したときだけ許す。
     block_private = not is_private_host(urllib.parse.urlsplit(args.url).hostname or "")
-    data, final_url, content_type = fetch(args.url, args.timeout, args.max_bytes, block_private=block_private)
+    html_file = getattr(args, "html_file", None)
+    if html_file:
+        # ブラウザで保存した HTML。基準の URL は、本文を取ったときのアドレス欄の URL にする。
+        check_url(args.page_url)
+        data = Path(html_file).read_bytes()
+        if len(data) > args.max_bytes:
+            raise FetchError(f"HTML のファイルが大きすぎる（{len(data):,} バイト）")
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"--html-file は UTF-8 で保存した HTML にする（{exc.reason}、{exc.start} バイト目）") from None
+        final_url, content_type = args.page_url, "text/html; charset=utf-8"
+    else:
+        data, final_url, content_type = fetch(args.url, args.timeout, args.max_bytes, block_private=block_private)
     ctype = content_type.split(";")[0].strip().lower()
     if ctype and ctype not in ("text/html", "application/xhtml+xml", "text/plain", "application/xml", "text/xml"):
         raise FetchError(f"HTML のページではない（Content-Type: {ctype}）。PDF などは保存してから通常の手順で取り込む")
     sha = hashlib.sha256(data).hexdigest()
     result: dict = {"path": target.as_posix(), "url": args.url, "final_url": final_url, "source_sha256": sha,
                     "unchanged": False, "warnings": []}
+    wiki = getattr(args, "wiki", None)
 
     if target.exists() and not args.force:
         old = existing_sha(target)
         if old == sha:
             result["unchanged"] = True
+            if wiki is not None:
+                # 写しがそろい（そろった印は raw を書いたあとに置くので、raw と同じ取得で書いたもの）、raw の
+                # frontmatter を書き換えていないときだけ、途中から続けられる。
+                complete = wiki_rawcheck.work_dir_complete(wiki, args.slug) and \
+                    wiki_rawcheck.work_dir_matches_raw(wiki, args.slug, target)
+                result["work_dir"] = complete
+                if complete:
+                    # 途中から続けるために、どの段まで進んだかと、後の手順が使う値を返す。
+                    wd = wiki_rawcheck.work_dir(wiki, args.slug)
+                    frozen = (wd / "cleaned.md").is_file()
+                    result["work_stage"] = "frozen" if frozen else "fetched"
+                    saved = wiki_rawcheck.load_fetch(wd)
+                    for key in ("needs_translation", "images", "removed_by_rule", "title", "source_lang", "ja_ratio"):
+                        if key in saved:
+                            result[key] = saved[key]
+                    if frozen:
+                        # 削除を固定したあとは、補足を書く画像は、削除のあとの本文に残ったものだけ（freeze の出力と同じ）。
+                        fm, body = wiki_rawcheck.split_frontmatter(wiki_rawcheck.read_text(wd / "cleaned.md"))
+                        result["images"] = wiki_rawcheck.remaining_images(saved, wiki_rawcheck.parse_tree(body), len(fm))
             return 0, result
         suggestion = f"{args.slug}-{datetime.now().strftime('%Y%m%d')}"
         result["suggested_slug"] = suggestion
@@ -1083,6 +1262,8 @@ def build(args) -> tuple[int, dict]:
 
     html_text, encoding = decode_html(data, content_type)
     doc = parse_html(html_text)
+    keep_noise = getattr(args, "keep_noise", False)
+    removed_by_rule: list[dict] = [] if keep_noise else drop_mediawiki_parts(doc)
     html_node = next((n for n in doc.iter() if n.tag == "html"), None)
     lang = (html_node.attrs.get("lang") or html_node.attrs.get("xml:lang") or "").strip().lower() if html_node else ""
     root, how = choose_root(doc)
@@ -1172,6 +1353,9 @@ def build(args) -> tuple[int, dict]:
         block = IMG_MARK_RE.sub(lambda m: replacements.get(int(m.group(1)), ""), block).strip("\n")
         if block.strip():
             body_blocks.append(block)
+    if not keep_noise:
+        body_blocks, removed_blocks = apply_block_rules(body_blocks, title)
+        removed_by_rule.extend(removed_blocks)
     body = "\n\n".join(body_blocks).replace("\x00BR\x00", "  \n")
 
     meta = {
@@ -1179,7 +1363,7 @@ def build(args) -> tuple[int, dict]:
         "title": title,
         "fetched_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "source_sha256": sha,
-        "source_sha256_of": "html",
+        "source_sha256_of": "dom" if html_file else "html",
         "source_lang": lang,
         "translated_by": "",
         "fetched_by": FETCHED_BY,
@@ -1188,7 +1372,6 @@ def build(args) -> tuple[int, dict]:
         meta["final_url"] = final_url
     fm = "---\n" + "".join(f"{k}: {format_fm_value(v)}\n" for k, v in meta.items()) + "---\n"
     text = fm + "\n" + (f"# {title}\n\n" if title else "") + body + "\n"
-    write_outputs(raw_root, target, asset_dir, args.slug, text, pending)
 
     lines = text.split("\n")
     seen: dict[str, int] = {}
@@ -1204,22 +1387,47 @@ def build(args) -> tuple[int, dict]:
         result["warnings"].append("本文が空になった。JavaScript で描くページかもしれない。ブラウザで本文を取る")
     elif len(re.sub(r"\s+", "", body)) < 500:
         result["warnings"].append("本文が短い。JavaScript で描くページか、本文の推定を誤った可能性がある")
+    ja_ratio = japanese_text_ratio(strip_code(body))
     result.update({
         "title": title,
         "source_lang": lang,
         "encoding": encoding,
         "content_root": how,
-        "ja_ratio": japanese_text_ratio(strip_code(body)),
+        "ja_ratio": ja_ratio,
+        "needs_translation": needs_translation(lang, ja_ratio),
         "chars": len(re.sub(r"\s+", "", body)),
         "images": images_out,
         "dropped_images": dropped,
+        "removed_by_rule": removed_by_rule,
     })
+
+    # 検査（wiki_rawcheck.py）の基準になる作業用の写しを、raw より先に書く。写しを書けなければ raw も書かない。
+    # 写しがそろった印（fetch.json）は、raw を書き終えてから置く。写しがそろっていれば、raw はその写しと同じ取得で
+    # 書いたものである。raw を書けずに止まると（--force の取り直しで、前の raw が残るときも）、写しはそろわず、
+    # 取り直しは work_dir を偽にする。写しがそろったかは、fetched.md と、JSON として読める fetch.json の両方で
+    # 判定する（wiki_rawcheck.work_dir_complete）。
+    tmp = None
+    if wiki is not None:
+        wiki_rawcheck.remove_work_dir(wiki, args.slug)
+        wd = wiki_rawcheck.work_dir(wiki, args.slug)
+        wd.mkdir(parents=True)
+        result["work_dir"] = True
+        (wd / "fetched.md").write_bytes(text.encode("utf-8"))
+        tmp = wd / "fetch.json.tmp"
+        tmp.write_bytes(json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"))
+    write_outputs(raw_root, target, asset_dir, args.slug, text, pending)
+    if tmp is not None:
+        os.replace(tmp, tmp.with_name("fetch.json"))
     return 0, result
 
 
 def render_text(code: int, result: dict) -> str:
     if result.get("unchanged"):
-        return f"内容は前回と同じなので、書き込まなかった: {result['path']}"
+        note = ""
+        if result.get("work_dir") is False:
+            note = ("\n作業用の写しがないか、raw と別の取得のもの。取り込みの途中なら、--force で取り直す"
+                    "（写しと raw の両方を作り直す）")
+        return f"内容は前回と同じなので、書き込まなかった: {result['path']}{note}"
     if code == 3:
         return (f"同じスラッグのファイルがあり、内容が違う: {result['path']}\n"
                 f"別版として取り込むなら --slug {result['suggested_slug']} を付け、上書きするなら --force を付ける。")
@@ -1231,8 +1439,11 @@ def render_text(code: int, result: dict) -> str:
         f"画像: 保存 {sum(1 for i in result['images'] if i['path'])} 件、"
         f"未取得 {sum(1 for i in result['images'] if not i['path'])} 件、捨てた {len(result['dropped_images'])} 件",
     ]
+    out.append(f"訳す: {'はい' if result.get('needs_translation') else 'いいえ'}")
     for img in result["images"]:
         out.append(f"  - {img['line']} 行目: {img['path'] or img['url']}  alt: {img['alt'] or '（なし）'}")
+    for r in result.get("removed_by_rule", []):
+        out.append(f"規則で消した（{r['rule']}）: {r['text'][:120]}")
     for w in result["warnings"]:
         out.append(f"注意: {w}")
     return "\n".join(out)
@@ -1252,7 +1463,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES, help="ページと画像 1 つの大きさの上限（既定: 20 MiB）")
     parser.add_argument("--max-images", type=int, default=50, help="保存する画像の数の上限（既定: 50）")
     parser.add_argument("--force", action="store_true", help="同じスラッグのファイルがあっても上書きする")
+    parser.add_argument("--keep-noise", action="store_true",
+                        help="サイトに共通の雑音の規則（MediaWiki の部品、本文の前のタグや表示の文言）を使わない")
+    parser.add_argument("--html-file", type=Path,
+                        help="URL を取得する代わりに、ブラウザで保存した HTML（UTF-8）を読む。--page-url と一緒に使う")
+    parser.add_argument("--page-url",
+                        help="--html-file の本文を取ったときのブラウザのアドレス欄の URL。相対リンクと画像の基準にする")
     args = parser.parse_args(argv)
+    if args.html_file and not args.page_url:
+        parser.error("--html-file には --page-url を付ける")
+    if args.page_url and not args.html_file:
+        parser.error("--page-url は --html-file と一緒に使う")
 
     # ネットにつなぐ前に、取り込み先の wiki と raw のルートを確かめる（ADR-0019）。
     found = wiki_initialized.problem(args.wiki)
