@@ -597,13 +597,16 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
 
         # 更新の停滞: ヒューリスティック。90 日間更新されておらず、かつ最近の取り込みで触れられたページ。
         # 近似: 最終更新が 90 日より前で、よくリンクされている（ハブである）ページを指摘する。
-        updated = parse_date(scalar_value(p["meta"].get("updated")))
+        # 指摘の updated は、判定に使った値（配列なら要素をつないだ文字）を出す。書き方の指摘（non_iso_dates）だけが、
+        # 書かれた形のまま出す。
+        updated_value = scalar_value(p["meta"].get("updated"))
+        updated = parse_date(updated_value)
         if updated:
             age_days = (date.today() - updated).days
             if age_days > 90 and len(inbound.get(p["slug"], [])) >= 3:
                 findings["stale_pages"].append({
                     "path": p["rel_path"],
-                    "updated": p["meta"].get("updated"),
+                    "updated": updated_value,
                     "age_days": age_days,
                     "inbound_count": len(inbound.get(p["slug"], [])),
                 })

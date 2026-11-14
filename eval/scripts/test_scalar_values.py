@@ -57,10 +57,16 @@ PAGES = {
     "missing": ("concepts", "", None, None),
     "src_one": ("sources", "type: [source]\nupdated: 2026-01-01", "source", "2026-01-01"),
     "uses_src": ("concepts", 'type: "concept"\nupdated: 2026-01-01\nsources: ["src_one"]', "concept", "2026-01-01"),
+    # source でないページ（type: [concept]）を出典に挙げる。lint の指摘の type は、比べた値（concept）になる。
+    "uses_concept": ("concepts", 'type: "concept"\nupdated: 2026-01-01\nsources: ["type_one"]', "concept",
+                     "2026-01-01"),
     # グラフの lint が、配列の kind から主語の型（person）を、配列の type から出典のページ（source）を読むことを確かめる関係。
+    # 2 つ目の関係は、証拠がソースの本文にないので、--decide の判定の候補になる（出典を source と読めたときだけ）。
     "kind_one": ("entities", 'type: "entity"\nkind: [person]\ncreated: [2026-01-01]\nupdated: 2026-01-01\n'
                  "graph:\n  relationships:\n    - predicate: works_on\n      object: concept:plain\n"
-                 '      source: src_one\n      evidence: "共通語の本文"\n      confidence: high\n      status: current',
+                 '      source: src_one\n      evidence: "共通語の本文"\n      confidence: high\n      status: current\n'
+                 "    - predicate: works_on\n      object: concept:type_one\n"
+                 '      source: src_one\n      evidence: "本文にない言い回し"\n      confidence: high\n      status: current',
                  "entity", "2026-01-01"),
     "kind_alias": ("entities", 'type: [エンティティ]\nkind: [人物]\nupdated: 2026-01-01', "entity", "2026-01-01"),
 }
@@ -187,9 +193,18 @@ class LintScalarTest(unittest.TestCase):
         # type: [source] のページを、lint は source として読む（グラフの抽出と同じ）。
         wiki = ScalarWiki()
         self.addCleanup(wiki.close)
+        # upd_one（updated: [2026-03-01]）を、更新の停滞の条件（被リンク 3 以上）に当てる。
+        for i in range(3):
+            (wiki.root / "concepts" / f"hub_link_{i}.md").write_bytes(
+                f'---\ntitle: "hub_link_{i}"\ntype: concept\n---\n[[upd_one]]\n'.encode("utf-8"))
         findings = WIKI_LINT.lint(WIKI_LINT.collect_pages(wiki.root), soft_cap=100, hard_cap=200,
                                   required_fm=["type", "title"], suggest_pages=False, suggest_min=5)
         self.assertEqual([f for f in findings["unresolved_sources"] if f["path"] == "concepts/uses_src.md"], [])
+        # 判定に使った値を示す欄は、比べた値（そろえた値）を出す。
+        not_source = [f for f in findings["unresolved_sources"] if f["path"] == "concepts/uses_concept.md"]
+        self.assertEqual([(f["reason"], f["type"]) for f in not_source], [("not_source", "concept")])
+        stale = {f["path"]: f["updated"] for f in findings["stale_pages"]}
+        self.assertEqual(stale.get("concepts/upd_one.md"), "2026-03-01")
         # 書き方の指摘は、書かれた形のまま残す。
         non_iso = {f["path"]: f["value"] for f in findings["non_iso_dates"]}
         self.assertEqual(non_iso.get("concepts/upd_one.md"), ["2026-03-01"])
@@ -225,6 +240,9 @@ class GraphScalarTest(unittest.TestCase):
                 # 主語の kind: [person] を person と読み、source: src_one を type: [source] のページと読む。
                 for key in ("subject_type_mismatch", "object_type_mismatch", "broken_source_refs", "broken_object_refs"):
                     self.assertEqual([f for f in findings[key] if f.get("page") == "entities/kind_one.md"], [], key)
+                if extra:
+                    # 証拠が本文にない 2 つ目の関係が、type: [source] の src_one を出典として、判定の候補になる。
+                    self.assertEqual(findings["evidence_check"]["candidates"], 1)
 
 
 if __name__ == "__main__":
