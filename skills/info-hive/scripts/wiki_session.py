@@ -132,7 +132,7 @@ PLACE_MANUAL = "［伏せ字］"
 # や、間に入った別の文のあとが伏せ残る）。構造（差し込み、コマンドの要素）の判定は伏せ字の前の元の文で行うので、
 # 最後までを伏せても構造は壊れない。終わりのない塊は最後まで当たるので、終わりを探し直す計算は文の長さに比例する。
 RE_PEM = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:.*?-----END [A-Z0-9 ]*PRIVATE KEY-----|.*\Z)", re.DOTALL)
-RE_KEY_LINE = re.compile(r"^[A-Za-z0-9+/=]{4,}$")
+RE_KEY_MARK = re.compile(r"-----(?:BEGIN|END) [A-Z0-9 ]*PRIVATE KEY-----")
 RE_PREFIX = re.compile(r"(?<![A-Za-z0-9_-])(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
                        r"|xox[abposr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})(?![A-Za-z0-9])")
 RE_JWT = re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}")
@@ -350,10 +350,9 @@ def find_secrets(text: str) -> tuple[list, list]:
 
     for m in RE_PEM.finditer(text):
         # 塊の全体に加えて、本体の各行も探す（本体だけを書き戻しても見つけるため）。行は元の改行で分ける。
-        # 探す文字列は、鍵の本体らしい行（Base64 の文字だけで、16 文字以上か、4 文字以上で数字か + / = を含む）だけに
-        # する。終わりのない塊は文の最後までなので、続く文や英単語を探す文字列にしないため。
-        body = [ln.strip() for ln in m.group(0).split("\n")
-                if RE_KEY_LINE.match(ln.strip()) and (len(ln.strip()) >= 16 or re.search(r"[0-9+/=]", ln))]
+        # 探す文字列は、塊の各行から BEGIN と END の目印を除いたもの（形で選ばない。伏せた文字列はすべて探す。
+        # 4 文字より短いものは scan が省く）。終わりのない塊では続く文も探す文字列になるが、raw でも伏せている。
+        body = [RE_KEY_MARK.sub("", ln).strip() for ln in m.group(0).split("\n")]
         add(m.start(), m.end(), PLACE_SECRET, "auto_secret", [m.group(0), *body])
     for rx in (RE_PREFIX, RE_JWT):
         for m in rx.finditer(text):
@@ -733,32 +732,42 @@ def extract(rng: Range, opts: Options) -> Extract:
         if pieces:
             bodies[uid] = pieces  # 出力しない部品（--tools none のツールの値）だけの記録も、伏せ字を見つける文に入れる
 
-    # 返答の宛先
-    limit = len(by_uuid)
+    # 返答の宛先。A と T の記録を通って親をたどり、H、I、X に着いたらそれが宛先、範囲の外か読めない行なら不明。
+    # たどった結果は、通った A と T の記録ごとに覚えておく（長い連鎖で、記録ごとに先頭までたどり直さない）。
     targets: dict = {}
     unknown_key: dict = {}
-    for uid in bodies:
-        parent = by_uuid[uid][0].get("parentUuid")
-        last = uid
-        steps = 0
-        target = None
+    walked: dict = {}  # A か T の記録 → （宛先, 不明のときの鍵）
+
+    def walk(start: str) -> tuple:
+        path, seen, node = [], set(), start
         while True:
-            if not isinstance(parent, str) or parent not in by_uuid:
+            if node in walked:
+                result = walked[node]
                 break
-            prec, pkind = by_uuid[parent]
-            if pkind in (A, T):
-                steps += 1
-                if steps > limit:
-                    warn("reply_unresolved")
-                    break
-                last = parent
-                parent = prec.get("parentUuid")
-                continue
-            target = parent
-            break
+            rec_, kind_ = by_uuid[node]
+            if kind_ not in (A, T):
+                result = (node, None)
+                break
+            if node in seen:  # 循環
+                warn("reply_unresolved")
+                result = (None, ("?", node))
+                break
+            seen.add(node)
+            path.append(node)
+            parent_ = rec_.get("parentUuid")
+            if not isinstance(parent_, str) or parent_ not in by_uuid:
+                result = (None, ("?", parent_ if isinstance(parent_, str) else node))
+                break
+            node = parent_
+        for n in path:
+            walked[n] = result
+        return result
+
+    for uid in bodies:
+        target, key = walk(uid)
         targets[uid] = target
         if target is None:
-            unknown_key[uid] = ("?", parent if isinstance(parent, str) else last)
+            unknown_key[uid] = key
     visible = {uid for uid, pieces in bodies.items() if any(piece[3] for piece in pieces)}
     referenced = {t for uid, t in targets.items() if uid in visible and t is not None and by_uuid[t][1] == X}
     hidden: dict = {}  # 宛先ごとの、まだターンのない出力しない部品
