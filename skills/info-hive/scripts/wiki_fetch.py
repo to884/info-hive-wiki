@@ -1212,9 +1212,11 @@ def build(args) -> tuple[int, dict]:
     # 取り直して原文を比べると、--html-file で取ったページ（DOM のハッシュ）や、取得のたびに変わるページでは、
     # 写しがそろっていても内容が違うとして止まり、ネットにつながらなければ取得の失敗で止まる。
     # --html-file は、渡した内容で取るという入力なので、ここでは続けずに、読んで比べる（下の枝）。
+    # 0.14.0 が書いた写し（fetch.json に fetched_sha256 がない）は、fetch.json と fetched.md を内容で結べないので、
+    # ここでは続けない。今までどおり取得して原文を比べ、同じなら下の枝で続ける。
     if wiki is not None and not html_file and not args.force and target.exists():
         saved = wiki_rawcheck.resumable_fetch(wiki, args.slug, target)
-        if saved is not None and saved["url"] == args.url:
+        if saved is not None and "fetched_sha256" in saved and saved["url"] == args.url:
             # 前の取得の出力（警告を含む）に、取得しなかったことと、どの段まで進んだかを足して返す。
             result = {"path": target.as_posix(), "url": args.url, "final_url": saved["final_url"],
                       "source_sha256": saved["source_sha256"], "unchanged": True, "fetch_skipped": True,
@@ -1401,6 +1403,9 @@ def build(args) -> tuple[int, dict]:
         "images": images_out,
         "dropped_images": dropped,
         "removed_by_rule": removed_by_rule,
+        # 作業用の写し（fetched.md。text をそのまま書く）のハッシュ。fetch.json と写しを内容で結ぶ（途中から続けるとき、
+        # wiki_rawcheck.resumable_fetch が照らす）。
+        "fetched_sha256": wiki_rawcheck.snapshot_sha256(text.encode("utf-8")),
     })
 
     # 検査（wiki_rawcheck.py）の基準になる作業用の写しを、raw より先に書く。写しを書けなければ raw も書かない。
@@ -1423,24 +1428,41 @@ def build(args) -> tuple[int, dict]:
     return 0, result
 
 
+def _resume_lines(result: dict) -> list[str]:
+    """途中から続けるときの段と、最後に終えた段の出力。止まる前に読むはずだった出力を、ここで読み直して確かめる。"""
+    if result.get("work_stage") == "frozen":
+        out = ["段: frozen（削除は固定してある。下の消したものを読み、本文を消していないかを確かめてから、訳と補足に進む）"]
+        report = result.get("freeze", {})
+        for line in report.get("removed_lines", []):
+            out.append(f"消した行: {line[:160]}")
+        for c in report.get("shortened_lines", []):
+            out.append(f"一部を消した行: {c['fetched'][:120]} → {c['raw'][:120]}")
+        for w in report.get("warnings", []):
+            out.append(f"警告: {w['message']}")
+        for img in result.get("images", []):
+            out.append(f"補足を書く画像: {img.get('line') or '?'} 行目のあたり: {img['path']}  alt: {img.get('alt') or '（なし）'}")
+        return out
+    out = ["段: fetched（下の注意と規則で消したものを見て、本文を取れたかを確かめるところから続ける）"]
+    for r in result.get("removed_by_rule", []):
+        out.append(f"規則で消した（{r['rule']}）: {r['text'][:120]}")
+    for w in result.get("warnings", []):
+        out.append(f"注意: {w}")
+    return out
+
+
 def render_text(code: int, result: dict) -> str:
-    if result.get("fetch_skipped"):
-        stage = "前の取得の注意を見るところから" if result.get("work_stage") == "fetched" else "訳と補足から"
-        out = [f"取り込みの途中の作業用の写しがあるので、ページを取得せずに続ける: {result['path']}",
-               f"段: {result.get('work_stage')}（{stage}続ける）。ページが更新されたかは見ていない。",
-               "取り直すなら --force を付ける（途中の作業を捨て、写しと raw の両方を作り直す）"]
-        # 前の取得の出力の注意と、規則で消したもの。本文を取れたかは、取得した直後と同じに、ここで確かめる。
-        for r in result.get("removed_by_rule", []):
-            out.append(f"規則で消した（{r['rule']}）: {r['text'][:120]}")
-        for w in result.get("warnings", []):
-            out.append(f"注意: {w}")
-        return "\n".join(out)
     if result.get("unchanged"):
-        note = ""
-        if result.get("work_dir") is False:
-            note = ("\n作業用の写しがないか、raw と別の取得のもの。取り込みの途中なら、--force で取り直す"
-                    "（写しと raw の両方を作り直す）")
-        return f"内容は前回と同じなので、書き込まなかった: {result['path']}{note}"
+        if result.get("fetch_skipped"):
+            out = [f"取り込みの途中の作業用の写しがあるので、ページを取得せずに続ける: {result['path']}",
+                   "ページが更新されたかは見ていない。取り直すなら --force を付ける（途中の作業を捨て、写しと raw の両方を作り直す）"]
+        else:
+            out = [f"内容は前回と同じなので、書き込まなかった: {result['path']}"]
+        if result.get("work_dir"):
+            out.extend(_resume_lines(result))
+        elif result.get("work_dir") is False:
+            out.append("作業用の写しがないか、raw と別の取得のもの。取り込みの途中なら、--force で取り直す"
+                       "（写しと raw の両方を作り直す）")
+        return "\n".join(out)
     if code == 3:
         return (f"同じスラッグのファイルがあり、内容が違う: {result['path']}\n"
                 f"別版として取り込むなら --slug {result['suggested_slug']} を付け、上書きするなら --force を付ける。")

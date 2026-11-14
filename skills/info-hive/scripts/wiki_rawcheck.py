@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import hashlib
 import importlib
 import json
 import os
@@ -278,9 +279,14 @@ def work_dir_matches_raw(wiki: Path, slug: str, raw_path: Path) -> bool:
 # 作ったものすべてである（警告もここに入る。続きの手順は、前の取得の出力を見て、本文を取れたかを確かめる）。
 RESUME_KEYS = ("title", "source_lang", "encoding", "content_root", "ja_ratio", "needs_translation", "chars",
                "images", "dropped_images", "removed_by_rule", "warnings")
-# 続けるときに使う、取得の記録のキーと型。取得器はいつもこれを書く。
+# 続けるときに使う、取得の記録のキーと型。取得器はいつもこれを書く（fetched_sha256 は 0.14.0 の写しにはない）。
 _FETCH_TYPES = {"url": str, "final_url": str, "source_sha256": str, "needs_translation": bool,
                 "images": list, "removed_by_rule": list, "warnings": list}
+
+
+def snapshot_sha256(data: bytes) -> str:
+    """作業用の写しの fetched.md のバイト列の SHA-256。取得の記録（fetch.json の fetched_sha256）と、写しを結ぶ。"""
+    return hashlib.sha256(data).hexdigest()
 
 
 def _fetch_record_ok(saved) -> bool:
@@ -288,6 +294,8 @@ def _fetch_record_ok(saved) -> bool:
     if not isinstance(saved, dict):
         return False
     if any(not isinstance(saved.get(key), kind) for key, kind in _FETCH_TYPES.items()):
+        return False
+    if "fetched_sha256" in saved and not isinstance(saved["fetched_sha256"], str):
         return False
     return (all(isinstance(img, dict) and isinstance(img.get("path"), str) for img in saved["images"])
             and all(isinstance(r, dict) and isinstance(r.get("rule"), str) and isinstance(r.get("text"), str)
@@ -298,14 +306,17 @@ def _fetch_record_ok(saved) -> bool:
 def resumable_fetch(wiki: Path, slug: str, raw_path: Path) -> dict | None:
     """途中の取り込みを続けられるなら、写しの取得の記録（fetch.json の中身）を返す。続けられなければ None。
 
-    続けられるのは、次のすべてを満たすときだけである。どの取得（URL か --html-file か）だったかには依らない。
-    続けるかは写しと raw の状態だけで決まり、ページを取り直さなくてよい。
+    前提: 作業用の写しは、wiki_fetch.py と freeze だけが書く。ここで守るのは、どこで止まったときも（書く順）と、
+    ファイルを丸ごと別の取得のものに置き換えたとき（一部だけを戻したバックアップなど）である。ファイルの中を
+    手で書き換えたものは、前提の外である。続けられるのは、次のすべてを満たすときだけである。
 
     - 写しがそろい（work_dir_complete）、raw の frontmatter が写しの fetched.md と同じ（work_dir_matches_raw）。
     - fetch.json が取得器の書いた形である（_fetch_record_ok）。
-    - fetch.json の取得元とハッシュ（url、final_url、source_sha256）が、fetched.md の frontmatter と同じ。写しの
-      3 つのファイルが同じ取得のものであることを、書く順（fetch.json を最後に置く）だけに頼らずに確かめる。
-      一部だけを戻したバックアップなどで、fetch.json だけが別の取得のものになっていれば続けない。
+    - fetch.json の fetched_sha256 が、fetched.md のバイト列のハッシュと同じ。fetch.json と fetched.md を内容で
+      結ぶ。同じ URL の同じ原文を、別の設定（--keep-noise など）で取った記録は、取得元とハッシュが同じでも、
+      fetched.md が違うので見分けられる。0.14.0 が書いた写しにはこの値がないので、ないときは照らさない
+      （wiki_fetch.build は、その写しを、取得して原文を比べた枝でだけ続ける。取得の前には続けない）。
+    - fetch.json の取得元とハッシュ（url、final_url、source_sha256）が、fetched.md の frontmatter と同じ。
     """
     if not (work_dir_complete(wiki, slug) and work_dir_matches_raw(wiki, slug, raw_path)):
         return None
@@ -314,23 +325,50 @@ def resumable_fetch(wiki: Path, slug: str, raw_path: Path) -> dict | None:
     if not _fetch_record_ok(saved):
         return None
     try:
-        fm_lines, _body = split_frontmatter(read_text(wd / "fetched.md"))
+        data = (wd / "fetched.md").read_bytes()
+        fm_lines, _body = split_frontmatter(data.decode("utf-8").replace("\r\n", "\n"))
     except (OSError, UnicodeDecodeError):
         return None
+    if "fetched_sha256" in saved and saved["fetched_sha256"] != snapshot_sha256(data):
+        return None
     fm = parse_frontmatter_text("\n".join(fm_lines[1:-1]))
-    final_url = fm.get("final_url") or fm.get("url")
+    final_url = fm["final_url"] if "final_url" in fm else fm.get("url")  # final_url は url と違うときだけ書く
     if (fm.get("url"), final_url, fm.get("source_sha256")) != \
             (saved["url"], saved["final_url"], saved["source_sha256"]):
         return None
     return saved
 
 
-def resume_fields(wiki: Path, slug: str, saved: dict) -> dict:
-    """途中から続けるために、どの段まで進んだか（work_stage）と、前の取得の出力の値（RESUME_KEYS）を返す。
+def deletion_report(fetch: dict, src_body: str, out_body: str, out_tree: "Node", offset: int) -> dict:
+    """取得した直後の本文（src_body）から、削除のあとの本文（out_body）までに消したものの報告。
 
-    saved は resumable_fetch が返した記録。警告（本文が空、短い、など）も前の取得のものを返すので、続きの手順は、
-    取得した直後と同じに本文を取れたかを確かめられる。削除を固定したあと（frozen）は、補足を書く画像を、削除の
-    あとの本文に残ったものだけにする（freeze の出力と同じ）。
+    freeze の出力のうち、人が読んで本文を消していないかを確かめるためのもの（消した行、一部を消した行、消した
+    文字の割合の警告）と、補足を書く画像。freeze と、削除を固定したあとから続けるとき（resume_fields）の両方が
+    使う。固定した内容（cleaned.md）は freeze が通したときの raw なので、同じ報告を作り直せる。
+    """
+    removed = [line[2:] for line in difflib.ndiff(src_body.split("\n"), out_body.split("\n"))
+               if line.startswith("- ") and line[2:].strip()]
+    changed = [{"fetched": a, "raw": b} for a, b in _changed_lines(src_body, out_body)]
+    body_chars = len(re.sub(r"\s+", "", src_body))
+    removed_chars = body_chars - len(re.sub(r"\s+", "", out_body))
+    warnings = []
+    if body_chars and removed_chars > body_chars * 0.2:
+        warnings.append({"kind": "removed_much",
+                         "message": f"消した文字が本文の 2 割を超える（{removed_chars} / {body_chars} 文字）。本文を消していないかを確かめる"})
+    return {"removed_lines": removed, "shortened_lines": changed, "warnings": warnings,
+            "images": remaining_images(fetch, out_tree, offset)}
+
+
+def resume_fields(wiki: Path, slug: str, saved: dict) -> dict:
+    """途中から続けるために、どの段まで進んだか（work_stage）と、最後に終えた段の出力を返す。
+
+    続きの手順は、止まる前に読むはずだった出力を読み直して、確かめの段からやり直せる。
+
+    - 取得のあと（fetched）: 前の取得の出力の値（RESUME_KEYS。警告と規則で消したものを含む）。saved は
+      resumable_fetch が返した記録である。
+    - 削除を固定したあと（frozen）: 上に加えて、freeze の報告（freeze。消した行、一部を消した行、警告）を、
+      fetched.md と cleaned.md から作り直して返す。補足を書く画像（images）は、削除のあとの本文に残ったものだけ
+      にする（freeze の出力と同じ）。
     """
     wd = work_dir(wiki, slug)
     frozen = (wd / "cleaned.md").is_file()
@@ -339,8 +377,11 @@ def resume_fields(wiki: Path, slug: str, saved: dict) -> dict:
         if key in saved:
             fields[key] = saved[key]
     if frozen:
+        _src_fm, src_body = split_frontmatter(read_text(wd / "fetched.md"))
         fm, body = split_frontmatter(read_text(wd / "cleaned.md"))
-        fields["images"] = remaining_images(saved, parse_tree(body), len(fm))
+        report = deletion_report(saved, src_body, body, parse_tree(body), len(fm))
+        fields["images"] = report.pop("images")
+        fields["freeze"] = report
     return fields
 
 
@@ -645,21 +686,14 @@ def freeze(wiki: Path, raw_root: Path, slug: str) -> tuple[int, dict]:
         if not refs.get(norm) and exists:
             errors.append({"kind": "image_file", "message": f"画像を消したのに、ファイルが残っている: {rel}"})
 
-    # 消したもの（人が読むための行の差分）。
-    removed = [line[2:] for line in difflib.ndiff(src_body.split("\n"), out_body.split("\n"))
-               if line.startswith("- ") and line[2:].strip()]
-    changed = [{"fetched": a, "raw": b} for a, b in _changed_lines(src_body, out_body)]
-    body_chars = len(re.sub(r"\s+", "", src_body))
-    removed_chars = body_chars - len(re.sub(r"\s+", "", out_body))
-    warnings = []
-    if body_chars and removed_chars > body_chars * 0.2:
-        warnings.append({"kind": "removed_much",
-                         "message": f"消した文字が本文の 2 割を超える（{removed_chars} / {body_chars} 文字）。本文を消していないかを確かめる"})
+    # 消したもの（人が読むための行の差分）と、消した文字の割合の警告。
+    report = deletion_report(fetch, src_body, out_body, out_tree, len(out_fm))
+    removed, changed, warnings = report["removed_lines"], report["shortened_lines"], report["warnings"]
     to_file_lines(errors + warnings, len(out_fm))
     result = {"stage": "freeze", "ok": not errors, "errors": errors, "warnings": warnings,
               "removed_lines": removed, "shortened_lines": changed,
               "removed_by_rule": fetch.get("removed_by_rule", []),
-              "images": remaining_images(fetch, out_tree, len(out_fm))}
+              "images": report["images"]}
     if not errors:
         # どちらも一時の名前で書き終えてから名前を変える。cleaned.md は最後に置く。cleaned.md があることを、
         # 削除を固定し終えた印にする（wiki_fetch.py の work_stage）。書きかけの cleaned.md は残らない。
