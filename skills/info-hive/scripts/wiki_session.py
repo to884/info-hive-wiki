@@ -128,7 +128,10 @@ PLACE_HOME = "~"
 PLACE_MANUAL = "［伏せ字］"
 
 # 自動の伏せ字の規則。記録と引数だけで決まり、実行する PC の値は使わない。当てる順にならべる。
-RE_PEM = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|\Z)", re.DOTALL)
+# 秘密の鍵の塊。終わりの行があればそこまで。なければ、鍵の本体の形の行（16 文字以上の Base64 の文字だけ。間の空の
+# 行は飛ばす）が続くところまで（文の最後までにすると、あとに続く人の発言や終了タグまで巻き込む）。
+RE_PEM = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:.*?-----END [A-Z0-9 ]*PRIVATE KEY-----"
+                    r"|(?:\n(?:[ \t]*\n)*[ \t]*[A-Za-z0-9+/=]{16,}[ \t]*(?=\n|\Z))*)", re.DOTALL)
 RE_PREFIX = re.compile(r"(?<![A-Za-z0-9_-])(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
                        r"|xox[abposr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})(?![A-Za-z0-9])")
 RE_JWT = re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}")
@@ -330,54 +333,75 @@ class Redactions:
                 self.needles.append((rule, v))
 
 
-def find_secrets(text: str) -> list:
-    """自動の伏せ字の規則に当たる範囲を、元の文の上で見つける。返り値は（開始, 終わり, 置き換え, 規則, 探す文字列）
-    の並び。規則は当てる順に見て、先に見つけた範囲と重なるものは捨てる。"""
-    found: list = []
+PLACE_PRIORITY = {PLACE_SECRET: 0, PLACE_EMAIL: 1, PLACE_HOME: 2}
 
-    def take(start, end, place, rule, needles):
-        if all(end <= s or e <= start for s, e, *_ in found):
-            found.append((start, end, place, rule, [n for n in needles if n]))
+
+def find_secrets(text: str) -> tuple[list, list]:
+    """自動の伏せ字の規則に当たる範囲を、元の文の上で見つける。返り値は（伏せる範囲, 当たったもの）。
+
+    当たったもの（規則, 探す文字列）は、どの規則のものも捨てない。伏せる範囲（開始, 終わり, 置き換え）は、
+    すべての規則の範囲の和集合で、重なる範囲は 1 つにまとめる（先に当たった狭い範囲が、あとの規則の広い範囲を
+    捨てると、秘密の値の末尾が伏せ残る）。置き換えは、まとめた中でいちばん強いもの（秘密、メール、ホーム）。"""
+    hits: list = []  # （開始, 終わり, 置き換え, 規則, 探す文字列）
+
+    def add(start, end, place, rule, needles):
+        hits.append((start, end, place, rule, [n for n in needles if n]))
 
     for m in RE_PEM.finditer(text):
         # 塊の全体に加えて、本体の各行も探す（本体だけを書き戻しても見つけるため）。行は元の改行で分ける。
         body = [ln.strip() for ln in m.group(0).split("\n") if ln.strip() and "-----" not in ln]
-        take(m.start(), m.end(), PLACE_SECRET, "auto_secret", [m.group(0), *body])
+        add(m.start(), m.end(), PLACE_SECRET, "auto_secret", [m.group(0), *body])
     for rx in (RE_PREFIX, RE_JWT):
         for m in rx.finditer(text):
-            take(m.start(), m.end(), PLACE_SECRET, "auto_secret", [m.group(0)])
+            add(m.start(), m.end(), PLACE_SECRET, "auto_secret", [m.group(0)])
     for m in RE_NAMED.finditer(text):
-        take(m.start(3), m.end(3), PLACE_SECRET, "auto_secret", [m.group(3)])
+        add(m.start(3), m.end(3), PLACE_SECRET, "auto_secret", [m.group(3)])
     for m in RE_EMAIL.finditer(text):
-        take(m.start(), m.end(), PLACE_EMAIL, "auto_email", [m.group(0), m.group(1)])
+        add(m.start(), m.end(), PLACE_EMAIL, "auto_email", [m.group(0), m.group(1)])
     for rx in (RE_HOME_WIN, RE_HOME_POSIX):
         for m in rx.finditer(text):
-            take(m.start(), m.end(), PLACE_HOME, "auto_home", [m.group(1)])
-    return sorted(found)
+            add(m.start(), m.end(), PLACE_HOME, "auto_home", [m.group(1)])
+    merged: list = []
+    for start, end, place, _rule, _needles in sorted(hits, key=lambda h: (h[0], h[1])):
+        if merged and start < merged[-1][1]:
+            s0, e0, p0 = merged[-1]
+            merged[-1] = (s0, max(e0, end), min(p0, place, key=PLACE_PRIORITY.get))
+        else:
+            merged.append((start, end, place))
+    return merged, [(rule, needles) for _s, _e, _p, rule, needles in hits]
+
+
+def apply_ranges(text: str, ranges: list, a: int, b: int) -> str:
+    """text[a:b] に、元の文の上の伏せる範囲を当てる。範囲が a か b をまたいでも、内側の部分を伏せる。"""
+    out, pos = [], a
+    for s, e, place in ranges:
+        if e <= a or s >= b:
+            continue
+        out.append(text[pos:max(s, a)])
+        out.append(place)
+        pos = min(e, b)
+    out.append(text[pos:b])
+    return "".join(out)
+
+
+def scan_secrets(text: str, red: Redactions | None) -> list:
+    """元の文で規則を当て、当たったものを red に足し、伏せる範囲を返す。"""
+    ranges, hits = find_secrets(text)
+    if red is not None:
+        for rule, needles in hits:
+            red.add(rule, *needles)
+    return ranges
 
 
 def redact_parts(parts: list, red: Redactions | None = None, joiner: str = "\n\n") -> list:
     """いくつかの部品をつないだ元の文の全体で規則を当て、見つけた範囲を部品ごとに切り分けて伏せる。部品の境目を
     またぐ秘密は、またいだ両方の部品で伏せる。形を変える処理（改行を空白にする、切る）は、このあとに行う。"""
-    red = red if red is not None else Redactions()
     joined = joiner.join(parts)
-    matches = find_secrets(joined)
-    for _s, _e, _place, rule, needles in matches:
-        red.add(rule, *needles)
+    ranges = scan_secrets(joined, red)
     out, offset = [], 0
     for part in parts:
-        p0, p1 = offset, offset + len(part)
-        pieces, pos = [], p0
-        for s, e, place, _rule, _n in matches:
-            if e <= p0 or s >= p1:
-                continue
-            a, b = max(s, p0), min(e, p1)
-            pieces.append(joined[pos:a])
-            pieces.append(place)
-            pos = b
-        pieces.append(joined[pos:p1])
-        out.append("".join(pieces))
-        offset = p1 + len(joiner)
+        out.append(apply_ranges(joined, ranges, offset, offset + len(part)))
+        offset += len(part) + len(joiner)
     return out
 
 
@@ -414,7 +438,7 @@ RE_APP_ELEMENT = re.compile(r"\A\s*<(" + "|".join(APP_ELEMENTS) + r")>.*?</\1>\s
 
 
 def human_text(rec: dict, keep_reminders: bool, excluded: Counter, warn, red: "Redactions") -> str:
-    """人の発言の本文を、設計の 5 節の順に加工する。伏せ字はまだかけない。"""
+    """人の発言の本文を、設計の 5 節の順に加工し、元の文で見つけた伏せ字を当てる。"""
     if rec.get("type") == "attachment":
         text = rec["attachment"]["prompt"]
     else:
@@ -432,28 +456,36 @@ def human_text(rec: dict, keep_reminders: bool, excluded: Counter, warn, red: "R
                 else:
                     excluded[f"user:block:{_safe_key(btype)}"] += 1
         text = "\n\n".join(parts)
-    # 伏せ字は、加工（差し込みを除く、コマンドの要素を 1 行にする）の前の元の文で当てる。加工のあとにも、
-    # 呼び出し側がもう一度当てる。
-    text = redact(normalize_newlines(text), red)
+    # 見つける、決める、変えるを分ける。伏せ字の範囲は元の文で見つけ、構造（先頭の差し込み、コマンドの要素）も
+    # 元の文で判定して残す範囲を決め、最後に、残す範囲に伏せ字の範囲を当てる。伏せ字を先にかけると、終了タグを
+    # 巻き込んだ秘密の鍵の塊などで構造が判定できなくなる。加工のあとにも、呼び出し側がもう一度当てる。
+    text = normalize_newlines(text)
+    ranges = scan_secrets(text, red)
+    start = 0
     if not keep_reminders:
         m = RE_REMINDERS.match(text)
         if m:
-            text = text[m.end():]
+            start = m.end()
             warn("stripped_reminder")
-    if RE_COMMAND_ONLY.match(text):
-        found = {name: value.strip() for name, value in RE_COMMAND_PART.findall(text)}
+    rest = text[start:]
+    if RE_COMMAND_ONLY.match(rest):
+        found = {}
+        for m in RE_COMMAND_PART.finditer(rest):
+            found[m.group(1)] = apply_ranges(text, ranges, start + m.start(2), start + m.end(2)).strip()
         name = found.get("command-name") or found.get("command-message") or ""
         name = " ".join(name.split())
         if name and not name.startswith("/"):
             name = "/" + name
         args = " ".join(found.get("command-args", "").split())
-        text = f"コマンド: `{name}{' ' + args if args else ''}`" if name else ""
-    elif RE_APP_ELEMENT.match(text):
-        text = f"（アプリの要素 {RE_APP_ELEMENT.match(text).group(1)}。中身は除いた）"
-    elif text.lstrip().startswith("<"):
-        warn("leading_tag")
-    text = text.strip("\n")
-    return text if text.strip() else ""
+        out = f"コマンド: `{name}{' ' + args if args else ''}`" if name else ""
+    elif RE_APP_ELEMENT.match(rest):
+        out = f"（アプリの要素 {RE_APP_ELEMENT.match(rest).group(1)}。中身は除いた）"
+    else:
+        if rest.lstrip().startswith("<"):
+            warn("leading_tag")
+        out = apply_ranges(text, ranges, start, len(text))
+    out = out.strip("\n")
+    return out if out.strip() else ""
 
 
 def tool_parts(block: dict) -> tuple[str, str]:
@@ -1508,11 +1540,8 @@ def cmd_decide(args) -> int:
     if args.action == "init":
         ex = load_extract(args)
         require_session(ex)
-        import wiki_fetch
-        try:
-            wiki_fetch.check_slug(args.slug)
-        except ValueError as exc:
-            raise Fail(str(exc))
+        # スラッグは、ディスクに何かを書く前に、show --meta と write と同じ検査（自動の伏せ字の規則）にかける。
+        check_slug_value(args.slug, ex, [])
         folder = Path(args.wiki) / ".wiki-cache" / "session"
         step = Path(args.wiki)
         for part in (".wiki-cache", "session"):
