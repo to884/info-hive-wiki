@@ -754,6 +754,43 @@ def _mkdir_shared(path, mode=0o777) -> None:
     except Unknown as e:
         if e.os_error is not FileExistsError or kind(path) != "dir":
             raise
+        return
+    CREATED.append(path)
+
+
+# この実行で作ったディレクトリ（<data_dir> とその祖先、領分の根、状態のディレクトリ）。拒むときに取り除いて戻す
+CREATED: list = []
+
+
+def _rollback(start) -> None:
+    """この実行で作ったディレクトリのうち、start より後に作ったものを、新しいほうから取り除く。
+
+    拒むときに、拒んだ実行が何も残さないようにする（実装の 5 回目のレビューの重大 1。作る前の判定は、まだない名前の
+    別名（Windows の 8.3 の短い名前など）を見分けられない）。取り除くのは空のディレクトリだけで、`rmdir` は空で
+    なければ失敗する。ほかのプロセスが中に何かを置いていれば、そこで止めて残し、警告を出す。
+    """
+    if "no_rollback" in MUTANTS:
+        return
+    made = CREATED[start:]
+    del CREATED[start:]
+    for path in reversed(made):
+        try:
+            w("rmdir", path)
+        except (Unknown, Absent, Stop) as e:
+            warn(f"拒む前に作ったディレクトリを取り除けなかったので残す: {path}（{e}）")
+            return
+
+
+def _enter_root_then_check(browse_root, check) -> None:
+    """領分の根に入り（なければ作り）、作ったあとの場所で check を行う。check が拒めば、この実行で作ったものを
+    取り除いてから拒む。作る前の判定で止められなかった重なり（別名で届く場所）も、何も残さずに止まる。"""
+    start = len(CREATED)
+    enter_root(browse_root, create=True)
+    try:
+        check()
+    except Stop:
+        _rollback(start)
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -973,19 +1010,27 @@ def build(root, out, files: dict, default: bool, owner: str, browse_root, report
     """
     global G
     G = Guard(root)
+    CREATED.clear()
     out, browse_root = os.fspath(out), os.fspath(browse_root)
     work = out + ".browse-work"
+
+    def check():
+        _check_out(out)
+        _check_nesting(out, browse_root, default)
     if default:
         _check_not_nested(browse_root)
     if default or "enter_root_first" in MUTANTS:     # 対照: 実装の 1 回目の形（--out も、根に入ってから確かめる）
-        enter_root(browse_root, create=True)
-        _check_out(out)
-        _check_nesting(out, browse_root, default)
+        if "enter_root_first" in MUTANTS:
+            enter_root(browse_root, create=True)
+            check()
+        else:
+            _enter_root_then_check(browse_root, check)
     else:
-        _check_out(out)
-        _check_nesting(out, browse_root)
-        # --out の書き出しも、根の共通のロックを取るので、根に入る（設計の 6.4 の 1）
-        enter_root(browse_root, create=True)
+        # 作る前に判定し、--out の書き出しも根の共通のロックを取るので根に入り、作ったあとの場所でもう一度判定する
+        # （設計の 6.4 の 1）。作ったあとの判定で拒めば、作ったものを取り除いて戻す。どちらも、共通のロックの
+        # ファイルを作る前に行うので、取り除くのは空のディレクトリだけである
+        check()
+        _enter_root_then_check(browse_root, check)
     common = Lock(os.path.join(browse_root, "build.lock"))
     if not common.acquire(lock_wait):
         raise Stop("ほかの書き出しが終わらない。終わってからやり直す")
@@ -1180,12 +1225,13 @@ def _enter_state(root, browse_root, state_dir, owner, create=False) -> bool:
     """
     global G
     G = Guard(root)
+    CREATED.clear()
     if create:
         _check_not_nested(browse_root)
-    if not enter_root(browse_root, create):
+        _enter_root_then_check(browse_root, lambda: _check_not_nested(state_dir, SERVER_MARKER))
+    elif not enter_root(browse_root, create):
         return False
     if create:
-        _check_not_nested(state_dir, SERVER_MARKER)
         # 状態のディレクトリと記録は、ほかの利用者に読ませない（トークンを持つ。POSIX の権限。0.10.0 と同じ）
         use_territory(state_dir, SERVER_MARKER, owner=owner, lock_name="server.lock", mode=0o700)
         return True
