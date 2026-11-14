@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-11-14
+
 ### Fixed
 
 - frontmatter の `type` と `updated` を配列（`type: [concept]`、`updated: [2026-03-01]`）や値なし（`type:`、`updated:`。パーサーは空の配列を返す）で書いたページを、文字で書いたページと同じように扱うようにした。今までは次のようになっていた。
