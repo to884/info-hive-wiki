@@ -24,7 +24,8 @@ ADR-0020）。記録から会話だけを許可リストで抜き出し、自動
             --expect-sha256 <render_sha256>       raw を重ねて書かない形で置き、読み取り専用にする
     verify  --raw-root <R> --slug <S> --expect-sha256 <render_sha256>
                                                    raw のバイト列が承認したものか、読み取り専用かを照らす
-    scan    --transcript <P> [共通] --decisions <F> [--allow <文字列> ...]  < 書く予定の文
+    scan    --transcript <P> [共通] --decisions <F> [--allow <文字列> ...] [--path <書いたファイル> ...]
+                                                   < 書く予定の文（--path がなければ標準入力）
                                                    伏せた文字列と、自動の伏せ字の規則に当たる文字列を探す
 
 共通の引数: [--session-id <ID>] [--before <uuid>] [--tools summary|none] [--keep-reminders]
@@ -49,6 +50,7 @@ import re
 import secrets
 import stat
 import sys
+import time
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
@@ -336,6 +338,12 @@ def redact(text: str, red: Redactions | None = None) -> str:
         red.add("auto_secret", m.group(0))
         return PLACE_SECRET
 
+    def pem(m):
+        # 塊の全体に加えて、本体の各行も探す（本体だけを書き戻しても見つけるため）。
+        body = [ln.strip() for ln in m.group(0).split("\n") if ln.strip() and "-----" not in ln]
+        red.add("auto_secret", m.group(0), *body)
+        return PLACE_SECRET
+
     def named(m):
         red.add("auto_secret", m.group(3))
         return m.group(1) + m.group(2) + PLACE_SECRET
@@ -348,7 +356,7 @@ def redact(text: str, red: Redactions | None = None) -> str:
         red.add("auto_home", m.group(1))
         return PLACE_HOME
 
-    text = RE_PEM.sub(secret, text)
+    text = RE_PEM.sub(pem, text)
     text = RE_PREFIX.sub(secret, text)
     text = RE_JWT.sub(secret, text)
     text = RE_NAMED.sub(named, text)
@@ -649,7 +657,7 @@ def extract(rng: Range, opts: Options) -> Extract:
             if how == "text":
                 text = normalize_newlines(block["text"]).strip("\n")
                 if text.strip():
-                    pieces.append(("text", redact(text, red)))
+                    pieces.append(("text", text))  # 伏せ字は、つないだ本文の全体にかける
             elif how == "tool":
                 if opts.tools == "summary":
                     pieces.append(("tool", tool_summary(block, red)))
@@ -740,7 +748,9 @@ def extract(rng: Range, opts: Options) -> Extract:
                 turn._pieces = list(bodies[uid])
     for turn in turns:
         if turn.kind == "claude":
-            turn.body = join_pieces(turn._pieces)
+            # 伏せ字は、raw に出す単位（つないだ本文）の全体にかける。ブロックごとにかけると、複数の行や
+            # ブロックにまたがる規則（秘密の鍵の塊）が、つなぐ前の単位では当たらない。
+            turn.body = redact(join_pieces(turn._pieces), red)
             del turn._pieces, turn._group
 
     # frontmatter の値
@@ -1146,6 +1156,7 @@ def raw_ref_of(wiki: Path, target: Path) -> str:
 def write_raw(wiki: Path, raw_root: Path, slug: str, data: bytes) -> tuple[str, Path]:
     """raw を重ねて書かない形で置く。返り値は（状態, パス）。"""
     target = raw_root / f"{slug}.md"
+    busy = 0
     while True:
         check_destination(wiki, raw_root, target)
         if os.path.lexists(target):
@@ -1164,6 +1175,15 @@ def write_raw(wiki: Path, raw_root: Path, slug: str, data: bytes) -> tuple[str, 
                 publish_exclusive(tmp, target)
             except FileExistsError:
                 continue
+            except PermissionError as exc:
+                # Windows では、ほかのプロセスが同じ行き先へ名前を変えている最中だと、FileExistsError ではなく
+                # アクセスの拒否になる。少し待って行き先を確かめ直す（できていれば identical か conflict）。
+                # 回数を限り、本当に書けないディレクトリでは止まる。
+                if os.name == "nt" and busy < 50:
+                    busy += 1
+                    time.sleep(0.02)
+                    continue
+                raise Fail(f"raw を置けない（{exc}）")
             except ExclusiveUnsupported as exc:
                 raise Fail(f"このファイルシステムでは、raw を重ねて書かない形で置けないので書かない（{exc}）")
             after_publish()
@@ -1483,7 +1503,7 @@ def cmd_decide(args) -> int:
         start = text.find(args.text)
         while start != -1:
             found.append((target, start, start + len(args.text)))
-            start = text.find(args.text, start + len(args.text))
+            start = text.find(args.text, start + 1)  # 重なる一致も数える
     if not found:
         raise Fail("一致する文字列が土台にない（自動の伏せ字をかけたあとの文で探す）")
     if args.nth is not None:
@@ -1558,6 +1578,30 @@ def cmd_verify(args) -> int:
     return 0 if result["sha256_matches"] and result["read_only"] else 1
 
 
+def _joins_previous(ch: str) -> bool:
+    """正規化で前の文字と合成されうる文字（結合文字、半角の濁点と半濁点、ハングルの中声と終声）。"""
+    code = ord(ch)
+    return bool(unicodedata.combining(ch)) or code in (0xFF9E, 0xFF9F) or 0x1160 <= code <= 0x11FF \
+        or 0xD7B0 <= code <= 0xD7FF
+
+
+def segment_map(line: str) -> tuple[list, list]:
+    """行を、正規化で切れない塊（前の文字と合成されない文字の前で切る）に分け、塊ごとの正規化した位置と元の
+    位置を返す。塊ごとの正規化をつないだものが行全体の正規化と違えば、対応を取れないので空を返す（列は行の
+    先頭にする）。計算は行の長さに比例する。"""
+    starts = [i for i, ch in enumerate(line) if i == 0 or not _joins_previous(ch)]
+    norm_starts, total, parts = [], 0, []
+    for k, s in enumerate(starts):
+        e = starts[k + 1] if k + 1 < len(starts) else len(line)
+        piece = _norm_line(line[s:e])
+        norm_starts.append(total)
+        total += len(piece)
+        parts.append(piece)
+    if "".join(parts) != _norm_line(line):
+        return [], []
+    return norm_starts, starts
+
+
 def scan_text(text: str, ex: Extract, spans: list, allow: list) -> tuple[list, int]:
     """書く予定の文から、伏せた文字列と規則に当たる文字列を探す。返り値は（見つけた場所, 短くて探さない数）。"""
     needles: dict = {}
@@ -1584,16 +1628,20 @@ def scan_text(text: str, ex: Extract, spans: list, allow: list) -> tuple[list, i
         o += len(line) + 1
         n_ += len(nline) + 1
 
+    maps: dict = {}
+
     def where(starts: list, offset: int, normalized: bool) -> tuple[int, int]:
         idx = bisect.bisect_right(starts, offset) - 1
         within = offset - starts[idx]
         if not normalized:
             return idx + 1, within + 1
-        line = lines[idx]
-        k = 0
-        while k < len(line) and len(_norm_line(line[:k + 1])) <= within:
-            k += 1
-        return idx + 1, k + 1
+        if idx not in maps:
+            maps[idx] = segment_map(lines[idx])
+        seg_norm_starts, seg_orig_starts = maps[idx]
+        if not seg_norm_starts:
+            return idx + 1, 1
+        j = bisect.bisect_right(seg_norm_starts, within) - 1
+        return idx + 1, seg_orig_starts[max(j, 0)] + 1
 
     def occurrences(haystack: str, needle: str) -> list:
         out, start = [], haystack.find(needle)
@@ -1624,12 +1672,26 @@ def scan_text(text: str, ex: Extract, spans: list, allow: list) -> tuple[list, i
 def cmd_scan(args) -> int:
     dec = load_decisions(Path(args.decisions))
     ex = load_extract(args, dec)
-    data = sys.stdin.buffer.read()
-    try:
-        text = data.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        raise Fail("標準入力を UTF-8 として読めない")
-    findings, short = scan_text(text, ex, dec.spans, args.allow or [])
+    if args.path:
+        # 書いたあとのファイルの全体を照らす（S9）。断片と既存の文がつながって伏せた文字列になったものも見つける。
+        findings, short = [], 0
+        for value in args.path:
+            path = Path(value)
+            try:
+                text = path.read_bytes().decode("utf-8-sig")
+            except OSError as exc:
+                raise Fail(f"照らすファイルを読めない: {path}（{exc.strerror or exc}）")
+            except UnicodeDecodeError:
+                raise Fail(f"照らすファイルを UTF-8 として読めない: {path}")
+            rows, short = scan_text(text, ex, dec.spans, args.allow or [])
+            findings += [{"path": str(path), **row} for row in rows]
+    else:
+        data = sys.stdin.buffer.read()
+        try:
+            text = data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            raise Fail("標準入力を UTF-8 として読めない")
+        findings, short = scan_text(text, ex, dec.spans, args.allow or [])
     result = {"findings": findings, "skipped_short": short}
     out_json(result) if args.json else out_lines(result)
     return 1 if findings else 0
@@ -1713,6 +1775,8 @@ def build_parser() -> argparse.ArgumentParser:
     common(p)
     p.add_argument("--decisions", required=True)
     p.add_argument("--allow", action="append", default=None)
+    p.add_argument("--path", action="append", default=None,
+                   help="標準入力の代わりに、書いたあとのファイルの全体を照らす（繰り返し指定できる）")
     return parser
 
 
