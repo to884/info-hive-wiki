@@ -850,47 +850,77 @@ def _number(name) -> int:
         return 0
 
 
-def _existing_ancestor(path):
-    """path か、その祖先のうち、今あるもの（種類が「ない」でないもの）。"""
+def _numbered(name, *prefixes) -> bool:
+    """name が、browse の番号の付いた名前（tmp-N、old-N、del-N）か。番号のないものは、知らない項目として残す
+    （設計の 6.2。実装の 2 回目のレビューの軽微）。"""
+    head, sep, tail = name.partition("-")
+    return bool(sep) and head in prefixes and tail.isdigit() and tail.isascii()
+
+
+def _planned(path):
+    """作られる予定の場所。(今ある、いちばん近い祖先の解いたパスから根までの識別子の並び, まだない名前の並び)。
+
+    書き出し先も browse のデータの場所も、まだないことがある。まだない部分にはリンクがない（ないものはリンクでも
+    ない）ので、今ある祖先の識別子と、まだない名前の並びで、場所が決まる（実装の 2 回目のレビューの重大 1）。
+    """
+    tail = []
     p = path
     while kind(p) == "absent":
         parent = os.path.dirname(p)
         if parent == p:
             raise failure(Unknown, "今ある祖先がない", path)
+        tail.insert(0, os.path.basename(p))
         p = parent
-    return p
+    r = x("realpath", p)
+    chain = []
+    while True:
+        chain.append(ident(r))
+        parent = os.path.dirname(r)
+        if parent == r:
+            break
+        r = parent
+    return chain, tail
+
+
+def _within(inner, outer) -> bool:
+    """作られる予定の場所 inner が、outer と同じか、その中か。
+
+    outer が今あれば、inner の今ある祖先のどれかが outer なら中である（inner のまだない部分は、outer の中にしか
+    できない）。outer がまだなければ、inner も同じ今ある祖先の下で、まだない名前の並びが outer の並びで始まるとき
+    だけ中である。名前は、大文字と小文字を区別しないファイルシステムに合わせて同一視する。重なりを広く取るのは、
+    これが守りではなく、拒む判定だからである（拒みすぎても、何も変えない）。
+    """
+    inner_chain, inner_tail = inner
+    outer_chain, outer_tail = outer
+    if not outer_tail:
+        return outer_chain[0] in inner_chain
+    if inner_chain[0] != outer_chain[0] or len(inner_tail) < len(outer_tail):
+        return False
+    return [n.casefold() for n in inner_tail[:len(outer_tail)]] == [n.casefold() for n in outer_tail]
 
 
 def _check_nesting(out, browse_root) -> None:
-    """--out の書き出し先を、ほかの browse のディレクトリ（目印を持つディレクトリ）と、browse のデータの場所の中に
-    作らない。browse のデータの場所も、--out の中に置かない（設計の 6.1 の入れ子。0.10.0 と同じ）。
+    """--out の書き出し先と作業用のディレクトリを、ほかの browse のディレクトリ（目印を持つディレクトリ）と、browse の
+    データの場所の中に作らない。browse のデータの場所も、--out と作業用のディレクトリの中に置かない（設計の 6.1 の
+    入れ子。0.10.0 と同じ）。
 
     守りではない。入れ子にすると、外側の世代が「一覧にない項目がある」として次の書き出しで止まるので、先に知らせる。
-    何も作る前に呼ぶ。browse のデータの場所がまだなければ、今ある祖先で照らす（作ってから拒むと、拒んだ書き出し先が
-    変わる。実装の 1 回目のレビューの重大 1）。
+    何も作る前に呼ぶ。どの場所も、まだなければ、作られる予定の場所で照らす。
     """
-    data_id = ident(x("realpath", browse_root)) if kind(browse_root) == "dir" else None
     p = x("realpath", os.path.dirname(out))
     while True:
         for marker in MARKERS:
             if kind(os.path.join(p, marker)) != "absent":
                 raise Stop(f"ほかの browse のディレクトリの中には書き出さない: {os.path.dirname(out)}")
-        if data_id is not None and ident(p) == data_id:
-            raise Stop(f"--out は、browse のデータの場所（{browse_root}）と重ならない場所にする")
         parent = os.path.dirname(p)
         if parent == p:
             break
         p = parent
-    if kind(out) == "dir":
-        q = x("realpath", _existing_ancestor(browse_root))
-        out_id = ident(x("realpath", out))
-        while True:
-            if ident(q) == out_id:
-                raise Stop(f"--out は、browse のデータの場所（{browse_root}）と重ならない場所にする")
-            parent = os.path.dirname(q)
-            if parent == q:
-                return
-            q = parent
+    data = _planned(browse_root)
+    for place in (out, out + ".browse-work"):
+        planned = _planned(place)
+        if _within(planned, data) or _within(data, planned):
+            raise Stop(f"--out は、browse のデータの場所（{browse_root}）と重ならない場所にする")
 
 
 def _check_out(out) -> None:
@@ -932,6 +962,11 @@ def build(root, out, files: dict, default: bool, owner: str, browse_root, report
     if not common.acquire(lock_wait):
         raise Stop("ほかの書き出しが終わらない。終わってからやり直す")
     try:
+        # ほかの書き出しの結果（入れ子にしようとした外側の世代など）に依る判定は、共通のロックの中でもう一度行う。
+        # ロックの前の判定は、作る前に止めるためで、ほかの書き出しと並んで走りうる（0.10.0 と同じ）
+        _check_out(out)
+        if not default:
+            _check_nesting(out, browse_root)
         use_territory(work, WORK_MARKER, owner=owner if default else None, lock_name="build.lock")
         lock = Lock(os.path.join(work, "build.lock"))
         if not lock.try_acquire():
@@ -954,7 +989,7 @@ def _discard(work, names) -> None:
                 move(path, target)
                 path = target
             remove_tree(path)
-        except (Unknown, Absent) as e:
+        except (Unknown, Absent, Stop) as e:
             if "coarse_warning" in MUTANTS:
                 warn(f"消せなかったので残す: {name}（{e}）")      # 対照: 6 版目の初めの形（付け替える前の名前だけ）
             elif "silent_post_commit" not in MUTANTS:
@@ -967,9 +1002,9 @@ def _discard(work, names) -> None:
 def _build_locked(out, work, files, default, report_text) -> int:
     # 2. 作業用の残りを消す
     entries = listdir(work)
-    leftover = ("tmp-", "del-", "old-") if "discard_old_first" in MUTANTS else ("tmp-", "del-")   # 対照: 退避の世代も消す
-    _discard(work, [n for n in entries if n.startswith(leftover) or n in LEGACY])
-    olds = [n for n in listdir(work) if n.startswith("old-")]
+    leftover = ("tmp", "del", "old") if "discard_old_first" in MUTANTS else ("tmp", "del")   # 対照: 退避の世代も消す
+    _discard(work, [n for n in entries if _numbered(n, *leftover) or n in LEGACY])
+    olds = [n for n in listdir(work) if _numbered(n, "old")]
     state, reason, _seq = out_state(out, verify=not default)
 
     # 3. 途中で止まった入れ替えから、最後に退避した世代を戻す。番号は、作業用にあるどの名前よりも大きく取るので、
@@ -996,7 +1031,7 @@ def _build_locked(out, work, files, default, report_text) -> int:
         raise Stop(f"書き出し先に、browse が作っていないものがある（{reason}）。書き出し先を確かめる: {out}")
 
     # 5. 通し番号は、作業用にある名前の番号だけで決める
-    used = [_number(n) for n in listdir(work) if n.startswith(("tmp-", "old-", "del-"))]
+    used = [_number(n) for n in listdir(work) if _numbered(n, "tmp", "old", "del")]
     seq = max(used, default=0) + 1
 
     # 6. 世代を作る。7. 入れ替える
@@ -1033,15 +1068,26 @@ def _build_locked(out, work, files, default, report_text) -> int:
             pass                        # 片付けの失敗で、元の失敗を隠さない。残りは次の書き出しが消す
         raise
 
-    # 8. 確定のあと。失敗しても、単位を失敗にしない（設計の 7）。
-    leftovers = [n for n in _listdir_after_commit(work) if n.startswith("old-")]
+    # 8〜9. 確定のあと。どの失敗も、単位を失敗にしない（設計の 7）。片付けと知らせを 1 つの境界で囲む。書き込みの
+    # 守りの Stop（片付けが Wiki のルートの祖先を動かそうとした、など）や、知らせの出力の ValueError も、警告にする
+    # （実装の 2 回目のレビューの重大 2）
+    if MUTANTS & {"commit_then_fail", "raise_post_listdir", "report_fails_unit"}:
+        _after_commit(work, report_text)       # 対照: 確定のあとの失敗を、単位の失敗にする形
+        return 0
+    try:
+        _after_commit(work, report_text)
+    except Exception as e:  # noqa: BLE001  確定のあとの境界
+        warn(f"確定のあとの片付けか知らせに失敗した（{type(e).__name__}: {e}）。新しい世代は書き出してある")
+    return 0
+
+
+def _after_commit(work, report_text) -> None:
+    leftovers = [n for n in _listdir_after_commit(work) if _numbered(n, "old")]
     before = len(WARNINGS)
     _discard(work, leftovers)
     if "commit_then_fail" in MUTANTS and len(WARNINGS) > before:
         raise Unknown("確定のあとの片付けに失敗した")
-    # 9. 知らせ
     report(report_text)
-    return 0
 
 
 def _restorable(path, default):
@@ -1071,6 +1117,10 @@ def report(text: str) -> None:
         if "report_fails_unit" in MUTANTS:
             raise
         warn(f"知らせを出せなかった（{e}）")
+    except ValueError as e:      # 閉じた標準出力（通信の失敗）
+        if "report_fails_unit" in MUTANTS:
+            raise
+        warn(f"知らせを出せなかった（{type(e).__name__}）")
 
 
 def _listdir_after_commit(work):
@@ -1089,8 +1139,9 @@ def _listdir_after_commit(work):
 # ---------------------------------------------------------------------------
 
 class Server:
-    def __init__(self, state_dir, lock, owner, root):
+    def __init__(self, state_dir, lock, owner, root, browse_root):
         self.state_dir, self.lock, self.owner, self.root = state_dir, lock, owner, root
+        self.browse_root = browse_root
 
 
 def _enter_state(root, browse_root, state_dir, owner, create=False) -> bool:
@@ -1165,15 +1216,19 @@ def serve_start(root, browse_root, state_dir, owner, make_record):
     except BaseException:
         lock.release()
         raise
-    return "started", Server(state_dir, lock, owner, root)
+    return "started", Server(state_dir, lock, owner, root, browse_root)
 
 
 def serve_finish(server) -> None:
     """終了。待ち受けを閉じたあとに呼ぶ。記録を消し、ロックを離す。記録を消せなくても、ロックは離す。"""
-    global G
-    G = Guard(server.root)
     try:
-        w("unlink", os.path.join(server.state_dir, "server.json"))
+        # 起動のときに確かめた名前でも、終了のときにもう一度、領分の根と状態のディレクトリを確かめてから触れる
+        # （設計の 7.1。実装の 2 回目のレビューの重大 3。サーバーが動いているあいだに、名前がリンクに置き換わりうる）
+        if _enter_state(server.root, server.browse_root, server.state_dir, server.owner):
+            marker = os.path.join(server.state_dir, SERVER_MARKER)
+            if (read_text(marker) if kind(marker) == "file" else None) != server.owner:
+                raise Stop("状態のディレクトリの目印が、このサーバーのものでない")
+            w("unlink", os.path.join(server.state_dir, "server.json"))
     except Absent:
         pass
     except (Unknown, Stop) as e:

@@ -40,7 +40,8 @@ import secrets  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
 import urllib.parse  # noqa: E402
-from pathlib import Path  # noqa: E402
+# Path は持たない。純粋なパスの操作だけを使う（入出力は層の口。構造の直しの設計の 3）
+from pathlib import PurePath  # noqa: E402
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
@@ -89,12 +90,12 @@ def flush_warnings() -> None:
     fs.WARNINGS.clear()
 
 
-def wiki_root(arg: str) -> Path:
+def wiki_root(arg: str) -> PurePath:
     """初期化された wiki のルート。SCHEMA.md のないディレクトリは断る（ADR-0019）。build、serve、stop、core の
     どれも通る。stop も通すのは、未初期化のディレクトリのためにデータの場所に状態のディレクトリを作らないためである。
     判定は、パスを解決するより前に行う。解決の失敗も、同じ理由の文と案内で止める。"""
     try:
-        return initialized.resolve(Path(arg).expanduser())
+        return PurePath(initialized.resolve(os.path.expanduser(arg)))
     except initialized.NotInitialized as e:
         raise Failed(str(e)) from e
 
@@ -116,7 +117,7 @@ def _unknown_text(e) -> str:
 READ_ATTEMPTS = 3
 
 
-def _read_and_render(root: Path, raw: str, scope: "str | None", generated_at: str):
+def _read_and_render(root: PurePath, raw: str, scope: "str | None", generated_at: str):
     """写しを採り、すべてのページを描く。読んでいるあいだに Wiki が変われば、3 回までやり直す（設計の 4.2）。"""
     for attempt in range(READ_ATTEMPTS):
         try:
@@ -130,10 +131,10 @@ def _read_and_render(root: Path, raw: str, scope: "str | None", generated_at: st
     raise AssertionError("unreachable")
 
 
-def _machine_needles(root: Path, snap) -> "tuple[list, int]":
+def _machine_needles(root: PurePath, snap) -> "tuple[list, int]":
     """公開の前の検査で探す絶対パス（Wiki のルート、ホーム、data_dir、Wiki の外にある入力の実体）。
     (並び, 実体の場所を確かめられなかった入力の数) を返す。"""
-    needles = [str(root), str(Path.home()), os.path.abspath(common.data_dir())]
+    needles = [str(root), os.path.expanduser("~"), os.path.abspath(common.data_dir())]
     try:
         real_root = os.path.normcase(fs.resolve(root))
     except (fs.Unknown, fs.Absent):
@@ -151,8 +152,8 @@ def _machine_needles(root: Path, snap) -> "tuple[list, int]":
     return needles, unknown
 
 
-def build(root: Path, out_arg: "str | None", raw: "str | None", scope: "str | None" = None) -> dict:
-    root = Path(root)
+def build(root: PurePath, out_arg: "str | None", raw: "str | None", scope: "str | None" = None) -> dict:
+    root = PurePath(root)
     key = common.wiki_key(root)
     bdir = browse_dir()
     default = out_arg is None
@@ -187,7 +188,7 @@ def build(root: Path, out_arg: "str | None", raw: "str | None", scope: "str | No
     for kind, rel in snap.unreadable:
         warnings.append(f"この入力を読めない。ない Wiki と同じに描き、「読めない」と示した（{kind}: {rel}）")
 
-    report = {"wiki": root.as_posix(), "out": Path(out).as_posix(), "generation": c.generation,
+    report = {"wiki": root.as_posix(), "out": PurePath(out).as_posix(), "generation": c.generation,
               "pages": len(c.drawn), "raw": raw, "warnings": list(warnings), "diagnostics": len(c.diagnostics)}
     fs.WARNINGS.clear()
     for message in warnings:
@@ -273,7 +274,7 @@ def _quote_path(name: str) -> str:
 class BrowseState:
     """サーバーが持つ中核と、作り直しの状態（設計の 8.3）。"""
 
-    def __init__(self, root: Path, raw: str = "text", scope: "str | None" = None):
+    def __init__(self, root: PurePath, raw: str = "text", scope: "str | None" = None):
         self.root = root
         self.raw = raw
         # このサーバーが wiki のページ（サイドバーの先頭とタブの題名）に描くスコープ。サーバーは描くスコープを
@@ -549,7 +550,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 class App:
-    def __init__(self, root: Path, idle: float, verbose: bool = False, scope: "str | None" = None,
+    def __init__(self, root: PurePath, idle: float, verbose: bool = False, scope: "str | None" = None,
                  assets: "dict | None" = None):
         self.root = root
         self.key = common.wiki_key(root)
@@ -648,7 +649,7 @@ def _drawn_scope(live: dict) -> "str | None":
     return core.normalize_scope(live.get("scope"))
 
 
-def _state_dir(root: Path) -> str:
+def _state_dir(root: PurePath) -> str:
     return os.path.join(browse_dir(), f"{common.wiki_key(root)}.server")
 
 
@@ -687,7 +688,7 @@ def _page_url(base_url_for, port, token, target):
     return base_url_for("index.html"), found.get("state")
 
 
-def serve(root: Path, page: "str | None", open_browser: bool, idle: float, verbose: bool = False,
+def serve(root: PurePath, page: "str | None", open_browser: bool, idle: float, verbose: bool = False,
           scope: "str | None" = None) -> int:
     bdir = browse_dir()
     state_dir = _state_dir(root)
@@ -747,7 +748,7 @@ def serve(root: Path, page: "str | None", open_browser: bool, idle: float, verbo
     return EXIT_OK
 
 
-def stop(root: Path) -> int:
+def stop(root: PurePath) -> int:
     """動いているサーバーを止める。何も作らない（構造の直しの設計の 6.2、7.1）。"""
     bdir = browse_dir()
     state_dir = _state_dir(root)
@@ -871,7 +872,7 @@ def _add_server_commands(sub, common_args) -> None:
     t.add_argument("wiki")
 
 
-def _run_server_command(args, root: Path) -> int:
+def _run_server_command(args, root: PurePath) -> int:
     """root は、main() が判定した wiki のルート。"""
     if args.cmd == "serve":
         return serve(root, args.page, not args.no_open, args.idle_timeout, args.verbose, args.scope)

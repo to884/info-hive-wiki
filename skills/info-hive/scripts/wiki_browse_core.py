@@ -504,7 +504,14 @@ class Core:
                 self.diagnostics.append({"kind": "renamed", "page": pid, "output": self.out_name[pid]})
         self._prepass()
         self._backlinks()
-        self._relations()
+        kept = len(self.diagnostics)
+        try:
+            self._relations()
+        except Exception:  # noqa: BLE001  関係表を作れないときは、関係表だけを使えないにする（構造の直しの設計の 7.2）
+            self.relations = {pid: {"out": [], "in": []} for pid in self.drawn}
+            self.relations_state = "error"
+            del self.diagnostics[kept:]          # 途中まで足した関係表の診断を取り除く
+            self.diagnostics.append({"kind": "relations_error", "reason": "unexpected"})
         self._nav()
         # 解釈できなかった入力も、読めない入力と同じに「不完全」の印を描く
         for kind, rel in self.parse_failures:
@@ -683,9 +690,14 @@ class Core:
             except Exception:  # noqa: BLE001  そのページの関係を使えないにして、ほかのページは続ける
                 meta, problems = dict(p["meta"]), [{"kind": "unreadable_graph", "reason": "unexpected"}]
                 meta.pop("graph", None)
+            try:
+                links = wiki_pages.extract_wikilinks(p["body"])
+            except Exception:  # noqa: BLE001  本文のリンクを取り出せないページは、リンクなしで続ける
+                links = []
+                problems = list(problems) + [{"kind": "unreadable_graph", "reason": "unexpected"}]
             gpages.append({"path": p["rel_path"], "rel_path": p["rel_path"],
                            "disk_rel_path": disk, "slug": p["slug"], "meta": meta, "body": p["body"],
-                           "links": wiki_pages.extract_wikilinks(p["body"]), "fm_problems": problems})
+                           "links": links, "fm_problems": problems})
         try:
             _nodes, page_node_ids, _aliases = wiki_graph_extract.build_nodes(gpages, ontology, diag)
             edges = wiki_graph_extract.build_edges(gpages, page_node_ids, diag)
