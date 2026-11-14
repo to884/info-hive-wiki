@@ -212,7 +212,8 @@ gist をめぐるコミュニティの議論で、このパターンがうまく
 - `scripts/wiki_lint.py`: 構造の健全性チェック（孤立ページ、リンク切れ、大きすぎるページ、frontmatter の検証、古い日付、`YYYY-MM-DD` でない日付、大文字と小文字だけが違うページ）
 - `scripts/wiki_pages.py`: lint、検索、統計、グラフが共有する、ページの集合と wikilink の抜き出しと解決の規則。コードの中の `[[...]]` はリンクとして数えない。本文は同梱した `scripts/_vendor/` の markdown-it-py で読む
 - `scripts/wiki_stats.py`: wiki の規模（ページ数、行数、文字数）、種類別のページ数、リンク密度の簡単なまとめ。インデックスを分割するタイミングを決めるのに役立つ
-- `scripts/wiki_fetch.py`: Web ページを取得し、本文を Markdown にして画像とともに `raw/` に保存する。原文の HTML の SHA-256 を記録し、同じ内容の再取得を見分ける。翻訳と画像の説明はモデルが行う
+- `scripts/wiki_fetch.py`: Web ページを取得し、本文を Markdown にして画像とともに `raw/` に保存する。原文の HTML の SHA-256 を記録し、同じ内容の再取得を見分ける。サイトに共通の雑音（Wikipedia の部品、Medium の表示の文言など）を消し、ブラウザで保存した HTML（`--html-file`）も変換する。翻訳と画像の説明はモデルが行う
+- `scripts/wiki_rawcheck.py`: Web ページの raw のモデルによる書き換えを、取得した直後の写しと照らして検査する。雑音の削除の段（`freeze`。消すことだけをしたか）と、訳と補足の段（`check`。ブロック、コード、リンク、画像、表の形が変わっていないか）
 - `scripts/wiki_encoding.py`: テキストのソースの文字コード（UTF-8、Shift_JIS、EUC-JP、ISO-2022-JP）を調べ、必要なら UTF-8 に変換した別のファイルを書き出す。元のファイルは書き換えない
 - `scripts/wiki_graph_extract.py`: グラフのメタデータと wikilink を、バージョンを固定した PyYAML を使って JSONL、SQLite、GraphML にコンパイルする
 - `scripts/wiki_graph_lint.py`: バージョンを固定した PyYAML を使い、型付きエッジをオントロジーと照らして検証する
