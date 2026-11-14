@@ -138,6 +138,11 @@ def work_dir(wiki: Path, slug: str) -> Path:
     return wiki.joinpath(*WORK_SUBDIR, slug)
 
 
+# JSON のファイルを読むときに上がりうる例外。ValueError は、UnicodeDecodeError と JSONDecodeError のほか、桁の
+# 多すぎる整数（int の文字数の上限）も含む。入れ子の深すぎる JSON は RecursionError になる。
+JSON_READ_ERRORS = (OSError, ValueError, RecursionError)
+
+
 def work_dir_complete(wiki: Path, slug: str) -> bool:
     """作業用の写しがそろっているか。wiki_fetch.py は fetch.json を最後に、raw を書き終えてから置く。そろって
     いれば、raw はこの写しと同じ取得で書いたものである（raw をあとで書き換えたかは、freeze と check が照らす）。"""
@@ -146,7 +151,7 @@ def work_dir_complete(wiki: Path, slug: str) -> bool:
         return False
     try:
         json.loads(read_text(wd / "fetch.json"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+    except JSON_READ_ERRORS:
         return False
     return True
 
@@ -364,7 +369,7 @@ def old_version_work_dir(wiki: Path, slug: str, raw_path: Path) -> bool:
         if not (work_dir_complete(wiki, slug) and work_dir_matches_raw(wiki, slug, raw_path)):
             return False
         saved = load_fetch(work_dir(wiki, slug))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+    except JSON_READ_ERRORS:
         return False
     return isinstance(saved, dict) and "fetched_sha256" not in saved
 

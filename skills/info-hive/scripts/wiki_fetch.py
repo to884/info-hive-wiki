@@ -1249,12 +1249,19 @@ OLD_WORK_DIR_NOTE = ("0.14.1 までの版で始めた取り込みの途中の作
 def has_old_work_dir(args, target: Path) -> bool:
     """0.14.1 までの版が書いた、取り込みの途中の作業用の写しがあるか（--force のときは問わない）。
 
-    この版では続けられないことを、取得の結果（原文が同じ、違う、取得の失敗）によらず知らせるために、build と
-    main の両方がこれで決める。続けるかの判定ではない（それは wiki_rawcheck.resumable_fetch が決める）。
+    この版では続けられないことを、取得の結果（原文が同じ、違う、どの例外で止まったか）によらず知らせるために、
+    build（結果の old_work_dir）と main（例外の出口の report_failure）の両方がこれで決める。続けるかの判定では
+    ない（それは wiki_rawcheck.resumable_fetch が決める）。例外の出口からも呼ぶので、規則に反するスラッグや
+    読めない写しでも例外を上げずに False を返す。
     """
     wiki = getattr(args, "wiki", None)
-    return (wiki is not None and not args.force and target.exists()
-            and wiki_rawcheck.old_version_work_dir(wiki, args.slug, target))
+    if wiki is None or args.force:
+        return False
+    try:
+        check_slug(args.slug)
+        return target.exists() and wiki_rawcheck.old_version_work_dir(wiki, args.slug, target)
+    except (OSError, ValueError):
+        return False
 
 
 def build(args) -> tuple[int, dict]:
@@ -1594,31 +1601,37 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         code, result = build(args)
-    except ValueError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-    except FetchError as exc:
-        # 続けられない旧版の写しがあることは、取得に失敗したときも知らせる（build の結果の old_work_dir と同じ）。
-        old = has_old_work_dir(args, args.raw_root / f"{args.slug}.md")
-        if args.json:
-            failed = {"error": "fetch_failed", "message": str(exc)}
-            if old:
-                failed["old_work_dir"] = True
-            print(json.dumps(failed, ensure_ascii=False))
-        print(f"取得に失敗した: {exc}" + (f"\n{OLD_WORK_DIR_NOTE}" if old else ""), file=sys.stderr)
-        return 2
-    except OSError as exc:
+    except (ValueError, FetchError, OSError, RecursionError) as exc:
+        return report_failure(args, exc)
+    print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else render_text(code, result))
+    return code
+
+
+def report_failure(args, exc: BaseException) -> int:
+    """build が上げた例外を、終了コードと出力にする（例外の出口はここだけである）。
+
+    続けられない旧版の写しがあれば、どの例外でも、標準エラーに案内を足し、--json の出力（取得の失敗と入れ子の
+    深すぎる HTML）に old_work_dir を付ける。build の結果の old_work_dir と同じ判定（has_old_work_dir）を使う。
+    """
+    old = has_old_work_dir(args, args.raw_root / f"{args.slug}.md")
+    error = None  # --json のときに出す error の値。None なら標準出力には何も出さない（今までどおり）。
+    if isinstance(exc, FetchError):
+        code, error, message, text = 2, "fetch_failed", str(exc), f"取得に失敗した: {exc}"
+    elif isinstance(exc, RecursionError):
+        message = "HTML の入れ子が深すぎて変換できない"
+        code, error, text = 2, "too_deep", message
+    elif isinstance(exc, ValueError):
+        code, message, text = 1, str(exc), str(exc)
+    else:
         # 注記（write_outputs が戻しきれなかった古い画像の置き場所を書く）も出す。
         notes = "".join(f"\n{note}" for note in getattr(exc, "__notes__", ()))
-        print(f"ファイルを書けない: {exc}{notes}", file=sys.stderr)
-        return 1
-    except RecursionError:
-        message = "HTML の入れ子が深すぎて変換できない"
-        if args.json:
-            print(json.dumps({"error": "too_deep", "message": message}, ensure_ascii=False))
-        print(message, file=sys.stderr)
-        return 2
-    print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else render_text(code, result))
+        code, message, text = 1, str(exc), f"ファイルを書けない: {exc}{notes}"
+    if args.json and error is not None:
+        failed = {"error": error, "message": message}
+        if old:
+            failed["old_work_dir"] = True
+        print(json.dumps(failed, ensure_ascii=False))
+    print(text + (f"\n{OLD_WORK_DIR_NOTE}" if old else ""), file=sys.stderr)
     return code
 
 
