@@ -44,6 +44,8 @@ import re
 import socket
 import struct
 import sys
+import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -1134,12 +1136,38 @@ def _md_url(url: str) -> str:
     return url.replace(" ", "%20").replace("(", "%28").replace(")", "%29")
 
 
+# Windows では、ほかのプロセス（ウイルス対策の検査、検索の索引、エディター）が移動元か移動先を開いていると、
+# os.replace が PermissionError（WinError 5 か 32）で失敗する。開いている時間は短いので、間を置いて試し直す。
+# 待つ時間は合わせて 1 秒である。Windows のほかでは、PermissionError は権限の不足なので試し直さない。
+_REPLACE_RETRY_DELAYS = (0.05, 0.1, 0.15, 0.2, 0.25, 0.25)
+_RETRY_REPLACE_ON_WINDOWS = os.name == "nt"
+
+
+def replace_with_retry(src: Path, dst: Path) -> None:
+    """os.replace(src, dst) を行う。Windows で PermissionError になったときだけ、間を置いて試し直す。
+
+    ほかの例外は試し直さずに上げる。試し直しても失敗したら、最後の PermissionError を上げる。
+    ファイルは消さない。失敗したときの後始末は呼び出し側が行う。
+    """
+    for delay in _REPLACE_RETRY_DELAYS if _RETRY_REPLACE_ON_WINDOWS else ():
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            time.sleep(delay)
+    os.replace(src, dst)
+
+
 def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text: str,
                   images: list[tuple[str, bytes]]) -> None:
     """本文と画像を書く。途中で失敗したら、前の本文と画像をそのまま残す。
 
     新しい本文と画像は一時の場所に書き、古い画像を退避してから、新しい画像と本文を置く。
     どこかで失敗したら、置いた新しい画像を消して、退避した古い画像を戻す。
+    名前の変更（退避、配置、本文の置き換え、戻し）は replace_with_retry で行う。
+    退避の場所は呼び出しごとに新しく作り、前の呼び出しが残した退避の場所は使わない。
+    退避した古い画像を消すのは、本文を置き換えたあとだけである。戻しきれなかった古い画像は、
+    ただ 1 つの写しなので退避の場所に残し、その場所を例外の注記（add_note）で知らせる。
     書き込み先はすべて RAW_ROOT の中に限り、シンボリックリンクを通して外に書かない。
     RAW_ROOT そのものは作らない。初期化（init_wiki.py）が作る（ADR-0019）。
     """
@@ -1148,7 +1176,8 @@ def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text
     pid = os.getpid()
     tmp = raw_root / f".{slug}.md.{pid}.tmp"
     staging = asset_dir.parent / f".{slug}.{pid}.new"
-    backup = asset_dir.parent / f".{slug}.{pid}.old"
+    # 退避の場所（.<スラッグ>.<プロセス ID>.<乱数>.old）は、古い画像があるときに mkdtemp で作る。
+    backup: Path | None = None
     if target.is_symlink():
         raise ValueError(f"保存先がシンボリックリンクになっている: {target}")
     for path in [tmp, asset_dir] + [asset_dir / name for name, _ in images]:
@@ -1161,6 +1190,7 @@ def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text
     old_files = sorted(asset_dir.glob(f"{slug}-*")) if asset_dir.is_dir() else []
     placed: list[Path] = []
     moved: list[tuple[Path, Path]] = []
+    replaced = False
     try:
         with tmp.open("w", encoding="utf-8", newline="") as f:
             f.write(text)
@@ -1169,33 +1199,47 @@ def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text
             for name, data in images:
                 (staging / name).write_bytes(data)
         if old_files:
-            backup.mkdir(parents=True, exist_ok=True)
+            # 前の呼び出しが戻しきれずに残した退避の場所（同じプロセス ID のこともある）を使い回すと、
+            # そこにある古い画像を上書きするか、後始末で消す。毎回、まだない名前の場所を作る。
+            backup = Path(tempfile.mkdtemp(prefix=f".{slug}.{pid}.", suffix=".old", dir=asset_dir.parent))
             for old in old_files:
                 dest = backup / old.name
-                os.replace(old, dest)
+                # 移す前に記録する。移した直後に止められても、戻しと注記がその画像を知っている。
                 moved.append((dest, old))
+                replace_with_retry(old, dest)
         if images:
             asset_dir.mkdir(parents=True, exist_ok=True)
             for name, _data in images:
-                os.replace(staging / name, asset_dir / name)
+                replace_with_retry(staging / name, asset_dir / name)
                 placed.append(asset_dir / name)
-        os.replace(tmp, target)
+        replace_with_retry(tmp, target)
+        replaced = True
     except BaseException:
-        for path in placed:
-            if path.exists():
-                path.unlink()
-        for dest, original in moved:
-            if dest.exists():
-                os.replace(dest, original)
+        try:
+            for path in placed:
+                if path.exists():
+                    path.unlink()
+            for dest, original in moved:
+                if dest.exists():
+                    replace_with_retry(dest, original)
+        except BaseException as exc:
+            if any(dest.exists() for dest, _original in moved):
+                exc.add_note(f"古い画像を戻しきれなかった。戻していない古い画像を {backup} に残した。"
+                             f"{asset_dir} に移すと元に戻る")
+            raise
         raise
     finally:
         if tmp.exists():
             tmp.unlink()
-        for d in (staging, backup):
-            if d.is_dir():
-                for leftover in d.iterdir():
-                    leftover.unlink()
-                d.rmdir()
+        # 退避の場所の中身を消すのは、本文を置き換えたあとだけにする。失敗したときに残っているのは、
+        # 戻しきれなかった古い画像のただ 1 つの写しなので消さない。空になった場所だけを消す。
+        for d, drop_files in ((staging, True), (backup, replaced)):
+            if d is not None and d.is_dir():
+                if drop_files:
+                    for leftover in d.iterdir():
+                        leftover.unlink()
+                if not any(d.iterdir()):
+                    d.rmdir()
 
 
 def build(args) -> tuple[int, dict]:
@@ -1426,7 +1470,8 @@ def build(args) -> tuple[int, dict]:
         tmp.write_bytes(json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"))
     write_outputs(raw_root, target, asset_dir, args.slug, text, pending)
     if tmp is not None:
-        os.replace(tmp, tmp.with_name("fetch.json"))
+        # 書いた直後の fetch.json.tmp は、ウイルス対策の検査が開いていることがある（write_outputs と同じ理由）。
+        replace_with_retry(tmp, tmp.with_name("fetch.json"))
     return 0, result
 
 
@@ -1533,7 +1578,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"取得に失敗した: {exc}", file=sys.stderr)
         return 2
     except OSError as exc:
-        print(f"ファイルを書けない: {exc}", file=sys.stderr)
+        # 注記（write_outputs が戻しきれなかった古い画像の置き場所を書く）も出す。
+        notes = "".join(f"\n{note}" for note in getattr(exc, "__notes__", ()))
+        print(f"ファイルを書けない: {exc}{notes}", file=sys.stderr)
         return 1
     except RecursionError:
         message = "HTML の入れ子が深すぎて変換できない"
