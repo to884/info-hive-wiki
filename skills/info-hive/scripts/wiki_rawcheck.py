@@ -279,7 +279,7 @@ def work_dir_matches_raw(wiki: Path, slug: str, raw_path: Path) -> bool:
 # 作ったものすべてである（警告もここに入る。続きの手順は、前の取得の出力を見て、本文を取れたかを確かめる）。
 RESUME_KEYS = ("source_sha256_of", "title", "source_lang", "encoding", "content_root", "ja_ratio",
                "needs_translation", "chars", "images", "dropped_images", "removed_by_rule", "warnings")
-# 続けるときに使う、取得の記録のキーと型。取得器はいつもこれを書く。0.14.0 が書いた記録には fetched_sha256 と
+# 続けるときに使う、取得の記録のキーと型。取得器はいつもこれを書く。0.14.1 までの版が書いた記録には fetched_sha256 と
 # source_sha256_of がないので、続けられない記録になる（fetch.json と fetched.md を結べず、どの取得かも分からない）。
 _FETCH_TYPES = {"url": str, "final_url": str, "source_sha256": str, "fetched_sha256": str, "source_sha256_of": str,
                 "needs_translation": bool, "images": list, "removed_by_rule": list, "warnings": list}
@@ -314,7 +314,7 @@ def resumable_fetch(wiki: Path, slug: str, raw_path: Path) -> dict | None:
     違う fetch.json で例外にはしない）。続けられるのは、次のすべてを満たすときだけである。
 
     - 写しがそろい（work_dir_complete）、raw の frontmatter が写しの fetched.md と同じ（work_dir_matches_raw）。
-    - fetch.json が取得器の書いた形である（_fetch_record_ok）。0.14.0 が書いた写しは、fetched_sha256 がなく、
+    - fetch.json が取得器の書いた形である（_fetch_record_ok）。0.14.1 までの版が書いた写しは、fetched_sha256 がなく、
       fetch.json と fetched.md を結べないので、続けない（取得して原文が同じでも、別の設定で取った記録かを
       見分けられない）。
     - fetch.json の fetched_sha256 が、fetched.md のバイト列のハッシュと同じ（取得器は、fetched.md に書いた

@@ -1256,7 +1256,7 @@ def build(args) -> tuple[int, dict]:
     # 取り直して原文を比べると、--html-file で取ったページ（DOM のハッシュ）や、取得のたびに変わるページでは、
     # 写しがそろっていても内容が違うとして止まり、ネットにつながらなければ取得の失敗で止まる。
     # --html-file は、渡した内容で取るという入力なので、ここでは続けずに、読んで比べる（下の枝）。
-    # 0.14.0 が書いた写しは、resumable_fetch が続けられないものとする（どちらの枝でも続けない）。
+    # 0.14.1 までの版が書いた写しは、resumable_fetch が続けられないものとする（どちらの枝でも続けない）。
     if wiki is not None and not html_file and not args.force and target.exists():
         saved = wiki_rawcheck.resumable_fetch(wiki, args.slug, target)
         if saved is not None and saved["url"] == args.url:
@@ -1506,7 +1506,7 @@ def render_text(code: int, result: dict) -> str:
         if result.get("work_dir"):
             out.extend(_resume_lines(result))
         elif result.get("work_dir") is False:
-            out.append("作業用の写しがないか、続けられない写し（raw と別の取得のもの、0.14.0 が書いたものなど）。"
+            out.append("作業用の写しがないか、続けられない写し（raw と別の取得のもの、0.14.1 までの版が書いたものなど）。"
                        "取り込みの途中なら、--force で取り直す"
                        "（写しと raw の両方を作り直す）")
         return "\n".join(out)
