@@ -15,8 +15,12 @@ wiki_browse.py — wiki の閲覧（browse）の入口。
 
 build は静的の HTML を書き出す（既定の書き出し先は <data_dir>/browse/<wiki_key>/）。serve は 127.0.0.1 だけで
 待ち受けるサーバーを起動し、動いていれば使い回す。stop はサーバーを止める。core は、中核を Python 以外から
-呼ぶための JSON の入出力である。どれも Wiki のファイルを変えない。設計は
-`docs/plans/wiki-browse-stage1-2026-11-09.md` にある。
+呼ぶための JSON の入出力である。どれも Wiki のファイルを変えず、Wiki のルートの下には何も作らない。browse は、
+領分（<data_dir>/browse/ と、--out の書き出し先の隣の作業用のディレクトリ）の外では、自分が作ったものだけを
+置き換え、消す。設計は `docs/plans/wiki-browse-stage1-2026-11-09.md` と
+`docs/plans/wiki-browse-structure-2026-11-11.md` にある。
+
+このモジュールは、ファイルの入出力を呼ばない。入出力は wiki_browse_fs.py の口を通す（構造の直しの設計の 3）。
 """
 
 import sys
@@ -36,16 +40,11 @@ import secrets  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
 import urllib.parse  # noqa: E402
-from pathlib import Path  # noqa: E402
+# Path は持たない。純粋なパスの操作だけを使う（入出力は層の口。構造の直しの設計の 3）
+from pathlib import PurePath  # noqa: E402
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(SCRIPT_DIR))
-
-import wiki_browse_core as core  # noqa: E402
-import wiki_browse_fs as fs  # noqa: E402
-import wiki_initialized as initialized  # noqa: E402
-import wiki_mcp_common as common  # noqa: E402
-from wiki_text import localize_argparse  # noqa: E402
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, SCRIPT_DIR)
 
 for _stream in (sys.stdout, sys.stderr):
     try:
@@ -53,10 +52,23 @@ for _stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
+# 入出力をするモジュール（wiki_pages は読み込みのときに同梱のファイルを読む）は、コマンドの出口の境界の中で
+# 読み込む（構造の直しの設計の 3.3）。試験は _load() を呼んでから使う。
+core = fs = initialized = common = None
+
 EXIT_OK = 0
 EXIT_FAILED = 1
 EXIT_USAGE = 2
-COMMON_LOCK_WAIT = 60.0
+
+
+def _load() -> None:
+    global core, fs, initialized, common
+    if core is None:
+        # global の名前に直接取り込む（入口の判定の試験が、wiki_initialized の関数の呼び出しを名前で見つける）
+        import wiki_browse_core as core  # noqa: PLC0415
+        import wiki_browse_fs as fs  # noqa: PLC0415
+        import wiki_initialized as initialized  # noqa: PLC0415
+        import wiki_mcp_common as common  # noqa: PLC0415
 
 
 class Failed(Exception):
@@ -64,216 +76,132 @@ class Failed(Exception):
 
 
 def say(message: str) -> None:
-    print(message, file=sys.stderr, flush=True)
+    """標準エラーへの知らせ（通信）。書けなくても、終了コードを変えない（設計の 7）。"""
+    if sys.stderr is None:
+        return
+    try:
+        print(message, file=sys.stderr, flush=True)
+    except (OSError, ValueError):
+        pass
 
 
-def wiki_root(arg: str) -> Path:
+def flush_warnings() -> None:
+    """層が単位の中で出した警告を、標準エラーに出す。"""
+    for message in fs.WARNINGS:
+        say(f"警告: {message}")
+    fs.WARNINGS.clear()
+
+
+def wiki_root(arg: str) -> PurePath:
     """初期化された wiki のルート。SCHEMA.md のないディレクトリは断る（ADR-0019）。build、serve、stop、core の
     どれも通る。stop も通すのは、未初期化のディレクトリのためにデータの場所に状態のディレクトリを作らないためである。
     判定は、パスを解決するより前に行う。解決の失敗も、同じ理由の文と案内で止める。"""
     try:
-        return initialized.resolve(Path(arg).expanduser())
+        return PurePath(initialized.resolve(os.path.expanduser(arg)))
     except initialized.NotInitialized as e:
         raise Failed(str(e)) from e
 
 
-def browse_dir() -> Path:
-    return Path(os.path.abspath(common.data_dir())) / "browse"
+def browse_dir() -> str:
+    """領分の根 <data_dir>/browse（設計の 2.3）。"""
+    return os.path.join(os.path.abspath(common.data_dir()), "browse")
 
 
-def ensure_dir(guard: fs.Guard, path: Path) -> None:
-    """ない祖先のディレクトリを、上から順に守りを通して作る。"""
-    path = Path(path)
-    missing = []
-    p = path
-    while not p.exists():
-        missing.append(p)
-        if p.parent == p:
-            break
-        p = p.parent
-    for d in reversed(missing):
+def _unknown_text(e) -> str:
+    path = getattr(e, "path", None)
+    return f"{e}" + (f"（{path}）" if path else "")
+
+
+# ---------------------------------------------------------------------------
+# 静的の書き出し（設計の 7。構造の直しの設計の 6.4）
+# ---------------------------------------------------------------------------
+
+READ_ATTEMPTS = 3
+
+
+def _read_and_render(root: PurePath, raw: str, scope: "str | None", generated_at: str):
+    """写しを採り、すべてのページを描く。読んでいるあいだに Wiki が変われば、3 回までやり直す（設計の 4.2）。"""
+    for attempt in range(READ_ATTEMPTS):
         try:
-            guard.mkdir(d)
-        except FileExistsError:
-            pass
+            snap = core.take_snapshot(root)
+        except core.InputsChanged:
+            if attempt + 1 == READ_ATTEMPTS:
+                raise Failed("読んでいるあいだに Wiki が変わり続けた。前の世代を残して止める。少し待ってからやり直す")
+            continue
+        c = core.Core(snap, scope=scope)
+        return snap, c, c.render_all(raw, generated_at)
+    raise AssertionError("unreachable")
 
 
-# ---------------------------------------------------------------------------
-# 静的の書き出し（設計の 7）
-# ---------------------------------------------------------------------------
-
-def _read_marker(directory: Path) -> "dict | None":
+def _machine_needles(root: PurePath, snap) -> "tuple[list, int]":
+    """公開の前の検査で探す絶対パス（Wiki のルート、ホーム、data_dir、Wiki の外にある入力の実体）。
+    (並び, 実体の場所を確かめられなかった入力の数) を返す。"""
+    needles = [str(root), os.path.expanduser("~"), os.path.abspath(common.data_dir())]
     try:
-        data = json.loads((directory / fs.GENERATION_MARKER).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if not isinstance(data, dict) or not isinstance(data.get("published_seq"), int):
-        return None
-    return data
+        real_root = os.path.normcase(fs.resolve(root))
+    except (fs.Unknown, fs.Absent):
+        return needles, len(snap.entries)
+    unknown = 0
+    for _kind, rel, _size, _mtime in snap.entries:
+        try:
+            real = fs.resolve(os.path.join(str(root), *rel.split("/")))
+        except (fs.Unknown, fs.Absent):
+            unknown += 1
+            continue
+        folded = os.path.normcase(real)
+        if folded != real_root and not folded.startswith(real_root.rstrip(os.sep) + os.sep):
+            needles.append(real)
+    return needles, unknown
 
 
-def _generation_dirs(work: Path, prefix: str) -> list:
-    if not work.is_dir():
-        return []
-    return sorted(p for p in work.iterdir()
-                  if p.name.startswith(prefix) and p.is_dir() and fs.has_marker(p, fs.GENERATION_MARKER))
-
-
-def _try_rmtree(guard: fs.Guard, path: Path) -> None:
-    if fs.markers_below(path) != [fs.GENERATION_MARKER]:
-        # ほかの browse のディレクトリが中にあるものは消さない。
-        raise fs.Refused(f"消そうとした世代の中に、ほかの browse のディレクトリがある: {path}")
-    try:
-        # 目印を最後に消す。途中で失敗しても目印が残り、次の書き出しで世代として見つけて消せる。
-        guard.rmtree(path, last=fs.GENERATION_MARKER)
-    except OSError as e:
-        say(f"消せなかったので残す（次の書き出しで消す）: {path.name}（{type(e).__name__}）")
-
-
-def cleanup(guard: fs.Guard, out: Path, work: Path) -> None:
-    """作業用のディレクトリを片付け、途中で止まった入れ替えから最後に公開した世代を戻す（設計の 7 の 3）。
-
-    出力先に世代の目印があるときだけ、公開した世代がそこにあるとみなす。出力先がない、または空のディレクトリ
-    のときは、退避した世代のうち published_seq のいちばん大きいものを戻す。
-    """
-    for tmp in _generation_dirs(work, "tmp-"):
-        _try_rmtree(guard, tmp)
-    olds = _generation_dirs(work, "old-")
-    if out.exists() and fs.has_marker(out, fs.GENERATION_MARKER):
-        for old in olds:
-            _try_rmtree(guard, old)
-        return
-    candidates = [(m["published_seq"], o) for o in olds if (m := _read_marker(o)) is not None]
-    if candidates:
-        _seq, best = max(candidates)
-        if out.exists():
-            guard.rmdir_empty(out)   # 空でなければ失敗する（check_output_dir で空だと確かめてある）
-        guard.rename(best, out)
-        say(f"前の書き出しが途中で止まっていたので、最後に公開した世代を戻した（{best.name}）")
-        olds = [o for o in olds if o != best]
-    for old in olds:
-        _try_rmtree(guard, old)
-
-
-def next_seq(guard: fs.Guard, out: Path, work: Path) -> int:
-    seq_file = work / "seq"
-    try:
-        current = int(seq_file.read_text(encoding="utf-8").strip())
-    except (OSError, ValueError):
-        seen = [m["published_seq"] for d in [out, *_generation_dirs(work, "old-")]
-                if (m := _read_marker(d)) is not None]
-        current = max(seen, default=0)
-    new = current + 1
-    guard.write_text(seq_file, f"{new}\n")
-    return new
-
-
-def write_tree(guard: fs.Guard, base: Path, files: dict) -> None:
-    """出力のファイルを base の下に書く。名前は、base の下に収まる相対パスでなければ書かない。"""
-    for name, content in sorted(files.items()):
-        if not core.is_safe_relative(name):
-            raise fs.Refused(f"出力の名前が相対パスでない: {name!r}")
-        target = base / name
-        if not fs.is_within(target, base) or fs.is_within(base, target):
-            raise fs.Refused(f"出力の名前が書き出し先の外を指す: {name!r}")
-        ensure_dir(guard, target.parent)
-        data = content if isinstance(content, bytes) else content.encode("utf-8")
-        guard.write_bytes(target, data)
-
-
-def build(root: Path, out_arg: "str | None", raw: "str | None", scope: "str | None" = None) -> dict:
-    root = Path(root)
+def build(root: PurePath, out_arg: "str | None", raw: "str | None", scope: "str | None" = None) -> dict:
+    root = PurePath(root)
     key = common.wiki_key(root)
     bdir = browse_dir()
     default = out_arg is None
-    out = bdir / key if default else Path(os.path.abspath(os.path.expanduser(out_arg)))
+    out = os.path.join(bdir, key) if default else os.path.abspath(os.path.expanduser(out_arg))
     raw = raw or ("link" if default else "basename")
-    if not default and not out.parent.is_dir():
-        raise Failed(f"書き出し先の親のディレクトリがない: {out.parent}")
-    work = out.with_name(out.name + ".browse-work")
-
-    # 始める前に: 守る場所を決め、どこにも書く前に確かめる（設計の 6.1）。
-    guard = fs.Guard([root, *core.external_inputs(root)])
-    for p in (bdir, out, work):
-        guard.check(p)
-    if not default and (fs.overlaps(out, bdir) or fs.overlaps(work, bdir)):
-        raise Failed(f"--out は、browse のデータの場所（{bdir}）と重ならない場所にする")
-    fs.check_output_dir(out)
-    fs.check_work_dir(work)
-
-    ensure_dir(guard, bdir)
-    with fs.Lock(guard, bdir / "build.lock") as common_lock:
-        if not common_lock.acquire(COMMON_LOCK_WAIT):
-            raise Failed("ほかの書き出しが終わらない。終わってからやり直す")
-        fs.check_output_dir(out)
-        fs.check_work_dir(work)
-        if not work.exists():
-            guard.make_marked_dir(work, fs.WORK_MARKER)
-            fs.check_work_dir(work)
-        with fs.Lock(guard, work / "build.lock") as work_lock:
-            if not work_lock.try_acquire():
-                raise Failed("同じ書き出し先に、ほかの書き出しが動いている")
-            return _build_locked(guard, root, out, work, raw, scope)
-
-
-def _build_locked(guard: fs.Guard, root: Path, out: Path, work: Path, raw: str,
-                  scope: "str | None" = None) -> dict:
     started = time.perf_counter()
-    fs.check_output_dir(out)
-    fs.check_work_dir(work)
-    snap = core.take_snapshot(root)
-    guard.set_protected([root, *snap.external])
-    for p in (out, work):
-        guard.check(p)
-    cleanup(guard, out, work)
-    seq = next_seq(guard, out, work)
-    tmp = work / f"tmp-{seq}"
-    guard.mkdir(tmp)
+    assets = core.load_assets()
+    owner = fs.owner_of(root)
     generated_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    snap, c, files = _read_and_render(root, raw, scope, generated_at)
+    files = {name: (content if isinstance(content, bytes) else content.encode("utf-8"))
+             for name, content in files.items()}
+    files.update(assets)
+    for name in files:
+        if not core.is_safe_relative(name):
+            raise Failed(f"出力の名前が相対パスでない: {name!r}")
+
+    # 公開の前の検査（構造の直しの設計の 8）。見つかれば警告を出す。書き出しは止めない。
+    needles, unresolved = _machine_needles(root, snap)
+    tokens, unreadable_records = fs.server_tokens(bdir)
+    findings = core.scan_machine_info(files, needles, tokens)
+    warnings = []
+    for name, what in findings:
+        warnings.append(f"この出力に、{'絶対パス' if what == 'path' else 'サーバーの操作のトークン'}がある"
+                        f"（{name}）。入力の中身にあるもので、持ち出すと渡る")
+    if unresolved:
+        warnings.append(f"Wiki の外にある入力の実体かを、{unresolved} 件確かめられなかった（絶対パスの検査が不完全）")
+    for name in unreadable_records:
+        warnings.append(f"サーバーの記録を読めないので、トークンが含まれていないかを確かめられなかった（{name}）")
+    for pid in c.render_failures:
+        warnings.append(f"このページを描けない。そのページに「描けない」と出した（{pid}）")
+    for kind, rel in snap.unreadable:
+        warnings.append(f"この入力を読めない。ない Wiki と同じに描き、「読めない」と示した（{kind}: {rel}）")
+
+    report = {"wiki": root.as_posix(), "out": PurePath(out).as_posix(), "generation": c.generation,
+              "pages": len(c.drawn), "raw": raw, "warnings": list(warnings), "diagnostics": len(c.diagnostics)}
+    fs.WARNINGS.clear()
+    for message in warnings:
+        fs.warn(message)
+    report_text = json.dumps({"out": report["out"], "generation": report["generation"], "pages": report["pages"],
+                              "warnings": len(warnings)}, ensure_ascii=False) + "\n"
     try:
-        # 目印を最初に置く。組み立てが途中で失敗しても、作りかけの世代として見つけて消せる。
-        guard.write_text(tmp / fs.GENERATION_MARKER,
-                         json.dumps({"generation": snap.generation, "published_seq": seq}) + "\n")
-        c = core.Core(snap, scope=scope)
-        files = c.render_all(raw, generated_at)
-        write_tree(guard, tmp, files)
-        write_tree(guard, tmp, {name: core.asset_bytes(name) for name in core.ASSETS})
-        needles = [str(root), str(Path.home()), str(Path(os.path.abspath(common.data_dir()))),
-                   *(str(p) for p in snap.external)]
-        leaks, warnings = core.find_leaks(files, needles, c.recorder)
-    except BaseException:
-        try:
-            _try_rmtree(guard, tmp)
-        except (fs.Refused, OSError):
-            pass   # 片付けの失敗で、元の例外を隠さない。残った作りかけは次の書き出しで消す
-        raise
-    report = {"wiki": root.as_posix(), "out": out.as_posix(), "generation": c.generation,
-              "pages": len(c.drawn), "raw": raw, "leaks": leaks, "warnings": warnings,
-              "diagnostics": len(c.diagnostics)}
-    if leaks:
-        _try_rmtree(guard, tmp)
-        guard.write_text(work / "build-report.json", json.dumps(report, ensure_ascii=False, indent=2) + "\n")
-        raise Failed("生成した出力に、生成器が入れた絶対パスがある。前の世代を残して止める: " + ", ".join(leaks[:5]))
-    for name in warnings:
-        say(f"警告: このページの本文に絶対パスがある（{name}）" + ("。持ち出す書き出しに含まれる" if raw == "basename" else ""))
-    fs.check_output_dir(out)
-    old = None
-    if out.exists():
-        if fs.has_marker(out, fs.GENERATION_MARKER):
-            old = work / f"old-{seq}"
-            guard.rename(out, old)
-        else:
-            guard.rmdir_empty(out)
-    try:
-        guard.rename(tmp, out)
-    except OSError:
-        if old is not None:
-            guard.rename(old, out)
-        raise
-    if old is not None:
-        _try_rmtree(guard, old)
+        fs.build(root, out, files, default, owner, bdir, report_text=report_text)
+    finally:
+        flush_warnings()
     report["seconds"] = round(time.perf_counter() - started, 3)
-    guard.write_text(work / "build-report.json", json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     return report
 
 
@@ -286,12 +214,15 @@ def core_loop(stdin, stdout) -> int:
 
     def get(wiki: str):
         root = wiki_root(wiki)
-        cached = cache.get(root)
+        # 鍵は、綴りそのままの文字にする。PureWindowsPath は大文字と小文字を同一視して等しくするが、大文字と小文字を
+        # 区別するディレクトリでは別の Wiki である（実装の 3 回目のレビューの重大 3）
+        key = os.fspath(root)
+        cached = cache.get(key)
         sig = core.signature(root)
-        if cached and cached.snapshot.signature == sig and not cached.snapshot.unreadable:
+        if cached and cached.snapshot.signature == sig and not cached.snapshot.transient:
             return cached
-        c = core.Core(core.take_snapshot(root), record=False)
-        cache[root] = c
+        c = core.Core(core.take_snapshot(root))
+        cache[key] = c
         return c
 
     for line in stdin:
@@ -314,11 +245,13 @@ def core_loop(stdin, stdout) -> int:
                     res = {"ok": False, "error": "unknown_page" if pid not in c.drawn else "bad_raw"}
                 else:
                     res = {"ok": True, "protocol_version": core.PROTOCOL_VERSION, "generation": c.generation,
-                           "id": pid, "path": c.out_name[pid], "html": c.render_page(pid, raw)}
+                           "id": pid, "path": c.out_name[pid], "html": c.render(c.out_name[pid], raw)}
             else:
                 res = {"ok": False, "error": "unknown_op"}
         except Failed:
             res = {"ok": False, "error": "no_wiki"}
+        except (core.InputsUnknown, core.InputsChanged):
+            res = {"ok": False, "error": "unavailable"}
         except (ValueError, AttributeError):
             res = {"ok": False, "error": "bad_request"}
         except Exception as e:  # noqa: BLE001  例外の文字列（絶対パスを含む）は返さない
@@ -329,7 +262,7 @@ def core_loop(stdin, stdout) -> int:
 
 
 # ---------------------------------------------------------------------------
-# サーバー（設計の 8）
+# サーバー（設計の 8。構造の直しの設計の 7.1）
 # ---------------------------------------------------------------------------
 
 BUILD_WAIT = 30.0
@@ -346,11 +279,8 @@ def _quote_path(name: str) -> str:
 class BrowseState:
     """サーバーが持つ中核と、作り直しの状態（設計の 8.3）。"""
 
-    def __init__(self, root: Path, guard: fs.Guard, state_dir: Path, raw: str = "text",
-                 scope: "str | None" = None):
+    def __init__(self, root: PurePath, raw: str = "text", scope: "str | None" = None):
         self.root = root
-        self.guard = guard
-        self.state_dir = state_dir
         self.raw = raw
         # このサーバーが wiki のページ（サイドバーの先頭とタブの題名）に描くスコープ。サーバーは描くスコープを
         # ここにだけ持つ。組み立てるどの中核にも同じものを渡し、操作の口の status と起動の出力もこれを書く。
@@ -360,13 +290,13 @@ class BrowseState:
         self.failed: "str | None" = None
         self.build_lock = threading.Lock()
         self.attempts: dict = {}
-        self.shutdown_requested = False
         # 最後に未初期化と決まった理由の種類（wiki_initialized.REASONS のキー）。応答の文に使う。
         self.uninitialized_kind = "no_marker"
 
     def _should_retry(self) -> bool:
         cur = self.current
-        return self.failed is not None or (cur is not None and cur.snapshot.unreadable)
+        # 開けなかった入力は、ファイルを変えずに読めるようになりうるので、やり直す（UTF-8 でないものは変わらない）
+        return self.failed is not None or (cur is not None and bool(cur.snapshot.transient))
 
     def _recently_tried(self, sig: str) -> bool:
         last = self.attempts.get(sig)
@@ -380,6 +310,8 @@ class BrowseState:
         種類を uninitialized_kind に置く。中核は捨てない。SCHEMA.md が戻れば、入力の印が同じならそのまま使う。
         調べられなかったとき（アクセス権、読み取りの障害、循環するリンクなど）は、初期化されていると確かめられて
         いないので、新しい中核を組み立てない。前の中核があれば古いと示して使い、なければ組み立てられないと答える。
+        入力の名前の集合が分からないときと、読んでいるあいだに Wiki が変わったときも、新しい中核を採らない
+        （構造の直しの設計の 4.1、4.2）。次の要求で、またやり直す。
         """
         found = initialized.check(self.root)
         if found is not None:
@@ -403,18 +335,13 @@ class BrowseState:
                 return self._answer(cur, request_sig, "failed" if self.failed else "building")
             self.attempts = {sig: time.monotonic()}
             if sig is None:
-                # 入力の一覧を作れない（ディレクトリや索引の属性を読めない）。前の中核を古いと示して使う。
-                self.failed = self.failed or "OSError"
+                # 入力の名前の集合が分からない。前の中核を古いと示して使う（なければ 503）。
+                self.failed = self.failed or "InputsUnknown"
                 return self._answer(cur, request_sig, "failed")
             try:
                 snap = core.take_snapshot(self.root)
-                self.guard.set_protected([self.root, *snap.external])
-                if self.guard.overlapping(self.state_dir):
-                    # 状態のディレクトリが守る場所と重なった。記録に触れずに終わる（設計の 6.1）。
-                    self.shutdown_requested = True
-                    return self._answer(cur, request_sig, "failed")
-                new = core.Core(snap, record=False, scope=self.scope)
-            except Exception as e:  # noqa: BLE001  前の中核を使い続ける
+                new = core.Core(snap, scope=self.scope)
+            except Exception as e:  # noqa: BLE001  前の中核を使い続ける（InputsUnknown、InputsChanged を含む）
                 self.failed = type(e).__name__
                 return self._answer(cur, request_sig, "failed")
             # 生成日時は中核に持たせる。答えに使う中核の世代と、いつも同じ組になる。
@@ -426,10 +353,10 @@ class BrowseState:
             self.build_lock.release()
 
     def _signature(self) -> "str | None":
-        """入力の印。入力の一覧を作れなければ None（どの中核の印とも一致しない）。"""
+        """入力の印。入力の名前の集合が分からなければ None（どの中核の印とも一致しない）。"""
         try:
             return core.signature(self.root)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001  InputsUnknown のほか、思わない例外でも新しい中核を採らない
             return None
 
     def _answer(self, c, request_sig: "str | None", reason: "str | None"):
@@ -437,6 +364,9 @@ class BrowseState:
             return None, reason or "building"
         if c.snapshot.signature != request_sig:
             return c, reason or ("failed" if self.failed else "building")
+        if reason == "failed" and self.failed is not None:
+            # 印が同じでも、組み立て直しに失敗しているあいだは、今の中核が最新とは言えない（実装の 1 回目のレビュー）
+            return c, "failed"
         return c, None
 
 
@@ -480,6 +410,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(code, json.dumps(value, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
 
     def _route(self):
+        # 要求の境界（構造の直しの設計の 7.2）。1 つの要求の全体を囲み、ヘッダーのそろった 500 を返す。
         try:
             self._route_inner()
         except Exception as e:  # noqa: BLE001  描画の例外などで接続を黙って閉じない。例外の文字列は出さない
@@ -502,11 +433,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _route_inner(self):
         app = self.server.app
-        app.touch()
+        app.mark_activity()
         self._kind = "-"
-        if app.state.shutdown_requested:
-            app.request_shutdown()
-            return self._text(503, "終わるところである")
         if self.headers.get("Host") != f"127.0.0.1:{app.port}":
             return self._text(421, "Misdirected Request")
         raw_path = urllib.parse.urlsplit(self.path).path
@@ -549,11 +477,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         app = self.server.app
         if name in core.ASSETS:
             ctype = "text/javascript; charset=utf-8" if name.endswith(".js") else "text/css; charset=utf-8"
-            return self._send(200, core.asset_bytes(name), ctype)
+            return self._send(200, app.assets[name], ctype)
         c, stale = app.state.get()
-        if app.state.shutdown_requested:
-            app.request_shutdown()
-            return self._text(503, "終わるところである")
         if c is None and stale == "uninitialized":
             # 応答にパスを出さない（設計の 8.1）。理由はパスを含まない短い文にする。
             reason = initialized.REASONS.get(app.state.uninitialized_kind, initialized.REASONS["no_marker"])
@@ -576,9 +501,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
         """行き先を wikilink と同じ規則で解決し、状態と、解決したページの出力の名前を返す。"""
         app = self.server.app
         c, _stale = app.state.get()
-        if app.state.shutdown_requested:
-            app.request_shutdown()
-            return self._json(503, {"state": "unavailable"})
         if c is None:
             return self._json(200, {"state": "unavailable"})
         r = c.resolve(core.nfc(target))
@@ -633,25 +555,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 class App:
-    def __init__(self, root: Path, guard: fs.Guard, state_dir: Path, idle: float, verbose: bool = False,
-                 scope: "str | None" = None):
+    def __init__(self, root: PurePath, idle: float, verbose: bool = False, scope: "str | None" = None,
+                 assets: "dict | None" = None):
         self.root = root
         self.key = common.wiki_key(root)
-        self.guard = guard
-        self.state_dir = state_dir
         self.idle = idle
         self.verbose = verbose
+        self.assets = assets or {}
         self.view_token = secrets.token_urlsafe(24)
         self.control_token = secrets.token_urlsafe(24)
         self.instance = secrets.token_hex(12)
-        self.state = BrowseState(root, guard, state_dir, scope=scope)
+        self.state = BrowseState(root, scope=scope)
         self.last = time.monotonic()
         self.httpd = None
         self.port = 0
         self.render_errors = 0
         self._stopping = threading.Event()
 
-    def touch(self):
+    def mark_activity(self):
         self.last = time.monotonic()
 
     def request_shutdown(self):
@@ -704,9 +625,24 @@ def _live_status(rec: dict) -> "dict | None":
         return None
 
 
-def _status(rec: dict) -> "str | None":
+def _valid_record(rec) -> "dict | None":
+    """記録の形を確かめる。正しくなければ None。記録は手がかりで、真実はロックである（設計の 7.1）。"""
+    if not isinstance(rec, dict):
+        return None
+    if not isinstance(rec.get("port"), int) or not 0 < rec["port"] < 65536:
+        return None
+    if not all(isinstance(rec.get(k), str) and rec[k] for k in ("view_token", "control_token", "instance")):
+        return None
+    return rec
+
+
+def _answering(rec: "dict | None") -> "dict | None":
+    """記録の instance が、その口で答えているサーバーと同じなら、その答え。違うか答えなければ None。"""
+    rec = _valid_record(rec)
+    if rec is None:
+        return None
     live = _live_status(rec)
-    return live.get("instance") if live else None
+    return live if live is not None and live.get("instance") == rec["instance"] else None
 
 
 def _drawn_scope(live: dict) -> "str | None":
@@ -718,34 +654,8 @@ def _drawn_scope(live: dict) -> "str | None":
     return core.normalize_scope(live.get("scope"))
 
 
-def _read_record(state_dir: Path) -> "dict | None":
-    try:
-        rec = json.loads((state_dir / "server.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if not isinstance(rec, dict):
-        return None
-    if not isinstance(rec.get("port"), int) or not 0 < rec["port"] < 65536:
-        return None
-    if not all(isinstance(rec.get(k), str) and rec[k] for k in ("view_token", "control_token", "instance")):
-        return None
-    return rec
-
-
-def _prepare_state(root: Path) -> "tuple[fs.Guard, Path]":
-    bdir = browse_dir()
-    state_dir = bdir / f"{common.wiki_key(root)}.server"
-    guard = fs.Guard([root, *core.external_inputs(root)])
-    guard.check(bdir)
-    guard.check(state_dir)
-    fs.check_server_dir(state_dir)
-    ensure_dir(guard, bdir)
-    if not state_dir.exists():
-        guard.make_marked_dir(state_dir, fs.SERVER_MARKER, mode=0o700)
-    fs.check_server_dir(state_dir)
-    if os.name == "nt" and os.environ.get(common.DATA_DIR_ENV, "").strip():
-        say("警告: INFO_HIVE_DATA_DIR を指定している。ほかの利用者が読める場所なら、サーバーの記録のトークンを読まれる")
-    return guard, state_dir
+def _state_dir(root: PurePath) -> str:
+    return os.path.join(browse_dir(), f"{common.wiki_key(root)}.server")
 
 
 def _locate(port: int, control_token: str, target: str) -> dict:
@@ -759,9 +669,12 @@ def _locate(port: int, control_token: str, target: str) -> dict:
 
 def _emit(url: str, port: int, reused: bool, page_state: "str | None", open_browser: bool,
           drawn: "str | None") -> None:
-    """起動の出力。scope には、URL の先のサーバーの BrowseState.scope を書く。"""
-    print(json.dumps({"url": url, "port": port, "reused": reused, "page": page_state, "scope": drawn},
-                     ensure_ascii=False), flush=True)
+    """起動の出力（通信）。scope には、URL の先のサーバーの BrowseState.scope を書く。"""
+    try:
+        print(json.dumps({"url": url, "port": port, "reused": reused, "page": page_state, "scope": drawn},
+                         ensure_ascii=False), flush=True)
+    except (OSError, ValueError):
+        say("起動の知らせを標準出力に出せなかった")
     if open_browser:
         import webbrowser
         webbrowser.open(url)
@@ -780,24 +693,41 @@ def _page_url(base_url_for, port, token, target):
     return base_url_for("index.html"), found.get("state")
 
 
-def _refresh_guard(guard: fs.Guard, root: Path, state_dir: Path) -> None:
-    """守る場所を今の入力から決め直す。状態のディレクトリと重なれば止まる。"""
-    external = core.external_inputs(root)
-    guard.set_protected([root, *external])
-    if guard.overlapping(state_dir) or any(fs.is_within(x, state_dir) for x in external):
-        raise fs.Refused("サーバーの状態の場所が、Wiki か Wiki が読む入力と重なる。何も書かずに止める")
-
-
-def serve(root: Path, page: "str | None", open_browser: bool, idle: float, verbose: bool = False,
+def serve(root: PurePath, page: "str | None", open_browser: bool, idle: float, verbose: bool = False,
           scope: "str | None" = None) -> int:
-    guard, state_dir = _prepare_state(root)
-    lock = fs.Lock(guard, state_dir / "server.lock")
+    bdir = browse_dir()
+    state_dir = _state_dir(root)
+    if os.name == "nt" and os.environ.get(common.DATA_DIR_ENV, "").strip():
+        say("警告: INFO_HIVE_DATA_DIR を指定している。ほかの利用者が読める場所なら、サーバーの記録のトークンを読まれる")
+    assets = core.load_assets()
+    owner = fs.owner_of(root)
+    app = App(root, idle, verbose, scope, assets)
+
+    def make_record():
+        # ロックを取ったあとに待ち受けを始め、記録を置き換える（設計の 7.1）
+        httpd = _Server(("127.0.0.1", 0), Handler)
+        httpd.app = app
+        app.httpd = httpd
+        app.port = httpd.server_address[1]
+        return app.record()
+
     deadline = time.monotonic() + RECORD_WAIT
-    while not lock.try_acquire():
-        rec = _read_record(state_dir)
-        live = _live_status(rec) if rec is not None else None
-        if live is not None and live.get("instance") == rec["instance"]:
-            key = rec.get("wiki_key") or common.wiki_key(root)
+    while True:
+        try:
+            outcome, value = fs.serve_start(root, bdir, state_dir, owner, make_record)
+        except BaseException:
+            if app.httpd is not None:
+                app.httpd.server_close()
+            raise
+        finally:
+            flush_warnings()
+        if outcome == "started":
+            server = value
+            break
+        live = _answering(value)
+        if live is not None:
+            rec = value
+            key = rec.get("wiki_key") or app.key
 
             def url_for(name, rec=rec, key=key):
                 return f"http://127.0.0.1:{rec['port']}/{rec['view_token']}/w/{key}/{_quote_path(name)}"
@@ -806,160 +736,167 @@ def serve(root: Path, page: "str | None", open_browser: bool, idle: float, verbo
             _emit(url, int(rec["port"]), True, state, open_browser, _drawn_scope(live))
             return EXIT_OK
         if time.monotonic() >= deadline:
-            raise Failed("動いているサーバーを使い回せない。/wiki:browse --stop で止めてからやり直す")
+            raise Failed("動いているサーバーに届かないので、使い回せない。/wiki:browse --stop で止めてからやり直す")
         time.sleep(0.2)
     try:
-        # ロックを待つあいだに、Wiki のページが状態のファイルを指すようになっているかもしれない。
-        # 守る場所を今の入力から決め直し、重なれば何も書かずに止まる（設計の 6.1）。
-        _refresh_guard(guard, root, state_dir)
-        guard.unlink(state_dir / "server.json")
-        app = App(root, guard, state_dir, idle, verbose, scope)
-        httpd = _Server(("127.0.0.1", 0), Handler)
-        httpd.app = app
-        app.httpd = httpd
-        app.port = httpd.server_address[1]
-        guard.write_text(state_dir / "server.json", json.dumps(app.record(), ensure_ascii=False) + "\n", mode=0o600)
         threading.Thread(target=app.idle_watch, daemon=True).start()
-        server_thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True)
+        server_thread = threading.Thread(target=app.httpd.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True)
         server_thread.start()
         url, state = _page_url(app.url, app.port, app.control_token, page)
         _emit(url, app.port, False, state, open_browser, app.state.scope)
         server_thread.join()
-        httpd.server_close()
-        return _finish(root, app, guard, state_dir)
     finally:
-        lock.release()
+        # 終了: 待ち受けを閉じる、記録を消す、ロックを離す、の順にする（設計の 7.1）
+        app.httpd.server_close()
+        fs.serve_finish(server)
+        flush_warnings()
+    return EXIT_OK
 
 
-def _finish(root: Path, app: "App", guard: fs.Guard, state_dir: Path) -> int:
-    """終わるときの後片付け。記録を消すのは、守る場所と重ならないことを、その時点で確かめてからにする。
-
-    組み立ての途中で終わると、組み立てが読んだ入力（記録を指すページなど）を守る場所に入れる前に、記録を消して
-    しまう。そこで、組み立てのロックを取って組み立てが走っていないことを確かめ、守る場所を今の入力から
-    決め直す（設計の 6.1）。重なれば、記録に触れずに終わる。
-    """
-    got = app.state.build_lock.acquire(timeout=BUILD_WAIT)
-    try:
-        external = core.external_inputs(root)
-        guard.set_protected([root, *external])
-        if not got or app.state.shutdown_requested or guard.overlapping(state_dir) or \
-                any(fs.is_within(x, state_dir) for x in external):
-            say("サーバーの状態の場所が、Wiki か Wiki が読む入力と重なったか、確かめられなかったので、記録を残して終わる")
-            return EXIT_FAILED
-        rec = _read_record(state_dir)
-        if rec is not None and rec.get("instance") == app.instance:
-            try:
-                guard.unlink(state_dir / "server.json")
-            except (OSError, fs.Refused):
-                pass
-        return EXIT_OK
-    finally:
-        if got:
-            app.state.build_lock.release()
-
-
-def stop(root: Path) -> int:
-    guard, state_dir = _prepare_state(root)
-    lock = fs.Lock(guard, state_dir / "server.lock")
-    if lock.try_acquire():
-        try:
-            _refresh_guard(guard, root, state_dir)
-            guard.unlink(state_dir / "server.json")
-        finally:
-            lock.release()
-        print(json.dumps({"stopped": False, "running": False}), flush=True)
-        return EXIT_OK
+def stop(root: PurePath) -> int:
+    """動いているサーバーを止める。何も作らない（構造の直しの設計の 6.2、7.1）。"""
+    bdir = browse_dir()
+    state_dir = _state_dir(root)
+    owner = fs.owner_of(root)
     deadline = time.monotonic() + RECORD_WAIT
-    rec = _read_record(state_dir)
-    while rec is None or _status(rec) != rec["instance"]:
-        if lock.try_acquire():
-            lock.release()
-            print(json.dumps({"stopped": False, "running": False}), flush=True)
+    while True:
+        state, rec = fs.probe_server(root, bdir, state_dir, owner)
+        if state == "not-running":
+            _print_json({"stopped": False, "running": False})
             return EXIT_OK
+        if _answering(rec) is not None:
+            break
         if time.monotonic() >= deadline:
             raise Failed("サーバーが応答しないので、止められない。操作がなければ、いずれ終わる")
         time.sleep(0.2)
-        rec = _read_record(state_dir)
     try:
         _http(int(rec["port"]), "POST", f"/{rec['control_token']}/control/stop")
     except (OSError, http.client.HTTPException):
         pass
-    if not lock.acquire(STOP_WAIT):
-        raise Failed("サーバーが終わらないので、止められなかった")
+    deadline = time.monotonic() + STOP_WAIT
+    while fs.probe_server(root, bdir, state_dir, owner)[0] != "not-running":
+        if time.monotonic() >= deadline:
+            raise Failed("サーバーが終わらないので、止められなかった")
+        time.sleep(0.2)
     try:
-        # 状態のディレクトリが Wiki の入力と重なれば、記録に触れない（サーバー自身の後片付けと同じ）。
-        _refresh_guard(guard, root, state_dir)
-        latest = _read_record(state_dir)
-        if latest is not None and latest.get("instance") == rec["instance"]:
-            guard.unlink(state_dir / "server.json")
-    except fs.Refused:
-        pass
+        fs.remove_record(root, bdir, state_dir, owner, rec["instance"])
     finally:
-        lock.release()
-    print(json.dumps({"stopped": True, "running": False}), flush=True)
+        flush_warnings()
+    _print_json({"stopped": True, "running": False})
     return EXIT_OK
 
 
+def _print_json(value: dict) -> None:
+    try:
+        print(json.dumps(value), flush=True)
+    except (OSError, ValueError):
+        say("結果を標準出力に出せなかった")
+
+
 # ---------------------------------------------------------------------------
-# コマンドライン
+# コマンドライン（コマンドの出口。構造の直しの設計の 7.2）
 # ---------------------------------------------------------------------------
 
 def main(argv=None) -> int:
+    from wiki_text import localize_argparse  # noqa: PLC0415  （文字だけを扱うモジュール）
+
     parser = argparse.ArgumentParser(description="wiki を閲覧する（静的の書き出し、サーバー、中核の入出力）。")
     localize_argparse(parser)
+    common_args = argparse.ArgumentParser(add_help=False)
+    common_args.add_argument("--debug", action="store_true", help="思わない失敗のスタックトレースを標準エラーに出す")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    b = sub.add_parser("build", help="静的の HTML を書き出す")
+    b = sub.add_parser("build", help="静的の HTML を書き出す", parents=[common_args])
     b.add_argument("wiki")
     b.add_argument("--out", default=None, help="書き出し先（既定は <data_dir>/browse/<wiki_key>/）")
-    b.add_argument("--raw", choices=core.RAW_MODES, default=None,
+    b.add_argument("--raw", choices=("text", "link", "basename", "none"), default=None,
                    help="raw: の出し方（既定は、既定の書き出し先で link、--out で basename）")
     _add_scope_arguments(b)
-    sub.add_parser("core", help="中核を、標準入力と標準出力の JSON で呼ぶ")
-    _add_server_commands(sub)
+    sub.add_parser("core", help="中核を、標準入力と標準出力の JSON で呼ぶ", parents=[common_args])
+    _add_server_commands(sub, common_args)
     args = parser.parse_args(argv)
     try:
-        # wiki のパスを受け取るサブコマンド（build、serve、stop）は、振り分けの前の 1 か所で判定する（ADR-0019）。
-        # 新しいサブコマンドも、wiki を引数に取れば既定でここを通る。core は要求ごとに wiki を受け取り、要求ごとに
-        # 判定する（core_loop）。
-        root = wiki_root(args.wiki) if hasattr(args, "wiki") else None
-        if args.cmd == "build":
-            report = build(root, args.out, args.raw, args.scope)
-            print(json.dumps({"out": report["out"], "generation": report["generation"], "pages": report["pages"],
-                              "warnings": len(report["warnings"])}, ensure_ascii=False), flush=True)
-            return EXIT_OK
-        if args.cmd == "core":
-            sys.stdin.reconfigure(encoding="utf-8")
-            return core_loop(sys.stdin, sys.stdout)
-        return _run_server_command(args, root)
-    except (Failed, fs.Refused, core.NameCollision) as e:
+        _load()
+        code = _dispatch(args)
+    except Exception as e:  # noqa: BLE001  コマンドの出口の境界。種類だけの短い知らせと、0 でない終了コード
+        code = _exit_for(e, getattr(args, "debug", False))
+    _final_flush()
+    return code
+
+
+def _final_flush() -> None:
+    """標準出力と標準エラーを最後にフラッシュする（通信）。出せなければ、知らせを捨てて、終了コードを変えない（設計の 7）。
+
+    フラッシュに失敗した出力はバッファーに残り、Python が終わるときにもう一度フラッシュして、終了コード 120 で
+    終わる（実装の 3 回目と 4 回目のレビューの重大 2）。None にした流れは、終わるときにフラッシュしない。
+    """
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name)
+        if stream is None:
+            continue
+        try:
+            stream.flush()
+        except (OSError, ValueError):
+            setattr(sys, name, None)
+            say(f"{name} に出せなかった。知らせを捨てる")
+
+
+def _dispatch(args) -> int:
+    # wiki のパスを受け取るサブコマンド（build、serve、stop）は、振り分けの前の 1 か所で判定する（ADR-0019）。
+    # 新しいサブコマンドも、wiki を引数に取れば既定でここを通る。core は要求ごとに wiki を受け取り、要求ごとに
+    # 判定する（core_loop）。
+    root = wiki_root(args.wiki) if hasattr(args, "wiki") else None
+    if args.cmd == "build":
+        build(root, args.out, args.raw, args.scope)
+        return EXIT_OK
+    if args.cmd == "core":
+        sys.stdin.reconfigure(encoding="utf-8")
+        return core_loop(sys.stdin, sys.stdout)
+    return _run_server_command(args, root)
+
+
+def _exit_for(e: Exception, debug: bool) -> int:
+    if isinstance(e, Failed) or (fs is not None and isinstance(e, fs.Stop)):
         say(str(e))
-        return EXIT_FAILED
-    except core.EnumerationError:
-        say("Wiki のディレクトリの一覧を作れない。アクセス権を確かめる")
-        return EXIT_FAILED
+    elif fs is not None and isinstance(e, (fs.Unknown, fs.Absent)):
+        say(f"確かめられないので、何も変えずに止める: {_unknown_text(e)}")
+    elif core is not None and isinstance(e, core.InputsUnknown):
+        say(f"Wiki の入力の一覧を作れない（{e}）。アクセス権を確かめる")
+    elif core is not None and isinstance(e, core.NameCollision):
+        say(str(e))
+    else:
+        say(f"思わない失敗で止まった（{type(e).__name__}）。--debug を付けると詳しく出す")
+    if debug:
+        import traceback  # noqa: PLC0415
+        try:
+            traceback.print_exception(e, file=sys.stderr)
+        except (OSError, ValueError):
+            pass
+    if fs is not None:
+        flush_warnings()
+    return EXIT_FAILED
 
 
 def _add_scope_arguments(p) -> None:
     """画面に出す wiki のスコープ。wiki を選んだ側（/wiki:browse）が、その wiki が指示や設定で何として登録されて
     いるかで決めて渡す。このスクリプトは、スコープを決めるために何も読まず、wiki の場所から推し量らない。"""
-    p.add_argument("--scope", choices=core.SCOPE_KINDS, default=None,
+    p.add_argument("--scope", choices=("user", "project"), default=None,
                    help="wiki のスコープ（user か project）。省くと画面に出さない")
 
 
-def _add_server_commands(sub) -> None:
+def _add_server_commands(sub, common_args) -> None:
     """serve と stop（設計の 8）。"""
-    s = sub.add_parser("serve", help="127.0.0.1 のサーバーを起動して開く（動いていれば使い回す）")
+    s = sub.add_parser("serve", help="127.0.0.1 のサーバーを起動して開く（動いていれば使い回す）", parents=[common_args])
     s.add_argument("wiki")
     s.add_argument("--page", default=None, help="開くページ（[[slug]] と同じ規則で探す）")
     s.add_argument("--no-open", action="store_true", help="ブラウザで開かない（URL を出すだけ）")
     s.add_argument("--idle-timeout", type=float, default=DEFAULT_IDLE, help="操作がないときに終わるまでの秒数（既定 1800）")
     s.add_argument("--verbose", action="store_true", help="要求の方法、口の種類、状態の番号を標準エラーに出す")
     _add_scope_arguments(s)
-    t = sub.add_parser("stop", help="動いているサーバーを止める")
+    t = sub.add_parser("stop", help="動いているサーバーを止める", parents=[common_args])
     t.add_argument("wiki")
 
 
-def _run_server_command(args, root: Path) -> int:
+def _run_server_command(args, root: PurePath) -> int:
     """root は、main() が判定した wiki のルート。"""
     if args.cmd == "serve":
         return serve(root, args.page, not args.no_open, args.idle_timeout, args.verbose, args.scope)

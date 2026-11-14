@@ -1,13 +1,17 @@
 """
 wiki_browse_core.py — 閲覧（browse）の中核。
 
-Wiki を 1 度だけ読んで写し（Snapshot）を作り、そこからページ、リンク、被リンク、関係表、ナビゲーション、
-診断を組み立て（Core）、ページの HTML を描く。書き込みはしない。静的の書き出しとサーバーは、どちらも
-このモジュールの同じ関数でページを描く（守ること 6）。設計は `docs/plans/wiki-browse-stage1-2026-11-09.md`
-の 2〜5 にある。
+Wiki を読んで写し（Snapshot）を作り、そこからページ、リンク、被リンク、関係表、ナビゲーション、診断を組み立て
+（Core）、ページの HTML を描く。入出力は呼ばない（読むのは wiki_browse_fs.py の口を通す）。静的の書き出しと
+サーバーは、どちらもこのモジュールの同じ関数でページを描く（守ること 6）。設計は
+`docs/plans/wiki-browse-stage1-2026-11-09.md` の 2〜5 と、`docs/plans/wiki-browse-structure-2026-11-11.md` の
+4、5、8 にある。
 
 ページの集合、リンクの解決、`sources:` の解決は、lint と同じ wiki_pages の関数で決める（守ること 2）。
 関係表だけが PyYAML（グラフの抽出）を使う。PyYAML がなければ、関係表は「使えない」になる。
+
+写しは、内容（入力ごとの種類、相対パス、文字か読めない理由、世代）だけを持ち、Path と、機械の絶対パス（Wiki の
+ルート、ホーム、data_dir）を持たない。Core は、内容だけを受け取る（設計の 8）。
 """
 
 from __future__ import annotations
@@ -24,11 +28,11 @@ import threading
 import urllib.parse
 from collections import defaultdict
 from dataclasses import dataclass, field
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import wiki_browse_fs  # noqa: E402
+import wiki_browse_fs as fs  # noqa: E402
 import wiki_lint  # noqa: E402
 import wiki_pages  # noqa: E402
 from wiki_text import canonical_meta, nfc, posix_rel  # noqa: E402
@@ -47,7 +51,7 @@ CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' 
        "base-uri 'none'; form-action 'none'")
 RAW_MODES = ("text", "link", "basename", "none")
 ASSETS = ("assets/app.js", "assets/style.css")
-ASSET_DIR = Path(__file__).resolve().parent / "browse_assets"
+ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "browse_assets")
 DATA_FILES = ("nav.js", "data/manifest.js", "data/diagnostics.js")
 EXTERNAL_SCHEMES = ("http", "https", "mailto")
 ONTOLOGY_REL = "graph/ontology.yaml"
@@ -74,125 +78,57 @@ class NameCollision(Exception):
 
 
 # ---------------------------------------------------------------------------
-# 写し（設計の 2）
+# 写し（設計の 2。構造の直しの設計の 4、8）
 # ---------------------------------------------------------------------------
 
 @dataclass
 class InputFile:
+    """内容の 1 つの入力。Path と絶対パスを持たない（設計の 8）。"""
     kind: str            # "page"、"index"、"ontology"
-    path: Path           # Wiki の中のパス
     disk_rel: str        # ディスク上の綴りの / 区切りの相対パス
     rel: str             # NFC にそろえた / 区切りの相対パス
     text: "str | None" = None
-    error: "str | None" = None   # "os" か "decode"
+    error: "str | None" = None   # "os"（読めない）か "decode"（UTF-8 でない）
     sha: "str | None" = None
-    real: "Path | None" = None   # シンボリックリンクとジャンクションを解いた実体
+
+    @property
+    def stem(self) -> str:
+        return PurePosixPath(self.disk_rel).stem
 
 
-class EnumerationError(OSError):
-    """Wiki のディレクトリの一覧を作れなかった。"""
+class InputsUnknown(Exception):
+    """入力の名前の集合が分からない（走査が送出した、一覧を作れない場所、種類を調べられない項目）。
 
-
-def check_enumerable(root: Path) -> None:
-    """入力のあるディレクトリの一覧を作れることを確かめる。作れないディレクトリがあれば EnumerationError。
-
-    ページの集合は lint と同じ iter_page_files（Path.rglob）で決める。rglob は一覧を作れないディレクトリを
-    黙って飛ばし、空や一部の集合を返すので、そのまま使うと「0 ページの正常な Wiki」と区別できない（守ること 9）。
-    確かめるのは、印（signature）と同じ範囲である。入力でない最上位のディレクトリ（raw、assets、.wiki-cache
-    など）は見ない。そこを読めなくても、閲覧の起動、作り直し、停止は止めない。
+    そのときは全体を採らない（設計の 4.1）。サーバーは前の中核を「古い」と示して使い、書き出しは失敗する。
     """
-    signature(root)
 
 
-def list_inputs(root: Path, checked: bool = False) -> list:
-    """入力の集合を、(種類, パス) の並びで返す。中身は読まない。一覧を作れなければ EnumerationError。
+class InputsChanged(Exception):
+    """読む前と読んだあとの走査が違った（読んでいるあいだに Wiki が変わった。設計の 4.2）。"""
 
-    checked が真なら、呼ぶ側が直前に signature() で一覧を確かめてあるので、確かめを繰り返さない。
+
+def input_list(root) -> tuple:
+    """入力の一覧（設計の 4）。(種類, ディスク上の相対パス, 大きさ, 更新時刻) の並び。分からなければ InputsUnknown。
+
+    写しが読むものも、変化を知るための印も、比べる 2 回の走査も、この 1 つの一覧から作る。
     """
-    if not checked:
-        check_enumerable(root)
-    items = [("page", p) for p in wiki_pages.iter_page_files(root)]
-    items += [("index", p) for p in wiki_lint.index_files(root)]
-    onto = root / ONTOLOGY_REL
-    if onto.is_file():
-        items.append(("ontology", onto))
-    return items
+    entries, problem = fs.walk_inputs(root)
+    if problem is not None:
+        raise InputsUnknown(problem)
+    return tuple(entries)
 
 
-def signature(root: Path) -> str:
-    """入力の印。Wiki の下の Markdown（拡張子の大文字と小文字は問わない）とオントロジーの、相対パス、大きさ、
-    更新時刻から作る。一覧を作れないディレクトリがあれば EnumerationError を送出する。
-
-    印は、入力の集合（ページ、索引、オントロジー）を含む上位の集合から作る。入力が変われば必ず変わればよく、
-    余分なファイルの変更で変わるのは構わない。そのために、シンボリックリンクとジャンクションのディレクトリも
-    たどる（`indexes/` がリンクでも、lint は中の索引を読む。ページの rglob がリンクをたどるかは Python の版で
-    違う）。同じディレクトリは 1 度だけ走査する（リンクの輪で止まらない）。ページでも索引でもない最上位の
-    ディレクトリ（raw、assets など）は走査しない。1 回の走査で、一覧を作れないディレクトリも見つけられる
-    （rglob は黙って飛ばす）。
-    """
-    skip_top = wiki_pages.SKIP_TOP_LEVEL_DIRS - {"indexes"}
-    found = []
-    visited = set()
-
-    def dir_key(path):
-        try:
-            st = os.stat(path)
-        except OSError as e:
-            raise EnumerationError(getattr(e, "errno", None) or 0, "一覧を作れないディレクトリがある") from e
-        return (st.st_dev, st.st_ino) if st.st_ino else os.path.normcase(os.path.realpath(path))
-
-    def walk(directory, rel):
-        try:
-            with os.scandir(directory) as it:
-                entries = sorted(it, key=lambda e: e.name)
-        except OSError as e:
-            raise EnumerationError(getattr(e, "errno", None) or 0, "一覧を作れないディレクトリがある") from e
-        for entry in entries:
-            try:
-                is_dir = entry.is_dir()   # リンクの先がディレクトリなら真
-            except OSError:
-                is_dir = False
-            if is_dir:
-                if not rel and entry.name in skip_top:
-                    continue
-                key = dir_key(entry.path)
-                if key in visited:
-                    continue
-                visited.add(key)
-                walk(entry.path, f"{rel}{entry.name}/")
-            elif entry.name.lower().endswith(".md"):
-                try:
-                    st = entry.stat()     # リンクなら先の大きさと更新時刻
-                    part = f"{st.st_size}\0{st.st_mtime_ns}"
-                except OSError:
-                    part = "missing"
-                found.append(f"{rel}{entry.name}\0{part}")
-
-    visited.add(dir_key(root))
-    walk(str(root), "")
-    onto = root / ONTOLOGY_REL
-    try:
-        st = os.stat(onto)
-        found.append(f"\0ontology\0{st.st_size}\0{st.st_mtime_ns}")
-    except (FileNotFoundError, NotADirectoryError):
-        pass
-    except OSError:
-        found.append("\0ontology\0unreadable")
+def signature_of(entries) -> str:
+    """入力の印。入力の一覧の、種類、相対パス、大きさ、更新時刻から作る。"""
     h = hashlib.sha256()
-    for line in sorted(found):
-        h.update((line + "\n").encode("utf-8"))
+    for kind, rel, size, mtime in entries:
+        h.update(f"{kind}\0{rel}\0{size}\0{mtime}\n".encode("utf-8"))
     return h.hexdigest()
 
 
-def external_inputs(root: Path, items: "list | None" = None) -> list:
-    """入力のうち、実体が Wiki のルートの外にあるものの実体のパス。中身は読まない（設計の 6.1）。"""
-    items = list_inputs(root) if items is None else items
-    out = []
-    for _kind, path in items:
-        real = Path(os.path.realpath(path))
-        if not wiki_browse_fs.is_within(real, root):
-            out.append(real)
-    return out
+def signature(root) -> str:
+    """今の入力の印。名前の集合が分からなければ InputsUnknown。"""
+    return signature_of(input_list(root))
 
 
 def read_text_like_lint(data: bytes) -> str:
@@ -202,31 +138,38 @@ def read_text_like_lint(data: bytes) -> str:
 
 @dataclass
 class Snapshot:
-    root: Path
+    """写し。inputs と generation が内容、signature と unreadable が読み取りの情報である（設計の 8）。"""
     signature: str
     inputs: list
     generation: str
-    unreadable: bool
-    external: list = field(default_factory=list)
+    unreadable: list = field(default_factory=list)   # 中身を読めなかった入力の (種類, 相対パス)（UTF-8 でないものを含む）
+    entries: tuple = ()                              # 入力の一覧（読み取りの情報。公開の前の検査が使う）
+    transient: list = field(default_factory=list)    # そのうち、開けなかった入力（ファイルを変えずに読めるようになりうる）
 
     def by_kind(self, kind: str) -> list:
         return [f for f in self.inputs if f.kind == kind]
 
 
-def take_snapshot(root: Path) -> Snapshot:
-    """入力を 1 度だけ読み、写しを作る。印は読む前に取る。"""
-    root = Path(root)
-    sig = signature(root)        # 読む前に取る。一覧を作れることも、ここで確かめる
-    items = list_inputs(root, checked=True)
+def take_snapshot(root, entries=None) -> Snapshot:
+    """入力の一覧を作り、入力を読み、もう 1 度一覧を作る。2 回が同じときだけ、写しを採る（設計の 4.2）。
+
+    違えば InputsChanged、名前の集合が分からなければ InputsUnknown。中身を読めない入力は、その入力がない Wiki と
+    同じに描き、読み取りの印を足す（設計の 4.1）。
+    """
+    first = input_list(root) if entries is None else tuple(entries)
     inputs = []
-    unreadable = False
+    unreadable = []
+    transient = []
     gen = hashlib.sha256(CORE_VERSION.encode("utf-8"))
-    for kind, path in items:
-        rel_disk = path.relative_to(root).as_posix()
-        f = InputFile(kind=kind, path=path, disk_rel=rel_disk, rel=posix_rel(str(path.relative_to(root))))
-        try:
-            data = path.read_bytes()
-        except OSError:
+    for kind, rel_disk, size, _mtime in first:
+        f = InputFile(kind=kind, disk_rel=rel_disk, rel=posix_rel(rel_disk))
+        data = None
+        if size is not None:
+            try:
+                data = fs.read_input(root, rel_disk)
+            except (fs.Unknown, fs.Absent):
+                data = None
+        if data is None:
             f.error = "os"
         else:
             f.sha = hashlib.sha256(data).hexdigest()
@@ -234,14 +177,17 @@ def take_snapshot(root: Path) -> Snapshot:
                 f.text = read_text_like_lint(data)
             except UnicodeDecodeError:
                 f.error = "decode"
-        f.real = Path(os.path.realpath(path))
+        if f.error is not None:
+            unreadable.append((kind, f.rel))
         if f.error == "os":
-            unreadable = True
+            transient.append((kind, f.rel))
         gen.update(f"{kind}\0{rel_disk}\0{f.sha or '!' + str(f.error)}\n".encode("utf-8"))
         inputs.append(f)
-    external = [f.real for f in inputs if f.real is not None and not wiki_browse_fs.is_within(f.real, root)]
-    return Snapshot(root=root, signature=sig, inputs=inputs, generation=gen.hexdigest()[:20],
-                    unreadable=unreadable, external=external)
+    second = input_list(root)
+    if second != first:
+        raise InputsChanged("読んでいるあいだに Wiki が変わった")
+    return Snapshot(signature=signature_of(second), inputs=inputs, generation=gen.hexdigest()[:20],
+                    unreadable=unreadable, entries=second, transient=transient)
 
 
 # ---------------------------------------------------------------------------
@@ -354,9 +300,29 @@ def _clashes(names: dict) -> set:
     return bad
 
 
+def unify_dir_case(names: dict) -> dict:
+    """出力の名前のディレクトリの部分を、大文字と小文字を同一視して 1 つの綴りにそろえる。
+
+    大文字と小文字を区別する Wiki の `A/x.md` と `a/y.md` を、区別しない書き出し先に書くと、ディレクトリは 1 つに
+    なり、一覧（`A` と `a`）と書き出し先の綴りが合わず、次の書き出しの門で止まる（実装の 1 回目のレビューの重大 2）。
+    ファイルどうしの重なりは `_clashes` が数えるので、ここではディレクトリだけをそろえる。綴りは、識別子の順で
+    最初に現れたものにする。
+    """
+    canonical = {}
+    out = {}
+    for pid in sorted(names):
+        parts = names[pid].split("/")
+        dirs = []
+        for part in parts[:-1]:
+            key = "/".join(dirs + [part]).casefold()
+            dirs.append(canonical.setdefault(key, part))
+        out[pid] = "/".join(dirs + [parts[-1]])
+    return out
+
+
 def assign_names(page_ids, limit: int = NAME_LIMIT) -> dict:
     """全ページの出力の名前を決める。重なった名前には接尾辞を足し、まだ重なれば桁を 4 桁ずつ増やす。"""
-    base = {pid: export_name(pid, limit) for pid in page_ids}
+    base = unify_dir_case({pid: export_name(pid, limit) for pid in page_ids})
     names = dict(base)
     digits = {}
     bad = _clashes(names)
@@ -494,9 +460,8 @@ def classify_raw(value: str) -> dict:
 
 
 def file_url(path: str) -> str:
-    p = path.replace("\\", "/")
-    if p.startswith("~"):
-        p = os.path.expanduser(p).replace("\\", "/")
+    """絶対パスの file: の URL。~ はホームに展開しない（呼ぶ側が文字で出す。構造の直しの設計の 8）。"""
+    p = path.replace(BS, "/")
     if re.match(r"^[A-Za-z]:/", p):
         return "file:///" + urllib.parse.quote(p, safe="/:")
     return "file://" + urllib.parse.quote(p, safe="/:")
@@ -510,30 +475,10 @@ def _page_id(rel: str) -> str:
     return rel[:-3] if rel.lower().endswith(".md") else rel
 
 
-class Recorder:
-    """描画が、利用者の内容として出した文字を、出力のファイルごとに覚える（設計の 5）。"""
-
-    def __init__(self, enabled: bool = True):
-        self.enabled = enabled
-        self.by_file = defaultdict(list)
-        self.all = []
-        # どのファイルに出てもよい利用者の内容（ページの題名。リンクの文字としてほかのページにも出る）。
-        self.common = []
-
-    def add(self, file: str, value) -> None:
-        if value is None or not self.enabled:
-            return
-        text = str(value)
-        if text:
-            self.by_file[file].append(text)
-            self.all.append(text)
-
-
 class Core:
     """1 つの写しから組み立てた中核。描く関数は静的の書き出しとサーバーで同じものを使う。"""
 
-    def __init__(self, snapshot: Snapshot, name_limit: int = NAME_LIMIT, record: bool = True,
-                 scope: "str | None" = None):
+    def __init__(self, snapshot: Snapshot, name_limit: int = NAME_LIMIT, scope: "str | None" = None):
         self.snapshot = snapshot
         # wiki のスコープ（user か project）。呼び出し元の指定で、中核は決めない。None なら出さない。
         self.scope = normalize_scope(scope)
@@ -541,14 +486,17 @@ class Core:
         self.parser = wiki_pages.new_parser()
         self.diagnostics = []
         self._body_cache = {}
-        # 絶対パスの検査（静的の書き出し）のための記録。サーバーは記録しない（要求ごとに増えるので）。
-        self.recorder = Recorder(record)
+        # 描けなかったページの識別子（設計の 7.2。そのページに「描けない」と出して続ける）
+        self.render_failures = []
+        # 解釈できなかった入力の (種類, 相対パス)。読めない入力と同じに扱い、「不完全」の印を描く
+        self.parse_failures = []
+        # 読めなかった入力（読み取りの情報）。読み取りの印（「不完全」）を描くのに使う（構造の直しの設計の 4.1）
+        unreadable = list(snapshot.unreadable)
+        self.unreadable_pages = sorted(rel for kind, rel in unreadable if kind == "page")
+        self.unreadable_indexes = sorted(rel for kind, rel in unreadable if kind == "index")
+        self.unreadable_ontology = [rel for kind, rel in unreadable if kind == "ontology"]
         self._render_lock = threading.Lock()
         self._build_pages()
-        if record:
-            for pid in self.drawn:
-                self.recorder.common.append(self.title(pid))
-                self.recorder.all.append(self.title(pid))
         self.out_name = assign_names(sorted(self.drawn), name_limit)
         self.name_to_id = {name: pid for pid, name in self.out_name.items()}
         for pid in sorted(self.drawn):
@@ -556,8 +504,21 @@ class Core:
                 self.diagnostics.append({"kind": "renamed", "page": pid, "output": self.out_name[pid]})
         self._prepass()
         self._backlinks()
-        self._relations()
+        kept = len(self.diagnostics)
+        try:
+            self._relations()
+        except Exception:  # noqa: BLE001  関係表を作れないときは、関係表だけを使えないにする（構造の直しの設計の 7.2）
+            self.relations = {pid: {"out": [], "in": []} for pid in self.drawn}
+            self.relations_state = "error"
+            del self.diagnostics[kept:]          # 途中まで足した関係表の診断を取り除く
+            self.diagnostics.append({"kind": "relations_error", "reason": "unexpected"})
         self._nav()
+        # 解釈できなかった入力も、読めない入力と同じに「不完全」の印を描く
+        for kind, rel in self.parse_failures:
+            target = {"page": self.unreadable_pages, "index": self.unreadable_indexes}.get(kind)
+            if target is not None and rel not in target:
+                target.append(rel)
+                target.sort()
 
     # --- ページ ---
 
@@ -570,9 +531,14 @@ class Core:
             if f.text is None:
                 self.diagnostics.append({"kind": "read_error", "page": pid, "reason": f.error})
                 continue
-            raw_meta, _fm, body, malformed = wiki_lint.parse_frontmatter_raw(f.text)
-            meta, _conflicts = canonical_meta(raw_meta)
-            p = {"rel_path": f.rel, "disk_rel_path": f.disk_rel, "slug": nfc(f.path.stem), "meta": meta,
+            try:
+                raw_meta, _fm, body, malformed = wiki_lint.parse_frontmatter_raw(f.text)
+                meta, _conflicts = canonical_meta(raw_meta)
+            except Exception:  # noqa: BLE001  1 ページの解釈の失敗で、全体を止めない（構造の直しの設計の 7.2）
+                self.diagnostics.append({"kind": "read_error", "page": pid, "reason": "parse"})
+                self.parse_failures.append((f.kind, f.rel))
+                continue
+            p = {"rel_path": f.rel, "disk_rel_path": f.disk_rel, "slug": nfc(f.stem), "meta": meta,
                  "body": body, "malformed_fm": malformed, "id": pid, "text": f.text}
             self.pages[f.disk_rel] = p
             self.page_files[f.disk_rel] = f
@@ -625,18 +591,37 @@ class Core:
     def _prepass(self) -> None:
         self.tokens = {}
         self.headings = {}
+        unparsed = set()
         for pid, disk in self.drawn.items():
-            tokens = self.parser.parse(self.pages[disk]["body"])
+            try:
+                tokens = self.parser.parse(self.pages[disk]["body"])
+                headings = assign_heading_ids(tokens)
+            except Exception:  # noqa: BLE001  1 ページの解釈の失敗で、全体を止めない（構造の直しの設計の 7.2）
+                unparsed.add(disk)
+                tokens, headings = None, []
             self.tokens[pid] = tokens
-            self.headings[pid] = assign_heading_ids(tokens)
+            self.headings[pid] = headings
         self.links = {}
         # 描かないページ（id_collision）のリンクも、lint と同じく数える。描かないので、診断は全体にだけ載せる。
         self.hidden_links = {}
         for disk, p in sorted(self.pages.items()):
             pid = p["id"]
             drawn = self.drawn.get(pid) == disk
-            tokens = self.tokens[pid] if drawn else self.parser.parse(p["body"])
+            if drawn:
+                tokens = self.tokens[pid]
+            elif disk not in unparsed:
+                try:
+                    tokens = self.parser.parse(p["body"])
+                except Exception:  # noqa: BLE001  描かないページの解釈の失敗も、全体を止めない
+                    unparsed.add(disk)
+                    tokens = None
             found = []
+            if tokens is None:
+                # 本文を解釈できない。そのページのリンクは分からないので、「不完全」の印を描く。ページは「描けない」になる
+                self.diagnostics.append({"kind": "read_error", "page": pid if drawn else None,
+                                         "source_page": None if drawn else pid, "reason": "parse"})
+                self.parse_failures.append(("page", p["rel_path"]))
+                tokens = []
             for tok in tokens:
                 if tok.type == "inline":
                     for child in tok.children or []:
@@ -705,9 +690,14 @@ class Core:
             except Exception:  # noqa: BLE001  そのページの関係を使えないにして、ほかのページは続ける
                 meta, problems = dict(p["meta"]), [{"kind": "unreadable_graph", "reason": "unexpected"}]
                 meta.pop("graph", None)
-            gpages.append({"path": str(self.page_files[disk].path), "rel_path": p["rel_path"],
+            try:
+                links = wiki_pages.extract_wikilinks(p["body"])
+            except Exception:  # noqa: BLE001  本文のリンクを取り出せないページは、リンクなしで続ける
+                links = []
+                problems = list(problems) + [{"kind": "unreadable_graph", "reason": "unexpected"}]
+            gpages.append({"path": p["rel_path"], "rel_path": p["rel_path"],
                            "disk_rel_path": disk, "slug": p["slug"], "meta": meta, "body": p["body"],
-                           "links": wiki_pages.extract_wikilinks(p["body"]), "fm_problems": problems})
+                           "links": links, "fm_problems": problems})
         try:
             _nodes, page_node_ids, _aliases = wiki_graph_extract.build_nodes(gpages, ontology, diag)
             edges = wiki_graph_extract.build_edges(gpages, page_node_ids, diag)
@@ -766,9 +756,20 @@ class Core:
         self.nav_groups = []
         listed = set()
         index_files = self.snapshot.by_kind("index")
-        group_of_file = {}
+        # 索引を先に解釈する。解釈できない索引は、読めない索引と同じに扱う（構造の直しの設計の 7.2）
+        parsed = {}
         for f in index_files:
             if f.text is None:
+                continue
+            try:
+                raw_meta, _fm, body, _malformed = wiki_lint.parse_frontmatter_raw(f.text)
+                meta, _c = canonical_meta(raw_meta)
+                parsed[f.disk_rel] = (meta, self.parser.parse(body))
+            except Exception:  # noqa: BLE001  1 つの索引の解釈の失敗で、全体を止めない
+                self.parse_failures.append(("index", f.rel))
+        group_of_file = {}
+        for f in index_files:
+            if f.disk_rel not in parsed:
                 continue   # 読めない索引のグループは作らないので、そこへのリンクも作らない
             gid = "_g" + short_hash(f.disk_rel, 10)   # NFC で同じになる 2 つの名前でも重ならない
             group_of_file.setdefault(_page_id(f.rel), gid)
@@ -780,27 +781,24 @@ class Core:
 
         for f in index_files:
             is_top = f.rel == "index.md"
-            if f.text is None:
-                self.diagnostics.append({"kind": "read_error", "page": _page_id(f.rel), "reason": f.error})
+            if f.disk_rel not in parsed:
+                self.diagnostics.append({"kind": "read_error", "page": _page_id(f.rel),
+                                         "reason": f.error or "parse"})
                 continue
-            raw_meta, _fm, body, _malformed = wiki_lint.parse_frontmatter_raw(f.text)
-            meta, _c = canonical_meta(raw_meta)
-            tokens = self.parser.parse(body)
+            meta, tokens = parsed[f.disk_rel]
             first_heading = next((inline_text(tokens[i + 1].children) for i, t in enumerate(tokens)
                                   if t.type == "heading_open" and i + 1 < len(tokens)), None)
             gid = "_g" + short_hash(f.disk_rel, 10)
             if is_top:
                 top = new_group("", gid)
             else:
-                top = new_group(str(meta.get("title") or first_heading or f.path.stem), gid)
-            self.recorder.add("nav.js", top["title"])
+                top = new_group(str(meta.get("title") or first_heading or f.stem), gid)
             stack = [(0, top)]
             pending = []
             for i, tok in enumerate(tokens):
                 if tok.type == "heading_open":
                     level = int(tok.tag[1])
                     text = inline_text(tokens[i + 1].children)
-                    self.recorder.add("nav.js", text)
                     while len(stack) > 1 and stack[-1][0] >= level:
                         stack.pop()
                     g = new_group(text)
@@ -839,8 +837,6 @@ class Core:
                     continue
                 target = nfc(m.group(1).strip())
                 label = (m.group(2) or m.group(1)).strip()
-                self.recorder.add("nav.js", target)
-                self.recorder.add("nav.js", label)
                 clean = wiki_pages.clean_link_target(target)
                 if clean in group_of_file and clean.startswith("indexes/"):
                     return {"state": "group", "group": group_of_file[clean], "label": label}
@@ -889,8 +885,6 @@ class Core:
                     j += 1
                 inner = children[i + 1:j]
                 href = c.attrs.get("href", "")
-                self.recorder.add(file, href)
-                self.recorder.add(file, display_href(href))
                 try:
                     scheme = urllib.parse.urlparse(href).scheme.lower()
                 except ValueError:
@@ -910,13 +904,10 @@ class Core:
                 i = j + 1
                 continue
             if c.type == "image":
-                self.recorder.add(file, c.content)
-                self.recorder.add(file, c.attrs.get("src"))
                 out.append(Token("text", "", 0, content=c.content))
                 i += 1
                 continue
             if c.type == "text" and "[[" in c.content and wiki_pages.WIKILINK_FULL_RE.search(c.content):
-                self.recorder.add(file, c.content)
                 pos = 0
                 for m in wiki_pages.WIKILINK_FULL_RE.finditer(c.content):
                     if m.start() > pos:
@@ -929,8 +920,6 @@ class Core:
                     out.append(Token("text", "", 0, content=c.content[pos:]))
                 i += 1
                 continue
-            if c.type in ("text", "code_inline"):
-                self.recorder.add(file, c.content)
             out.append(c)
             i += 1
         return out
@@ -939,7 +928,12 @@ class Core:
         if pid in self._body_cache:
             return self._body_cache[pid]
         path = self.out_name[pid]
-        tokens = self.tokens.pop(pid)
+        # 下ごしらえの字句を 1 度だけ使う。描くときに字句を書き換えるので、描けずに終わったあとは、本文から
+        # 解析し直して描く（設計の 7.2。描画は中核を変えないので、失敗のあとも同じ中核からもう一度描ける）。
+        tokens = self.tokens.pop(pid, None)
+        if tokens is None:
+            tokens = self.parser.parse(self.page(pid)["body"])
+            assign_heading_ids(tokens)
         counter = [0, self.links[pid]]
         for tok in tokens:
             if tok.type in ("th_open", "td_open") and "style" in (tok.attrs or {}):
@@ -947,8 +941,6 @@ class Core:
                 m = re.search(r"text-align:(left|center|right)", style)
                 if m:
                     tok.attrSet("class", f"ta-{m.group(1)}")
-            if tok.type in ("fence", "code_block"):
-                self.recorder.add(path, tok.content)
             if tok.type == "inline" and tok.children:
                 tok.children = self._transform_inline(tok.children, path, counter, path)
         rendered = self.parser.renderer.render(tokens, self.parser.options, {})
@@ -964,13 +956,11 @@ class Core:
             if value in (None, "", []):
                 continue
             text = "、".join(map(str, value)) if isinstance(value, list) else str(value)
-            self.recorder.add(path, text)
             rows.append(f"<tr><th>{label}</th><td>{html.escape(text)}</td></tr>")
         sources = wiki_pages.ref_values(meta.get("sources"))
         if sources:
             cells = []
             for ref in sources:
-                self.recorder.add(path, ref)
                 _status, found, _t = wiki_pages.classify_source_ref(
                     ref, self.pages_by_path, self.pages_by_slug, lambda d: self.pages[d]["meta"].get("type"))
                 sp = self.resolve_disks(found)
@@ -990,13 +980,12 @@ class Core:
     def _raw_html(self, raw: dict, sha: str, mode: str, path: str) -> str:
         value = raw["value"]
         if raw["kind"] != "absolute" or mode == "text":
-            self.recorder.add(path, value)
             return f"<code>{html.escape(value)}</code>"
         if mode == "link":
-            self.recorder.add(path, value)
             if value.startswith("~"):
-                # file_url が ~ をホームに展開する。展開したパスも、利用者が選んだ raw の値として通す（設計の 5）。
-                self.recorder.add(path, os.path.expanduser(value))
+                # ~ はホームに展開しない。生成器が機械の情報（ホームの絶対パス）を出力に足さないため、文字で出す
+                # （構造の直しの設計の 8）。
+                return f"<code>{html.escape(value)}</code>"
             return f'<a class="raw" href="{html.escape(file_url(value))}">{html.escape(value)}</a>'
         base = re.split(r"[\\/]", value)[-1]
         tail = f"（SHA-256 {html.escape(sha[:12])}…）" if sha else ""
@@ -1009,7 +998,8 @@ class Core:
             return '<section id="_relations"><h2>関係</h2><p class="state-error">オントロジーを読めない</p></section>\n'
         rel = self.relations[pid]
         if not rel["out"] and not rel["in"]:
-            return '<section id="_relations"><h2>関係</h2><p class="state-empty">関係はない</p></section>\n'
+            return ('<section id="_relations"><h2>関係</h2>' + self._incomplete_html()
+                    + '<p class="state-empty">関係はない</p></section>\n')
         rows = []
         for direction, label in (("out", "→"), ("in", "←")):
             for r in rel[direction]:
@@ -1021,7 +1011,6 @@ class Core:
                 cells = [label, html.escape(str(r["predicate"])), other]
                 for key in ("status", "valid_from", "valid_to", "confidence", "source", "evidence"):
                     value = str(r.get(key) or "")
-                    self.recorder.add(path, value)
                     cell = html.escape(value)
                     if key == "source" and value:
                         found = self.resolve(nfc(value))
@@ -1029,11 +1018,11 @@ class Core:
                             cell = (f'<a href="{html.escape(rel_href(path, self.out_name[found["id"]]))}">'
                                     f"{html.escape(self.title(found['id']))}</a>")
                     cells.append(cell)
-                self.recorder.add(path, r["other_text"])
                 rows.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
         head = "".join(f"<th>{h}</th>" for h in ("向き", "述語", "相手", "状態", "開始", "終了", "確からしさ",
                                                  "出典", "証拠"))
-        return (f'<section id="_relations"><h2>関係</h2><table class="relations"><thead><tr>{head}</tr></thead>'
+        return (f'<section id="_relations"><h2>関係</h2>{self._incomplete_html()}'
+                f'<table class="relations"><thead><tr>{head}</tr></thead>'
                 f"<tbody>{''.join(rows)}</tbody></table></section>\n")
 
     def page_diagnostics(self, pid: str) -> list:
@@ -1048,8 +1037,6 @@ class Core:
             for key in ("target", "reason", "output", "node_id", "predicate", "object", "source", "source_page"):
                 if d.get(key):
                     parts.append(f"{key}: {d[key]}")
-                    if key != "reason":   # reason は生成器が決める文字なので、利用者の内容に数えない
-                        self.recorder.add(path, d[key])
             lis.append(f"<li>{html.escape(' / '.join(map(str, parts)))}</li>")
         return f'<section id="_diagnostics"><h2>診断</h2><ul>{"".join(lis)}</ul></section>\n'
 
@@ -1061,7 +1048,6 @@ class Core:
 
     def _head(self, path: str, title: str, stale: "str | None") -> str:
         prefix = root_prefix(path)
-        self.recorder.add(path, title)
         banner = ""
         if stale:
             banner = (f'<p id="_stale" class="stale">Wiki の最新の内容を表示できていない。前の内容を表示している'
@@ -1089,8 +1075,6 @@ class Core:
         title = self.title(pid)
         back = "".join(f'<li><a href="{html.escape(rel_href(path, self.out_name[b]))}">'
                        f"{html.escape(self.title(b))}</a></li>" for b in self.backlinks[pid])
-        for b in self.backlinks[pid]:
-            self.recorder.add(path, self.title(b))
         diags = list(self.page_diagnostics(pid))
         if stale:
             diags.insert(0, {"kind": "stale", "reason": stale})
@@ -1098,9 +1082,26 @@ class Core:
                 + f'<article id="_article" data-page-id="{html.escape(pid)}">\n'
                 + f'<table id="_meta" class="meta">{self._meta_rows(pid, path, raw_mode)}</table>\n'
                 + f'<div id="_body">\n{self.body_html(pid)}</div>\n</article>\n'
-                + f'<section id="_backlinks"><h2>被リンク</h2><ul>{back}</ul></section>\n'
+                + f'<section id="_backlinks"><h2>被リンク</h2>{self._incomplete_html()}<ul>{back}</ul></section>\n'
                 + self._relations_html(pid, path)
                 + self._diagnostics_html(diags, path)
+                + self._tail(path))
+
+    def _incomplete_html(self) -> str:
+        """中身に依る一覧（未解決リンク、被リンク、関係）の「不完全」の印（構造の直しの設計の 4.1）。"""
+        if not self.unreadable_pages:
+            return ""
+        return ('<p class="notice incomplete">読めないページがあるので、この一覧は不完全である'
+                f"（{len(self.unreadable_pages)} ページ）</p>")
+
+    def _broken_page(self, pid: str, error: str, stale: "str | None") -> str:
+        """描けないページの代わり。その場所に「このページを描けない」と出す（設計の 7.2）。"""
+        path = self.out_name[pid]
+        title = self.title(pid)
+        return (self._head(path, title, stale)
+                + f'<article id="_article" data-page-id="{html.escape(pid)}">\n'
+                + f'<p class="notice notice-error render-error">このページを描けない（{html.escape(error)}）。'
+                  "lint で確かめる</p>\n</article>\n"
                 + self._tail(path))
 
     def _nav_html(self, groups, path: str) -> str:
@@ -1128,8 +1129,14 @@ class Core:
         diags = list(self.diagnostics)
         if stale:
             diags.insert(0, {"kind": "stale", "reason": stale})
+        nav_note = ""
+        if self.unreadable_indexes:
+            nav_note = ('<p class="notice incomplete">読めない索引のファイルがあるので、ナビゲーションは不完全である'
+                        f"（{len(self.unreadable_indexes)} 件）</p>\n")
+        diag_note = self._incomplete_html()
         return (self._head(path, "索引", stale)
-                + f'<h1>索引</h1>\n<div id="_index">{self._nav_html(self.nav_groups, path)}</div>\n'
+                + f'<h1>索引</h1>\n{nav_note}<div id="_index">{self._nav_html(self.nav_groups, path)}</div>\n'
+                + (f'<section id="_incomplete">{diag_note}</section>\n' if diag_note else "")
                 + self._diagnostics_html(diags, path)
                 + self._tail(path, ("data/diagnostics.js",)))
 
@@ -1151,13 +1158,19 @@ class Core:
                     items.append(item)
                 out.append({"id": g["id"], "title": g["title"], "items": items, "children": conv(g["children"])})
             return out
-        return {"protocol_version": PROTOCOL_VERSION, "generation": self.generation, "groups": conv(self.nav_groups)}
+        nav = {"protocol_version": PROTOCOL_VERSION, "generation": self.generation, "groups": conv(self.nav_groups)}
+        if self.unreadable_indexes:
+            nav["incomplete"] = True
+        return nav
 
     def manifest(self, generated_at: str = "") -> dict:
         return {"protocol_version": PROTOCOL_VERSION, "generation": self.generation, "generated_at": generated_at,
                 "capabilities": {"search": "none", "relations": self.relations_state, "rag": False,
                                  "multi_wiki": False, "live_reload": False},
-                "pages": len(self.drawn)}
+                "pages": len(self.drawn),
+                "incomplete": {"unreadable_pages": len(self.unreadable_pages),
+                               "unreadable_indexes": len(self.unreadable_indexes),
+                               "unreadable_ontology": bool(self.unreadable_ontology)}}
 
     def diagnostics_json(self) -> dict:
         return {"protocol_version": PROTOCOL_VERSION, "generation": self.generation, "items": self.diagnostics}
@@ -1188,7 +1201,13 @@ class Core:
             return self.render_index(stale)
         if name in DATA_FILES:
             return self.render_data(name, generated_at, stale)
-        return self.render_page(self.name_to_id[name], raw_mode, stale)
+        pid = self.name_to_id[name]
+        try:
+            return self.render_page(pid, raw_mode, stale)
+        except Exception as e:  # noqa: BLE001  1 ページを描けなくても、その場所に「描けない」と出して続ける（設計の 7.2）
+            if pid not in self.render_failures:
+                self.render_failures.append(pid)
+            return self._broken_page(pid, type(e).__name__, stale)
 
     def render_all(self, raw_mode: str, generated_at: str = "") -> dict:
         out = {}
@@ -1207,48 +1226,48 @@ def js_data(name: str, value) -> str:
     return f"window.{name}={text};\n"
 
 
-def asset_bytes(name: str) -> bytes:
-    return (ASSET_DIR / PurePosixPath(name).name).read_bytes()
+def load_assets() -> dict:
+    """同梱の画面の部品（app.js、style.css）を読む。serve と build の始めに 1 度だけ呼ぶ（設計の 3.3）。
+
+    読めなければ fs.Unknown か fs.Absent を送出する（呼ぶ側は起動しない）。
+    """
+    return {name: fs.read_file(os.path.join(ASSET_DIR, PurePosixPath(name).name)) for name in ASSETS}
 
 
 # ---------------------------------------------------------------------------
-# 絶対パスの検査（設計の 5）
+# 公開の前の検査（構造の直しの設計の 5、8）
 # ---------------------------------------------------------------------------
 
 def path_forms(path: str) -> list:
     """絶対パスを、出力に現れうる形にする。"""
-    posix = str(path).replace("\\", "/").rstrip("/")
-    win = posix.replace("/", "\\")
-    forms = {posix, win, win.replace("\\", "\\\\"), posix.replace("/", "\\/")}
+    posix = str(path).replace(BS, "/").rstrip("/")
+    win = posix.replace("/", BS)
+    forms = {posix, win, win.replace(BS, BS * 2), posix.replace("/", BS + "/")}
     forms |= {html.escape(f) for f in list(forms)}
     forms.add(urllib.parse.quote(posix, safe=""))
     forms.add(urllib.parse.quote(posix, safe="/:"))
     return sorted(f for f in forms if len(f) >= 4)
 
 
-def find_leaks(files: dict, needles: list, recorder: Recorder) -> tuple:
-    """出力のファイルから絶対パスを探す。(生成器が入れたもの, 利用者が書いたもの) を返す。
+def scan_machine_info(files: dict, needles: list, tokens: list) -> list:
+    """作った世代から、機械の情報（絶対パスと、サーバーの記録のトークン）を探す。見つけた (ファイル名, 種類) の並び。
 
-    検索対象の絶対パスごとに判定する。あるファイルで、どれか 1 つでも、そのファイルの利用者の内容の記録に
-    ないパスが見つかれば、生成器が入れたものとする。
+    生成器は機械の情報を出力に足さないので、見つかるのは入力の実体の中身にあるときだけである。だれがその中身を
+    書いたかは問わない。見つかれば、呼ぶ側が警告を出す。書き出しは止めない（構造の直しの設計の 8）。
     """
     fold = os.name == "nt" or sys.platform == "darwin"
     norm = (lambda s: s.lower()) if fold else (lambda s: s)
-    leaks, warnings = set(), set()
-    for name, content in files.items():
-        text = norm(content)
-        aggregate = name in ("index.html", *DATA_FILES)
-        recorded = (recorder.all if aggregate else recorder.by_file.get(name, [])) + recorder.common
-        recorded = [norm(r.replace(BS * 2, BS)) for r in recorded]
-        for needle in needles:
-            if not any(norm(f) in text for f in path_forms(needle)):
-                continue
-            forms = [norm(f) for f in path_forms(needle)]
-            if any(q in r for r in recorded for q in forms):
-                warnings.add(name)
-            else:
-                leaks.add(name)
-    return sorted(leaks), sorted(warnings - leaks)
+    forms = [norm(f) for needle in needles for f in path_forms(needle)]
+    found = []
+    for name in sorted(files):
+        data = files[name]
+        text = data.decode("utf-8", errors="replace") if isinstance(data, bytes) else data
+        folded = norm(text)
+        if any(f in folded for f in forms):
+            found.append((name, "path"))
+        if any(t in text for t in tokens):
+            found.append((name, "token"))
+    return found
 
 
 BS = chr(92)
