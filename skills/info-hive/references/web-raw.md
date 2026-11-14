@@ -30,7 +30,7 @@
    `slug` は、決まっていれば書く（いくつもの URL を同時に取り込むときは、ぶつからないように先に決める）。`null` なら、エージェントが W1 で決める。`language` は、ユーザーが訳す・訳さないを指定したときの `"translate"` か `"keep"` で、理由を `language_reason` に書く。
 
 3. Agent ツールで `wiki:web-raw` を呼ぶ。`model` の引数は渡さない（渡すと、エージェントの定義の `model: sonnet` より優先される）。プロンプトには、「この依頼の raw を作る」という 1 行と、依頼の JSON を ```` ```json ```` のフェンスで書く。同時に呼ぶのは 3 つまでにする。
-4. エージェントの応答の中の、`"web_raw": 1` を持つ最後の ```` ```json ```` のフェンスを、報告として読む（下の「報告の形」）。フェンスがない、`status` が決まった値でない、`status` に要る欄がない、渡した依頼と `url`・`wiki_root`・`raw_root` が違う、のどれかなら、エージェントの応答をユーザーに見せて止まる（推し量って続けない）。報告の `slug` を、依頼の `slug` にする。
+4. エージェントの応答の中の、`"web_raw": 1` を持つ最後の ```` ```json ```` のフェンスを、報告として読む（下の「報告の形」）。フェンスがない、`status` が決まった値でない、`status` に要る欄がない、渡した依頼と `url`・`wiki_root`・`raw_root` が違う、のどれかなら、エージェントの応答をユーザーに見せて止まる（推し量って続けない）。エージェントが決めたことを、依頼に写す（エージェントは前の呼び出しを覚えていないので、呼び直すときに渡すため）。報告の `slug` を依頼の `slug` にし、報告の `language_override` があれば、その `value` と `reason` を依頼の `language` と `language_reason` にする。
 5. `status` ごとに次のようにする。
    - `done`: raw ができ、`check --finish` で作業用の写しが消えている。`raw` のファイルがあり、frontmatter の `url` が依頼の `url` と同じで、作業用のフォルダー `<WIKI_ROOT>/.wiki-cache/ingest/<スラッグ>/` がないことを確かめる。合わなければ、報告をユーザーに見せて止まる。
    - `warnings`: raw はできたが、エージェントが直さなかった警告が残っていて、作業用の写しがある。`python "<skill-root>/scripts/wiki_rawcheck.py" check --wiki "<WIKI_ROOT>" --raw-root "<RAW_ROOT>" --slug "<スラッグ>" --json` を、報告の `language_override` があればその `--language-override` と `--reason` を付けて実行し、誤りがなく、警告の `kind`・`line`・`message` の並びが報告の `warnings` と同じであることを確かめる。理由の案（`proposed_reason`）を読み、受け入れられないもの（人名をカタカナにした、など）があれば、`conditions` にその直し方を足して、3 に戻る。受け入れるなら W9 に進み、log の段で、取り込みの行のサブ行に警告ごとの理由を書いてから、同じ引数に `--finish --accept-warnings` を足して実行し、作業用の写しが消えたことを確かめる。
@@ -43,9 +43,9 @@
      | `needs_browser` | 本文が空か短すぎる（JavaScript で描くページ、ログインが要るページ） | ユーザーがふだん使っているブラウザで本文を表示し、ページの HTML を UTF-8 のファイルに保存する。`fetch.html_file` にそのファイルの絶対パス、`fetch.page_url` に本文を表示したときのアドレス欄の URL を入れ、`fetch.force` を `true` にする（この取り込みで書いた、本文の足りない raw を置き換える）。ログインが要るページは、wiki に入れてよいかをユーザーに先に確かめる |
 
    - `failed`: `error.message` をそのまま伝えて止まる。
-6. W9 に進む。raw はエージェントが作ったので、取り込みの手順 3 で raw を読む。
-7. log の段で、取り込みの行のサブ行に、raw の段の分担を書く。例: 「raw: `wiki:web-raw` に任せた（報告したモデル: Claude Sonnet 5.5）。訳: Claude Sonnet 5.5、補足: Claude Sonnet 5.5」。訳と補足の名前は、raw の `translated_by` と補足の表示名から取る（訳していなければ「訳: なし」、画像がなければ「補足: なし」）。これらはモデルが自分で書いた名前であり、記録の目安である。
-8. raw の `translated_by` か補足の表示名に `Sonnet` が入っていなければ（前の取り込みの途中で、別のモデルが訳した raw を続けて検査した、など）、ユーザーに伝える。Sonnet で作り直すなら、`fetch.force` を `true` にして 3 から行う。
+6. `done` か `warnings` なら、W9 に進む前に、raw の `translated_by` と補足の表示名を見る。どちらかが空でなく、`Sonnet` が入っていなければ（前の取り込みの途中で、別のモデルが訳した raw を続けて検査した、など）、ユーザーに伝え、作り直すかを聞く。作り直すなら、`fetch.force` を `true` にして 3 から行う。訳さないページの空の `translated_by` と、画像がないときの補足のなさは、そのままでよい。
+7. W9 に進む。raw はエージェントが作ったので、取り込みの手順 3 で raw を読む。
+8. log の段で、取り込みの行のサブ行に、raw の段の分担を書く。エージェントに任せたときは「raw: `wiki:web-raw` に任せた（報告したモデル: Claude Sonnet 5.5）。訳: Claude Sonnet 5.5、補足: Claude Sonnet 5.5」、`wiki:web-raw` がなく自分で作ったときは「raw: 自分のモデル（Claude Opus 5.5）で作った（`wiki:web-raw` がなかった）。訳: …、補足: …」と書く。訳と補足の名前は、raw の `translated_by` と補足の表示名から取る（訳していなければ「訳: なし」、画像がなければ「補足: なし」）。これらはモデルが自分で書いた名前であり、記録の目安である。
 
 ## 報告の形
 
@@ -79,7 +79,22 @@
 | `needs_user` | ユーザーの判断が要る | `question` に `kind`（上の表の 3 つのどれか）と `message`。`existing_differs` なら `suggested_slug` も |
 | `failed` | 続けられない（取得の失敗、初期化されていない wiki、raw のルートがない、自分のモデル名が分からない） | `error` に `kind`（`fetch_failed`、`not_initialized`、`no_raw_root`、`model_unknown`、`other`）と `message` |
 
+- `warnings` の各項目の `line` は、`check` の出力の `line` をそのまま書く。行のない警告（文体の混在）は `null` にする。
 - `language_override` は、`check` に `--language-override` を付けたときの `{"value": "translate" か "keep", "reason": "…"}`。付けなければ `null`。
+
+`done` のほかの報告の例（同じ欄のうち、変わるところだけを示す）:
+
+```json
+{"web_raw": 1, "status": "warnings", "language_override": null, "warnings": [{"kind": "style", "line": null, "message": "です・ます調（3 文）とである調（12 文）が混ざっている", "proposed_reason": "原文の引用の部分だけがです・ます調で、訳し分けた"}], "question": null, "error": null}
+```
+
+```json
+{"web_raw": 1, "status": "needs_user", "warnings": [], "question": {"kind": "existing_differs", "message": "同じスラッグ cqrs の raw があり、原文が違う", "suggested_slug": "cqrs-20261114"}, "error": null}
+```
+
+```json
+{"web_raw": 1, "status": "failed", "warnings": [], "question": null, "error": {"kind": "fetch_failed", "message": "HTTP 404"}}
+```
 - `notes` は、呼び出す側に伝えたいことを、短い文で 5 つまで書く（ページの欠け、規則で消したもの、など）。要約や訳文は書かない。
 
 ## W1〜W8
