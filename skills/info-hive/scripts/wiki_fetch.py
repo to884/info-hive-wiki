@@ -1461,7 +1461,8 @@ def build(args) -> tuple[int, dict]:
         tmp.write_bytes(json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"))
     write_outputs(raw_root, target, asset_dir, args.slug, text, pending)
     if tmp is not None:
-        os.replace(tmp, tmp.with_name("fetch.json"))
+        # 書いた直後の fetch.json.tmp は、ウイルス対策の検査が開いていることがある（write_outputs と同じ理由）。
+        replace_with_retry(tmp, tmp.with_name("fetch.json"))
     return 0, result
 
 
