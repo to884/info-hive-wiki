@@ -60,7 +60,7 @@ graph:
 
 ### 値の読み方
 
-グラフのスクリプト（extract と lint）は、frontmatter の最上位の欄（`type`、`kind`、`title`、`tags`、`sources`、`raw` など）を、wiki の lint、検索、統計と同じパーサーで読む。値は、書かれた文字のままの文字列か、その配列になる。ただし、ノードの `title` は、検索と同じく、配列なら空でない要素を「, 」でつないだ文字にし、値がなければスラッグにする。`sources: [true]` は `true` というページ、`sources: [007]` は `007` というページを指し、`kind: 2024` は文字の `2024` である。wiki の lint が解決する `sources:` は、グラフでも同じページに解決する。`raw:` を配列で書くと、値 1 つにつき `summarizes_raw` が 1 本できる。
+グラフのスクリプト（extract と lint）は、frontmatter の最上位の欄（`type`、`kind`、`title`、`tags`、`sources`、`raw` など）を、wiki の lint、検索、統計と同じパーサーで読む。値は、書かれた文字のままの文字列か、その配列になる。ただし、ノードの `title` は、検索と同じく、配列なら空でない要素を「, 」でつないだ文字にし、値がなければスラッグにする。ノードの `page_type`、`kind`、`created`、`updated` も、配列なら同じく要素をつなぐ（`type` と `kind` の要素は日本語の別名を英語に直す）。ノードの種類（`node_type`）は、そうしてそろえた `type` と `kind` から決める。`sources: [true]` は `true` というページ、`sources: [007]` は `007` というページを指し、`kind: 2024` は文字の `2024` である。wiki の lint が解決する `sources:` は、グラフでも同じページに解決する。`raw:` を配列で書くと、値 1 つにつき `summarizes_raw` が 1 本できる。
 
 `graph:` の欄だけは PyYAML で読む。そのうち、ページやノードを指す欄（`node_id`、`aliases`、関係の `object`、`source`、`contradicts`、`supersedes`）は、引用符のない `true`、`no`、数、日付も、書かれた文字で読む（`source: 007` は `007`、`object: no` は `no`）。`null`、`~`、値なしは、値がないものとして扱う。文字の `null` を指すには、`"null"` と引用符で囲む。ほかの欄（`canonical`、`valid_from`、`notes` など）は、YAML の値で読む。
 

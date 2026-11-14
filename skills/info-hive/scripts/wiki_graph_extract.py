@@ -77,8 +77,11 @@ from wiki_pages import (  # noqa: E402
     iter_page_files,
     link_candidates,
     link_lookup,
+    kind_value,
     ref_values,
+    scalar_value,
     text_value,
+    type_value,
 )
 from wiki_pages import resolve_link as resolve_link_slug  # noqa: E402
 
@@ -485,8 +488,8 @@ def load_ontology(path: Path) -> dict:
 
 def derive_node_type(meta: dict, ontology: dict) -> str | None:
     """ontology[node_types][*].maps_from を使い、ページの frontmatter を node_type に対応付ける。"""
-    page_type = meta.get("type")
-    page_kind = meta.get("kind")
+    page_type = type_value(meta.get("type"))
+    page_kind = kind_value(meta.get("kind"))
     explicit = (meta.get("graph") or {}).get("node_type") if isinstance(meta.get("graph"), dict) else None
     if explicit:
         return explicit
@@ -577,14 +580,14 @@ def build_nodes(pages: list[dict], ontology: dict,
             "id": node_id,
             "slug": p["slug"],
             "title": text_value(meta.get("title")) or p["slug"],
-            "page_type": meta.get("type") or "",
+            "page_type": type_value(meta.get("type")) or "",
             "node_type": node_type,
-            "kind": meta.get("kind") or "",
+            "kind": kind_value(meta.get("kind")) or "",
             "tags": _tag_list(meta.get("tags")),
             "aliases": list(graph_meta.get("aliases") or []),
             "path": p["rel_path"],
-            "created": meta.get("created") or "",
-            "updated": meta.get("updated") or "",
+            "created": scalar_value(meta.get("created")) or "",
+            "updated": scalar_value(meta.get("updated")) or "",
             "canonical": bool(graph_meta.get("canonical", False)),
         }
         nodes.append(node)
@@ -683,7 +686,7 @@ def build_edges(pages: list[dict], page_node_ids: dict[str, str],
     # 行き先のページを引くインデックス。パスは .md を除いた wiki からの相対パス（NFC、大文字と小文字を区別）、
     # スラッグはファイル名の stem である。どちらも、当たるページのキーをすべて並べる。
     pages_by_path, pages_by_slug = build_page_index(pages, page_key)
-    type_by_key = {page_key(p): p["meta"].get("type") for p in pages}
+    type_by_key = {page_key(p): type_value(p["meta"].get("type")) for p in pages}
 
     # ノード ID ごとの、それを持つページの数。2 つ以上なら、目的語としては曖昧である。
     pages_per_node: dict[str, int] = defaultdict(int)
@@ -795,7 +798,7 @@ def build_edges(pages: list[dict], page_node_ids: dict[str, str],
                 note("ambiguous_source" if found else "unresolved_source", p, source=ref, pages=sorted(found))
                 continue
             src_id = page_node_ids.get(found[0])
-            if meta.get("type") != "source" and src_id:
+            if type_value(meta.get("type")) != "source" and src_id:
                 push(make_edge(
                     subject=subject_id,
                     predicate="sourced_from",
@@ -811,7 +814,7 @@ def build_edges(pages: list[dict], page_node_ids: dict[str, str],
 
         # 4. ソースページの raw: フィールドから作る summarizes_raw エッジ。lint の missing_raw と同じく、
         # 配列で書いた raw: は値ごとに読む。
-        if meta.get("type") == "source":
+        if type_value(meta.get("type")) == "source":
             for raw_path in ref_values(meta.get("raw")):
                 push(make_edge(
                     subject=subject_id,
