@@ -434,11 +434,13 @@ def section_tokens(tokens: list, section: Section) -> list:
     return picked
 
 
-def token_shape(tokens: list) -> tuple[list, list]:
+def token_shape(tokens: list, parser) -> tuple[list, list]:
     """トークンの木を、(リンクの宛先を除いた形の並び, リンクと画像の宛先の並び) にする。
 
     画像の子（代替テキストを読んだトークン）はたどらない。代替テキストは文字として描かれ、その中のリンクの
-    記法は宛先にならないので、代替テキストは画像の content（文字だけにしたもの）で比べる。
+    記法は宛先にならないので、代替テキストは、パーサーが描く文字（renderInlineAsText）で比べる。
+    画像の content は元の記法のままなので、節の外の参照リンクの定義が効かなくなって描く文字が変わっても、
+    同じになってしまう（実装の 3 回目のレビュー）。
     """
     shape: list = []
     dests: list = []
@@ -450,8 +452,13 @@ def token_shape(tokens: list) -> tuple[list, list]:
                 dests.append(("link", attrs.pop("href", "")))
             elif t.type == "image":
                 dests.append(("image", attrs.pop("src", "")))
-            # inline の content は元の文字列なので、宛先の違いを含む。中身は children で比べる。
-            content = "" if t.type == "inline" else t.content
+            if t.type == "inline":
+                # inline の content は元の文字列なので、宛先の違いを含む。中身は children で比べる。
+                content = ""
+            elif t.type == "image":
+                content = parser.renderer.renderInlineAsText(t.children or [], parser.options, {})
+            else:
+                content = t.content
             shape.append((t.type, t.tag, t.nesting, t.info, t.markup, content, sorted(attrs.items())))
             if t.children and t.type != "image":
                 walk(t.children)
@@ -469,8 +476,8 @@ def verify_rewrite(doc_text: str, section: Section, rewritten: str, root: Path, 
     もの）を link_url() で書き換え、同じパーサーの normalizeLink() で正規化したもの（変えない宛先は前の宛先）。
     """
     parser = new_parser()
-    before_shape, before_dests = token_shape(section_tokens(parser.parse(doc_text, {}), section))
-    after_shape, after_dests = token_shape(parser.parse(rewritten, {}))
+    before_shape, before_dests = token_shape(section_tokens(parser.parse(doc_text, {}), section), parser)
+    after_shape, after_dests = token_shape(parser.parse(rewritten, {}), parser)
     if before_shape != after_shape or len(before_dests) != len(after_dests):
         return [f"{COMMANDS_DOC.as_posix()}: リンクの書き換えで、リンクの宛先のほかが変わった"
                 "（参照の形のリンク、リストや引用の中のコードフェンスなど、書き換えが読めない書き方がある）"]
