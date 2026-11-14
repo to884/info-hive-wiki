@@ -264,11 +264,14 @@ def classify_record(rec: dict) -> str:
             if _origin_kind(att.get("origin")) == "human" and isinstance(att.get("prompt"), str):
                 return H
             return X
-        if atype in CONTEXT_ATTACHMENT_TYPES and att.get("origin") is None and rec.get("origin") is None:
+        # 種類の値が文字列でなければ（配列など）、知らないものとして境界にする（集合の検索で例外にしない）。
+        if isinstance(atype, str) and atype in CONTEXT_ATTACHMENT_TYPES and att.get("origin") is None \
+                and rec.get("origin") is None:
             return T
         return X
     if kind == "system":
-        return T if rec.get("subtype") in TRANSPARENT_SYSTEM_SUBTYPES else X
+        subtype = rec.get("subtype")
+        return T if isinstance(subtype, str) and subtype in TRANSPARENT_SYSTEM_SUBTYPES else X
     return X
 
 
@@ -672,7 +675,7 @@ def extract(rng: Range, opts: Options) -> Extract:
         if "uuid" not in rec:
             rtype = rec.get("type")
             ignored[_safe_key(rtype)] += 1
-            if rtype not in KNOWN_UUIDLESS_TYPES:
+            if not (isinstance(rtype, str) and rtype in KNOWN_UUIDLESS_TYPES):
                 unknown_types.add(_safe_key(rtype))
             continue
         uid = rec.get("uuid")
