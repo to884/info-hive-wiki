@@ -143,6 +143,8 @@ RE_EMAIL = re.compile(r"(?<![A-Za-z0-9._%+-])([A-Za-z0-9._%+-]+)@([A-Za-z0-9-]+(
 RE_HOME_WIN = re.compile(r"(?i)(?<![A-Za-z])[A-Z]:[\\/]+Users[\\/]+([^\\/\s\"'`<>|:*?]+)")
 RE_HOME_POSIX = re.compile(r"(?<![A-Za-z0-9_.~-])/(?:Users|home)/([^/\s\"'`<>|:*?]+)")
 
+# Windows かどうか（試験はこの定数だけを差し替える。os.name を差し替えると pathlib まで変わる）。
+WINDOWS = os.name == "nt"
 NUL = chr(0)
 REPLACEMENT = chr(0xFFFD)
 
@@ -1215,7 +1217,7 @@ class ExclusiveUnsupported(Exception):
 
 def publish_exclusive(tmp: Path, target: Path) -> None:
     """一時ファイルを、行き先に重ねて書かない形で置く。行き先があれば FileExistsError。"""
-    if os.name == "nt":
+    if WINDOWS:
         os.rename(tmp, target)
         return
     try:
@@ -1280,7 +1282,7 @@ def write_raw(wiki: Path, raw_root: Path, slug: str, data: bytes) -> tuple[str, 
                 # Windows では、ほかのプロセスが同じ行き先へ名前を変えている最中だと、FileExistsError ではなく
                 # アクセスの拒否になる。少し待って行き先を確かめ直す（できていれば identical か conflict）。
                 # 回数を限り、本当に書けないディレクトリでは止まる。
-                if os.name == "nt" and busy < 50:
+                if WINDOWS and busy < 50:
                     busy += 1
                     time.sleep(0.02)
                     continue
