@@ -113,6 +113,16 @@ def _canonical_value(value, table: dict[str, str]):
     return value
 
 
+def canonical_type(value):
+    """type の値が日本語の別名（概念など）なら英語に直す。文字でなければ、そのまま返す。"""
+    return _canonical_value(value, TYPE_ALIASES)
+
+
+def canonical_kind(value):
+    """kind の値が日本語の別名（人物など）なら英語に直す。文字でなければ、そのまま返す。"""
+    return _canonical_value(value, KIND_ALIASES)
+
+
 def canonical_meta(meta: dict) -> tuple[dict, list[dict]]:
     """frontmatter の日本語の別名を英語に直す。(英語に直した meta, 衝突の一覧) を返す。
 
@@ -138,9 +148,9 @@ def canonical_meta(meta: dict) -> tuple[dict, list[dict]]:
         out[canonical] = value
         origin[canonical] = key
     if "type" in out:
-        out["type"] = _canonical_value(out["type"], TYPE_ALIASES)
+        out["type"] = canonical_type(out["type"])
     if "kind" in out:
-        out["kind"] = _canonical_value(out["kind"], KIND_ALIASES)
+        out["kind"] = canonical_kind(out["kind"])
     return out, conflicts
 
 

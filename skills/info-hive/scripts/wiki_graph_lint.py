@@ -64,7 +64,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 import wiki_graph_extract as _extract  # noqa: E402
 import wiki_graph_common as common  # noqa: E402
-from wiki_pages import text_value  # noqa: E402
+from wiki_pages import kind_value, text_value, type_value  # noqa: E402
 from wiki_text import localize_argparse, nfc  # noqa: E402
 import wiki_initialized  # noqa: E402
 import wiki_workspace  # noqa: E402
@@ -95,8 +95,8 @@ def collect_pages(wiki_root: Path) -> list[dict]:
 
 
 def derive_node_type(meta: dict, ontology: dict) -> str | None:
-    page_type = meta.get("type")
-    page_kind = meta.get("kind")
+    page_type = type_value(meta.get("type"))
+    page_kind = kind_value(meta.get("kind"))
     explicit = (meta.get("graph") or {}).get("node_type") if isinstance(meta.get("graph"), dict) else None
     if explicit:
         return explicit
@@ -176,7 +176,7 @@ def lint(pages: list[dict], ontology: dict) -> dict:
             "rel_path": p["rel_path"],
             "disk_rel_path": p.get("disk_rel_path", p["rel_path"]),
             "slug": p["slug"],
-            "page_type": p["meta"].get("type"),
+            "page_type": type_value(p["meta"].get("type")),
             "canonical": bool(graph_meta.get("canonical", False)),
             "aliases": list(graph_meta.get("aliases") or []),
             "graph": graph_meta,
@@ -191,7 +191,7 @@ def lint(pages: list[dict], ontology: dict) -> dict:
         findings["duplicate_node_ids"].append(finding)
 
     # スラッグをキーにしたソースページ。エッジの `source:` の参照を検証するのに使う。
-    source_slugs = {p["slug"] for p in pages if p["meta"].get("type") == "source"}
+    source_slugs = {p["slug"] for p in pages if type_value(p["meta"].get("type")) == "source"}
 
     # 別名
     alias_to_canonicals: dict[str, set[str]] = defaultdict(set)
@@ -353,7 +353,7 @@ def decide_evidence(pages: list[dict], ontology: dict, threshold: float | None) 
         wd.note(str(exc))
         client = None
     predicates = ontology.get("predicates", {})
-    sources = {p["slug"]: p for p in pages if p["meta"].get("type") == "source"}
+    sources = {p["slug"]: p for p in pages if type_value(p["meta"].get("type")) == "source"}
     titles = {derive_node_id(p["meta"], p["slug"], ontology): text_value(p["meta"].get("title")) or p["slug"]
               for p in pages}
     items = []

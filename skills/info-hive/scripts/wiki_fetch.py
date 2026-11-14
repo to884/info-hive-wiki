@@ -44,6 +44,9 @@ import re
 import socket
 import struct
 import sys
+import tempfile
+import time
+import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -1134,12 +1137,38 @@ def _md_url(url: str) -> str:
     return url.replace(" ", "%20").replace("(", "%28").replace(")", "%29")
 
 
+# Windows では、ほかのプロセス（ウイルス対策の検査、検索の索引、エディター）が移動元か移動先を開いていると、
+# os.replace が PermissionError（WinError 5 か 32）で失敗する。開いている時間は短いので、間を置いて試し直す。
+# 待つ時間は合わせて 1 秒である。Windows のほかでは、PermissionError は権限の不足なので試し直さない。
+_REPLACE_RETRY_DELAYS = (0.05, 0.1, 0.15, 0.2, 0.25, 0.25)
+_RETRY_REPLACE_ON_WINDOWS = os.name == "nt"
+
+
+def replace_with_retry(src: Path, dst: Path) -> None:
+    """os.replace(src, dst) を行う。Windows で PermissionError になったときだけ、間を置いて試し直す。
+
+    ほかの例外は試し直さずに上げる。試し直しても失敗したら、最後の PermissionError を上げる。
+    ファイルは消さない。失敗したときの後始末は呼び出し側が行う。
+    """
+    for delay in _REPLACE_RETRY_DELAYS if _RETRY_REPLACE_ON_WINDOWS else ():
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            time.sleep(delay)
+    os.replace(src, dst)
+
+
 def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text: str,
                   images: list[tuple[str, bytes]]) -> None:
     """本文と画像を書く。途中で失敗したら、前の本文と画像をそのまま残す。
 
     新しい本文と画像は一時の場所に書き、古い画像を退避してから、新しい画像と本文を置く。
     どこかで失敗したら、置いた新しい画像を消して、退避した古い画像を戻す。
+    名前の変更（退避、配置、本文の置き換え、戻し）は replace_with_retry で行う。
+    退避の場所は呼び出しごとに新しく作り、前の呼び出しが残した退避の場所は使わない。
+    退避した古い画像を消すのは、本文を置き換えたあとだけである。戻しきれなかった古い画像は、
+    ただ 1 つの写しなので退避の場所に残し、その場所を例外の注記（add_note）で知らせる。
     書き込み先はすべて RAW_ROOT の中に限り、シンボリックリンクを通して外に書かない。
     RAW_ROOT そのものは作らない。初期化（init_wiki.py）が作る（ADR-0019）。
     """
@@ -1148,7 +1177,8 @@ def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text
     pid = os.getpid()
     tmp = raw_root / f".{slug}.md.{pid}.tmp"
     staging = asset_dir.parent / f".{slug}.{pid}.new"
-    backup = asset_dir.parent / f".{slug}.{pid}.old"
+    # 退避の場所（.<スラッグ>.<プロセス ID>.<乱数>.old）は、古い画像があるときに mkdtemp で作る。
+    backup: Path | None = None
     if target.is_symlink():
         raise ValueError(f"保存先がシンボリックリンクになっている: {target}")
     for path in [tmp, asset_dir] + [asset_dir / name for name, _ in images]:
@@ -1161,6 +1191,7 @@ def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text
     old_files = sorted(asset_dir.glob(f"{slug}-*")) if asset_dir.is_dir() else []
     placed: list[Path] = []
     moved: list[tuple[Path, Path]] = []
+    replaced = False
     try:
         with tmp.open("w", encoding="utf-8", newline="") as f:
             f.write(text)
@@ -1169,33 +1200,83 @@ def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text
             for name, data in images:
                 (staging / name).write_bytes(data)
         if old_files:
-            backup.mkdir(parents=True, exist_ok=True)
+            # 前の呼び出しが戻しきれずに残した退避の場所（同じプロセス ID のこともある）を使い回すと、
+            # そこにある古い画像を上書きするか、後始末で消す。毎回、まだない名前の場所を作る。
+            backup = Path(tempfile.mkdtemp(prefix=f".{slug}.{pid}.", suffix=".old", dir=asset_dir.parent))
             for old in old_files:
                 dest = backup / old.name
-                os.replace(old, dest)
+                # 移す前に記録する。移した直後に止められても、戻しと注記がその画像を知っている。
                 moved.append((dest, old))
+                replace_with_retry(old, dest)
         if images:
             asset_dir.mkdir(parents=True, exist_ok=True)
             for name, _data in images:
-                os.replace(staging / name, asset_dir / name)
+                replace_with_retry(staging / name, asset_dir / name)
                 placed.append(asset_dir / name)
-        os.replace(tmp, target)
+        replace_with_retry(tmp, target)
+        replaced = True
     except BaseException:
-        for path in placed:
-            if path.exists():
-                path.unlink()
-        for dest, original in moved:
-            if dest.exists():
-                os.replace(dest, original)
+        try:
+            for path in placed:
+                if path.exists():
+                    path.unlink()
+            for dest, original in moved:
+                if dest.exists():
+                    replace_with_retry(dest, original)
+        except BaseException as exc:
+            if any(dest.exists() for dest, _original in moved):
+                exc.add_note(f"古い画像を戻しきれなかった。戻していない古い画像を {backup} に残した。"
+                             f"{asset_dir} に移すと元に戻る")
+            raise
         raise
     finally:
         if tmp.exists():
             tmp.unlink()
-        for d in (staging, backup):
-            if d.is_dir():
-                for leftover in d.iterdir():
-                    leftover.unlink()
-                d.rmdir()
+        # 退避の場所の中身を消すのは、本文を置き換えたあとだけにする。失敗したときに残っているのは、
+        # 戻しきれなかった古い画像のただ 1 つの写しなので消さない。空になった場所だけを消す。
+        for d, drop_files in ((staging, True), (backup, replaced)):
+            if d is not None and d.is_dir():
+                if drop_files:
+                    for leftover in d.iterdir():
+                        leftover.unlink()
+                if not any(d.iterdir()):
+                    d.rmdir()
+
+
+MAX_TIMEOUT = 86400.0  # --timeout の上限（秒）。大きすぎる値は、ソケットの待ち時間で OverflowError になる。
+
+
+def timeout_seconds(text: str) -> float:
+    """--timeout の値。0 より大きく MAX_TIMEOUT 以下の有限の秒数だけを受け付ける（inf、nan、負の値は断る）。"""
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"秒数として読めない: {text!r}") from None
+    if not (0 < value <= MAX_TIMEOUT):  # nan はどの比較も偽になるので、ここで断る
+        raise argparse.ArgumentTypeError(f"0 より大きく {MAX_TIMEOUT:g} 以下の秒数にする: {text!r}")
+    return value
+
+
+OLD_WORK_DIR_NOTE = ("0.14.1 までの版で始めた取り込みの途中の作業用の写しがあるが、この版では続けられない。"
+                     "取り直すなら --force を付ける（写しと raw の両方を作り直し、途中の削除や訳は消える）")
+
+
+def has_old_work_dir(args, target: Path) -> bool:
+    """0.14.1 までの版が書いた、取り込みの途中の作業用の写しがあるか（--force のときは問わない）。
+
+    この版では続けられないことを、取得の結果（原文が同じ、違う、どの例外で止まったか）によらず知らせるために、
+    build（結果の old_work_dir）と main（例外の出口の report_failure）の両方がこれで決める。続けるかの判定では
+    ない（それは wiki_rawcheck.resumable_fetch が決める）。例外の出口からも呼ぶので、規則に反するスラッグや
+    読めない写しでも例外を上げずに False を返す。
+    """
+    wiki = getattr(args, "wiki", None)
+    if wiki is None or args.force:
+        return False
+    try:
+        check_slug(args.slug)
+        return target.exists() and wiki_rawcheck.old_version_work_dir(wiki, args.slug, target)
+    except (OSError, ValueError):
+        return False
 
 
 def build(args) -> tuple[int, dict]:
@@ -1206,10 +1287,26 @@ def build(args) -> tuple[int, dict]:
     if not inside(raw_root, target) or not inside(raw_root, asset_dir):
         raise ValueError(f"保存先が RAW_ROOT の外になる: {target}")
 
+    wiki = getattr(args, "wiki", None)
+    html_file = getattr(args, "html_file", None)
+    # 途中の取り込みは、取得の前に再開する。続けるかは写しと raw の状態だけで決まるので、ページを取り直さない。
+    # 取り直して原文を比べると、--html-file で取ったページ（DOM のハッシュ）や、取得のたびに変わるページでは、
+    # 写しがそろっていても内容が違うとして止まり、ネットにつながらなければ取得の失敗で止まる。
+    # --html-file は、渡した内容で取るという入力なので、ここでは続けずに、読んで比べる（下の枝）。
+    # 0.14.1 までの版が書いた写しは、resumable_fetch が続けられないものとする（どちらの枝でも続けない）。
+    if wiki is not None and not html_file and not args.force and target.exists():
+        saved = wiki_rawcheck.resumable_fetch(wiki, args.slug, target)
+        if saved is not None and saved["url"] == args.url:
+            # 前の取得の出力（警告を含む）に、取得しなかったことと、どの段まで進んだかを足して返す。
+            result = {"path": target.as_posix(), "url": args.url, "final_url": saved["final_url"],
+                      "source_sha256": saved["source_sha256"], "unchanged": True, "fetch_skipped": True,
+                      "work_dir": True}
+            result.update(wiki_rawcheck.resume_fields(wiki, args.slug, saved))
+            return 0, result
+
     # 内部のアドレスを取るかは、ユーザーが渡した URL で決める。公開のページが内部のアドレスへ
     # リダイレクトしても、その先は取らない。ユーザーが内部のページを直接渡したときだけ許す。
     block_private = not is_private_host(urllib.parse.urlsplit(args.url).hostname or "")
-    html_file = getattr(args, "html_file", None)
     if html_file:
         # ブラウザで保存した HTML。基準の URL は、本文を取ったときのアドレス欄の URL にする。
         check_url(args.page_url)
@@ -1227,9 +1324,13 @@ def build(args) -> tuple[int, dict]:
     if ctype and ctype not in ("text/html", "application/xhtml+xml", "text/plain", "application/xml", "text/xml"):
         raise FetchError(f"HTML のページではない（Content-Type: {ctype}）。PDF などは保存してから通常の手順で取り込む")
     sha = hashlib.sha256(data).hexdigest()
+    # source_sha256_of は、どの取得か（dom はブラウザで保存した HTML）を示す。続きの手順は、本文が短いときに
+    # ブラウザで取り直すかを、これで決める（dom なら、もうブラウザで取ってある）。
     result: dict = {"path": target.as_posix(), "url": args.url, "final_url": final_url, "source_sha256": sha,
-                    "unchanged": False, "warnings": []}
-    wiki = getattr(args, "wiki", None)
+                    "source_sha256_of": "dom" if html_file else "html", "unchanged": False, "warnings": []}
+    if has_old_work_dir(args, target):
+        # 原文が同じでも違っても（終了コード 3）、続けられない旧版の写しがあることを知らせる。
+        result["old_work_dir"] = True
 
     if target.exists() and not args.force:
         old = existing_sha(target)
@@ -1238,22 +1339,10 @@ def build(args) -> tuple[int, dict]:
             if wiki is not None:
                 # 写しがそろい（そろった印は raw を書いたあとに置くので、raw と同じ取得で書いたもの）、raw の
                 # frontmatter を書き換えていないときだけ、途中から続けられる。
-                complete = wiki_rawcheck.work_dir_complete(wiki, args.slug) and \
-                    wiki_rawcheck.work_dir_matches_raw(wiki, args.slug, target)
-                result["work_dir"] = complete
-                if complete:
-                    # 途中から続けるために、どの段まで進んだかと、後の手順が使う値を返す。
-                    wd = wiki_rawcheck.work_dir(wiki, args.slug)
-                    frozen = (wd / "cleaned.md").is_file()
-                    result["work_stage"] = "frozen" if frozen else "fetched"
-                    saved = wiki_rawcheck.load_fetch(wd)
-                    for key in ("needs_translation", "images", "removed_by_rule", "title", "source_lang", "ja_ratio"):
-                        if key in saved:
-                            result[key] = saved[key]
-                    if frozen:
-                        # 削除を固定したあとは、補足を書く画像は、削除のあとの本文に残ったものだけ（freeze の出力と同じ）。
-                        fm, body = wiki_rawcheck.split_frontmatter(wiki_rawcheck.read_text(wd / "cleaned.md"))
-                        result["images"] = wiki_rawcheck.remaining_images(saved, wiki_rawcheck.parse_tree(body), len(fm))
+                saved = wiki_rawcheck.resumable_fetch(wiki, args.slug, target)
+                result["work_dir"] = saved is not None
+                if saved is not None:
+                    result.update(wiki_rawcheck.resume_fields(wiki, args.slug, saved))
             return 0, result
         suggestion = f"{args.slug}-{datetime.now().strftime('%Y%m%d')}"
         result["suggested_slug"] = suggestion
@@ -1399,6 +1488,9 @@ def build(args) -> tuple[int, dict]:
         "images": images_out,
         "dropped_images": dropped,
         "removed_by_rule": removed_by_rule,
+        # 作業用の写し（fetched.md。text をそのまま書く）のハッシュ。fetch.json と写しを内容で結ぶ（途中から続けるとき、
+        # wiki_rawcheck.resumable_fetch が照らす）。
+        "fetched_sha256": wiki_rawcheck.snapshot_sha256(text.encode("utf-8")),
     })
 
     # 検査（wiki_rawcheck.py）の基準になる作業用の写しを、raw より先に書く。写しを書けなければ raw も書かない。
@@ -1417,20 +1509,57 @@ def build(args) -> tuple[int, dict]:
         tmp.write_bytes(json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"))
     write_outputs(raw_root, target, asset_dir, args.slug, text, pending)
     if tmp is not None:
-        os.replace(tmp, tmp.with_name("fetch.json"))
+        # 書いた直後の fetch.json.tmp は、ウイルス対策の検査が開いていることがある（write_outputs と同じ理由）。
+        replace_with_retry(tmp, tmp.with_name("fetch.json"))
     return 0, result
+
+
+def _resume_lines(result: dict) -> list[str]:
+    """途中から続けるときの段と、最後に終えた段の出力。止まる前に読むはずだった出力を、ここで読み直して確かめる。"""
+    if result.get("work_stage") == "frozen":
+        out = ["段: frozen（削除は固定してある。下の消したものを読み、本文を消していないかを確かめてから、訳と補足に進む）"]
+        report = result.get("freeze", {})
+        for line in report.get("removed_lines", []):
+            out.append(f"消した行: {line[:160]}")
+        for c in report.get("shortened_lines", []):
+            out.append(f"一部を消した行: {c['fetched'][:120]} → {c['raw'][:120]}")
+        for w in report.get("warnings", []):
+            out.append(f"警告: {w['message']}")
+        for img in result.get("images", []):
+            out.append(f"補足を書く画像: {img.get('line') or '?'} 行目のあたり: {img['path']}  alt: {img.get('alt') or '（なし）'}")
+        return out
+    out = ["段: fetched（下の注意と規則で消したものを見て、本文を取れたかを確かめるところから続ける）"]
+    for r in result.get("removed_by_rule", []):
+        out.append(f"規則で消した（{r['rule']}）: {r['text'][:120]}")
+    for w in result.get("warnings", []):
+        out.append(f"注意: {w}")
+    return out
 
 
 def render_text(code: int, result: dict) -> str:
     if result.get("unchanged"):
-        note = ""
-        if result.get("work_dir") is False:
-            note = ("\n作業用の写しがないか、raw と別の取得のもの。取り込みの途中なら、--force で取り直す"
-                    "（写しと raw の両方を作り直す）")
-        return f"内容は前回と同じなので、書き込まなかった: {result['path']}{note}"
+        if result.get("fetch_skipped"):
+            out = [f"取り込みの途中の作業用の写しがあるので、ページを取得せずに続ける: {result['path']}",
+                   "ページが更新されたかは見ていない。取り直すなら --force を付ける（途中の作業を捨て、写しと raw の両方を作り直す）"]
+        else:
+            out = [f"内容は前回と同じなので、書き込まなかった: {result['path']}"]
+        if result.get("work_dir"):
+            out.extend(_resume_lines(result))
+        elif result.get("old_work_dir"):
+            out.append(OLD_WORK_DIR_NOTE)
+        elif result.get("work_dir") is False:
+            out.append("作業用の写しがないか、続けられない写し（raw と別の取得のもの、0.14.1 までの版が書いたものなど）。"
+                       "取り込みの途中なら、--force で取り直す"
+                       "（写しと raw の両方を作り直す）")
+        return "\n".join(out)
     if code == 3:
-        return (f"同じスラッグのファイルがあり、内容が違う: {result['path']}\n"
+        text = (f"同じスラッグのファイルがあり、内容が違う: {result['path']}\n"
                 f"別版として取り込むなら --slug {result['suggested_slug']} を付け、上書きするなら --force を付ける。")
+        if result.get("old_work_dir"):
+            # 旧版の写しの取り込みでは、原文の違いはページの更新とは限らない（DOM と HTML のハッシュは違う）。
+            text += (f"\n{OLD_WORK_DIR_NOTE}。原文が違うのは、ページが更新されたからとは限らない"
+                     "（ブラウザで保存した HTML から取った取り込みを、URL で取り直したときなど）")
+        return text
     out = [
         f"保存した: {result['path']}",
         f"題名: {result['title']}",
@@ -1459,7 +1588,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--slug", required=True, help="保存するファイルのスラッグ。ソースの要約ページのスラッグとそろえる")
     parser.add_argument("--json", action="store_true", help="結果を JSON で出力する。キーは英語のまま")
     parser.add_argument("--no-images", action="store_true", help="画像をダウンロードせず、元の URL を参照する")
-    parser.add_argument("--timeout", type=float, default=30, help="1 回の取得の待ち時間（秒、既定: 30）")
+    parser.add_argument("--timeout", type=timeout_seconds, default=30,
+                        help=f"1 回の取得の待ち時間（秒、0 より大きく {MAX_TIMEOUT:g} 以下、既定: 30）")
     parser.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES, help="ページと画像 1 つの大きさの上限（既定: 20 MiB）")
     parser.add_argument("--max-images", type=int, default=50, help="保存する画像の数の上限（既定: 50）")
     parser.add_argument("--force", action="store_true", help="同じスラッグのファイルがあっても上書きする")
@@ -1487,24 +1617,44 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         code, result = build(args)
-    except ValueError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-    except FetchError as exc:
-        if args.json:
-            print(json.dumps({"error": "fetch_failed", "message": str(exc)}, ensure_ascii=False))
-        print(f"取得に失敗した: {exc}", file=sys.stderr)
-        return 2
-    except OSError as exc:
-        print(f"ファイルを書けない: {exc}", file=sys.stderr)
-        return 1
-    except RecursionError:
-        message = "HTML の入れ子が深すぎて変換できない"
-        if args.json:
-            print(json.dumps({"error": "too_deep", "message": message}, ensure_ascii=False))
-        print(message, file=sys.stderr)
-        return 2
+    except Exception as exc:  # noqa: BLE001 - 例外の出口は report_failure だけにする（旧版の写しを知らせるため）
+        return report_failure(args, exc)
     print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else render_text(code, result))
+    return code
+
+
+def report_failure(args, exc: BaseException) -> int:
+    """build が上げた例外を、終了コードと出力にする（例外の出口はここだけである）。
+
+    main は build が上げる例外をすべて（Exception）ここに渡す。種類を並べて捕まえると、予期しない例外が出口を
+    迂回して、旧版の写しを知らせずに止まるからである。続けられない旧版の写しがあれば、どの例外でも、標準エラーに
+    案内を足し、--json の出力（取得の失敗と入れ子の深すぎる HTML）に old_work_dir を付ける。build の結果の
+    old_work_dir と同じ判定（has_old_work_dir）を使う。予期しない例外は、トレースバックも標準エラーに出し、
+    終了コード 1 にする（捕まえなかったときの Python の終了コードと同じ）。
+    """
+    old = has_old_work_dir(args, args.raw_root / f"{args.slug}.md")
+    error = None  # --json のときに出す error の値。None なら標準出力には何も出さない（今までどおり）。
+    if isinstance(exc, FetchError):
+        code, error, message, text = 2, "fetch_failed", str(exc), f"取得に失敗した: {exc}"
+    elif isinstance(exc, RecursionError):
+        message = "HTML の入れ子が深すぎて変換できない"
+        code, error, text = 2, "too_deep", message
+    elif isinstance(exc, ValueError):
+        code, message, text = 1, str(exc), str(exc)
+    elif isinstance(exc, OSError):
+        # 注記（write_outputs が戻しきれなかった古い画像の置き場所を書く）も出す。
+        notes = "".join(f"\n{note}" for note in getattr(exc, "__notes__", ()))
+        code, message, text = 1, str(exc), f"ファイルを書けない: {exc}{notes}"
+    else:
+        trace = "".join(traceback.format_exception(exc)).rstrip("\n")
+        code, message = 1, str(exc)
+        text = f"{trace}\n予期しない誤りで止まった（{type(exc).__name__}: {exc}）"
+    if args.json and error is not None:
+        failed = {"error": error, "message": message}
+        if old:
+            failed["old_work_dir"] = True
+        print(json.dumps(failed, ensure_ascii=False))
+    print(text + (f"\n{OLD_WORK_DIR_NOTE}" if old else ""), file=sys.stderr)
     return code
 
 
