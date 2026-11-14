@@ -46,6 +46,7 @@ import struct
 import sys
 import tempfile
 import time
+import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -1242,6 +1243,20 @@ def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text
                     d.rmdir()
 
 
+MAX_TIMEOUT = 86400.0  # --timeout の上限（秒）。大きすぎる値は、ソケットの待ち時間で OverflowError になる。
+
+
+def timeout_seconds(text: str) -> float:
+    """--timeout の値。0 より大きく MAX_TIMEOUT 以下の有限の秒数だけを受け付ける（inf、nan、負の値は断る）。"""
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"秒数として読めない: {text!r}") from None
+    if not (0 < value <= MAX_TIMEOUT):  # nan はどの比較も偽になるので、ここで断る
+        raise argparse.ArgumentTypeError(f"0 より大きく {MAX_TIMEOUT:g} 以下の秒数にする: {text!r}")
+    return value
+
+
 OLD_WORK_DIR_NOTE = ("0.14.1 までの版で始めた取り込みの途中の作業用の写しがあるが、この版では続けられない。"
                      "取り直すなら --force を付ける（写しと raw の両方を作り直し、途中の削除や訳は消える）")
 
@@ -1573,7 +1588,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--slug", required=True, help="保存するファイルのスラッグ。ソースの要約ページのスラッグとそろえる")
     parser.add_argument("--json", action="store_true", help="結果を JSON で出力する。キーは英語のまま")
     parser.add_argument("--no-images", action="store_true", help="画像をダウンロードせず、元の URL を参照する")
-    parser.add_argument("--timeout", type=float, default=30, help="1 回の取得の待ち時間（秒、既定: 30）")
+    parser.add_argument("--timeout", type=timeout_seconds, default=30,
+                        help=f"1 回の取得の待ち時間（秒、0 より大きく {MAX_TIMEOUT:g} 以下、既定: 30）")
     parser.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES, help="ページと画像 1 つの大きさの上限（既定: 20 MiB）")
     parser.add_argument("--max-images", type=int, default=50, help="保存する画像の数の上限（既定: 50）")
     parser.add_argument("--force", action="store_true", help="同じスラッグのファイルがあっても上書きする")
@@ -1601,7 +1617,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         code, result = build(args)
-    except (ValueError, FetchError, OSError, RecursionError) as exc:
+    except Exception as exc:  # noqa: BLE001 - 例外の出口は report_failure だけにする（旧版の写しを知らせるため）
         return report_failure(args, exc)
     print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else render_text(code, result))
     return code
@@ -1610,8 +1626,11 @@ def main(argv: list[str] | None = None) -> int:
 def report_failure(args, exc: BaseException) -> int:
     """build が上げた例外を、終了コードと出力にする（例外の出口はここだけである）。
 
-    続けられない旧版の写しがあれば、どの例外でも、標準エラーに案内を足し、--json の出力（取得の失敗と入れ子の
-    深すぎる HTML）に old_work_dir を付ける。build の結果の old_work_dir と同じ判定（has_old_work_dir）を使う。
+    main は build が上げる例外をすべて（Exception）ここに渡す。種類を並べて捕まえると、予期しない例外が出口を
+    迂回して、旧版の写しを知らせずに止まるからである。続けられない旧版の写しがあれば、どの例外でも、標準エラーに
+    案内を足し、--json の出力（取得の失敗と入れ子の深すぎる HTML）に old_work_dir を付ける。build の結果の
+    old_work_dir と同じ判定（has_old_work_dir）を使う。予期しない例外は、トレースバックも標準エラーに出し、
+    終了コード 1 にする（捕まえなかったときの Python の終了コードと同じ）。
     """
     old = has_old_work_dir(args, args.raw_root / f"{args.slug}.md")
     error = None  # --json のときに出す error の値。None なら標準出力には何も出さない（今までどおり）。
@@ -1622,10 +1641,14 @@ def report_failure(args, exc: BaseException) -> int:
         code, error, text = 2, "too_deep", message
     elif isinstance(exc, ValueError):
         code, message, text = 1, str(exc), str(exc)
-    else:
+    elif isinstance(exc, OSError):
         # 注記（write_outputs が戻しきれなかった古い画像の置き場所を書く）も出す。
         notes = "".join(f"\n{note}" for note in getattr(exc, "__notes__", ()))
         code, message, text = 1, str(exc), f"ファイルを書けない: {exc}{notes}"
+    else:
+        trace = "".join(traceback.format_exception(exc)).rstrip("\n")
+        code, message = 1, str(exc)
+        text = f"{trace}\n予期しない誤りで止まった（{type(exc).__name__}: {exc}）"
     if args.json and error is not None:
         failed = {"error": error, "message": message}
         if old:
