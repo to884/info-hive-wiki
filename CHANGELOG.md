@@ -6,6 +6,22 @@
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-11-14
+
+### Fixed
+
+- frontmatter の `type` と `updated` を配列（`type: [concept]`、`updated: [2026-03-01]`）や値なし（`type:`、`updated:`。パーサーは空の配列を返す）で書いたページを、文字で書いたページと同じように扱うようにした。今までは次のようになっていた。
+  - 検索の `--json` と MCP の `query` の結果で、`type` と `updated` が配列のまま出た。人が読む出力の type の欄にも `['concept']` や `[]` と出た。
+  - `--type concept` が `type: [concept]` のページを外し、`--since` が `updated: [2026-03-01]` のページを、日付が読めないとして外した。
+  - 統計（`/wiki:stats`）が、`type: [concept]` のページを種類なしと数えた。
+  - lint とグラフが、`type: [source]` のページを source として読まなかった。
+  - グラフの抽出が、配列の `type` と `kind` を sqlite に渡して止まった。
+- 新しい `wiki_pages.scalar_value()`、`type_value()`、`kind_value()` でそろえる。文字の値はそのまま使い（`""` も変えない）、結果は変わらない。配列は、0.12.2 の `title` と同じく、空でない要素を「, 」でつなぐ。`type` と `kind` の要素は、日本語の別名（`概念`、`人物` など）も英語に直す。値がないか空の配列なら `null`（人が読む出力の type の欄では「?」）にする。
+  - `type: [concept, entity]` のように要素が 2 つ以上あると、つないだ「concept, entity」になる。`--type concept` にも `--type entity` にも当たらず、`--type "concept, entity"` にだけ当たる。`updated` は、つないだ値の先頭の 10 文字を日付として読む。
+  - グラフのノードの `page_type`、`kind`、`created`、`updated` も、配列なら同じ規則で要素をつなぐ。値がないか空の配列なら、今までどおり `""` にする（sqlite には `NULL` で入る）。配列の `type` や `kind` のページがあると、今まで抽出は止まり、グラフの lint はそのページのノードの種類を決められず `concept` とみなしていた。この修正から、文字で書いたときと同じ種類のノードになる（`type: [source]` は `source:`、`type: "entity"` と `kind: [person]` は `person:`）。グラフの lint も、主語の型の検査、`source:` の参照の検査、`--decide` の証拠の判定を、この種類で行う。
+  - lint の指摘のうち、書き方を指摘するもの（`non_iso_dates` の `value`）は、今までどおり書かれた形のまま出す。判定に使った値を示す欄（`index_type_mismatch` と `unresolved_sources` の `type`、`stale_pages` の `updated`）は、比べた値と同じく、そろえた値を出す。今までは `["concept"]` のように配列のまま出ていた。
+  - 閲覧（`/wiki:browse`）は、まだ直していない。索引にないページを種類で分ける欄に、配列の `type` が `['concept']` のように出る。
+
 ## [0.14.0] - 2026-11-14
 
 ### Added

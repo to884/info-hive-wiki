@@ -545,7 +545,7 @@ def contradiction_pairs(wiki: Path, max_pairs: int) -> list[tuple[str, dict, dic
     pages = ws.collect_pages(wiki)
     by_path, by_slug = ws.build_link_index(pages)
     entity_titles = {p["slug"]: ws.text_value(p["meta"].get("title")) or p["slug"]
-                     for p in pages if p["meta"].get("type") == "entity"}
+                     for p in pages if ws.type_value(p["meta"].get("type")) == "entity"}
     mentions: dict[str, list[dict]] = {}
     for page in pages:
         title = ws.text_value(page["meta"].get("title")) or page["slug"]

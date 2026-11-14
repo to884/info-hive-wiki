@@ -75,7 +75,9 @@ from wiki_pages import (  # noqa: E402
     iter_page_files,
     ref_values,
     resolve_link,
+    scalar_value,
     text_value,
+    type_value,
 )
 
 
@@ -494,7 +496,7 @@ def passes_filters(page: dict, args) -> bool:
     if args.type:
         # --type 概念 のように日本語の別名で指定されても、英語の type と比べられるようにする。
         wanted_type = canonical_meta({"type": args.type})[0]["type"]
-        if meta.get("type") != wanted_type:
+        if type_value(meta.get("type")) != wanted_type:
             return False
     if args.tag:
         # 全角の「ＡＩ」と半角の「AI」を同じタグとして比べる。
@@ -503,7 +505,7 @@ def passes_filters(page: dict, args) -> bool:
             return False
     if args.since:
         since = parse_date(args.since)
-        updated = parse_date(meta.get("updated"))
+        updated = parse_date(scalar_value(meta.get("updated")))
         if since and updated and updated < since:
             return False
         if since and not updated:
@@ -826,14 +828,14 @@ def json_result(
     return {
         "slug": page["slug"],
         "rel_path": page["rel_path"],
-        "type": meta.get("type"),
+        "type": type_value(meta.get("type")),
         "title": text_value(meta.get("title")) or page["slug"],
         "heading_path": heading_path,
         "section_index": section_index,
         "score": round(score, 4),
         "retrievers": retrievers or ["bm25"],
         "snippet": snippet,
-        "updated": meta.get("updated"),
+        "updated": scalar_value(meta.get("updated")),
         # tags と sources は、値を 1 つだけ書いたページ（tags: 検索）でも文字の配列にする。lint が sources を
         # 読むのと同じ wiki_pages.ref_values() を使う。MCP の query も、この関数で結果を作る。
         "tags": ref_values(meta.get("tags")),
@@ -911,6 +913,12 @@ def results_heading(query: str, count: int) -> str:
     return f"「{query}」の上位 {count} 件:"
 
 
+def type_cell_value(meta: dict) -> str:
+    """人が読む出力の type の欄に書く値。type がないか、配列が空なら「?」にする。文字の type は、"" も含めてそのまま使う。"""
+    value = type_value(meta.get("type", "?"))
+    return "?" if value is None else value
+
+
 def type_cell(page_type) -> str:
     """結果の行の type の欄。全角の文字を 2 桁と数えて、幅を 9 桁にそろえる。"""
     return ljust_display(str(page_type), 9)
@@ -964,7 +972,7 @@ def cmd_search(args, pages: list[dict]) -> None:
         print()
         for score, page in top:
             title = text_value(page["meta"].get("title")) or page["slug"]
-            page_type = page["meta"].get("type", "?")
+            page_type = type_cell_value(page["meta"])
             print(f"  [{score:6.2f}] [{type_cell(page_type)}] {title}")
             print(f"             {page['rel_path']}")
         return
@@ -1066,7 +1074,7 @@ def cmd_search(args, pages: list[dict]) -> None:
     for score, section, _retrievers in top_sections:
         page = section["page"]
         title = text_value(page["meta"].get("title")) or page["slug"]
-        page_type = page["meta"].get("type", "?")
+        page_type = type_cell_value(page["meta"])
         print(f"  [{score:6.2f}] [{type_cell(page_type)}] {title}")
         print(f"             {page['rel_path']}")
         if section["heading_path"]:

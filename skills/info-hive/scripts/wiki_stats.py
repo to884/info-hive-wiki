@@ -34,7 +34,8 @@ import wiki_initialized  # noqa: E402
 import wiki_workspace  # noqa: E402
 # ページの集合とリンクの抜き出しは、lint と同じ規則（wiki_pages）を使う。
 from wiki_pages import (  # noqa: E402,F401
-    SKIP_TOP_LEVEL_DIRS, SKIP_TOP_LEVEL_FILES, WIKILINK_RE, extract_wikilinks, is_page_path, read_os, walk_markdown,
+    SKIP_TOP_LEVEL_DIRS, SKIP_TOP_LEVEL_FILES, WIKILINK_RE, extract_wikilinks, is_page_path, read_os, type_value,
+    walk_markdown,
 )
 
 
@@ -69,8 +70,7 @@ def parse_type(text: str) -> str | None:
     if not m:
         return None
     meta, _conflicts = canonical_meta(parse_frontmatter_text(m.group(1)))
-    value = meta.get("type")
-    return value if isinstance(value, str) else None
+    return type_value(meta.get("type"))
 
 
 # ページの大きさの目安（wiki_lint の既定値と同じ）。行数と、空白を除いた文字数の両方で見る。
