@@ -74,7 +74,7 @@ python /path/to/info-hive-wiki/skills/info-hive/scripts/wiki_search.py "your que
 
 スキル本体（`SKILL.md` や references）を変えたときにもっとも役立つのは、実際に取り込んでみることである。テスト用のプロジェクトの `raw/` に論文や記事を置き、`/wiki:ingest <path>` を実行し、できあがったものを読む。ワークフローがずれて出力の質が落ちているなら、スキルを直す必要がある。
 
-スラッシュコマンドを変えたときは、新しいプロジェクトにプラグインをインストールし、コマンドを最初から最後まで実行して確かめる。引数のあるコマンドを足したり変えたりしたときは、frontmatter の `argument-hint` と `argument-description` もそろえて書き、`/wiki:help`（`python skills/info-hive/scripts/wiki_help.py`）の出力を確かめる。
+スラッシュコマンドを変えたときは、新しいプロジェクトにプラグインをインストールし、コマンドを最初から最後まで実行して確かめる。引数のあるコマンドを足したり変えたりしたときは、frontmatter の `argument-hint` と `argument-description` もそろえて書き、`/wiki:help`（`python skills/info-hive/scripts/wiki_help.py`）の出力を確かめる。コマンドを足したときは、`docs/commands.md` に `` ## `/wiki:<名前> ...` `` の節も書き、`/wiki:help <名前>`（`python skills/info-hive/scripts/wiki_help.py --command=<名前>`）の出力を確かめる。この節が個別のヘルプの「詳細」になる。節のリンクはインラインの形（`[文字](./workflows.md)`）で書く。スクリプトがリンクを GitHub の URL に書き換えられない書き方（参照の形のリンク、リストの中のコードフェンスのリンクなど）があると、書き換えずに節をそのまま出して警告する。
 
 ## スキルの文章の書き方
 

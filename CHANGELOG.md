@@ -26,6 +26,10 @@
 - `wiki_fetch.py` に `--html-file` と `--page-url` を足した。有料の記事や JavaScript で描くページを、ブラウザで表示して保存した HTML（UTF-8）から、URL での取得と同じ変換で raw にする。相対リンクと画像は、本文を表示したときのアドレス欄の URL（`--page-url`）を基準にする。`source_sha256_of` は `dom` になる。
 - `wiki_fetch.py` が、サイトに共通の雑音を取得の段階で消すようにした。消したものは出力の `removed_by_rule` に示し、`--keep-noise` で止められる。MediaWiki のページでは、本文へのスキップのリンク、ロゴ、「出典: フリー百科事典」、曖昧さ回避や告知の表を消す。本文の前の部分では、題名と同じだけの段落、タグの一覧へのリンクだけの段落、Medium の `Member-only story`、`Top highlight`、友人向けのリンクを消す。Medium の図の操作の文言（`Press enter or click to view image in full size`）は、本文のどこでも消す。
 - `wiki_fetch.py` の出力に、訳すかどうか（`needs_translation`）を足した。判定は取り込みの手順と同じ規則である。
+- `/wiki:help <コマンド名>` で、1 つのコマンドの詳しいヘルプを表示できるようにした（`/wiki:help query`）。書式、説明、引数の説明に続けて、`docs/commands.md` のそのコマンドの節（使用例と詳しい説明）を「詳細」として出す。節の中の相対リンクは、GitHub の、導入した版のタグ（`v<version>`）の文書へのリンクに書き換える。名前が見つからなければ、近い名前と使えるコマンドの一覧を示す。引数なしの `/wiki:help` の一覧は変わらない。
+  - コマンド名は `/wiki:` を付けずに書く。対話のセッションでは、`/wiki:help /wiki:query` の `/wiki:query` が別のコマンドとして読まれることがある。`wiki:query` と書いてもよい。
+  - `/wiki:help` は、利用者が書いた引数をそのままシェルに渡さない。先頭の `/` と `wiki:` を除いた残りが英数字と `-` だけのときに限り、`wiki_help.py --command=<名前>` で渡す。
+  - `wiki_help.py` に `--command` を足した。`--json` と一緒に使うと、一覧の項目のキーに `details`（節の本文か `null`）を足した 1 つのオブジェクトを出す。リンクを書き換えたあとで、同梱の Markdown のパーサーで書き換えの前後を読み、リンクの宛先のほかが変わっていれば、書き換えずに節をそのまま出す。`docs/commands.md` に節がないときと、書き換えずに出したときは、警告を出す。
 
 ### Changed
 
