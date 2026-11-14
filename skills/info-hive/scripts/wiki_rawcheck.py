@@ -274,6 +274,76 @@ def work_dir_matches_raw(wiki: Path, slug: str, raw_path: Path) -> bool:
         return False
 
 
+# 途中から続けるときに返す、前の取得の出力の値（wiki_fetch.py の出力のキー）。取得の出力のうち、取得した内容から
+# 作ったものすべてである（警告もここに入る。続きの手順は、前の取得の出力を見て、本文を取れたかを確かめる）。
+RESUME_KEYS = ("title", "source_lang", "encoding", "content_root", "ja_ratio", "needs_translation", "chars",
+               "images", "dropped_images", "removed_by_rule", "warnings")
+# 続けるときに使う、取得の記録のキーと型。取得器はいつもこれを書く。
+_FETCH_TYPES = {"url": str, "final_url": str, "source_sha256": str, "needs_translation": bool,
+                "images": list, "removed_by_rule": list, "warnings": list}
+
+
+def _fetch_record_ok(saved) -> bool:
+    """取得の記録が、取得器の書いた形か（続けるときに使うキーがその型である）。"""
+    if not isinstance(saved, dict):
+        return False
+    if any(not isinstance(saved.get(key), kind) for key, kind in _FETCH_TYPES.items()):
+        return False
+    return (all(isinstance(img, dict) and isinstance(img.get("path"), str) for img in saved["images"])
+            and all(isinstance(r, dict) and isinstance(r.get("rule"), str) and isinstance(r.get("text"), str)
+                    for r in saved["removed_by_rule"])
+            and all(isinstance(w, str) for w in saved["warnings"]))
+
+
+def resumable_fetch(wiki: Path, slug: str, raw_path: Path) -> dict | None:
+    """途中の取り込みを続けられるなら、写しの取得の記録（fetch.json の中身）を返す。続けられなければ None。
+
+    続けられるのは、次のすべてを満たすときだけである。どの取得（URL か --html-file か）だったかには依らない。
+    続けるかは写しと raw の状態だけで決まり、ページを取り直さなくてよい。
+
+    - 写しがそろい（work_dir_complete）、raw の frontmatter が写しの fetched.md と同じ（work_dir_matches_raw）。
+    - fetch.json が取得器の書いた形である（_fetch_record_ok）。
+    - fetch.json の取得元とハッシュ（url、final_url、source_sha256）が、fetched.md の frontmatter と同じ。写しの
+      3 つのファイルが同じ取得のものであることを、書く順（fetch.json を最後に置く）だけに頼らずに確かめる。
+      一部だけを戻したバックアップなどで、fetch.json だけが別の取得のものになっていれば続けない。
+    """
+    if not (work_dir_complete(wiki, slug) and work_dir_matches_raw(wiki, slug, raw_path)):
+        return None
+    wd = work_dir(wiki, slug)
+    saved = load_fetch(wd)
+    if not _fetch_record_ok(saved):
+        return None
+    try:
+        fm_lines, _body = split_frontmatter(read_text(wd / "fetched.md"))
+    except (OSError, UnicodeDecodeError):
+        return None
+    fm = parse_frontmatter_text("\n".join(fm_lines[1:-1]))
+    final_url = fm.get("final_url") or fm.get("url")
+    if (fm.get("url"), final_url, fm.get("source_sha256")) != \
+            (saved["url"], saved["final_url"], saved["source_sha256"]):
+        return None
+    return saved
+
+
+def resume_fields(wiki: Path, slug: str, saved: dict) -> dict:
+    """途中から続けるために、どの段まで進んだか（work_stage）と、前の取得の出力の値（RESUME_KEYS）を返す。
+
+    saved は resumable_fetch が返した記録。警告（本文が空、短い、など）も前の取得のものを返すので、続きの手順は、
+    取得した直後と同じに本文を取れたかを確かめられる。削除を固定したあと（frozen）は、補足を書く画像を、削除の
+    あとの本文に残ったものだけにする（freeze の出力と同じ）。
+    """
+    wd = work_dir(wiki, slug)
+    frozen = (wd / "cleaned.md").is_file()
+    fields = {"work_stage": "frozen" if frozen else "fetched"}
+    for key in RESUME_KEYS:
+        if key in saved:
+            fields[key] = saved[key]
+    if frozen:
+        fm, body = split_frontmatter(read_text(wd / "cleaned.md"))
+        fields["images"] = remaining_images(saved, parse_tree(body), len(fm))
+    return fields
+
+
 # ---------------------------------------------------------------- トークンの木
 
 

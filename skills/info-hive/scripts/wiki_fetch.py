@@ -1206,10 +1206,25 @@ def build(args) -> tuple[int, dict]:
     if not inside(raw_root, target) or not inside(raw_root, asset_dir):
         raise ValueError(f"保存先が RAW_ROOT の外になる: {target}")
 
+    wiki = getattr(args, "wiki", None)
+    html_file = getattr(args, "html_file", None)
+    # 途中の取り込みは、取得の前に再開する。続けるかは写しと raw の状態だけで決まるので、ページを取り直さない。
+    # 取り直して原文を比べると、--html-file で取ったページ（DOM のハッシュ）や、取得のたびに変わるページでは、
+    # 写しがそろっていても内容が違うとして止まり、ネットにつながらなければ取得の失敗で止まる。
+    # --html-file は、渡した内容で取るという入力なので、ここでは続けずに、読んで比べる（下の枝）。
+    if wiki is not None and not html_file and not args.force and target.exists():
+        saved = wiki_rawcheck.resumable_fetch(wiki, args.slug, target)
+        if saved is not None and saved["url"] == args.url:
+            # 前の取得の出力（警告を含む）に、取得しなかったことと、どの段まで進んだかを足して返す。
+            result = {"path": target.as_posix(), "url": args.url, "final_url": saved["final_url"],
+                      "source_sha256": saved["source_sha256"], "unchanged": True, "fetch_skipped": True,
+                      "work_dir": True}
+            result.update(wiki_rawcheck.resume_fields(wiki, args.slug, saved))
+            return 0, result
+
     # 内部のアドレスを取るかは、ユーザーが渡した URL で決める。公開のページが内部のアドレスへ
     # リダイレクトしても、その先は取らない。ユーザーが内部のページを直接渡したときだけ許す。
     block_private = not is_private_host(urllib.parse.urlsplit(args.url).hostname or "")
-    html_file = getattr(args, "html_file", None)
     if html_file:
         # ブラウザで保存した HTML。基準の URL は、本文を取ったときのアドレス欄の URL にする。
         check_url(args.page_url)
@@ -1229,7 +1244,6 @@ def build(args) -> tuple[int, dict]:
     sha = hashlib.sha256(data).hexdigest()
     result: dict = {"path": target.as_posix(), "url": args.url, "final_url": final_url, "source_sha256": sha,
                     "unchanged": False, "warnings": []}
-    wiki = getattr(args, "wiki", None)
 
     if target.exists() and not args.force:
         old = existing_sha(target)
@@ -1238,22 +1252,10 @@ def build(args) -> tuple[int, dict]:
             if wiki is not None:
                 # 写しがそろい（そろった印は raw を書いたあとに置くので、raw と同じ取得で書いたもの）、raw の
                 # frontmatter を書き換えていないときだけ、途中から続けられる。
-                complete = wiki_rawcheck.work_dir_complete(wiki, args.slug) and \
-                    wiki_rawcheck.work_dir_matches_raw(wiki, args.slug, target)
-                result["work_dir"] = complete
-                if complete:
-                    # 途中から続けるために、どの段まで進んだかと、後の手順が使う値を返す。
-                    wd = wiki_rawcheck.work_dir(wiki, args.slug)
-                    frozen = (wd / "cleaned.md").is_file()
-                    result["work_stage"] = "frozen" if frozen else "fetched"
-                    saved = wiki_rawcheck.load_fetch(wd)
-                    for key in ("needs_translation", "images", "removed_by_rule", "title", "source_lang", "ja_ratio"):
-                        if key in saved:
-                            result[key] = saved[key]
-                    if frozen:
-                        # 削除を固定したあとは、補足を書く画像は、削除のあとの本文に残ったものだけ（freeze の出力と同じ）。
-                        fm, body = wiki_rawcheck.split_frontmatter(wiki_rawcheck.read_text(wd / "cleaned.md"))
-                        result["images"] = wiki_rawcheck.remaining_images(saved, wiki_rawcheck.parse_tree(body), len(fm))
+                saved = wiki_rawcheck.resumable_fetch(wiki, args.slug, target)
+                result["work_dir"] = saved is not None
+                if saved is not None:
+                    result.update(wiki_rawcheck.resume_fields(wiki, args.slug, saved))
             return 0, result
         suggestion = f"{args.slug}-{datetime.now().strftime('%Y%m%d')}"
         result["suggested_slug"] = suggestion
@@ -1422,6 +1424,17 @@ def build(args) -> tuple[int, dict]:
 
 
 def render_text(code: int, result: dict) -> str:
+    if result.get("fetch_skipped"):
+        stage = "前の取得の注意を見るところから" if result.get("work_stage") == "fetched" else "訳と補足から"
+        out = [f"取り込みの途中の作業用の写しがあるので、ページを取得せずに続ける: {result['path']}",
+               f"段: {result.get('work_stage')}（{stage}続ける）。ページが更新されたかは見ていない。",
+               "取り直すなら --force を付ける（途中の作業を捨て、写しと raw の両方を作り直す）"]
+        # 前の取得の出力の注意と、規則で消したもの。本文を取れたかは、取得した直後と同じに、ここで確かめる。
+        for r in result.get("removed_by_rule", []):
+            out.append(f"規則で消した（{r['rule']}）: {r['text'][:120]}")
+        for w in result.get("warnings", []):
+            out.append(f"注意: {w}")
+        return "\n".join(out)
     if result.get("unchanged"):
         note = ""
         if result.get("work_dir") is False:
