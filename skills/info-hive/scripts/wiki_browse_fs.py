@@ -850,26 +850,39 @@ def _number(name) -> int:
         return 0
 
 
+def _existing_ancestor(path):
+    """path か、その祖先のうち、今あるもの（種類が「ない」でないもの）。"""
+    p = path
+    while kind(p) == "absent":
+        parent = os.path.dirname(p)
+        if parent == p:
+            raise failure(Unknown, "今ある祖先がない", path)
+        p = parent
+    return p
+
+
 def _check_nesting(out, browse_root) -> None:
     """--out の書き出し先を、ほかの browse のディレクトリ（目印を持つディレクトリ）と、browse のデータの場所の中に
     作らない。browse のデータの場所も、--out の中に置かない（設計の 6.1 の入れ子。0.10.0 と同じ）。
 
     守りではない。入れ子にすると、外側の世代が「一覧にない項目がある」として次の書き出しで止まるので、先に知らせる。
+    何も作る前に呼ぶ。browse のデータの場所がまだなければ、今ある祖先で照らす（作ってから拒むと、拒んだ書き出し先が
+    変わる。実装の 1 回目のレビューの重大 1）。
     """
-    data_id = ident(x("realpath", browse_root))
+    data_id = ident(x("realpath", browse_root)) if kind(browse_root) == "dir" else None
     p = x("realpath", os.path.dirname(out))
     while True:
         for marker in MARKERS:
             if kind(os.path.join(p, marker)) != "absent":
                 raise Stop(f"ほかの browse のディレクトリの中には書き出さない: {os.path.dirname(out)}")
-        if ident(p) == data_id:
+        if data_id is not None and ident(p) == data_id:
             raise Stop(f"--out は、browse のデータの場所（{browse_root}）と重ならない場所にする")
         parent = os.path.dirname(p)
         if parent == p:
             break
         p = parent
     if kind(out) == "dir":
-        q = x("realpath", browse_root)
+        q = x("realpath", _existing_ancestor(browse_root))
         out_id = ident(x("realpath", out))
         while True:
             if ident(q) == out_id:
@@ -880,28 +893,41 @@ def _check_nesting(out, browse_root) -> None:
             q = parent
 
 
-def build(root, out, files: dict, default: bool, owner: str, browse_root, report_text: str = "",
-          lock_wait: float = COMMON_LOCK_WAIT) -> int:
-    """静的の書き出し（設計の 6.4）。0 を返せば、書き出し先は新しい世代である。Stop と Unknown は、前のままで止まる。
-
-    files は {出力の / 区切りの相対パス: 中身のバイト列}。report_text は、確定のあとに標準出力へ出す知らせである。
-    """
-    global G
-    G = Guard(root)
-    out, browse_root = os.fspath(out), os.fspath(browse_root)
-    work = out + ".browse-work"
-    # 1. 領分の根に入る。--out の書き出しも、根の共通のロックを取るので入る（設計の 6.4 の 1）
-    enter_root(browse_root, create=True)
-    # 作る前に、書き出し先そのものを確かめる。書き込みの口も確かめるが、ここで止めれば作業用も作らない。
+def _check_out(out) -> None:
+    """書き出し先そのものとその親を確かめる（設計の 6.1、6.4 の 1）。書き込みの口も確かめるが、ここで止めれば作業用も
+    作らない。書き出し先の名前そのものが、ないか実のディレクトリでなければ止まる。"""
     G.place(os.path.dirname(out))
     k = kind(out)
     if k == "dir":
         G.not_root_ancestor(out)
     elif k != "absent" and "accept_out_link" not in MUTANTS:
-        # 書き出し先の名前そのものが、ないか実のディレクトリでなければ、作業用も作らずに止まる（設計の 6.4 の 1）。
         raise Stop(f"書き出し先がディレクトリでない（リンクを含む）: {out}")
-    if not default:
+
+
+def build(root, out, files: dict, default: bool, owner: str, browse_root, report_text: str = "",
+          lock_wait: float = COMMON_LOCK_WAIT) -> int:
+    """静的の書き出し（設計の 6.4）。0 を返せば、書き出し先は新しい世代である。Stop と Unknown は、前のままで止まる。
+
+    files は {出力の / 区切りの相対パス: 中身のバイト列}。report_text は、確定のあとに標準出力へ出す知らせである。
+
+    拒むかどうかの判定（書き出し先とその親、入れ子、browse のデータの場所との重なり）は、何かを作る前に済ませる。
+    拒む書き出し先と、Wiki のルートと重なる書き出し先では、砂場の全体が変わらない（設計の 9.1）。既定の書き出し先は、
+    親が領分の根なので、根に入ってから確かめる（根を作る口も、Wiki のルートとの重なりを確かめる）。
+    """
+    global G
+    G = Guard(root)
+    out, browse_root = os.fspath(out), os.fspath(browse_root)
+    work = out + ".browse-work"
+    if default or "enter_root_first" in MUTANTS:     # 対照: 実装の 1 回目の形（--out も、根に入ってから確かめる）
+        enter_root(browse_root, create=True)
+        _check_out(out)
+        if not default:
+            _check_nesting(out, browse_root)
+    else:
+        _check_out(out)
         _check_nesting(out, browse_root)
+        # --out の書き出しも、根の共通のロックを取るので、根に入る（設計の 6.4 の 1）
+        enter_root(browse_root, create=True)
     common = Lock(os.path.join(browse_root, "build.lock"))
     if not common.acquire(lock_wait):
         raise Stop("ほかの書き出しが終わらない。終わってからやり直す")

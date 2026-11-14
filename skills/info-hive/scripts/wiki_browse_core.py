@@ -142,8 +142,9 @@ class Snapshot:
     signature: str
     inputs: list
     generation: str
-    unreadable: list = field(default_factory=list)   # 読めなかった入力の (種類, 相対パス)
+    unreadable: list = field(default_factory=list)   # 中身を読めなかった入力の (種類, 相対パス)（UTF-8 でないものを含む）
     entries: tuple = ()                              # 入力の一覧（読み取りの情報。公開の前の検査が使う）
+    transient: list = field(default_factory=list)    # そのうち、開けなかった入力（ファイルを変えずに読めるようになりうる）
 
     def by_kind(self, kind: str) -> list:
         return [f for f in self.inputs if f.kind == kind]
@@ -158,6 +159,7 @@ def take_snapshot(root, entries=None) -> Snapshot:
     first = input_list(root) if entries is None else tuple(entries)
     inputs = []
     unreadable = []
+    transient = []
     gen = hashlib.sha256(CORE_VERSION.encode("utf-8"))
     for kind, rel_disk, size, _mtime in first:
         f = InputFile(kind=kind, disk_rel=rel_disk, rel=posix_rel(rel_disk))
@@ -175,15 +177,17 @@ def take_snapshot(root, entries=None) -> Snapshot:
                 f.text = read_text_like_lint(data)
             except UnicodeDecodeError:
                 f.error = "decode"
-        if f.error == "os":
+        if f.error is not None:
             unreadable.append((kind, f.rel))
+        if f.error == "os":
+            transient.append((kind, f.rel))
         gen.update(f"{kind}\0{rel_disk}\0{f.sha or '!' + str(f.error)}\n".encode("utf-8"))
         inputs.append(f)
     second = input_list(root)
     if second != first:
         raise InputsChanged("読んでいるあいだに Wiki が変わった")
     return Snapshot(signature=signature_of(second), inputs=inputs, generation=gen.hexdigest()[:20],
-                    unreadable=unreadable, entries=second)
+                    unreadable=unreadable, entries=second, transient=transient)
 
 
 # ---------------------------------------------------------------------------
@@ -296,9 +300,29 @@ def _clashes(names: dict) -> set:
     return bad
 
 
+def unify_dir_case(names: dict) -> dict:
+    """出力の名前のディレクトリの部分を、大文字と小文字を同一視して 1 つの綴りにそろえる。
+
+    大文字と小文字を区別する Wiki の `A/x.md` と `a/y.md` を、区別しない書き出し先に書くと、ディレクトリは 1 つに
+    なり、一覧（`A` と `a`）と書き出し先の綴りが合わず、次の書き出しの門で止まる（実装の 1 回目のレビューの重大 2）。
+    ファイルどうしの重なりは `_clashes` が数えるので、ここではディレクトリだけをそろえる。綴りは、識別子の順で
+    最初に現れたものにする。
+    """
+    canonical = {}
+    out = {}
+    for pid in sorted(names):
+        parts = names[pid].split("/")
+        dirs = []
+        for part in parts[:-1]:
+            key = "/".join(dirs + [part]).casefold()
+            dirs.append(canonical.setdefault(key, part))
+        out[pid] = "/".join(dirs + [parts[-1]])
+    return out
+
+
 def assign_names(page_ids, limit: int = NAME_LIMIT) -> dict:
     """全ページの出力の名前を決める。重なった名前には接尾辞を足し、まだ重なれば桁を 4 桁ずつ増やす。"""
-    base = {pid: export_name(pid, limit) for pid in page_ids}
+    base = unify_dir_case({pid: export_name(pid, limit) for pid in page_ids})
     names = dict(base)
     digits = {}
     bad = _clashes(names)
@@ -464,6 +488,8 @@ class Core:
         self._body_cache = {}
         # 描けなかったページの識別子（設計の 7.2。そのページに「描けない」と出して続ける）
         self.render_failures = []
+        # 解釈できなかった入力の (種類, 相対パス)。読めない入力と同じに扱い、「不完全」の印を描く
+        self.parse_failures = []
         # 読めなかった入力（読み取りの情報）。読み取りの印（「不完全」）を描くのに使う（構造の直しの設計の 4.1）
         unreadable = list(snapshot.unreadable)
         self.unreadable_pages = sorted(rel for kind, rel in unreadable if kind == "page")
@@ -480,6 +506,12 @@ class Core:
         self._backlinks()
         self._relations()
         self._nav()
+        # 解釈できなかった入力も、読めない入力と同じに「不完全」の印を描く
+        for kind, rel in self.parse_failures:
+            target = {"page": self.unreadable_pages, "index": self.unreadable_indexes}.get(kind)
+            if target is not None and rel not in target:
+                target.append(rel)
+                target.sort()
 
     # --- ページ ---
 
@@ -492,8 +524,13 @@ class Core:
             if f.text is None:
                 self.diagnostics.append({"kind": "read_error", "page": pid, "reason": f.error})
                 continue
-            raw_meta, _fm, body, malformed = wiki_lint.parse_frontmatter_raw(f.text)
-            meta, _conflicts = canonical_meta(raw_meta)
+            try:
+                raw_meta, _fm, body, malformed = wiki_lint.parse_frontmatter_raw(f.text)
+                meta, _conflicts = canonical_meta(raw_meta)
+            except Exception:  # noqa: BLE001  1 ページの解釈の失敗で、全体を止めない（構造の直しの設計の 7.2）
+                self.diagnostics.append({"kind": "read_error", "page": pid, "reason": "parse"})
+                self.parse_failures.append((f.kind, f.rel))
+                continue
             p = {"rel_path": f.rel, "disk_rel_path": f.disk_rel, "slug": nfc(f.stem), "meta": meta,
                  "body": body, "malformed_fm": malformed, "id": pid, "text": f.text}
             self.pages[f.disk_rel] = p
@@ -547,18 +584,37 @@ class Core:
     def _prepass(self) -> None:
         self.tokens = {}
         self.headings = {}
+        unparsed = set()
         for pid, disk in self.drawn.items():
-            tokens = self.parser.parse(self.pages[disk]["body"])
+            try:
+                tokens = self.parser.parse(self.pages[disk]["body"])
+                headings = assign_heading_ids(tokens)
+            except Exception:  # noqa: BLE001  1 ページの解釈の失敗で、全体を止めない（構造の直しの設計の 7.2）
+                unparsed.add(disk)
+                tokens, headings = None, []
             self.tokens[pid] = tokens
-            self.headings[pid] = assign_heading_ids(tokens)
+            self.headings[pid] = headings
         self.links = {}
         # 描かないページ（id_collision）のリンクも、lint と同じく数える。描かないので、診断は全体にだけ載せる。
         self.hidden_links = {}
         for disk, p in sorted(self.pages.items()):
             pid = p["id"]
             drawn = self.drawn.get(pid) == disk
-            tokens = self.tokens[pid] if drawn else self.parser.parse(p["body"])
+            if drawn:
+                tokens = self.tokens[pid]
+            elif disk not in unparsed:
+                try:
+                    tokens = self.parser.parse(p["body"])
+                except Exception:  # noqa: BLE001  描かないページの解釈の失敗も、全体を止めない
+                    unparsed.add(disk)
+                    tokens = None
             found = []
+            if tokens is None:
+                # 本文を解釈できない。そのページのリンクは分からないので、「不完全」の印を描く。ページは「描けない」になる
+                self.diagnostics.append({"kind": "read_error", "page": pid if drawn else None,
+                                         "source_page": None if drawn else pid, "reason": "parse"})
+                self.parse_failures.append(("page", p["rel_path"]))
+                tokens = []
             for tok in tokens:
                 if tok.type == "inline":
                     for child in tok.children or []:
@@ -688,9 +744,20 @@ class Core:
         self.nav_groups = []
         listed = set()
         index_files = self.snapshot.by_kind("index")
-        group_of_file = {}
+        # 索引を先に解釈する。解釈できない索引は、読めない索引と同じに扱う（構造の直しの設計の 7.2）
+        parsed = {}
         for f in index_files:
             if f.text is None:
+                continue
+            try:
+                raw_meta, _fm, body, _malformed = wiki_lint.parse_frontmatter_raw(f.text)
+                meta, _c = canonical_meta(raw_meta)
+                parsed[f.disk_rel] = (meta, self.parser.parse(body))
+            except Exception:  # noqa: BLE001  1 つの索引の解釈の失敗で、全体を止めない
+                self.parse_failures.append(("index", f.rel))
+        group_of_file = {}
+        for f in index_files:
+            if f.disk_rel not in parsed:
                 continue   # 読めない索引のグループは作らないので、そこへのリンクも作らない
             gid = "_g" + short_hash(f.disk_rel, 10)   # NFC で同じになる 2 つの名前でも重ならない
             group_of_file.setdefault(_page_id(f.rel), gid)
@@ -702,12 +769,11 @@ class Core:
 
         for f in index_files:
             is_top = f.rel == "index.md"
-            if f.text is None:
-                self.diagnostics.append({"kind": "read_error", "page": _page_id(f.rel), "reason": f.error})
+            if f.disk_rel not in parsed:
+                self.diagnostics.append({"kind": "read_error", "page": _page_id(f.rel),
+                                         "reason": f.error or "parse"})
                 continue
-            raw_meta, _fm, body, _malformed = wiki_lint.parse_frontmatter_raw(f.text)
-            meta, _c = canonical_meta(raw_meta)
-            tokens = self.parser.parse(body)
+            meta, tokens = parsed[f.disk_rel]
             first_heading = next((inline_text(tokens[i + 1].children) for i, t in enumerate(tokens)
                                   if t.type == "heading_open" and i + 1 < len(tokens)), None)
             gid = "_g" + short_hash(f.disk_rel, 10)

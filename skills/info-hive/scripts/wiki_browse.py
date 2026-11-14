@@ -213,7 +213,7 @@ def core_loop(stdin, stdout) -> int:
         root = wiki_root(wiki)
         cached = cache.get(root)
         sig = core.signature(root)
-        if cached and cached.snapshot.signature == sig and not cached.snapshot.unreadable:
+        if cached and cached.snapshot.signature == sig and not cached.snapshot.transient:
             return cached
         c = core.Core(core.take_snapshot(root))
         cache[root] = c
@@ -289,7 +289,8 @@ class BrowseState:
 
     def _should_retry(self) -> bool:
         cur = self.current
-        return self.failed is not None or (cur is not None and bool(cur.snapshot.unreadable))
+        # 開けなかった入力は、ファイルを変えずに読めるようになりうるので、やり直す（UTF-8 でないものは変わらない）
+        return self.failed is not None or (cur is not None and bool(cur.snapshot.transient))
 
     def _recently_tried(self, sig: str) -> bool:
         last = self.attempts.get(sig)
@@ -357,6 +358,9 @@ class BrowseState:
             return None, reason or "building"
         if c.snapshot.signature != request_sig:
             return c, reason or ("failed" if self.failed else "building")
+        if reason == "failed" and self.failed is not None:
+            # 印が同じでも、組み立て直しに失敗しているあいだは、今の中核が最新とは言えない（実装の 1 回目のレビュー）
+            return c, "failed"
         return c, None
 
 
@@ -423,7 +427,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _route_inner(self):
         app = self.server.app
-        app.touch()
+        app.mark_activity()
         self._kind = "-"
         if self.headers.get("Host") != f"127.0.0.1:{app.port}":
             return self._text(421, "Misdirected Request")
@@ -562,7 +566,7 @@ class App:
         self.render_errors = 0
         self._stopping = threading.Event()
 
-    def touch(self):
+    def mark_activity(self):
         self.last = time.monotonic()
 
     def request_shutdown(self):
