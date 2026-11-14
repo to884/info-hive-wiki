@@ -277,8 +277,8 @@ def work_dir_matches_raw(wiki: Path, slug: str, raw_path: Path) -> bool:
 
 # 途中から続けるときに返す、前の取得の出力の値（wiki_fetch.py の出力のキー）。取得の出力のうち、取得した内容から
 # 作ったものすべてである（警告もここに入る。続きの手順は、前の取得の出力を見て、本文を取れたかを確かめる）。
-RESUME_KEYS = ("title", "source_lang", "encoding", "content_root", "ja_ratio", "needs_translation", "chars",
-               "images", "dropped_images", "removed_by_rule", "warnings")
+RESUME_KEYS = ("source_sha256_of", "title", "source_lang", "encoding", "content_root", "ja_ratio",
+               "needs_translation", "chars", "images", "dropped_images", "removed_by_rule", "warnings")
 # 続けるときに使う、取得の記録のキーと型。取得器はいつもこれを書く（fetched_sha256 は 0.14.0 の写しにはない）。
 _FETCH_TYPES = {"url": str, "final_url": str, "source_sha256": str, "needs_translation": bool,
                 "images": list, "removed_by_rule": list, "warnings": list}
@@ -306,17 +306,23 @@ def _fetch_record_ok(saved) -> bool:
 def resumable_fetch(wiki: Path, slug: str, raw_path: Path) -> dict | None:
     """途中の取り込みを続けられるなら、写しの取得の記録（fetch.json の中身）を返す。続けられなければ None。
 
-    前提: 作業用の写しは、wiki_fetch.py と freeze だけが書く。ここで守るのは、どこで止まったときも（書く順）と、
-    ファイルを丸ごと別の取得のものに置き換えたとき（一部だけを戻したバックアップなど）である。ファイルの中を
-    手で書き換えたものは、前提の外である。続けられるのは、次のすべてを満たすときだけである。
+    保証するのは整合である。写しのファイルの組（fetched.md、fetch.json、あれば cleaned.md）と raw が、1 つの
+    取得と、その取得のあとの freeze が残しうる組のときだけ続ける。どこで止まったときも（書く順）、ファイルを
+    丸ごと別の取得のものに置き換えたとき（一部だけを戻したバックアップなど）も、この組でなければ続けない。
+    どの取得がその組を残したか（取得の出自）は、ファイルからは決められないので保証しない。別の設定で取っても
+    fetched.md が同じバイト列になれば、どちらの fetch.json も、その本文を作った取得の正しい記録である。
+    作業用の写しは wiki_fetch.py と freeze だけが書く。ファイルの中を手で書き換えたものは前提の外である（形の
+    違う fetch.json で例外にはしない）。続けられるのは、次のすべてを満たすときだけである。
 
     - 写しがそろい（work_dir_complete）、raw の frontmatter が写しの fetched.md と同じ（work_dir_matches_raw）。
     - fetch.json が取得器の書いた形である（_fetch_record_ok）。
-    - fetch.json の fetched_sha256 が、fetched.md のバイト列のハッシュと同じ。fetch.json と fetched.md を内容で
-      結ぶ。同じ URL の同じ原文を、別の設定（--keep-noise など）で取った記録は、取得元とハッシュが同じでも、
-      fetched.md が違うので見分けられる。0.14.0 が書いた写しにはこの値がないので、ないときは照らさない
+    - fetch.json の fetched_sha256 が、fetched.md のバイト列のハッシュと同じ（取得器は、fetched.md に書いた
+      バイト列のハッシュを記録する）。0.14.0 が書いた写しにはこの値がないので、ないときは照らさない
       （wiki_fetch.build は、その写しを、取得して原文を比べた枝でだけ続ける。取得の前には続けない）。
     - fetch.json の取得元とハッシュ（url、final_url、source_sha256）が、fetched.md の frontmatter と同じ。
+    - cleaned.md があれば、freeze が通す内容である。frontmatter が fetched.md と同じで、本文が fetched.md から
+      消すことだけで作れる（deletion_errors。画像のファイルは、あとで raw の側で変わりうるので見ない）。
+      止まった 2 回目の freeze の前の cleaned.md も、0.14.0 の freeze が書いた cleaned.md も、これを満たす。
     """
     if not (work_dir_complete(wiki, slug) and work_dir_matches_raw(wiki, slug, raw_path)):
         return None
@@ -326,16 +332,24 @@ def resumable_fetch(wiki: Path, slug: str, raw_path: Path) -> dict | None:
         return None
     try:
         data = (wd / "fetched.md").read_bytes()
-        fm_lines, _body = split_frontmatter(data.decode("utf-8").replace("\r\n", "\n"))
+        src_fm, src_body = split_frontmatter(data.decode("utf-8").replace("\r\n", "\n"))
     except (OSError, UnicodeDecodeError):
         return None
     if "fetched_sha256" in saved and saved["fetched_sha256"] != snapshot_sha256(data):
         return None
-    fm = parse_frontmatter_text("\n".join(fm_lines[1:-1]))
+    fm = parse_frontmatter_text("\n".join(src_fm[1:-1]))
     final_url = fm["final_url"] if "final_url" in fm else fm.get("url")  # final_url は url と違うときだけ書く
     if (fm.get("url"), final_url, fm.get("source_sha256")) != \
             (saved["url"], saved["final_url"], saved["source_sha256"]):
         return None
+    cleaned = wd / "cleaned.md"
+    if cleaned.is_file():
+        try:
+            out_fm, out_body = split_frontmatter(read_text(cleaned))
+        except (OSError, UnicodeDecodeError):
+            return None
+        if deletion_errors(src_fm, src_body, out_fm, out_body, parse_tree(out_body)):
+            return None
     return saved
 
 
@@ -643,38 +657,8 @@ def freeze(wiki: Path, raw_root: Path, slug: str) -> tuple[int, dict]:
     src_text, out_text = read_text(wd / "fetched.md"), read_text(raw_path)
     src_fm, src_body = split_frontmatter(src_text)
     out_fm, out_body = split_frontmatter(out_text)
-    errors: list[dict] = []
-    if src_fm != out_fm:
-        errors.append({"kind": "frontmatter", "message": "frontmatter が変わった（frontmatter は書き換えない。"
-                       "raw と作業用の写しが別の取得のものなら、wiki_fetch.py に --force を付けて取り直す）"})
-
-    if references_of(out_body) - references_of(src_body):
-        errors.append({"kind": "edit", "message": "参照の定義（[x]: …）を書き足したか、変えた"})
-    src_tree, out_tree = parse_tree(src_body), parse_tree(out_body)
-    failure: list[Node] = []
-    if not derivable(src_tree, out_tree, failure):
-        bad = failure[0] if failure else out_tree
-        kind, hint = "edit", ""
-        if bad.type in ("table", "thead", "tbody", "tr", "th", "td") or any(n.type == "table" for n in walk(bad)):
-            # 対応の取れないブロックが表か、表を含む（リストの項目の中の表など）。誤りの場所の手がかりで、判定は変えない。
-            kind, hint = "table", "。表では、セル（列）を消せない（セルの区切りの | も、\\| の \\ も消さない）。表は、行ごとか表ごと消す"
-        elif bad.type == "paragraph":
-            hint = "。2 つの段落が 1 つにつながっていれば、間の空の行を残す（行ごと消すときも、空の行は残す）"
-        errors.append({"kind": kind, "line": bad.line,
-                       "message": "取得した内容から消すことだけをしたものになっていない"
-                       "（書き足し、書き換え、並べ替え、入れ子の変更、コード・画像・リンク・インラインのコードの一部だけの変更）"
-                       + hint,
-                       "raw": (inline_text(bad.inline) or bad.content)[:200]})
-    elif not is_subsequence(out_body, src_body):
-        # 消すことだけをしたなら、本文は文字の上でも取得の部分列になる。木はこれより粗い（文字の参照や、意味を
-        # 変えないエスケープは、読んだ後の文字が同じになる）ので、文字の上でも照らす。
-        errors.append({"kind": "edit", "message": "取得した内容にない文字を書き足したか、文字を並べ替えた"})
-    # 題名（最初の h1 の見出し）は、そのまま残す。
-    src_title = next((n for n in walk(src_tree) if n.type == "heading" and n.tag == "h1"), None)
-    if src_title is not None:
-        out_title = next((n for n in walk(out_tree) if n.type == "heading" and n.tag == "h1"), None)
-        if out_title is None or inline_units(out_title.inline) != inline_units(src_title.inline):  # 完全一致
-            errors.append({"kind": "title", "message": "題名の見出しを消したか、変えた"})
+    out_tree = parse_tree(out_body)
+    errors = deletion_errors(src_fm, src_body, out_fm, out_body, out_tree)
 
     # 画像のファイルは、残った画像から参照されるかで決まる。
     refs = Counter(src for n in walk(out_tree) for src, _a, _t in images_of(n.inline))
@@ -701,6 +685,45 @@ def freeze(wiki: Path, raw_root: Path, slug: str) -> tuple[int, dict]:
                                                      ensure_ascii=False, indent=1))
         write_atomic(wd / "cleaned.md", out_text)
     return (0 if not errors else 1), result
+
+
+def deletion_errors(src_fm: list[str], src_body: str, out_fm: list[str], out_body: str, out_tree: "Node") -> list[dict]:
+    """out（frontmatter の行と本文）が、src から消すことだけで作れるかの誤り。freeze の判定のうち、画像のファイル
+    （raw のルートにあるか）を除いたもの。freeze と、削除を固定したあとから続けるとき（resumable_fetch が
+    cleaned.md を照らす）の両方が使う。誤りがなければ空のリスト。行番号は本文の中の行番号である。"""
+    errors: list[dict] = []
+    if src_fm != out_fm:
+        errors.append({"kind": "frontmatter", "message": "frontmatter が変わった（frontmatter は書き換えない。"
+                       "raw と作業用の写しが別の取得のものなら、wiki_fetch.py に --force を付けて取り直す）"})
+
+    if references_of(out_body) - references_of(src_body):
+        errors.append({"kind": "edit", "message": "参照の定義（[x]: …）を書き足したか、変えた"})
+    src_tree = parse_tree(src_body)
+    failure: list[Node] = []
+    if not derivable(src_tree, out_tree, failure):
+        bad = failure[0] if failure else out_tree
+        kind, hint = "edit", ""
+        if bad.type in ("table", "thead", "tbody", "tr", "th", "td") or any(n.type == "table" for n in walk(bad)):
+            # 対応の取れないブロックが表か、表を含む（リストの項目の中の表など）。誤りの場所の手がかりで、判定は変えない。
+            kind, hint = "table", "。表では、セル（列）を消せない（セルの区切りの | も、\\| の \\ も消さない）。表は、行ごとか表ごと消す"
+        elif bad.type == "paragraph":
+            hint = "。2 つの段落が 1 つにつながっていれば、間の空の行を残す（行ごと消すときも、空の行は残す）"
+        errors.append({"kind": kind, "line": bad.line,
+                       "message": "取得した内容から消すことだけをしたものになっていない"
+                       "（書き足し、書き換え、並べ替え、入れ子の変更、コード・画像・リンク・インラインのコードの一部だけの変更）"
+                       + hint,
+                       "raw": (inline_text(bad.inline) or bad.content)[:200]})
+    elif not is_subsequence(out_body, src_body):
+        # 消すことだけをしたなら、本文は文字の上でも取得の部分列になる。木はこれより粗い（文字の参照や、意味を
+        # 変えないエスケープは、読んだ後の文字が同じになる）ので、文字の上でも照らす。
+        errors.append({"kind": "edit", "message": "取得した内容にない文字を書き足したか、文字を並べ替えた"})
+    # 題名（最初の h1 の見出し）は、そのまま残す。
+    src_title = next((n for n in walk(src_tree) if n.type == "heading" and n.tag == "h1"), None)
+    if src_title is not None:
+        out_title = next((n for n in walk(out_tree) if n.type == "heading" and n.tag == "h1"), None)
+        if out_title is None or inline_units(out_title.inline) != inline_units(src_title.inline):  # 完全一致
+            errors.append({"kind": "title", "message": "題名の見出しを消したか、変えた"})
+    return errors
 
 
 def _changed_lines(a: str, b: str) -> list[tuple[str, str]]:

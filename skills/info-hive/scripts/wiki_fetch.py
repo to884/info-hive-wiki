@@ -1244,8 +1244,10 @@ def build(args) -> tuple[int, dict]:
     if ctype and ctype not in ("text/html", "application/xhtml+xml", "text/plain", "application/xml", "text/xml"):
         raise FetchError(f"HTML のページではない（Content-Type: {ctype}）。PDF などは保存してから通常の手順で取り込む")
     sha = hashlib.sha256(data).hexdigest()
+    # source_sha256_of は、どの取得か（dom はブラウザで保存した HTML）を示す。続きの手順は、本文が短いときに
+    # ブラウザで取り直すかを、これで決める（dom なら、もうブラウザで取ってある）。
     result: dict = {"path": target.as_posix(), "url": args.url, "final_url": final_url, "source_sha256": sha,
-                    "unchanged": False, "warnings": []}
+                    "source_sha256_of": "dom" if html_file else "html", "unchanged": False, "warnings": []}
 
     if target.exists() and not args.force:
         old = existing_sha(target)
