@@ -95,7 +95,9 @@ from wiki_pages import (  # noqa: E402
     iter_page_files,
     ref_values,
     resolve_link,
+    scalar_value,
     text_value,
+    type_value,
     walk_index_files,
 )
 
@@ -217,7 +219,7 @@ def missing_raw(meta: dict, md_path: Path, wiki_root: Path) -> list[dict]:
     そこで、wiki のルート、wiki の親、ページのディレクトリのどれかを基準にして見つかれば、原本があるとする。
     複数の部分からなるソースはディレクトリにするので、ファイルでもディレクトリでもよい。
     """
-    if meta.get("type") != "source":
+    if type_value(meta.get("type")) != "source":
         return []
     found = []
     for raw in _ref_values(meta.get("raw")):
@@ -481,11 +483,12 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
     src_by_path, src_by_slug = build_page_index(pages)
 
     def page_type(q: dict):
-        return q["meta"].get("type")
+        return type_value(q["meta"].get("type"))
 
     def types_of(slug: str) -> list:
         """スラッグのページの type（空のものは除く）。スラッグが重複していれば、それぞれの type を返す。"""
-        return [g["meta"].get("type") for g in slug_to_pages[slug] if g["meta"].get("type") not in (None, "", [])]
+        types = [type_value(g["meta"].get("type")) for g in slug_to_pages[slug]]
+        return [t for t in types if t not in (None, "")]
 
     # 索引の見出しとページの type の食い違い。リンク切れの項目と type のないページは見ない
     # （分割した索引の index.md は indexes/ のファイルを指し、type の欠落は missing_frontmatter で挙がる）。
@@ -594,13 +597,16 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
 
         # 更新の停滞: ヒューリスティック。90 日間更新されておらず、かつ最近の取り込みで触れられたページ。
         # 近似: 最終更新が 90 日より前で、よくリンクされている（ハブである）ページを指摘する。
-        updated = parse_date(p["meta"].get("updated"))
+        # 指摘の updated は、判定に使った値（配列なら要素をつないだ文字）を出す。書き方の指摘（non_iso_dates）だけが、
+        # 書かれた形のまま出す。
+        updated_value = scalar_value(p["meta"].get("updated"))
+        updated = parse_date(updated_value)
         if updated:
             age_days = (date.today() - updated).days
             if age_days > 90 and len(inbound.get(p["slug"], [])) >= 3:
                 findings["stale_pages"].append({
                     "path": p["rel_path"],
-                    "updated": p["meta"].get("updated"),
+                    "updated": updated_value,
                     "age_days": age_days,
                     "inbound_count": len(inbound.get(p["slug"], [])),
                 })

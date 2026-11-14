@@ -31,7 +31,7 @@ from collections import defaultdict
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
-from wiki_text import nfc, posix_rel
+from wiki_text import canonical_kind, canonical_type, nfc, posix_rel
 
 SKIP_TOP_LEVEL_FILES = frozenset({"SCHEMA.md", "index.md", "log.md", "README.md"})
 SKIP_TOP_LEVEL_DIRS = frozenset({"indexes", "graph", "raw", "assets", ".evolution", ".wiki-cache"})
@@ -555,6 +555,33 @@ def text_value(value) -> str:
     if isinstance(value, str):
         return value
     return ", ".join(ref_values(value))
+
+
+def scalar_value(value):
+    """frontmatter の 1 つの値を入れる欄（updated、created など）の値を、文字か None にする。
+
+    文字と None は、そのまま返す（"" も変えない）。それ以外は text_value() と同じく、空でない要素を「, 」でつなぎ、
+    空なら None を返す。`updated: [2026-03-01]` は "2026-03-01"、`updated:`（空の配列）は None になる。
+    """
+    if value is None or isinstance(value, str):
+        return value
+    return text_value(value) or None
+
+
+def type_value(value):
+    """frontmatter の type の値を、文字か None にする。scalar_value() と同じ規則で、配列の要素の日本語の別名
+    （概念など）も英語に直す。文字の type は、読み込みのとき（canonical_meta）に直してあるので、そのまま返す。
+    """
+    if value is None or isinstance(value, str):
+        return value
+    return ", ".join(canonical_type(v) for v in ref_values(value)) or None
+
+
+def kind_value(value):
+    """frontmatter の kind の値を、type_value() と同じ規則で、文字か None にする。"""
+    if value is None or isinstance(value, str):
+        return value
+    return ", ".join(canonical_kind(v) for v in ref_values(value)) or None
 
 
 def ref_link(ref: str) -> str:
