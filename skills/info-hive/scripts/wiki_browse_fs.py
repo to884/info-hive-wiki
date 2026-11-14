@@ -899,23 +899,43 @@ def _within(inner, outer) -> bool:
     return [n.casefold() for n in inner_tail[:len(outer_tail)]] == [n.casefold() for n in outer_tail]
 
 
-def _check_nesting(out, browse_root) -> None:
-    """--out の書き出し先と作業用のディレクトリを、ほかの browse のディレクトリ（目印を持つディレクトリ）と、browse の
-    データの場所の中に作らない。browse のデータの場所も、--out と作業用のディレクトリの中に置かない（設計の 6.1 の
-    入れ子。0.10.0 と同じ）。
+def _check_not_nested(place) -> None:
+    """browse が作る場所（領分の根、書き出し先、作業用のディレクトリ）を、ほかの browse のディレクトリ（目印を持つ
+    ディレクトリ）の中に置かない（設計の 6.1 の入れ子）。
+
+    作られる予定の場所の、今ある祖先から根までの、解いたパスのそれぞれに、目印があるかを見る。書き出し先の側だけ
+    でなく、データの場所の側にも当てる（実装の 3 回目のレビューの重大 1。データの場所が、ほかの世代の中にあった）。
+    """
+    p = place
+    while kind(p) == "absent":
+        parent = os.path.dirname(p)
+        if parent == p:
+            raise failure(Unknown, "今ある祖先がない", place)
+        p = parent
+    p = x("realpath", os.path.dirname(p) if p == place and kind(p) == "dir" else p)
+    while True:
+        for marker in MARKERS:
+            if kind(os.path.join(p, marker)) != "absent":
+                raise Stop(f"ほかの browse のディレクトリの中には作らない: {place}")
+        parent = os.path.dirname(p)
+        if parent == p:
+            return
+        p = parent
+
+
+def _check_nesting(out, browse_root, default=False) -> None:
+    """browse が作る場所を入れ子にしない（設計の 6.1 の入れ子。0.10.0 と同じ）。
+
+    - 領分の根、書き出し先、作業用のディレクトリを、ほかの browse のディレクトリの中に作らない。
+    - --out の書き出し先と作業用のディレクトリを、browse のデータの場所と重ねない（中にも、含むにもしない）。
 
     守りではない。入れ子にすると、外側の世代が「一覧にない項目がある」として次の書き出しで止まるので、先に知らせる。
     何も作る前に呼ぶ。どの場所も、まだなければ、作られる予定の場所で照らす。
     """
-    p = x("realpath", os.path.dirname(out))
-    while True:
-        for marker in MARKERS:
-            if kind(os.path.join(p, marker)) != "absent":
-                raise Stop(f"ほかの browse のディレクトリの中には書き出さない: {os.path.dirname(out)}")
-        parent = os.path.dirname(p)
-        if parent == p:
-            break
-        p = parent
+    for place in (browse_root, out, out + ".browse-work"):
+        _check_not_nested(place)
+    if default:
+        return
     data = _planned(browse_root)
     for place in (out, out + ".browse-work"):
         planned = _planned(place)
@@ -948,11 +968,12 @@ def build(root, out, files: dict, default: bool, owner: str, browse_root, report
     G = Guard(root)
     out, browse_root = os.fspath(out), os.fspath(browse_root)
     work = out + ".browse-work"
+    if default:
+        _check_not_nested(browse_root)
     if default or "enter_root_first" in MUTANTS:     # 対照: 実装の 1 回目の形（--out も、根に入ってから確かめる）
         enter_root(browse_root, create=True)
         _check_out(out)
-        if not default:
-            _check_nesting(out, browse_root)
+        _check_nesting(out, browse_root, default)
     else:
         _check_out(out)
         _check_nesting(out, browse_root)
@@ -965,8 +986,7 @@ def build(root, out, files: dict, default: bool, owner: str, browse_root, report
         # ほかの書き出しの結果（入れ子にしようとした外側の世代など）に依る判定は、共通のロックの中でもう一度行う。
         # ロックの前の判定は、作る前に止めるためで、ほかの書き出しと並んで走りうる（0.10.0 と同じ）
         _check_out(out)
-        if not default:
-            _check_nesting(out, browse_root)
+        _check_nesting(out, browse_root, default)
         use_territory(work, WORK_MARKER, owner=owner if default else None, lock_name="build.lock")
         lock = Lock(os.path.join(work, "build.lock"))
         if not lock.try_acquire():
@@ -1153,6 +1173,8 @@ def _enter_state(root, browse_root, state_dir, owner, create=False) -> bool:
     """
     global G
     G = Guard(root)
+    if create:
+        _check_not_nested(browse_root)
     if not enter_root(browse_root, create):
         return False
     if create:

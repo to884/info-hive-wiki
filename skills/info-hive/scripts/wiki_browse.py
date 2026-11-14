@@ -212,12 +212,15 @@ def core_loop(stdin, stdout) -> int:
 
     def get(wiki: str):
         root = wiki_root(wiki)
-        cached = cache.get(root)
+        # 鍵は、綴りそのままの文字にする。PureWindowsPath は大文字と小文字を同一視して等しくするが、大文字と小文字を
+        # 区別するディレクトリでは別の Wiki である（実装の 3 回目のレビューの重大 3）
+        key = os.fspath(root)
+        cached = cache.get(key)
         sig = core.signature(root)
         if cached and cached.snapshot.signature == sig and not cached.snapshot.transient:
             return cached
         c = core.Core(core.take_snapshot(root))
-        cache[root] = c
+        cache[key] = c
         return c
 
     for line in stdin:
@@ -811,9 +814,25 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     try:
         _load()
-        return _dispatch(args)
+        code = _dispatch(args)
     except Exception as e:  # noqa: BLE001  コマンドの出口の境界。種類だけの短い知らせと、0 でない終了コード
-        return _exit_for(e, getattr(args, "debug", False))
+        code = _exit_for(e, getattr(args, "debug", False))
+    _final_flush()
+    return code
+
+
+def _final_flush() -> None:
+    """標準出力を最後にフラッシュする（通信）。出せなければ、知らせを捨てて、終了コードを変えない（設計の 7）。
+
+    フラッシュに失敗した出力はバッファーに残り、Python が終わるときにもう一度フラッシュして、終了コード 120 で
+    終わる（実装の 3 回目のレビューの重大 2）。標準出力を None にすると、終わるときのフラッシュはしない。
+    """
+    try:
+        if sys.stdout is not None:
+            sys.stdout.flush()
+    except (OSError, ValueError):
+        sys.stdout = None
+        say("標準出力に出せなかった。知らせを捨てる")
 
 
 def _dispatch(args) -> int:
