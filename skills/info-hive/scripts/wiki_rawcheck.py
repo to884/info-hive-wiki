@@ -282,7 +282,7 @@ def work_dir_matches_raw(wiki: Path, slug: str, raw_path: Path) -> bool:
 
 # 途中から続けるときに返す、前の取得の出力の値（wiki_fetch.py の出力のキー）。取得の出力のうち、取得した内容から
 # 作ったものすべてである（警告もここに入る。続きの手順は、前の取得の出力を見て、本文を取れたかを確かめる）。
-RESUME_KEYS = ("source_sha256_of", "title", "source_lang", "encoding", "content_root", "ja_ratio",
+RESUME_KEYS = ("source_sha256_of", "fetched_sha256", "title", "source_lang", "encoding", "content_root", "ja_ratio",
                "needs_translation", "chars", "images", "dropped_images", "removed_by_rule", "warnings")
 # 続けるときに使う、取得の記録のキーと型。取得器はいつもこれを書く。0.14.1 までの版が書いた記録には fetched_sha256 と
 # source_sha256_of がないので、続けられない記録になる（fetch.json と fetched.md を結べず、どの取得かも分からない）。
