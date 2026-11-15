@@ -101,6 +101,38 @@ def _win():
     return _WIN
 
 
+# FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE。browse が Windows で開くファイルは、どれもこの共有で開く。
+# FILE_SHARE_DELETE がないと、ほかのプロセスが名前を付け替えるか消すために DELETE の権利で開いているあいだ
+# （os.replace と os.unlink の途中）は共有違反で開けず、開いているあいだは、ほかのプロセスの os.unlink を共有違反で
+# 止める（設計の 3.1）
+_SHARE_ALL = 0x7
+
+
+def _win_handle(path, access, disposition, flags):
+    """CreateFileW を、共有 _SHARE_ALL で呼び、ハンドルを返す。失敗は、winerror を持つ OSError にする。"""
+    ctypes, msvcrt, wintypes, k32, Info = _win()
+    handle = k32.CreateFileW(os.fspath(path), access, _SHARE_ALL, None, disposition, flags, None)
+    if handle in (None, wintypes.HANDLE(-1).value):
+        code = ctypes.get_last_error()
+        raise OSError(None, ctypes.FormatError(code).strip(), os.fspath(path), code)
+    return handle
+
+
+def _win_open_read(path):
+    """Windows で、読むために開く。最後の名前のリンクはたどる（入力の実体はリンクの先でも読む。設計の 5）。
+
+    os.open（CRT の _wopen）は、共有に FILE_SHARE_DELETE を付けないので使わない。サーバーの記録を読む stop が、
+    サーバーの置き換えの途中で共有違反になり、読んでいるあいだはサーバーが記録を消せなかった（設計の 3.1）。
+    """
+    ctypes, msvcrt, wintypes, k32, Info = _win()
+    handle = _win_handle(path, 0x80000000, _OPEN_EXISTING, 0x80)       # GENERIC_READ、FILE_ATTRIBUTE_NORMAL
+    try:
+        return msvcrt.open_osfhandle(handle, os.O_RDONLY | O_BINARY)
+    except BaseException:
+        k32.CloseHandle(handle)
+        raise
+
+
 def _win_open(path, disposition, flags):
     """Windows で、最後の名前の再解析点をたどらずに、ファイルを作るか開く。開いたものが通常のファイルでなければ失敗する。
 
@@ -111,10 +143,7 @@ def _win_open(path, disposition, flags):
     ctypes, msvcrt, wintypes, k32, Info = _win()
     access = 0x40000000 | (0x80000000 if flags == os.O_RDWR else 0)      # GENERIC_WRITE と GENERIC_READ
     # FILE_ATTRIBUTE_NORMAL、FILE_FLAG_OPEN_REPARSE_POINT
-    handle = k32.CreateFileW(os.fspath(path), access, 0x7, None, disposition, 0x80 | 0x00200000, None)
-    if handle in (None, wintypes.HANDLE(-1).value):
-        code = ctypes.get_last_error()
-        raise OSError(None, ctypes.FormatError(code).strip(), os.fspath(path), code)
+    handle = _win_handle(path, access, disposition, 0x80 | 0x00200000)
     try:
         info = Info()
         if not k32.GetFileInformationByHandle(handle, ctypes.byref(info)):
@@ -169,8 +198,11 @@ class Os:
         return os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode)
 
     def open_read(self, path):
-        """読むために開く。入力の実体はリンクの先でも読む（設計の 5）。"""
-        return os.open(path, os.O_RDONLY | O_BINARY)
+        """読むために開く。入力の実体はリンクの先でも読む（設計の 5）。Windows では、ほかのプロセスの付け替えと削除を
+        妨げない共有で開く（設計の 3.1）。"""
+        if NT and "read_without_share_delete" not in MUTANTS:
+            return _win_open_read(path)
+        return os.open(path, os.O_RDONLY | O_BINARY)       # 対照（read_without_share_delete）は、Windows でもこの形
 
     def open_lock(self, path, create=True):
         """ロックのファイルを開く。create なら、なければ作る。最後の名前がリンクなら、たどらずに失敗する。"""
