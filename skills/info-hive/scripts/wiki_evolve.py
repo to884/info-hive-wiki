@@ -83,6 +83,15 @@ def inside(root, value):
     return path
 
 
+def create(path, data):
+    """新しいファイルを作り、バイト列をそのまま書く。ファイルがあれば FileExistsError で止まり、上書きしない。
+
+    文字のモードで書くと、Windows では改行が CRLF に変わり、記録や返す SHA-256 とファイルのバイト列が食い違う。
+    """
+    with path.open('xb') as f:
+        f.write(data)
+
+
 def atomic(path, data, mode=None):
     fd, name = tempfile.mkstemp(prefix='.evolve-', dir=path.parent)
     try:
@@ -146,8 +155,7 @@ def locked(wiki):
 def event(exp, kind, payload):
     record = {'event': kind, 'at': datetime.now(timezone.utc).isoformat(), **payload}
     path = exp / f'{kind}-{uuid.uuid4().hex}.json'
-    with path.open('x', encoding='utf-8') as f:
-        f.write(encode(record))
+    create(path, encode(record).encode('utf-8'))
     return record
 
 
@@ -176,13 +184,18 @@ def capture(args):
     require(not folder.is_symlink(), 'experiences のディレクトリをシンボリックリンクにはできない')
     folder.mkdir(exist_ok=True)
     path = folder / (record['id'] + '.json')
-    body = encode(record)
+    data = encode(record).encode('utf-8')
     if path.exists():
-        require(not path.is_symlink() and path.read_text(encoding='utf-8') == body, 'この ID の経験はすでに記録されていて、変更できない')
+        require(not path.is_symlink(), 'この ID の経験はすでに記録されていて、変更できない')
+        stored = path.read_bytes()
+        # 0.19.1 までは文字のモードで書いたので、Windows の記録はすべての改行が CRLF になっている。
+        # 中身が同じなら受け入れ、raw は変更不可なので書き直さない。返す値は、実際のバイト列の SHA-256 にする。
+        # encode() は文字列の中の改行を \n とエスケープするので、改行はどれも JSON の行の区切りである。
+        require(stored in (data, data.replace(b'\n', b'\r\n')), 'この ID の経験はすでに記録されていて、変更できない')
     else:
-        with path.open('x', encoding='utf-8') as f:
-            f.write(body)
-    return {'raw': str(path), 'sha256': digest(body.encode()), 'next': 'Ingest as a source; consolidate supported patterns'}
+        create(path, data)
+        stored = data
+    return {'raw': str(path), 'sha256': digest(stored), 'next': 'Ingest as a source; consolidate supported patterns'}
 
 
 def propose(args, state):
@@ -201,8 +214,9 @@ def propose(args, state):
     else:
         target = inside(source, args.target)
         require(target.is_file(), '--target には、このスキルにある既存のファイルを指定する')
-        after = args.candidate.read_text(encoding='utf-8')
-        require(after.strip(), '候補が空である')
+        # 候補は渡されたバイト列のまま写す。文字として読み書きすると、Windows では改行が CRLF に変わる。
+        after = args.candidate.read_bytes()
+        require(after.decode('utf-8').strip(), '候補が空である')
     require(args.reason.strip(), '提案の理由（--reason）が空である')
     evidence = {}
     for name in args.evidence:
@@ -216,7 +230,7 @@ def propose(args, state):
         baseline = copy_tree(source, staging / 'baseline') if source.exists() else {}
         copy_tree(args.candidate if directory else source, staging / 'candidate')
         if not directory:
-            (staging / 'candidate' / args.target).write_text(after, encoding='utf-8')
+            (staging / 'candidate' / args.target).write_bytes(after)
         require(tree(staging / 'candidate') != baseline, '候補がベースラインと同じである')
         value = {'id': args.id, 'skill': str(source), 'target': args.target if not directory else None, 'new_skill': not source.exists(),
                  'reason': args.reason, 'evidence': evidence, 'baseline': baseline,

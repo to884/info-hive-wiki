@@ -6,6 +6,15 @@
 
 ## [Unreleased]
 
+## [0.19.2] - 2026-11-15
+
+### Fixed
+
+- 経験の記録（`wiki_evolve.py capture`）が、Windows で raw の JSON（`raw/experiences/<id>.json`）を CRLF で書き、返す `sha256`（LF の文字列の値）とファイルのバイト列の SHA-256 が食い違っていたのを直した。文字のモードで改行を指定せずに書いていたためで、記録をバイト列で書くようにした。返す `sha256` は、どの OS でもファイルのバイト列の SHA-256 である。
+- 0.19.1 までの Windows が書いた CRLF の記録を、同じ ID と同じ内容で `capture` に渡したときは、今までどおり受け入れて書き直さない。返す `sha256` は、ファイルの実際のバイト列（CRLF）の値になり、0.11.0〜0.19.1 が返した値（LF の値）とは違う。受け入れるのは、すべての改行を CRLF にしたものだけで、ほかの違いがあれば今までどおり断る。
+- 実験の記録（`.evolution/<id>/` の `inputs-*.json`、`evaluation-*.json` など）も、Windows で CRLF になっていたので、バイト列で書くようにした。
+- ファイル単位の提案（`wiki_evolve.py propose --target`）が、Windows で候補のファイルの改行を CRLF に変えて実験に写し、`apply` でそのままスキルに入れていたのを直した。候補は渡されたバイト列のまま写す。
+
 ## [0.19.0] - 2026-11-15
 
 閲覧（`/wiki:browse`）の記事のページの部品を、Fluent 2 のデザインにした（段 F2）。開発リポジトリの設計 `docs/plans/wiki-browse-fluent2-2026-11-14.md` の 5 節による。
