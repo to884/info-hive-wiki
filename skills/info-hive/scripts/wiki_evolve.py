@@ -235,15 +235,16 @@ def propose(args, state):
         value = {'id': args.id, 'skill': str(source), 'target': args.target if not directory else None, 'new_skill': not source.exists(),
                  'reason': args.reason, 'evidence': evidence, 'baseline': baseline,
                  'candidate': tree(staging / 'candidate')}
-        (staging / 'proposal.json').write_text(encode(value), encoding='utf-8')
+        (staging / 'proposal.json').write_bytes(encode(value).encode('utf-8'))
         diff = ''
         for name in sorted(set(baseline) | set(value['candidate'])):
             old, new = staging / 'baseline' / name, staging / 'candidate' / name
-            before = old.read_text(encoding='utf-8') if old.exists() else ''
-            after = new.read_text(encoding='utf-8') if new.exists() else ''
+            # 改行をそろえずに読む。read_text() は CRLF を LF に変えるので、改行だけが違う変更が差分から消える。
+            before = old.read_bytes().decode('utf-8') if old.exists() else ''
+            after = new.read_bytes().decode('utf-8') if new.exists() else ''
             diff += ''.join(difflib.unified_diff(before.splitlines(True), after.splitlines(True),
                                                fromfile='baseline/' + name, tofile='candidate/' + name))
-        (staging / 'change.diff').write_text(diff, encoding='utf-8')
+        (staging / 'change.diff').write_bytes(diff.encode('utf-8'))
         staging.rename(exp)
     return {'id': args.id, 'status': 'proposed', 'diff': str(exp / 'change.diff')}
 
