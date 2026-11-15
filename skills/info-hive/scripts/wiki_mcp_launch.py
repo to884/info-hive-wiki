@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # /// script
-# requires-python = ">=3.12"
+# requires-python = ">=3.12,<3.15"
 # dependencies = []
 # ///
 """wiki の MCP の中継（wiki_mcp_relay.py）を起動する入口。プラグインの .mcp.json から起動する。
@@ -41,10 +41,8 @@ def prepare(force: bool = False) -> str | None:
     try:
         return common.prepare_script(RELAY, output=sys.stderr, timeout=PREPARE_TIMEOUT, log=log, force=force)
     except Exception as exc:  # noqa: BLE001 - 理由をホストのログに残して止まる
-        message = f"中継の環境を用意できなかった: {type(exc).__name__}: {exc}"
-        log(message)
-        if not isinstance(exc, common.UvTlsError):  # UvTlsError は _uv_sync が記録済み
-            common.record_failure(message)
+        # launch.log には prepare_script が記録済み。ここではホストが読む標準エラーにだけ書く。
+        log(f"中継の環境を用意できなかった: {type(exc).__name__}: {exc}")
         return None
 
 

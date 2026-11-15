@@ -219,7 +219,7 @@ LLM Wiki パターンで最大の失敗は、wiki が大きくなるにつれて
 
 wiki をセットアップしたら、どの Markdown ビューアーでもページを読んで編集できる。[Obsidian](https://obsidian.md) は、グラフビューと `[[wikilinks]]` の構文があるので特に相性がよいが、必須ではない。Web ページは `/wiki:ingest <URL>` で取り込める（Obsidian Web Clipper で保存した Markdown も取り込める）。ページを取得して raw を作る段は、プラグインのエージェント `wiki:web-raw` が Sonnet で行い、要約ページから後は、使っているモデルが行う。wiki はプロジェクトの中にある、ただの Markdown ファイルのディレクトリである。
 
-ツールには Python 3.12 以上と `uv` が必要である。初期化とアップグレードでは `setup_wiki.py` を呼び出す。その PEP 723 の環境では、FastEmbed 0.8.0、sqlite-vec 0.1.9、PyYAML 6.0.3 のバージョンを固定しており、モデルをキャッシュし、wiki のインデックス全体を同期する。検索、グラフの lint、グラフの抽出も、それぞれバージョンを固定したスクリプトのメタデータを持つ。語彙ベースの `wiki_search.py --no-embed`、`wiki_lint.py`、`wiki_stats.py`、グラフのクエリは、標準ライブラリだけの Python で直接実行できる。同梱のスクリプトは、インストール後は `skills/info-hive/scripts/` にある。
+ツールには Python 3.12 以上と `uv` が必要である。uv で動くスクリプト（MCP サーバー、初期化、ハイブリッド検索、グラフ、閲覧）は 3.12〜3.14 の Python で動き、その範囲の Python がなければ uv が取得する。初期化とアップグレードでは `setup_wiki.py` を呼び出す。その PEP 723 の環境では、FastEmbed 0.8.0、sqlite-vec 0.1.9、PyYAML 6.0.3 のバージョンを固定しており、モデルをキャッシュし、wiki のインデックス全体を同期する。検索、グラフの lint、グラフの抽出も、それぞれバージョンを固定したスクリプトのメタデータを持つ。語彙ベースの `wiki_search.py --no-embed`、`wiki_lint.py`、`wiki_stats.py`、グラフのクエリは、標準ライブラリだけの Python で直接実行できる。同梱のスクリプトは、インストール後は `skills/info-hive/scripts/` にある。
 
 ## トラブルシューティング
 
@@ -244,6 +244,18 @@ MCP サーバーの入口（`wiki_mcp_launch.py`）は、この失敗を見つ�
 ```
 uv run --quiet --script <プラグインのパス>/skills/info-hive/scripts/wiki_mcp_launch.py --ensure
 ```
+
+### Python を取れない環境で、wiki の MCP サーバーが起動しない
+
+uv で動くスクリプトは、3.12〜3.14 の Python で動く（`requires-python = ">=3.12,<3.15"`）。その範囲の Python が PC になければ、uv が取得する。取得できないとき（`UV_PYTHON_DOWNLOADS=never` を設定している、オフライン、取得先への通信が制限されている）は、MCP サーバーが起動しない。PC に 3.15 以降しかないときも同じである。範囲の Python を入れる。
+
+```
+uv python install 3.14
+```
+
+uv で取得できないときは、python.org などから 3.12〜3.14 の Python を入れる。入れたら Claude Code を起動し直す。
+
+依存を解決できずに止まったとき（`logs/launch.log` に `UvResolveError` がある）は、使う Python の版に合う依存の配布物がない、版の固定どうしが食い違う、などが考えられる。`launch.log` に添えた uv の出力（`cause:` と `hint:`）で理由を確かめる。Python の版が理由なら、環境変数 `UV_PYTHON` などで範囲の外の版を選んでいないかを確かめる。
 
 ## クレジット
 
