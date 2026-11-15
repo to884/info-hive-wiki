@@ -465,11 +465,25 @@ def _run_uv(command: list[str], env: dict, output, timeout: float) -> tuple[int,
         out = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                              timeout=timeout, env=env, creationflags=child_creationflags())
     except subprocess.TimeoutExpired as exc:
-        # 待ちきれなかったときも、それまでの出力は残す。
-        _write_output(output, exc.stdout or exc.output or b"")
+        # 待ちきれなかったときも、それまでの出力は残す。launch.log に添えるため、例外の注記にも要約を入れる。
+        partial = exc.stdout or exc.output or b""
+        _write_output(output, partial)
+        summary = uv_error_summary(uv_text(partial))
+        if summary:
+            exc.add_note(f"uv の出力: {summary}")
         raise
     _write_output(output, out.stdout)
-    return out.returncode, out.stdout.decode("utf-8", "replace")
+    return out.returncode, uv_text(out.stdout)
+
+
+# 端末の色や太字の指定（ANSI のエスケープ）。uv は FORCE_COLOR などで、パイプにも色を付けることがある。
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+
+
+def uv_text(data: bytes | str) -> str:
+    """uv の出力を、見分けと要約に使う文字列にする。色の指定を除く（`error:` が行の頭に来るように）。"""
+    text = data.decode("utf-8", "replace") if isinstance(data, bytes) else data
+    return _ANSI_ESCAPE.sub("", text)
 
 
 def uv_reads_system_certs(timeout: float = 60) -> bool | None:
@@ -644,7 +658,9 @@ def prepare_script(script: Path, *, output, timeout: float, log, force: bool = F
     except UvSetupError:
         raise  # _uv_sync が記録済み
     except Exception as exc:
-        record_failure(f"{script.name} の環境を用意できなかった: {type(exc).__name__}: {exc}")
+        notes = " ".join(getattr(exc, "__notes__", []))  # 待ちきれなかったときの uv の出力の要約（_run_uv）
+        record_failure(f"{script.name} の環境を用意できなかった: {type(exc).__name__}: {exc}"
+                       + (f" {notes}" if notes else ""))
         raise
 
 

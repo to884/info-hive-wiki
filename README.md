@@ -255,7 +255,7 @@ uv python install 3.14
 
 uv で取得できないときは、python.org などから 3.12〜3.14 の Python を入れる。入れたら Claude Code を起動し直す。
 
-依存を解決できずに止まったとき（`logs/launch.log` に `UvResolveError` がある）は、使う Python の版に合う依存の配布物がない。環境変数 `UV_PYTHON` などで範囲の外の版を選んでいないかを確かめる。
+依存を解決できずに止まったとき（`logs/launch.log` に `UvResolveError` がある）は、使う Python の版に合う依存の配布物がない、版の固定どうしが食い違う、などが考えられる。`launch.log` に添えた uv の出力（`cause:` と `hint:`）で理由を確かめる。Python の版が理由なら、環境変数 `UV_PYTHON` などで範囲の外の版を選んでいないかを確かめる。
 
 ## クレジット
 
