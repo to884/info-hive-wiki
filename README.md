@@ -155,7 +155,7 @@ Claude はインデックスを読んで候補のページを見つけ、それ�
 | `/wiki:lint` | 構造と内容の健全性をチェックする。`wiki/graph/ontology.yaml` があればグラフの lint も実行する。 |
 | `/wiki:stats` | wiki の規模、リンク密度、スケーリングのどの閾値に達しているかを表示する。 |
 | `/wiki:graph <action>` | コンパイル済みのグラフ層に対して `extract` / `lint` / `neighbors` / `edges` / `path` / `facts` を実行する。 |
-| `/wiki:browse [slug]` | wiki をブラウザで閲覧する。必要なときだけ 127.0.0.1 のサーバーを起動する。`--stop` で止める。 |
+| `/wiki:browse [slug]` | wiki をブラウザで閲覧する。分類の木、検索、全ページの一覧の絞り込み、配色の切り替えを持つ。必要なときだけ 127.0.0.1 のサーバーを起動する。`--stop` で止める。 |
 | `/wiki:learn <task artifacts>` | 検証済みの経験を記録し、根拠にリンクした再利用できるパターンにまとめる。 |
 | `/wiki:evolve <goal or action>` | スキルの改善案を作成・評価・確認・適用し、ロールバックする。すべての試行の結果を残す。 |
 | `/wiki:upgrade` | 既存の wiki を現在のプラグインのバージョンにアップグレードする（冪等なファイル操作と、手順を追った SCHEMA.md のマージ）。 |
@@ -262,6 +262,8 @@ info-hive の土台は、Praney Behl の [llm-wiki-plugin](https://github.com/pr
 MIT。移植元の著作権表示（Praney Behl）を含む [LICENSE](./LICENSE) を参照。
 
 `skills/info-hive/scripts/_vendor/` には、Markdown の解析器 markdown-it-py と mdurl（どちらも MIT ライセンス）を同梱している。それぞれの著作権表示と許諾文は [_vendor/licenses/](./skills/info-hive/scripts/_vendor/licenses/) に、取得元と版は [_vendor/README.md](./skills/info-hive/scripts/_vendor/README.md) にある。
+
+閲覧（`/wiki:browse`）の画面は、Fluent 2 の Web 版のデザインを React を使わない CSS で再現した `fluent2.css`（スキル fluent2-html-replica の同梱のファイル、MIT ライセンス）を、書き換えずに `skills/info-hive/scripts/browse_assets/` に同梱して描く。元になった Fluent UI と Fluent UI System Icons（どちらも MIT ライセンス、Copyright (c) Microsoft Corporation）の表示は [browse_assets/licenses/](./skills/info-hive/scripts/browse_assets/licenses/) に、取得元と版は [browse_assets/README.md](./skills/info-hive/scripts/browse_assets/README.md) にある。info-hive は Microsoft の製品ではなく、Microsoft の提携、推薦、承認を受けたものでもない。Fluent、Microsoft、Segoe は Microsoft Corporation の商標である。書体は同梱しない。
 
 ## コントリビュート
 

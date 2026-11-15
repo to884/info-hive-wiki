@@ -877,9 +877,11 @@ class Core:
                 parsed[f.disk_rel] = (meta, self.parser.parse(body))
             except Exception:  # noqa: BLE001  1 つの索引の解釈の失敗で、全体を止めない
                 self.parse_failures.append(("index", f.rel))
-        # 索引のファイルのグループの ID は、`_gf` と写しの索引のファイルの並びの番号（探しやすさの設計の 2.2）。
-        # 読めないファイルも数える。ハッシュの先頭の桁は別の名前でも重なるので使わない。
-        file_gid = {f.disk_rel: f"_gf{k}" for k, f in enumerate(index_files)}
+        # 索引のファイルのグループの ID は、`_gf` と、グループを作る（読めて解釈できた）索引のファイルの並びの番号
+        # （探しやすさの設計の 2.2）。読めないファイルと解釈できないファイルは数えない。数えると、読めない入力のある
+        # Wiki が、その入力を取り除いた Wiki と違う ID になる（構造の直しの設計の 4.1）。ハッシュの先頭の桁は、
+        # 別の名前でも重なるので使わない。
+        file_gid = {disk: f"_gf{k}" for k, disk in enumerate(f.disk_rel for f in index_files if f.disk_rel in parsed)}
         group_of_file = {}
         for f in index_files:
             if f.disk_rel not in parsed:
