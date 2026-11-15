@@ -1167,6 +1167,16 @@ class Core:
         self._body_cache[pid] = rendered
         return rendered
 
+    @staticmethod
+    def _meta_row(label: str, cell: str) -> str:
+        """メタ欄の 1 行。Fluent の Table（small）の行、見出しのセル、値のセル（Fluent 2 の設計の 5）。cell は HTML。"""
+        return (f'<tr class="fui-TableRow"><th class="fui-TableHeaderCell" scope="row">{label}</th>'
+                f'<td class="fui-TableCell">{cell}</td></tr>')
+
+    def _meta_html(self, pid: str, path: str, raw_mode: str) -> str:
+        return (f'<table id="_meta" class="meta fui-Table" data-size="small" aria-label="ページの情報">'
+                f'<tbody class="fui-TableBody">{self._meta_rows(pid, path, raw_mode)}</tbody></table>\n')
+
     def _meta_rows(self, pid: str, path: str, raw_mode: str) -> str:
         meta = self.page(pid)["meta"]
         rows = []
@@ -1176,7 +1186,7 @@ class Core:
             if value in (None, "", []):
                 continue
             text = "、".join(map(str, value)) if isinstance(value, list) else str(value)
-            rows.append(f"<tr><th>{label}</th><td>{html.escape(text)}</td></tr>")
+            rows.append(self._meta_row(label, html.escape(text)))
         sources = wiki_pages.ref_values(meta.get("sources"))
         if sources:
             cells = []
@@ -1189,12 +1199,12 @@ class Core:
                                  f"{html.escape(self.title(sp))}</a>")
                 else:
                     cells.append(f'<span class="wl wl-unresolved">{html.escape(ref)}</span>')
-            rows.append(f"<tr><th>出典</th><td>{'、'.join(cells)}</td></tr>")
+            rows.append(self._meta_row("出典", "、".join(cells)))
         raws = wiki_pages.ref_values(meta.get("raw"))
         if raws and raw_mode != "none":
             sha = str(meta.get("raw_sha256") or "")
             cells = [self._raw_html(classify_raw(v), sha, raw_mode, path) for v in raws]
-            rows.append(f"<tr><th>原本</th><td>{'<br>'.join(cells)}</td></tr>")
+            rows.append(self._meta_row("原本", "<br>".join(cells)))
         return "".join(rows)
 
     def _raw_html(self, raw: dict, sha: str, mode: str, path: str) -> str:
@@ -1211,14 +1221,20 @@ class Core:
         tail = f"（SHA-256 {html.escape(sha[:12])}…）" if sha else ""
         return f"<code>{html.escape(base)}</code>{tail}"
 
+    @staticmethod
+    def _section_head(text: str) -> str:
+        """記事のページの節（被リンク、関係、診断）の見出し。Fluent の Subtitle2（Fluent 2 の設計の 5）。"""
+        return f'<h2 class="fui-Subtitle2">{text}</h2>'
+
     def _relations_html(self, pid: str, path: str) -> str:
         if self.relations_state == "none":
             return ""
+        head = self._section_head("関係")
         if self.relations_state == "error":
-            return '<section id="_relations"><h2>関係</h2><p class="state-error">オントロジーを読めない</p></section>\n'
+            return f'<section id="_relations">{head}<p class="state-error">オントロジーを読めない</p></section>\n'
         rel = self.relations[pid]
         if not rel["out"] and not rel["in"]:
-            return ('<section id="_relations"><h2>関係</h2>' + self._incomplete_html()
+            return (f'<section id="_relations">{head}' + self._incomplete_html()
                     + '<p class="state-empty">関係はない</p></section>\n')
         rows = []
         for direction, label in (("out", "→"), ("in", "←")):
@@ -1238,12 +1254,17 @@ class Core:
                             cell = (f'<a href="{html.escape(rel_href(path, self.out_name[found["id"]]))}">'
                                     f"{html.escape(self.title(found['id']))}</a>")
                     cells.append(cell)
-                rows.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
-        head = "".join(f"<th>{h}</th>" for h in ("向き", "述語", "相手", "状態", "開始", "終了", "確からしさ",
-                                                 "出典", "証拠"))
-        return (f'<section id="_relations"><h2>関係</h2>{self._incomplete_html()}'
-                f'<table class="relations"><thead><tr>{head}</tr></thead>'
-                f"<tbody>{''.join(rows)}</tbody></table></section>\n")
+                rows.append('<tr class="fui-TableRow">'
+                            + "".join(f'<td class="fui-TableCell">{c}</td>' for c in cells) + "</tr>")
+        cols = "".join(f'<th class="fui-TableHeaderCell" scope="col">{h}</th>'
+                       for h in ("向き", "述語", "相手", "状態", "開始", "終了", "確からしさ", "出典", "証拠"))
+        # 9 列の表は狭い幅で本文からはみ出すので、表だけを横に送る入れ物で包む（Fluent 2 の設計の 5）。
+        # 入れ物はキーボードでも送れるように、フォーカスできる領域にする
+        return (f'<section id="_relations">{head}{self._incomplete_html()}'
+                f'<div class="table-scroll" role="region" aria-label="関係の表" tabindex="0">'
+                f'<table class="relations fui-Table" data-size="small">'
+                f'<thead class="fui-TableHeader"><tr class="fui-TableRow">{cols}</tr></thead>'
+                f'<tbody class="fui-TableBody">{"".join(rows)}</tbody></table></div></section>\n')
 
     def page_diagnostics(self, pid: str) -> list:
         return [d for d in self.diagnostics if d.get("page") == pid]
@@ -1258,7 +1279,8 @@ class Core:
                 if d.get(key):
                     parts.append(f"{key}: {d[key]}")
             lis.append(f"<li>{html.escape(' / '.join(map(str, parts)))}</li>")
-        return f'<section id="_diagnostics"><h2>診断</h2><ul>{"".join(lis)}</ul></section>\n'
+        return (f'<section id="_diagnostics">{self._section_head("診断")}'
+                f'<ul class="diag-list">{"".join(lis)}</ul></section>\n')
 
     def _scope_html(self) -> str:
         """サイドバーの先頭に置く、スコープの表示。スクリプトなしでも見える。
@@ -1317,16 +1339,17 @@ class Core:
     def render_page(self, pid: str, raw_mode: str = "text", stale: "str | None" = None) -> str:
         path = self.out_name[pid]
         title = self.title(pid)
-        back = "".join(f'<li><a href="{html.escape(rel_href(path, self.out_name[b]))}">'
+        back = "".join(f'<li class="fui-ListItem"><a href="{html.escape(rel_href(path, self.out_name[b]))}">'
                        f"{html.escape(self.title(b))}</a></li>" for b in self.backlinks[pid])
         diags = list(self.page_diagnostics(pid))
         if stale:
             diags.insert(0, {"kind": "stale", "reason": stale})
         return (self._head(path, title, stale)
                 + f'<article id="_article" data-page-id="{html.escape(pid)}">\n'
-                + f'<table id="_meta" class="meta">{self._meta_rows(pid, path, raw_mode)}</table>\n'
+                + self._meta_html(pid, path, raw_mode)
                 + f'<div id="_body">\n{self.body_html(pid)}</div>\n</article>\n'
-                + f'<section id="_backlinks"><h2>被リンク</h2>{self._incomplete_html()}<ul>{back}</ul></section>\n'
+                + f'<section id="_backlinks">{self._section_head("被リンク")}{self._incomplete_html()}'
+                  f'<ul class="fui-List" role="list">{back}</ul></section>\n'
                 + self._relations_html(pid, path)
                 + self._diagnostics_html(diags, path)
                 + self._tail(path))
