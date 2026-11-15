@@ -72,6 +72,8 @@ uv run --script skills/info-hive/scripts/wiki_search.py \
 
 FastEmbed と sqlite-vec によるセマンティックな順位を、BM25 の結果と統合する。API キーは不要で、wiki やクエリのテキストを外部に送ることもない。依存パッケージを使わない語彙ベースの検索にするには、`python skills/info-hive/scripts/wiki_search.py "<query>" --no-embed` で PEP 723 の依存解決を経由せずに実行する。ページ単位で順位を付けるには `--granularity page` を使う。[検索と取得](./search.md)を参照。関係を問う質問では `graph.sqlite` も参照でき、内容のある回答は `wiki/synthesis/` に保存できる。オプションの[判定レイヤー](./decisions.md)を使う場合、`--decide` を付けると、クエリへの回答に役立たない行が除外される。
 
+回答の終わりには、確からしさ（confidence）が「高」「中」「低」で付く。wiki がその回答をどれだけ裏づけているかを表すもので、答えが正しい確率ではない。根拠のページに直接書かれていて元の資料までたどれるか、仮説や矛盾、置き換えられた記述、時期の分からない記述に頼っていないか、検索が縮退していなかったかで決まる。「中」か「低」のときは、理由と、確からしさを上げる方法（取り込むとよい資料や確かめるページ）が添えられる。wiki を書き換える方法は提案だけで、承認しない限り実行されない。決め方の詳細は[クエリのワークフロー](../skills/info-hive/references/query-workflow.md)の手順 5b にある。
+
 ## `/wiki:lint`
 
 構造と内容の健全性をチェックする。`--suggest-pages` を付けると、独立したページにすべきコンセプトを挙げる。
