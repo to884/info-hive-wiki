@@ -666,7 +666,8 @@
         return order(a) - order(b);
       });
       sorted.forEach(function (r) { list.appendChild(r); });
-      var filtered = filt.q || filt.type !== null || filt.tag !== null || filt.group;
+      // 語で絞っているかは、照合と同じ terms() で決める（空白だけの欄は絞っていない。3 回目の実装のレビューの A）
+      var filtered = terms(filt.q).length > 0 || filt.type !== null || filt.tag !== null || !!filt.group;
       countEl.textContent = filtered ? rows.length + " 件中 " + shown + " 件" : rows.length + " 件";
       if (incompletePages || state.searchIncomplete) {
         countEl.appendChild(el("span", "count-incomplete", "（読めないページがあるので不完全）"));
