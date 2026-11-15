@@ -227,7 +227,7 @@ wiki をセットアップしたら、どの Markdown ビューアーでもペ�
 
 TLS を検査する社内ネットワークでは、PyPI への通信の証明書が、OS の証明書ストアにだけある社内の CA で署名されていることがある。`uv` は既定で同梱の証明書を使い、OS の証明書ストアを見ないので、依存を取得できずに `invalid peer certificate: UnknownIssuer` で失敗する。Claude Code には `CONNECTION_CLOSED` とだけ表示される。
 
-MCP サーバーの入口（`wiki_mcp_launch.py`）は、この失敗を見つけると、OS の証明書ストアを使って（`UV_SYSTEM_CERTS=true`。`UV_SYSTEM_CERTS` を知らない古い uv では `UV_NATIVE_TLS=true`）1 回だけやり直す。中継がサーバーの環境を用意するときも同じである。利用者が、この uv が読む設定（`UV_NATIVE_TLS`、新しい uv の `UV_SYSTEM_CERTS`、偽の値の `UV_SYSTEM_CERTS`）を決めていれば、その設定で失敗したものとして、やり直さない。古い uv は `UV_SYSTEM_CERTS` を黙って無視するので、古い uv で `UV_SYSTEM_CERTS=true` だけが設定されているときは、設定が uv に届いていないものとして、`UV_NATIVE_TLS=true` でやり直す。それでも失敗したときは、理由と対処を次のログに書く（uv の出力は、入口では標準エラーに、サーバーの環境では同じディレクトリの `server.log` に書く）。
+MCP サーバーの入口（`wiki_mcp_launch.py`）は、この失敗を見つけると、OS の証明書ストアを使って（`UV_SYSTEM_CERTS=true`。`UV_SYSTEM_CERTS` を知らない古い uv では `UV_NATIVE_TLS=true`）1 回だけやり直す。中継がサーバーの環境を用意するときも同じである。利用者が、uv が実際に使う設定（`UV_NATIVE_TLS`、新しい uv の `UV_SYSTEM_CERTS`、真でない値の `UV_SYSTEM_CERTS`）を決めていれば、その設定で失敗したものとして、やり直さない。古い uv は `UV_SYSTEM_CERTS` を黙って無視するので、古い uv で `UV_SYSTEM_CERTS=true` だけが設定されているときは、設定が uv に届いていないものとして、`UV_NATIVE_TLS=true` でやり直す。uv の版が分からない（`uv sync --help` が動かない）ときは、`UV_SYSTEM_CERTS=true` と `UV_NATIVE_TLS=true` の両方でやり直す。それでも失敗したときは、理由と対処を次のログに書く（uv の出力は、入口では標準エラーに、サーバーの環境では同じディレクトリの `server.log` に書く）。
 
 - Windows: `%LOCALAPPDATA%\info-hive\logs\launch.log`
 - macOS、Linux: `~/.local/share/info-hive/logs/launch.log`（`XDG_DATA_HOME` があればその下）

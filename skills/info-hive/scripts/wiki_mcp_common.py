@@ -371,15 +371,22 @@ def is_tls_error(text: str) -> bool:
     return any(marker in lowered for marker in _TLS_ERROR_MARKERS)
 
 
-def tls_error_message(script: Path, user_setting: str | None, ignored_setting: str | None = None) -> str:
-    """user_setting は、この uv が読む利用者の設定（"NAME=値"）。ignored_setting は、利用者が設定したが、
-    この uv が読まない設定（古い uv の UV_SYSTEM_CERTS）。"""
+def tls_error_message(script: Path, user_setting: str | None, ignored_setting: str | None = None,
+                      reads_system_certs=True) -> str:
+    """user_setting は、uv が使う利用者の設定。ignored_setting は、利用者が設定したが uv に届いていない
+    設定（古い uv の UV_SYSTEM_CERTS=true）。reads_system_certs は uv_reads_system_certs の結果（None は
+    確かめられなかった）。"""
     if user_setting:
         tried = f"{user_setting} が設定されているので、そのまま止まる。"
-    elif ignored_setting:
+    elif ignored_setting and reads_system_certs is False:
         tried = (f"{ignored_setting} が設定されているが、この uv は古く、{SYSTEM_CERTS_ENV} を読まない。"
                  f"{NATIVE_TLS_ENV}=true で OS の証明書ストアを使ってやり直しても失敗した。uv を新しくする"
                  f"（uv self update）と、{SYSTEM_CERTS_ENV} を読むようになる。")
+    elif reads_system_certs is None:
+        tried = ((f"{ignored_setting} が設定されているが、" if ignored_setting else "")
+                 + f"この uv が {SYSTEM_CERTS_ENV} を読むかを確かめられなかった（uv sync --help が動かなかった）。"
+                 f"{SYSTEM_CERTS_ENV}=true と {NATIVE_TLS_ENV}=true で OS の証明書ストアを使ってやり直しても"
+                 "失敗した。")
     else:
         tried = "OS の証明書ストアを使ってやり直しても失敗した。"
     return (f"uv が {script.name} の依存を取得するときに、TLS 証明書を検証できなかった。社内ネットワークなどで、"
@@ -426,53 +433,84 @@ def _run_uv(command: list[str], env: dict, output, timeout: float) -> tuple[int,
     return out.returncode, out.stdout.decode("utf-8", "replace")
 
 
-def system_certs_env(timeout: float = 60) -> str:
-    """この uv が OS の証明書ストアを使う設定として読む環境変数の名前。
+def uv_reads_system_certs(timeout: float = 60) -> bool | None:
+    """この uv が UV_SYSTEM_CERTS を読むなら真、読まない古い uv なら偽、確かめられなければ None。
 
     新しい uv は UV_SYSTEM_CERTS を読み、UV_NATIVE_TLS には非推奨の警告を出す。古い uv は UV_SYSTEM_CERTS を
-    知らずに黙って無視し、UV_NATIVE_TLS だけを読む。`uv sync --help` が UV_SYSTEM_CERTS を挙げるかで決める。
+    知らずに黙って無視し、UV_NATIVE_TLS だけを読む。`uv sync --help` がどちらの名前を挙げるかで決める。
+    `uv sync --help` が動かない、または終了コードが 0 でないときは、版を推し量らずに None を返す。
+    どちらかの版とみなすと、外れたときに、やり直しを止めるか、効かない名前でやり直してしまう。
     """
     try:
         found = subprocess.run([uv_executable(), "sync", "--help"], stdin=subprocess.DEVNULL, capture_output=True,
                                timeout=timeout, env={**os.environ, "PYTHONUTF8": "1"},
                                creationflags=child_creationflags())
     except (OSError, subprocess.SubprocessError):
-        return SYSTEM_CERTS_ENV
+        return None
+    if found.returncode != 0:
+        return None
     text = found.stdout.decode("utf-8", "replace")
-    return NATIVE_TLS_ENV if found.returncode == 0 and SYSTEM_CERTS_ENV not in text and NATIVE_TLS_ENV in text         else SYSTEM_CERTS_ENV
+    if SYSTEM_CERTS_ENV in text:
+        return True
+    if NATIVE_TLS_ENV in text:
+        return False
+    return None
 
 
-def _user_tls_setting() -> tuple[str | None, str | None, str | None]:
-    """利用者の証明書の設定を (この uv が読む設定, この uv が読まない設定, この uv が読む名前) で返す。
-    設定は "NAME=値"。この uv が読む名前は、確かめたときだけ入れる（確かめなければ None）。
+def system_certs_envs(reads_system_certs: bool | None) -> tuple[str, ...]:
+    """OS の証明書ストアを使わせるために、真にする環境変数の名前。版が分からなければ両方にする
+    （新しい uv は UV_SYSTEM_CERTS を、古い uv は UV_NATIVE_TLS を読み、もう片方は効かないだけである）。"""
+    if reads_system_certs is True:
+        return (SYSTEM_CERTS_ENV,)
+    if reads_system_certs is False:
+        return (NATIVE_TLS_ENV,)
+    return (SYSTEM_CERTS_ENV, NATIVE_TLS_ENV)
 
-    利用者が決めたとみなすのは、この uv が読む設定だけである。古い uv は UV_SYSTEM_CERTS を知らずに
-    黙って無視するので、これを決定とみなすと、OS の証明書ストアを使ったやり直しを止めてしまう。
-    - UV_NATIVE_TLS: 新旧どちらの uv も読む。値に関わらず決定とみなす。
-    - UV_SYSTEM_CERTS が偽: uv の既定（OS の証明書ストアを使わない）と同じなので、uv が読むかに関わらず
-      決定とみなす。
-    - UV_SYSTEM_CERTS が真: この uv が読むなら決定とみなす。読まないなら、利用者の意図（OS の証明書ストアを
-      使う）が uv に届いていないので、読まない設定として返す。
+
+# _user_tls_setting が uv の版を確かめなかったことを表す。
+_UNCHECKED = object()
+
+
+def _user_tls_setting():
+    """利用者の証明書の設定を (この uv が使う設定, この uv に届いていない設定, uv の版) で返す。
+    設定は "NAME=値" の文。uv の版は uv_reads_system_certs の結果で、確かめなかったときは _UNCHECKED。
+
+    利用者が決めたとみなすのは、uv が実際に使う設定だけである。uv の読み方は次のとおり。
+    - 新しい uv: UV_SYSTEM_CERTS があればそれを使い、UV_NATIVE_TLS は見ない。なければ UV_NATIVE_TLS を使う。
+    - 古い uv: UV_SYSTEM_CERTS を黙って無視し、UV_NATIVE_TLS だけを使う。
+    - 真偽の値は、大文字と小文字を区別せずに読み、前後の空白は除かない（clap の BoolishValueParser と同じ）。
+    そのため、uv の版を確かめずに決まる場合がほとんどである。
+    - 両方ある: 新しい uv は UV_SYSTEM_CERTS を、古い uv は UV_NATIVE_TLS を使う。どちらにしても決定である。
+    - UV_NATIVE_TLS だけ: どちらの uv も使う。決定である。
+    - UV_SYSTEM_CERTS だけで、真でない値: 新しい uv では決定、古い uv では無視されるが、uv の既定（OS の
+      証明書ストアを使わない）と同じなので、利用者の意図どおりである。どちらにしても決定とみなす。
+    - UV_SYSTEM_CERTS だけで、真の値: 新しい uv では決定である。古い uv では、利用者の意図（OS の証明書
+      ストアを使う）が uv に届いていない。ここだけ uv の版を確かめ、新しい uv と分かったときだけ決定とみなす。
+      確かめられなければ、届いていないものとして扱う（やり直しは、両方の名前を真にして行う）。
     """
     native = os.environ.get(NATIVE_TLS_ENV, "")
-    if native.strip():
-        return f"{NATIVE_TLS_ENV}={native}", None, None
     system = os.environ.get(SYSTEM_CERTS_ENV, "")
-    if not system.strip():
-        return None, None, None
+    has_native, has_system = bool(native.strip()), bool(system.strip())
+    if has_native and has_system:
+        return (f"{SYSTEM_CERTS_ENV}={system} と {NATIVE_TLS_ENV}={native}（新しい uv は {SYSTEM_CERTS_ENV} を、"
+                f"古い uv は {NATIVE_TLS_ENV} を使う）"), None, _UNCHECKED
+    if has_native:
+        return f"{NATIVE_TLS_ENV}={native}", None, _UNCHECKED
+    if not has_system:
+        return None, None, _UNCHECKED
     setting = f"{SYSTEM_CERTS_ENV}={system}"
-    if system.strip().lower() not in _TRUTHY_VALUES:
-        return setting, None, None
-    name = system_certs_env()
-    if name == SYSTEM_CERTS_ENV:
-        return setting, None, name
-    return None, setting, name
+    if system.lower() not in _TRUTHY_VALUES:
+        return setting, None, _UNCHECKED
+    reads = uv_reads_system_certs()
+    if reads is True:
+        return setting, None, reads
+    return None, setting, reads
 
 
 def _uv_sync(script: Path, *, reinstall: bool, output, timeout: float, log=None) -> int:
     """`uv sync --script` の終了コードを返す。TLS 証明書を検証できずに失敗したときは、利用者が
     この uv が読む証明書の設定を決めていなければ、OS の証明書ストアを使って 1 回だけやり直す（_user_tls_setting）。
-    環境変数の名前は uv の版で選ぶ（system_certs_env）。
+    環境変数の名前は uv の版で選ぶ（uv_reads_system_certs、system_certs_envs）。
 
     uv は既定で同梱の証明書を使い、OS の証明書ストアを見ない。TLS を検査する社内ネットワークでは、PyPI への
     通信の証明書が OS にだけある CA で署名されているので、既定のままでは必ず失敗する。OS の証明書ストアを
@@ -485,17 +523,26 @@ def _uv_sync(script: Path, *, reinstall: bool, output, timeout: float, log=None)
     code, text = _run_uv(command, env, output, timeout)
     if code == 0 or not is_tls_error(text):
         return code
-    user_setting, ignored_setting, name = _user_tls_setting()
+    user_setting, ignored_setting, reads = _user_tls_setting()
     if user_setting is None:
-        name = name or system_certs_env()
+        if reads is _UNCHECKED:
+            reads = uv_reads_system_certs()
+        names = system_certs_envs(reads)
+        retry = {name: "true" for name in names}
         if log:
-            reason = f"（{ignored_setting} は、この古い uv が読まない名前である）" if ignored_setting else ""
-            log(f"uv が TLS 証明書を検証できなかったので、OS の証明書ストアを使ってやり直す（{name}=true）{reason}")
-        code, text = _run_uv(command, {**env, name: "true"}, output, timeout)
+            if ignored_setting and reads is False:
+                reason = f"（{ignored_setting} は、この古い uv が読まない名前である）"
+            elif reads is None:
+                reason = "（この uv がどちらの名前を読むかを確かめられなかったので、両方を設定する）"
+            else:
+                reason = ""
+            log("uv が TLS 証明書を検証できなかったので、OS の証明書ストアを使ってやり直す（"
+                + "、".join(f"{name}=true" for name in names) + f"）{reason}")
+        code, text = _run_uv(command, {**env, **retry}, output, timeout)
         if code == 0 or not is_tls_error(text):
-            os.environ[name] = "true"
+            os.environ.update(retry)
             return code
-    message = tls_error_message(script, user_setting, ignored_setting)
+    message = tls_error_message(script, user_setting, ignored_setting, reads)
     # 中継がサーバーの環境を用意するときも、利用者が読む場所（launch.log）に残す。
     record_failure(f"UvTlsError: {message}")
     raise UvTlsError(message)
