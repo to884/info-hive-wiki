@@ -44,15 +44,16 @@ try:
 except (ImportError, SystemExit):
     wiki_graph_extract = None
 
-PROTOCOL_VERSION = 1
-CORE_VERSION = "browse-core-1"
+PROTOCOL_VERSION = 2   # 探しやすさの設計の 2.3、6（nav.js の形とグループの並びが変わった）
+CORE_VERSION = "browse-core-2"
 NAME_LIMIT = 200
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
        "base-uri 'none'; form-action 'none'")
 RAW_MODES = ("text", "link", "basename", "none")
-ASSETS = ("assets/app.js", "assets/style.css")
+# 画面の部品。fluent2.css は Fluent 2 の再現の CSS の同梱の写し（Fluent 2 の設計の 2）、theme.js は配色を描く前に決める
+ASSETS = ("assets/app.js", "assets/style.css", "assets/fluent2.css", "assets/theme.js")
 ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "browse_assets")
-DATA_FILES = ("nav.js", "data/manifest.js", "data/diagnostics.js")
+DATA_FILES = ("nav.js", "data/manifest.js", "data/diagnostics.js", "data/search.js")
 EXTERNAL_SCHEMES = ("http", "https", "mailto")
 ONTOLOGY_REL = "graph/ontology.yaml"
 
@@ -492,6 +493,96 @@ def _page_id(rel: str) -> str:
     return rel[:-3] if rel.lower().endswith(".md") else rel
 
 
+# MessageBar のアイコン（Fluent UI System Icons の WarningFilled と DiamondDismissFilled、20px。MIT）
+ICON_WARNING = ('<svg class="fui-Icon" width="20" height="20" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" '
+                'focusable="false"><path d="M7.37 3.56a3 3 0 0 1 5.26 0l5.5 10A3 3 0 0 1 15.5 18h-11a3 3 0 0 1-2.63-4.44z'
+                'M10 12.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5m0-6.25a.5.5 0 0 0-.5.5v4a.5.5 0 0 0 1 0V7a.5.5 0 0 0-.5-.5"/></svg>')
+ICON_ERROR = ('<svg class="fui-Icon" width="20" height="20" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" '
+              'focusable="false"><path d="M7.88 1.88a3 3 0 0 1 4.24 0l6 6a3 3 0 0 1 0 4.24l-6 6a3 3 0 '
+              '0 1-4.24 0l-6-6a3 3 0 0 1 0-4.24zM13.1 6.9a.5.5 0 0 0-.7 0L10 9.3 7.6 6.9a.5.5 0 0 0-.7.7L9.3 10l-2.4 2.4a.5.5 0 0 0 .7.7l2.4-2.4 2.4 2.4a.5.5 0 0 0 .7-.7L10.7 10l2.4-2.4a.5.5 0 0 0 0-.7"/></svg>')
+
+# ---------------------------------------------------------------------------
+# ナビゲーションの木の補助（探しやすさの設計の 2）
+# ---------------------------------------------------------------------------
+
+TYPE_LABELS = {"source": "ソース", "entity": "エンティティ", "concept": "コンセプト", "synthesis": "シンセシス"}
+SUMMARY_SEPARATORS = ":：—–-"
+GROUP_ID_RE = re.compile(r"_g[0-9a-z]+\Z")
+TYPE_CLASS_RE = re.compile(r"[a-z][a-z0-9_-]*\Z")
+LEAD_LIMIT = 120
+
+
+class NavInvariantError(Exception):
+    """組み終えた木が、設計の 2.1 の末尾の性質を満たさない。組み立てを失敗にする。"""
+
+
+def type_label(value: str) -> str:
+    """種類の名前（N7）。知っている 4 つの値だけを日本語にし、ほかはそのまま、値がなければ「種類なし」。"""
+    return TYPE_LABELS[value] if value in TYPE_LABELS else (value or "種類なし")
+
+
+def type_class(value: str) -> str:
+    """種類の印のクラス。英小文字の識別子でなければ t-other。"""
+    return "t-" + value if TYPE_CLASS_RE.match(value or "") else "t-other"
+
+
+def _walk(groups):
+    for g in groups:
+        yield g
+        yield from _walk(g["children"])
+
+
+def _page_ids(groups) -> set:
+    return {it["id"] for g in _walk(groups) for it in g["items"] if it["state"] == "resolved"}
+
+
+def _after_first_link(inline_tok) -> str:
+    """段落の最初の wikilink より後ろの表示の文字（4.2 の 2）。先頭の区切りの記号と空白を除く。"""
+    children = inline_tok.children or []
+    for i, child in enumerate(children):
+        if child.type == "text" and "[[" in child.content:
+            m = wiki_pages.WIKILINK_FULL_RE.search(child.content)
+            if not m:
+                continue
+            rest = child.copy()
+            rest.content = child.content[m.end():]
+            text = inline_text([rest] + list(children[i + 1:]))
+            return nfc(text.strip().lstrip(SUMMARY_SEPARATORS).strip())
+    return ""
+
+
+def lead_text(tokens) -> str:
+    """本文の冒頭（4.2 の 3）。見出し、リスト、引用、表の中を除いた最初の段落の、最初の「。」まで（なければ 120 字まで）。"""
+    depth = 0
+    for i, tok in enumerate(tokens or []):
+        if tok.type in ("bullet_list_open", "ordered_list_open", "blockquote_open", "table_open"):
+            depth += 1
+        elif tok.type in ("bullet_list_close", "ordered_list_close", "blockquote_close", "table_close"):
+            depth -= 1
+        elif tok.type == "paragraph_open" and depth == 0 and i + 1 < len(tokens) and tokens[i + 1].type == "inline":
+            text = nfc(inline_text(tokens[i + 1].children or []).strip())
+            if not text:
+                continue
+            end = text.find("。")
+            return text[:end + 1] if end >= 0 else text[:LEAD_LIMIT]
+    return ""
+
+
+def _check_tree(top: list) -> None:
+    """設計の 2.1 の末尾の性質を確かめる。成り立たなければ NavInvariantError。"""
+    ids = [g["id"] for g in _walk(top)]
+    if len(ids) != len(set(ids)):
+        raise NavInvariantError("グループの ID が重なる")
+    if not all(GROUP_ID_RE.match(i) for i in ids):
+        raise NavInvariantError("グループの ID の形が違う")
+    shown = set(ids)
+    titles = {g["id"]: g["title"] for g in _walk(top)}
+    for g in _walk(top):
+        for it in g["items"]:
+            if it["state"] == "group" and (it["group"] not in shown or it["label"] != titles[it["group"]]):
+                raise NavInvariantError("木にないグループを指すか、名前が行き先のグループの名前と違う")
+
+
 class Core:
     """1 つの写しから組み立てた中核。描く関数は静的の書き出しとサーバーで同じものを使う。"""
 
@@ -770,7 +861,9 @@ class Core:
     # --- ナビゲーション（設計の 3.7） ---
 
     def _nav(self) -> None:
+        """ナビゲーションの木。1 つ目の段（N1）で索引のファイルごとのグループを組み、2 つ目の段で畳んで並べる。"""
         self.nav_groups = []
+        file_groups = []     # (索引のファイル, そのグループ)。解釈できたファイルだけ
         listed = set()
         index_files = self.snapshot.by_kind("index")
         # 索引を先に解釈する。解釈できない索引は、読めない索引と同じに扱う（構造の直しの設計の 7.2）
@@ -784,12 +877,16 @@ class Core:
                 parsed[f.disk_rel] = (meta, self.parser.parse(body))
             except Exception:  # noqa: BLE001  1 つの索引の解釈の失敗で、全体を止めない
                 self.parse_failures.append(("index", f.rel))
+        # 索引のファイルのグループの ID は、`_gf` と、グループを作る（読めて解釈できた）索引のファイルの並びの番号
+        # （探しやすさの設計の 2.2）。読めないファイルと解釈できないファイルは数えない。数えると、読めない入力のある
+        # Wiki が、その入力を取り除いた Wiki と違う ID になる（構造の直しの設計の 4.1）。ハッシュの先頭の桁は、
+        # 別の名前でも重なるので使わない。
+        file_gid = {disk: f"_gf{k}" for k, disk in enumerate(f.disk_rel for f in index_files if f.disk_rel in parsed)}
         group_of_file = {}
         for f in index_files:
             if f.disk_rel not in parsed:
                 continue   # 読めない索引のグループは作らないので、そこへのリンクも作らない
-            gid = "_g" + short_hash(f.disk_rel, 10)   # NFC で同じになる 2 つの名前でも重ならない
-            group_of_file.setdefault(_page_id(f.rel), gid)
+            group_of_file.setdefault(_page_id(f.rel), file_gid[f.disk_rel])
         counter = [0]
 
         def new_group(title, gid=None):
@@ -805,7 +902,7 @@ class Core:
             meta, tokens = parsed[f.disk_rel]
             first_heading = next((inline_text(tokens[i + 1].children) for i, t in enumerate(tokens)
                                   if t.type == "heading_open" and i + 1 < len(tokens)), None)
-            gid = "_g" + short_hash(f.disk_rel, 10)
+            gid = file_gid[f.disk_rel]
             if is_top:
                 top = new_group("", gid)
             else:
@@ -833,18 +930,123 @@ class Core:
                         stack[-1][1]["items"].append(item)
                         if item.get("id"):
                             listed.add(item["id"])
-            self.nav_groups.append(top)
+            file_groups.append((f, top))
         rest = defaultdict(list)
         for pid in sorted(self.drawn):
             if pid not in listed:
                 rest[str(self.page(pid)["meta"].get("type") or "")].append(pid)
+        rest_groups = []
         if rest:
             g = new_group("索引にないページ")
             for t in sorted(rest):
-                sub = new_group(t or "種類なし")
+                # N7: 名前だけを日本語にする。ID と並び（type の値の順）は 1 つ目の段のまま
+                sub = new_group(type_label(t))
                 sub["items"] = [{"state": "resolved", "id": pid, "label": self.title(pid)} for pid in rest[t]]
                 g["children"].append(sub)
-            self.nav_groups.append(g)
+            rest_groups.append(g)
+        self.nav_groups = self._nav_stage_two(file_groups, rest_groups)
+        self._page_listing()
+
+    def _nav_stage_two(self, file_groups: list, rest_groups: list) -> list:
+        """木の 2 つ目の段（探しやすさの設計の 2.1 の N2〜N8）。新しい ID は作らない。"""
+        listed_before = _page_ids([g for _f, g in file_groups])
+        by_id = {g["id"]: g for _f, g in file_groups}
+        index_g = next((g for f, g in file_groups if f.rel == "index.md"), None)
+        for _f, g in file_groups:
+            origin = "index" if g is index_g else "indexes"
+            for x in _walk([g]):
+                x["origin"] = origin
+                x.setdefault("summary", "")
+            if g is index_g:
+                g["title"] = "索引"                                  # N2
+            if not g["items"] and len(g["children"]) == 1:           # N3: 1 度だけ畳む
+                child = g["children"][0]
+                g["items"], g["children"] = child["items"], child["children"]
+        for _f, g in file_groups:                                    # N6: 行き先のグループの名前にする
+            for x in _walk([g]):
+                for it in x["items"]:
+                    if it["state"] == "group":
+                        it["label"] = by_id[it["group"]]["title"]
+        top = []
+        if index_g is not None:                                      # N4
+            if index_g["items"]:
+                top.append({**index_g, "title": "索引", "children": []})
+            top.extend(index_g["children"])
+        order, summaries = [], {}                                    # N5: 順と要約はグループの ID で決める
+        if index_g is not None:
+            for x in _walk([index_g]):
+                for it in x["items"]:
+                    if it["state"] == "group" and it["group"] not in summaries:
+                        order.append(it["group"])
+                        summaries[it["group"]] = it.get("after", "")
+        for _f, g in file_groups:
+            if g is not index_g and g["id"] not in summaries:
+                order.append(g["id"])
+        for gid in order:
+            by_id[gid]["summary"] = summaries.get(gid, "")
+            top.append(by_id[gid])
+
+        def only_group_items(g):
+            return all(it["state"] == "group" for x in _walk([g]) for it in x["items"])
+
+        def prune(groups):                                           # N6: index.md から来たグループだけを外せる
+            kept = []
+            for g in groups:
+                if g.get("origin") == "index" and only_group_items(g):
+                    continue
+                g["children"] = prune(g["children"])
+                kept.append(g)
+            return kept
+
+        top = prune(top)
+        if _page_ids(top) != listed_before:
+            raise NavInvariantError("2 つ目の段で、索引に載ったページが変わった")
+        for g in rest_groups:                                        # N7
+            for x in _walk([g]):
+                x["origin"], x["summary"] = "", ""
+            top.append(g)
+
+        def count(g):                                                # N8
+            ids = {it["id"] for it in g["items"] if it["state"] == "resolved"}
+            for ch in g["children"]:
+                ids |= count(ch)
+            g["count"] = len(ids)
+            return ids
+
+        for g in top:
+            count(g)
+        _check_tree(top)
+        return top
+
+    def _page_listing(self) -> None:
+        """索引のページの一覧と検索の索引に使う、ページごとの並び、グループ、階層、索引の行の要約（4.1、4.2）。"""
+        self.page_order = []          # 索引の順（木を深さ優先でたどり、ページが最初に現れた順）
+        self.page_groups = {}         # ページ -> そのページを項目に持つグループと祖先のグループの ID
+        self.page_path = {}           # ページ -> 最初に現れたグループの階層（名前のないグループは飛ばす）
+        self.index_summary = {}       # ページ -> 索引の行の要約（4.2 の 2）
+        self.index_unresolved = []    # (階層, 項目)。ページに決まらない索引の行（4.4）
+        # 本文の冒頭（4.2 の 3）。描くときに本文のトークンを書き換えるので、組み立てのときに取っておく
+        self.lead = {pid: lead_text(self.tokens.get(pid)) for pid in self.drawn}
+
+        def rec(g, trail):
+            trail = trail + [g]
+            for it in g["items"]:
+                if it["state"] == "resolved":
+                    pid = it["id"]
+                    if pid not in self.page_groups:
+                        self.page_order.append(pid)
+                        self.page_path[pid] = [x["title"] for x in trail if x["title"]]
+                        self.page_groups[pid] = set()
+                    self.page_groups[pid].update(x["id"] for x in trail)
+                    if pid not in self.index_summary and it.get("after"):
+                        self.index_summary[pid] = it["after"]
+                elif it["state"] in ("unresolved", "ambiguous"):
+                    self.index_unresolved.append(([x["title"] for x in trail if x["title"]], it))
+            for ch in g["children"]:
+                rec(ch, trail)
+
+        for g in self.nav_groups:
+            rec(g, [])
 
     def _nav_item(self, inline_tok, group_of_file) -> "dict | None":
         for child in inline_tok.children or []:
@@ -855,13 +1057,14 @@ class Core:
                 target = nfc(m.group(1).strip())
                 label = (m.group(2) or m.group(1)).strip()
                 clean = wiki_pages.clean_link_target(target)
+                after = _after_first_link(inline_tok)
                 if clean in group_of_file and clean.startswith("indexes/"):
-                    return {"state": "group", "group": group_of_file[clean], "label": label}
+                    return {"state": "group", "group": group_of_file[clean], "label": label, "after": after}
                 r = self.resolve(target)
                 if r["state"] == "resolved":
                     return {"state": "resolved", "id": r["id"], "label": self.title(r["id"]),
-                            "anchor": r.get("anchor")}
-                return {"state": r["state"], "label": label}
+                            "anchor": r.get("anchor"), "after": after}
+                return {"state": r["state"], "label": label, "after": after}
         return None
 
     # --- 描画 ---
@@ -1058,27 +1261,51 @@ class Core:
         return f'<section id="_diagnostics"><h2>診断</h2><ul>{"".join(lis)}</ul></section>\n'
 
     def _scope_html(self) -> str:
-        """サイドバーの先頭に置く、スコープの表示。スクリプトなしでも見える。"""
+        """サイドバーの先頭に置く、スコープの表示。スクリプトなしでも見える。
+
+        Fluent の Badge（tint）。ユーザースコープは brand、プロジェクトは中立の色で、文字でも見分ける（Fluent 2 の設計の 4）。
+        """
         if not self.scope:
             return ""
-        return f'<p id="_scope" class="scope scope-{self.scope}">{SCOPE_HEADINGS[self.scope]}</p>'
+        color = "brand" if self.scope == "user" else "informative"
+        return (f'<p id="_scope" class="scope scope-{self.scope}"><span class="fui-Badge" data-appearance="tint" '
+                f'data-color="{color}" data-size="large" data-shape="rounded">{SCOPE_HEADINGS[self.scope]}</span></p>')
+
+    def _message_bar(self, mid: str, intent: str, title: str, body: str, extra_class: str = "") -> str:
+        """Fluent の MessageBar（multiline）。アイコンはインライン SVG（Fluent 2 の設計の 4）。body は文字で渡す。"""
+        cls = f"{extra_class} fui-MessageBar" if extra_class else "fui-MessageBar"
+        return (f'<div id="{mid}" class="{cls}" role="group" aria-labelledby="{mid}_title" data-intent="{intent}" '
+                f'data-layout="multiline"><div class="fui-MessageBar__icon" aria-hidden="true">'
+                f'{ICON_ERROR if intent == "error" else ICON_WARNING}</div>'
+                f'<div class="fui-MessageBarBody"><span class="fui-MessageBarTitle" id="{mid}_title">'
+                f'{html.escape(title)}</span>{html.escape(body)}</div>'
+                f'<div class="fui-MessageBarActions"></div><div class="fui-MessageBar__bottomReflowSpacer"></div></div>\n')
 
     def _head(self, path: str, title: str, stale: "str | None") -> str:
         prefix = root_prefix(path)
         banner = ""
         if stale:
-            banner = (f'<p id="_stale" class="stale">Wiki の最新の内容を表示できていない。前の内容を表示している'
-                      f"（{html.escape(stale)}）</p>\n")
+            banner = self._message_bar("_stale", "warning", "前の内容を表示している",
+                                       f"Wiki の最新の内容を表示できていない（{stale}）。", "stale")
         full_title = f"{title} · {SCOPE_LABELS[self.scope]}" if self.scope else title
-        return (f'<!doctype html>\n<html lang="ja" data-root="{prefix}" data-generation="{self.generation}">\n'
+        kind = "page-index" if path == "index.html" else "page-article"
+        # data-theme="auto" は OS の配色に従う。theme.js が、選んだ配色を描く前に当てる（Fluent 2 の設計の 3）
+        return (f'<!doctype html>\n<html lang="ja" data-theme="auto" data-root="{prefix}" '
+                f'data-generation="{self.generation}">\n'
                 f'<head>\n<meta charset="utf-8">\n'
                 f'<meta http-equiv="Content-Security-Policy" content="{CSP}">\n'
                 f'<meta name="referrer" content="no-referrer">\n'
                 f'<meta name="viewport" content="width=device-width, initial-scale=1">\n'
                 f"<title>{html.escape(full_title)}</title>\n"
-                f'<link rel="stylesheet" href="{prefix}assets/style.css">\n</head>\n<body>\n'
-                f'<nav id="_nav">{self._scope_html()}'
-                f'<noscript><a href="{prefix}index.html">索引へ</a></noscript></nav>\n'
+                f'<link rel="stylesheet" href="{prefix}assets/fluent2.css">\n'
+                f'<link rel="stylesheet" href="{prefix}assets/style.css">\n'
+                f'<script src="{prefix}assets/theme.js"></script>\n</head>\n'
+                f'<body class="fui-FluentProvider {kind}">\n'
+                f'<nav id="_nav" class="fui-NavDrawer" aria-label="wiki のナビゲーション">'
+                f'<div class="fui-NavDrawerHeader nav-head">{self._scope_html()}'
+                f'<a class="fui-NavItem nav-home" href="{prefix}index.html">索引</a></div>'
+                f'<div class="fui-NavDrawerBody" id="_navbody">'
+                f'<noscript><a class="fui-Link" href="{prefix}index.html">索引へ</a></noscript></div></nav>\n'
                 f'<main id="_main">\n{banner}')
 
     def _tail(self, path: str, extra_data: tuple = ()) -> str:
@@ -1117,29 +1344,78 @@ class Core:
         title = self.title(pid)
         return (self._head(path, title, stale)
                 + f'<article id="_article" data-page-id="{html.escape(pid)}">\n'
-                + f'<p class="notice notice-error render-error">このページを描けない（{html.escape(error)}）。'
-                  "lint で確かめる</p>\n</article>\n"
+                + self._message_bar("_render_error", "error", "このページを描けない",
+                                    f"{error}。lint で確かめる。", "notice notice-error render-error")
+                + "</article>\n"
                 + self._tail(path))
 
-    def _nav_html(self, groups, path: str) -> str:
-        parts = []
-        for g in groups:
-            items = []
-            for it in g["items"]:
-                label = html.escape(it["label"])
-                if it["state"] == "resolved":
-                    href = rel_href(path, self.out_name[it["id"]])
-                    if it.get("anchor"):
-                        href += "#" + urllib.parse.quote(it["anchor"], safe="")
-                    items.append(f'<li><a href="{html.escape(href)}">{label}</a></li>')
-                elif it["state"] == "group":
-                    items.append(f'<li><a href="#{html.escape(it["group"])}">{label}</a></li>')
-                else:
-                    items.append(f'<li><span class="wl wl-{it["state"]}">{label}</span></li>')
-            title = f"<h2>{html.escape(g['title'])}</h2>" if g["title"] else ""
-            parts.append(f'<section class="nav-group" id="{html.escape(g["id"])}">{title}'
-                         f'<ul>{"".join(items)}</ul>{self._nav_html(g["children"], path)}</section>')
+    # --- 索引のページの一覧と検索（探しやすさの設計の 4、5） ---
+
+    def page_summary(self, pid: str) -> tuple:
+        """ページの要約と、その出どころ（4.2）。(文字, "frontmatter" | "index" | "lead" | "none")。"""
+        own = wiki_pages.scalar_value(self.page(pid)["meta"].get("summary"))
+        if own and str(own).strip():
+            return nfc(str(own).strip()), "frontmatter"
+        if self.index_summary.get(pid):
+            return self.index_summary[pid], "index"
+        lead = self.lead.get(pid, "")
+        if lead:
+            return lead, "lead"
+        return "", "none"
+
+    def page_type(self, pid: str) -> str:
+        return str(wiki_pages.type_value(self.page(pid)["meta"].get("type")) or "")
+
+    def page_updated(self, pid: str) -> str:
+        return str(wiki_pages.scalar_value(self.page(pid)["meta"].get("updated")) or "")
+
+    def page_tags(self, pid: str) -> list:
+        return [nfc(t) for t in wiki_pages.ref_values(self.page(pid)["meta"].get("tags"))]
+
+    def _type_badge(self, value: str) -> str:
+        return (f'<span class="badge fui-Badge {type_class(value)}" data-appearance="tint" data-size="small" '
+                f'data-shape="rounded">{html.escape(type_label(value))}</span>')
+
+    def _index_row(self, pid: str, order: int, path: str) -> str:
+        title = self.title(pid)
+        t = self.page_type(pid)
+        updated = self.page_updated(pid)
+        summary, _from = self.page_summary(pid)
+        tags = self.page_tags(pid)
+        gpath = " › ".join(self.page_path.get(pid, []))
+        href = rel_href(path, self.out_name[pid])
+        # data-id は、検索の索引（data/search.js）の行と結ぶためのページの識別子
+        parts = [f'<li class="fx-row" data-id="{html.escape(pid)}" data-type="{html.escape(t)}" '
+                 f'data-updated="{html.escape(updated)}" '
+                 f'data-title="{html.escape(title)}" data-order="{order}" '
+                 f'data-groups="{" ".join(sorted(self.page_groups.get(pid, ())))}">']
+        if gpath:
+            parts.append(f'<div class="fx-path fui-Caption1">{html.escape(gpath)}</div>')
+        parts.append(f'<div class="ix-line"><a class="ix-title" href="{html.escape(href)}">{html.escape(title)}</a>'
+                     f"{self._type_badge(t)}")
+        if updated:
+            parts.append(f'<time class="fui-Caption1" datetime="{html.escape(updated)}">{html.escape(updated)}</time>')
+        parts.append("</div>")
+        if summary:
+            parts.append(f'<p class="ix-summary">{html.escape(summary)}</p>')
+        if tags:
+            parts.append('<div class="ix-tags">' + "".join(
+                f'<span class="tag fui-Tag" data-appearance="outline" data-size="extra-small">'
+                f'<span class="fui-Tag__primaryText">{html.escape(t)}</span></span>' for t in tags) + "</div>")
+        parts.append("</li>")
         return "".join(parts)
+
+    def _index_unresolved_html(self) -> str:
+        if not self.index_unresolved:
+            return ""
+        lis = []
+        for trail, it in self.index_unresolved:
+            title = "ページがない" if it["state"] == "unresolved" else "行き先を 1 つに決められない"
+            where = f'<span class="fui-Caption1 state">（{html.escape(" › ".join(trail))}）</span>' if trail else ""
+            lis.append(f'<li><span class="wl wl-{it["state"]}" title="{title}">{html.escape(it["label"])}</span>'
+                       f"{where}</li>")
+        return ('<section id="_index_unresolved"><h2 class="fui-Subtitle2">ページに決まらない索引の行</h2>'
+                f'<ul>{"".join(lis)}</ul></section>\n')
 
     def render_index(self, stale: "str | None" = None) -> str:
         path = "index.html"
@@ -1148,14 +1424,38 @@ class Core:
             diags.insert(0, {"kind": "stale", "reason": stale})
         nav_note = ""
         if self.unreadable_indexes:
-            nav_note = ('<p class="notice incomplete">読めない索引のファイルがあるので、ナビゲーションは不完全である'
-                        f"（{len(self.unreadable_indexes)} 件）</p>\n")
+            nav_note = (self._message_bar("_nav_incomplete", "warning", "ナビゲーションは不完全",
+                                          f"読めない索引のファイルがある（{len(self.unreadable_indexes)} 件）。",
+                                          "notice incomplete"))
         diag_note = self._incomplete_html()
+        total = len(self.page_order)
+        rows = "".join(self._index_row(pid, k + 1, path) for k, pid in enumerate(self.page_order))
         return (self._head(path, "索引", stale)
-                + f'<h1>索引</h1>\n{nav_note}<div id="_index">{self._nav_html(self.nav_groups, path)}</div>\n'
+                + f'<header id="_ixhead"><h1 class="fui-Title2">索引</h1>'
+                  f'<p class="ix-stats fui-Caption1">{total} ページ</p></header>\n{nav_note}'
+                + '<div id="_filters" class="fx-bar"><noscript><p class="state fui-Caption1">絞り込みと検索には '
+                  'JavaScript が要る。一覧は索引の順に並んでいる。</p></noscript></div>\n'
+                + f'<p id="_count" class="fx-count fui-Caption1" aria-live="polite">{total} 件</p>\n'
+                + f'<ul id="_index" class="fx-list">{rows}</ul>\n'
+                + self._index_unresolved_html()
                 + (f'<section id="_incomplete">{diag_note}</section>\n' if diag_note else "")
                 + self._diagnostics_html(diags, path)
                 + self._tail(path, ("data/diagnostics.js",)))
+
+    def search_json(self) -> dict:
+        """data/search.js（5.1）。描かれているページ 1 つに 1 行、識別子の順。"""
+        rows = []
+        for pid in sorted(self.drawn):
+            summary, origin = self.page_summary(pid)
+            headings = [[hid, nfc(text)] for _k, hid, text in self.headings.get(pid, [])]
+            rows.append([self.out_name[pid], pid, nfc(self.title(pid)), summary, origin, self.page_type(pid),
+                         self.page_tags(pid), headings, self.page_updated(pid),
+                         [nfc(x) for x in self.page_path.get(pid, [])]])
+        return {"protocol_version": PROTOCOL_VERSION, "generation": self.generation,
+                "incomplete": bool(self.unreadable_pages),
+                "fields": ["path", "id", "title", "summary", "summary_from", "type", "tags", "headings", "updated",
+                           "group_path"],
+                "rows": rows}
 
     # --- データのファイル ---
 
@@ -1167,13 +1467,15 @@ class Core:
                 for it in g["items"]:
                     item = {"state": it["state"], "label": it["label"]}
                     if it["state"] == "resolved":
+                        item["id"] = it["id"]
                         item["path"] = self.out_name[it["id"]]
                         if it.get("anchor"):
                             item["anchor"] = it["anchor"]
                     elif it["state"] == "group":
                         item["group"] = it["group"]
                     items.append(item)
-                out.append({"id": g["id"], "title": g["title"], "items": items, "children": conv(g["children"])})
+                out.append({"id": g["id"], "title": g["title"], "summary": g.get("summary", ""),
+                            "count": g.get("count", 0), "items": items, "children": conv(g["children"])})
             return out
         nav = {"protocol_version": PROTOCOL_VERSION, "generation": self.generation, "groups": conv(self.nav_groups)}
         if self.unreadable_indexes:
@@ -1182,7 +1484,7 @@ class Core:
 
     def manifest(self, generated_at: str = "") -> dict:
         return {"protocol_version": PROTOCOL_VERSION, "generation": self.generation, "generated_at": generated_at,
-                "capabilities": {"search": "none", "relations": self.relations_state, "rag": False,
+                "capabilities": {"search": "embedded", "relations": self.relations_state, "rag": False,
                                  "multi_wiki": False, "live_reload": False},
                 "pages": len(self.drawn),
                 "incomplete": {"unreadable_pages": len(self.unreadable_pages),
@@ -1200,6 +1502,8 @@ class Core:
             if stale:
                 m["stale"] = stale
             return js_data("WIKI_MANIFEST", m)
+        if name == "data/search.js":
+            return js_data("WIKI_SEARCH", self.search_json())
         if name == "data/diagnostics.js":
             d = self.diagnostics_json()
             if stale:
