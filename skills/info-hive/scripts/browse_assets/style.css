@@ -218,7 +218,7 @@ p.notice, p.incomplete {
   border-bottom: var(--strokeWidthThin) solid var(--colorNeutralStroke2);
 }
 #_body h3 { font-size: var(--fontSizeBase500); line-height: var(--lineHeightBase500); margin: var(--spacingVerticalXL) 0 var(--spacingVerticalXS); }
-#_body h4 { font-size: var(--fontSizeBase400); line-height: var(--lineHeightBase400); margin: var(--spacingVerticalL) 0 var(--spacingVerticalXS); }
+#_body h4 { font-size: var(--fontSizeBase400); line-height: var(--lineHeightBase400); }
 code, pre { font-family: var(--browse-font-mono); }
 code {
   font-size: 0.9em; background-color: var(--colorNeutralBackground3); color: var(--colorNeutralForeground1);
@@ -226,8 +226,7 @@ code {
 }
 pre {
   overflow-x: auto; white-space: pre; background-color: var(--colorNeutralBackground3); color: var(--colorNeutralForeground1);
-  padding: var(--spacingVerticalM) var(--spacingHorizontalM); border-radius: var(--borderRadiusMedium);
-  border: var(--strokeWidthThin) solid var(--colorNeutralStroke2); line-height: 1.6;
+  padding: var(--spacingVerticalM) var(--spacingHorizontalM); border-radius: var(--borderRadiusMedium); line-height: 1.6;
 }
 pre code { background: none; padding: 0; font-size: var(--fontSizeBase300); overflow-wrap: normal; }
 /* 本文の表は、今と同じく display: block で横に送る */
@@ -236,10 +235,10 @@ pre code { background: none; padding: 0; font-size: var(--fontSizeBase300); over
   font-size: var(--fontSizeBase300); line-height: var(--lineHeightBase300);
 }
 #_body th, #_body td {
-  border: var(--strokeWidthThin) solid var(--colorNeutralStroke1);
-  padding: var(--spacingVerticalXS) var(--spacingHorizontalS); vertical-align: top;
+  border-bottom: var(--strokeWidthThin) solid var(--colorNeutralStroke2);
+  padding: var(--spacingVerticalS) var(--spacingHorizontalM); vertical-align: top;
 }
-#_body th { font-weight: var(--fontWeightSemibold); text-align: start; background-color: var(--colorNeutralBackground2); }
+#_body th { font-weight: var(--fontWeightSemibold); text-align: start; }
 /* 配置の class は、#_body th の揃えに詳細度で負けないように #_body を付ける */
 #_body .ta-left { text-align: left; }
 #_body .ta-center { text-align: center; }
@@ -272,12 +271,14 @@ a.ext::after { content: " ↗"; }
 #_backlinks h2, #_relations h2, #_diagnostics h2 { margin: 0 0 var(--spacingVerticalS); }
 #_backlinks .fui-ListItem { padding-block: var(--spacingVerticalXS); }
 /* 関係表: 9 列なので最小幅を 48em にし、表だけを横に送る（独自の入れ物）。
-   語はセルの中で折らない。日本語は文字の間で折り返す（利用者の文字を 1 行に伸ばさない。4.3） */
+   語はセルの中で折らない（keep-all。日本語も文字の間では折らず、空白と句読点で折り返す）。長い値は入れ物の中で送る */
 .table-scroll { overflow-x: auto; max-width: 100%; border-radius: var(--borderRadiusMedium); }
 .table-scroll:focus-visible { outline: var(--strokeWidthThick) solid var(--colorStrokeFocus2); outline-offset: var(--strokeWidthThin); }
 .relations.fui-Table { table-layout: auto; min-width: 48em; }
-.relations .fui-TableCell, .relations .fui-TableHeaderCell { height: auto; padding-block: var(--spacingVerticalXS); vertical-align: top; overflow-wrap: normal; }
-.relations .fui-TableHeaderCell { white-space: nowrap; text-align: start; font-weight: var(--fontWeightSemibold); }
+.relations .fui-TableCell, .relations .fui-TableHeaderCell {
+  height: auto; padding-block: var(--spacingVerticalXS); vertical-align: top; overflow-wrap: normal; word-break: keep-all;
+}
+.relations .fui-TableHeaderCell { white-space: nowrap; text-align: start; }
 /* 診断: 一覧の印だけを警告の色にし、文字は中立の色にする */
 .diag-list { margin: 0; padding-inline-start: var(--spacingHorizontalXL); }
 .diag-list li { color: var(--colorNeutralForeground1); }
