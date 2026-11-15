@@ -10,7 +10,7 @@
 
 ### Fixed
 
-- Python の入っていない PC では、MCP サーバーが起動しなかった。uv で動くスクリプトは `requires-python = ">=3.12"` で上限がなく、Python がないと uv はいちばん新しい CPython 3.15 を取る。MCP サーバーの依存の `onnxruntime==1.31.1` には 3.15 の配布物（wheel）がないので、依存を解決できずに止まった。uv で動くスクリプトの宣言を、どれも CI で試す範囲の `">=3.12,<3.15"` にした。Python がなければ、uv は 3.14 を取る。`/wiki:init` の `setup_wiki.py` など、ほかの uv で動くスクリプトも同じにした（ADR-0025）。
+- Python の入っていない PC では、MCP サーバーが起動しなかった。uv で動くスクリプトは `requires-python = ">=3.12"` で上限がなく、Python がないと uv はいちばん新しい CPython 3.15 を取る。MCP サーバーの依存の `onnxruntime==1.31.1` には 3.15 の配布物（wheel）がないので、依存を解決できずに止まった。uv で動くスクリプトの宣言を、どれも CI で試す範囲の `">=3.12,<3.15"` にした。Python がなければ、uv は 3.14 を取る。`/wiki:init` の `setup_wiki.py` など、ほかの uv で動くスクリプトも同じにした（ADR-0026）。
 - uv が依存を解決できなかったとき（`No solution found when resolving dependencies`）に、入口と中継は「環境が作りかけで壊れているかもしれない」とみなし、入れ直してから止まっていた。環境は作られていないので、入れ直しても直らない。入れ直さずに止まり、理由と uv の出力の要点（`cause:` と `hint:`）を `logs/launch.log` に書く。
 - 中継が MCP サーバーの環境を用意できなかったとき、理由が `logs/launch.log` に残らず、`server.log` にしか残っていなかった。入口も、入れ直しても直らなかったときは終了コードしか残していなかった。環境を用意できなかった理由は、どれも、uv の出力の要約（`error:`、`cause:`、`hint:` の行）と一緒に `launch.log` に書く。
 
