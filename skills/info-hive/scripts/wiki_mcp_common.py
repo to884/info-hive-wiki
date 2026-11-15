@@ -365,10 +365,11 @@ _TLS_ERROR_MARKERS = ("invalid peer certificate", "certificate verify failed", "
 # uv が依存を解決できなかったときの、誤りの行の書き出し（行の頭で、小文字で比べる）。使う Python に合う配布物
 # （wheel）がない、版の固定どうしが食い違う、など。環境は作られていないので、入れ直しても直らない。行の頭で
 # 比べるのは、パスなどに同じ句が含まれても誤判定しないためである。誤判定すると、入れ直せば直る壊れた環境を
-# 入れ直さずに止まってしまう。
-_RESOLVE_ERROR_PREFIXES = ("error: no solution found when resolving",)
-# uv の出力の要約に使う行の書き出し（uv の誤りは、error、cause、hint の行で書かれる）。
-_UV_DIAGNOSTIC_PREFIXES = ("error:", "cause:", "hint:")
+# 入れ直さずに止まってしまう。uv の誤りの書き方は版で違う。0.12 までは木の形（`× 見出し` と `╰─▶ 理由`）、
+# 0.13 からは `error: 見出し` と `cause: 理由` である（uv 0.7.22、0.12.2、0.13.8 の実際の出力で確かめた）。
+_RESOLVE_ERROR_PREFIXES = ("error: no solution found when resolving", "× no solution found when resolving")
+# uv の出力の要約に使う行の書き出し。どちらの書き方の見出し、理由、手がかりも拾う。
+_UV_DIAGNOSTIC_PREFIXES = ("error:", "cause:", "hint:", "×", "╰─▶", "├─▶", "help:")
 
 
 class UvSetupError(RuntimeError):
@@ -393,18 +394,31 @@ def is_resolve_error(text: str) -> bool:
 
 
 def uv_error_summary(text: str, limit: int = 600) -> str:
-    """uv の出力のうち、誤りの理由を書いた行（error、cause、hint）を、出た順に 1 行ずつ並べた要約。
-    そうした行がなければ、最後の空でない行。launch.log に、終了コードだけでなく理由を残すために使う。"""
+    """uv の出力のうち、誤りの見出しと理由と手がかりを、出た順に並べた要約。木の形の出力では、理由の文が
+    字下げした次の行に折り返されるので、続きの行もつなぐ。そうした行がなければ、最後の空でない行。
+    launch.log に、終了コードだけでなく理由を残すために使う。"""
+    entries: list[str] = []
+    current = None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            current = None
+        elif line.lower().startswith(_UV_DIAGNOSTIC_PREFIXES):
+            entries.append(line)
+            current = len(entries) - 1
+        elif current is not None and raw[:1].isspace():
+            entries[current] += " " + line
+        else:
+            current = None
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    picked = [line for line in lines if line.lower().startswith(_UV_DIAGNOSTIC_PREFIXES)][:6]
-    summary = " / ".join(picked or lines[-1:])
+    summary = " / ".join(entries[:6] or lines[-1:])
     return summary if len(summary) <= limit else summary[:limit] + "…"
 
 
 def resolve_error_message(script: Path, text: str) -> str:
     detail = uv_error_summary(text)
-    return (f"uv が {script.name} の依存を解決できなかった。使う Python の版に合う配布物（wheel）がない依存が"
-            "あると起きる。環境を入れ直しても直らないので、入れ直さずに止まる。"
+    return (f"uv が {script.name} の依存を解決できなかった。使う Python の版に合う配布物（wheel）がない、"
+            "版の固定どうしが食い違う、などで起きる。環境を入れ直しても直らないので、入れ直さずに止まる。"
             + (f"uv の出力: {detail} " if detail else "")
             + "対処: プラグインを新しい版に更新する。直らなければ、uv の出力をそえて報告する。")
 
