@@ -384,7 +384,8 @@ def tls_error_message(script: Path, user_setting: str | None, ignored_setting: s
                  f"（uv self update）と、{SYSTEM_CERTS_ENV} を読むようになる。")
     elif reads_system_certs is None:
         tried = ((f"{ignored_setting} が設定されているが、" if ignored_setting else "")
-                 + f"この uv が {SYSTEM_CERTS_ENV} を読むかを確かめられなかった（uv sync --help が動かなかった）。"
+                 + f"この uv が {SYSTEM_CERTS_ENV} を読むかを確かめられなかった（uv sync --help が動かなかったか、"
+                 "どちらの名前も挙げなかった）。"
                  f"{SYSTEM_CERTS_ENV}=true と {NATIVE_TLS_ENV}=true で OS の証明書ストアを使ってやり直しても"
                  "失敗した。")
     else:
@@ -476,11 +477,12 @@ def _user_tls_setting():
     設定は "NAME=値" の文。uv の版は uv_reads_system_certs の結果で、確かめなかったときは _UNCHECKED。
 
     利用者が決めたとみなすのは、uv が実際に使う設定だけである。uv の読み方は次のとおり。
-    - 新しい uv: UV_SYSTEM_CERTS があればそれを使い、UV_NATIVE_TLS は見ない。なければ UV_NATIVE_TLS を使う。
+    - 新しい uv: UV_SYSTEM_CERTS を読む。UV_NATIVE_TLS も読むが、両方あるときの扱いは版で違う（0.11、0.12 は
+      どちらかが真なら OS の証明書ストアを使い、のちの版は UV_SYSTEM_CERTS を優先する）。
     - 古い uv: UV_SYSTEM_CERTS を黙って無視し、UV_NATIVE_TLS だけを使う。
     - 真偽の値は、大文字と小文字を区別せずに読み、前後の空白は除かない（clap の BoolishValueParser と同じ）。
     そのため、uv の版を確かめずに決まる場合がほとんどである。
-    - 両方ある: 新しい uv は UV_SYSTEM_CERTS を、古い uv は UV_NATIVE_TLS を使う。どちらにしても決定である。
+    - 両方ある: どの uv でも、利用者の設定のどれかを使う。決定である。
     - UV_NATIVE_TLS だけ: どちらの uv も使う。決定である。
     - UV_SYSTEM_CERTS だけで、真でない値: 新しい uv では決定、古い uv では無視されるが、uv の既定（OS の
       証明書ストアを使わない）と同じなので、利用者の意図どおりである。どちらにしても決定とみなす。
@@ -492,8 +494,8 @@ def _user_tls_setting():
     system = os.environ.get(SYSTEM_CERTS_ENV, "")
     has_native, has_system = bool(native.strip()), bool(system.strip())
     if has_native and has_system:
-        return (f"{SYSTEM_CERTS_ENV}={system} と {NATIVE_TLS_ENV}={native}（新しい uv は {SYSTEM_CERTS_ENV} を、"
-                f"古い uv は {NATIVE_TLS_ENV} を使う）"), None, _UNCHECKED
+        return (f"{SYSTEM_CERTS_ENV}={system} と {NATIVE_TLS_ENV}={native}（古い uv は {NATIVE_TLS_ENV} だけを使い、"
+                f"新しい uv は版によって {SYSTEM_CERTS_ENV} を優先するか、両方を見る）"), None, _UNCHECKED
     if has_native:
         return f"{NATIVE_TLS_ENV}={native}", None, _UNCHECKED
     if not has_system:
