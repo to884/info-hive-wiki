@@ -47,6 +47,12 @@ URL を渡すと、`wiki_fetch.py` がページの本文を Markdown にして�
 /wiki:ingest https://example.com/posts/kalman-filter
 ```
 
+Claude Code のセッションの会話は、`session`（実行中のセッション）、`session:<ID>`、`session:<パス>`、`<パス>.jsonl` で取り込む。`wiki_session.py` が記録（JSONL）から人の発言、アシスタントの本文、ツールの呼び出しの 1 行の要約だけを抜き出し、モデルの思考、ツールの結果、通知や伝言の中身を除き、メールアドレス、ホームのディレクトリの名前、秘密の値を自動で伏せる。エージェントは raw と同じ文を見せながら、ほかに伏せる文字列と消すターンをユーザーと決め、承認された内容で raw を 1 回だけ、重ねて書かない形で書く（raw は読み取り専用になる）。記事の形の要約ページを書く前に、伏せた文字列が入っていないかを `wiki_session.py scan` で確かめ、書く中身をユーザーに見せる。`claude -p` のセッションは人の発言が記録されないので取り込めない。
+
+```bash
+/wiki:ingest session
+```
+
 PDF で `rag@info-hive` の MCP ツールが使える場合は、原本を `raw/` に複製せず、先に `register_pdf` で登録する。`job_status` がジョブの `completed` を返してから、抽出済みの Markdown を読んで要約ページを作る。`queued`、`running`、`paused` は処理中であり、取り込みの完了とは報告しない。
 
 ## `/wiki:query <question>`

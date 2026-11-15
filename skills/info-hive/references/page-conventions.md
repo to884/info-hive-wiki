@@ -198,6 +198,27 @@ Web ページから取り込んだソースは、`raw/` に置いた訳文から
 | `translated_by` | 訳したモデルの表示名。訳していなければ `""` |
 | `fetched_by` | 取得に使ったスクリプトと版 |
 
+## セッションの raw の frontmatter
+
+`wiki_session.py write` が `raw/<スラッグ>.md` に書く frontmatter の項目は次のとおりである（この順に書く）。これは raw の原本の記録で、wiki のページの frontmatter ではない。値は文字列か数で、実行の時刻は書かない。同じ記録の範囲、引数、抽出器の版、決定、題名からは、どの PC でも同じバイト列になる。
+
+| キー | 内容 |
+| --- | --- |
+| `title` | 取り込みの題名（ユーザーと決めたもの） |
+| `source_kind` | `"claude-code-session"` |
+| `session_id` | セッションの ID |
+| `cwd`、`git_branch` | セッションの作業ディレクトリとブランチ（伏せ字をかけたもの） |
+| `started_at`、`ended_at` | 範囲の最初と最後の記録の時刻。`utc_offset` の時差つきの ISO 8601 |
+| `claude_code_versions` | 範囲に現れた Claude Code の版 |
+| `source_sha256`、`source_bytes` | 記録の範囲のバイト列の SHA-256 と大きさ |
+| `source_sha256_of` | `"jsonl-range"` |
+| `cut_before` | 範囲の終わりの記録の `uuid`（`--before`）。なければ `""` |
+| `extracted_by` | 抜き出したスクリプトと版 |
+| `tools`、`keep_reminders`、`utc_offset` | 抜き出しの引数 |
+| `turns` | ターンの数 |
+| `excluded_records` | 中身を除いた記録の種類と数（`"種類=数, …"`） |
+| `auto_redactions`、`manual_redactions`、`dropped_turns` | 自動の伏せ字の数、人が伏せた区間の数、確認で消したターンの数 |
+
 ## 留保の書き方
 
 wiki のほかのソースで裏づけられていない主張をソースがしている場合は、留保を付ける。「ソース X は Y と主張しているが、wiki のほかのソースではまだ裏づけられていない」のように書く。wiki にソースが増えるにつれて、lint で留保付きの主張を見直し、確認済みに格上げするか、議論があるものとして指摘する。
