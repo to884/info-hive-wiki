@@ -245,6 +245,18 @@ MCP サーバーの入口（`wiki_mcp_launch.py`）は、この失敗を見つ�
 uv run --quiet --script <プラグインのパス>/skills/info-hive/scripts/wiki_mcp_launch.py --ensure
 ```
 
+### Python を取れない環境で、wiki の MCP サーバーが起動しない
+
+uv で動くスクリプトは、3.12〜3.14 の Python で動く（`requires-python = ">=3.12,<3.15"`）。その範囲の Python が PC になければ、uv が取得する。取得できないとき（`UV_PYTHON_DOWNLOADS=never` を設定している、オフライン、取得先への通信が制限されている）は、MCP サーバーが起動しない。PC に 3.15 以降しかないときも同じである。範囲の Python を入れる。
+
+```
+uv python install 3.14
+```
+
+uv で取得できないときは、python.org などから 3.12〜3.14 の Python を入れる。入れたら Claude Code を起動し直す。
+
+依存を解決できずに止まったとき（`logs/launch.log` に `UvResolveError` がある）は、使う Python の版に合う依存の配布物がない。環境変数 `UV_PYTHON` などで範囲の外の版を選んでいないかを確かめる。
+
 ## クレジット
 
 info-hive の土台は、Praney Behl の [llm-wiki-plugin](https://github.com/praneybehl/llm-wiki-plugin) である（[移植元](#移植元)を参照）。以下は、移植元が挙げているクレジットである。
