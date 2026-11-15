@@ -1055,18 +1055,29 @@ def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: s
 # ---------------------------------------------------------------- 出力
 
 
+# 項目の中の改行のあとに付ける字下げ。項目の値（取得と raw の本文、alt など）はページから来るので、`check: 通った`
+# のような行を含みうる。字下げしておけば、出力の見出しの行、最後の行、誤りと警告の行は、行の頭でしか始まらない。
+CONTINUATION = "      "
+
+
+def _item(text: str) -> list[str]:
+    """1 つの項目の行。値の中の改行（CR や、Unicode の行の区切りの文字も。str.splitlines）のあとの行を、CONTINUATION で字下げする。"""
+    first, *rest = text.splitlines() or [""]
+    return [first] + [CONTINUATION + line for line in rest]
+
+
 def render(result: dict) -> str:
     out = [f"{result['stage']}: {'通った' if result['ok'] else '規則に反している'}"]
     for e in result["errors"]:
         loc = f"{e['line']} 行目のあたり: " if e.get("line") else ""
-        out.append(f"誤り: {loc}{e['message']}")
+        out += _item(f"誤り: {loc}{e['message']}")
         if e.get("source") is not None:
-            out.append(f"    取得: {e['source']}")
+            out += _item(f"    取得: {e['source']}")
         if e.get("raw") is not None:
-            out.append(f"    raw : {e['raw']}")
+            out += _item(f"    raw : {e['raw']}")
     for w in result["warnings"]:
         loc = f"{w['line']} 行目のあたり: " if w.get("line") else ""
-        out.append(f"警告: {loc}{w['message']}")
+        out += _item(f"警告: {loc}{w['message']}")
     if result.get("work_dir_kept") == "warnings":
         out.append("警告があるので、作業用の写しを残した。直したら --finish を付けて再検査する。直さない警告は、"
                    "理由を log.md の取り込みの行のサブ行に書いてから、--finish --accept-warnings で再検査する")
@@ -1076,13 +1087,13 @@ def render(result: dict) -> str:
         out.append("作業用の写しを消した")
     if result["stage"] == "freeze":
         for img in result.get("images", []):
-            out.append(f"補足を書く画像: {img.get('line') or '?'} 行目のあたり: {img['path']}  alt: {img.get('alt') or '（なし）'}")
+            out += _item(f"補足を書く画像: {img.get('line') or '?'} 行目のあたり: {img['path']}  alt: {img.get('alt') or '（なし）'}")
         for r in result.get("removed_by_rule", []):
-            out.append(f"規則で消した（{r.get('rule')}）: {str(r.get('text'))[:160]}")
+            out += _item(f"規則で消した（{r.get('rule')}）: {str(r.get('text'))[:160]}")
         for line in result.get("removed_lines", []):
-            out.append(f"消した行: {line[:160]}")
+            out += _item(f"消した行: {line[:160]}")
         for c in result.get("shortened_lines", []):
-            out.append(f"一部を消した行: {c['fetched'][:120]} → {c['raw'][:120]}")
+            out += _item(f"一部を消した行: {c['fetched'][:120]} → {c['raw'][:120]}")
     return "\n".join(out)
 
 
