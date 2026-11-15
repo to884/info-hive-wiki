@@ -6,6 +6,14 @@
 
 ## [Unreleased]
 
+## [0.19.4] - 2026-11-15
+
+### Fixed
+
+- `UV_SYSTEM_CERTS` を知らない古い uv で、利用者が `UV_SYSTEM_CERTS=true` を設定していると、TLS を検査する社内ネットワークで MCP サーバーが起動しなかった。古い uv はこの設定を黙って無視するので、依存の取得は証明書の検証で失敗する。ところが入口と中継は、この設定があるだけで「利用者が決めた」とみなし、OS の証明書ストアを使ったやり直し（古い uv では `UV_NATIVE_TLS=true`）をしなかった。設定しないときより悪かった。利用者が決めたとみなすのを、uv が実際に使う設定（`UV_NATIVE_TLS`、新しい uv の `UV_SYSTEM_CERTS`、真でない値の `UV_SYSTEM_CERTS`）だけにした。古い uv の `UV_SYSTEM_CERTS=true` は、設定が uv に届いていないものとして `UV_NATIVE_TLS=true` でやり直す。それでも失敗したときは、この uv が `UV_SYSTEM_CERTS` を読まないことと、`uv self update` で新しくすることを、標準エラーと `logs/launch.log` に書く。
+- uv の版を `uv sync --help` で確かめられないとき（終了コードが 0 でない、動かない、待ちきれない、どちらの名前も挙げない）に、新しい uv とみなしていた。外れると、古い uv で `UV_SYSTEM_CERTS=true` でやり直し、効かずに失敗した。確かめられないときは版を推し量らず、`UV_SYSTEM_CERTS=true` と `UV_NATIVE_TLS=true` の両方でやり直す。
+- `UV_SYSTEM_CERTS` と `UV_NATIVE_TLS` の両方があるとき、失敗の案内が `UV_NATIVE_TLS` だけを示していた。uv の版によって、使うのはどちらかか両方なので、両方と、uv の版による違いを示す。
+
 ## [0.19.3] - 2026-11-15
 
 ### Fixed
