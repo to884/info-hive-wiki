@@ -49,6 +49,9 @@ CORE_VERSION = "browse-core-2"
 NAME_LIMIT = 200
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
        "base-uri 'none'; form-action 'none'")
+# アイコンがないことを宣言する。宣言がないと、製品の Chrome と Edge はサーバーの /favicon.ico を要求し、
+# 404 になってコンソールにエラーが出る（Playwright に同梱の Chromium は要求しない）。data: は CSP の img-src が許す
+ICON_LINK = '<link rel="icon" href="data:,">'
 RAW_MODES = ("text", "link", "basename", "none")
 # 画面の部品。fluent2.css は Fluent 2 の再現の CSS の同梱の写し（Fluent 2 の設計の 2）、theme.js は配色を描く前に決める
 ASSETS = ("assets/app.js", "assets/style.css", "assets/fluent2.css", "assets/theme.js")
@@ -1319,6 +1322,7 @@ class Core:
                 f'<meta name="referrer" content="no-referrer">\n'
                 f'<meta name="viewport" content="width=device-width, initial-scale=1">\n'
                 f"<title>{html.escape(full_title)}</title>\n"
+                f"{ICON_LINK}\n"
                 f'<link rel="stylesheet" href="{prefix}assets/fluent2.css">\n'
                 f'<link rel="stylesheet" href="{prefix}assets/style.css">\n'
                 f'<script src="{prefix}assets/theme.js"></script>\n</head>\n'

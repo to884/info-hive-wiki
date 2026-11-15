@@ -488,7 +488,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                               else "Wiki を組み立てられない。lint で確かめる", {"Retry-After": "5"})
         if not c.knows(name):
             index = "index.html"
-            body = ('<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>見つからない</title></head>'
+            body = ('<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>見つからない</title>'
+                    f'{core.ICON_LINK}</head>'
                     '<body><p>ページが見つからない。Wiki が更新されたかもしれない。</p>'
                     f'<p><a href="{html.escape(core.rel_href(name, index))}">索引へ</a></p></body></html>\n')
             return self._send(404, body.encode("utf-8"), "text/html; charset=utf-8")
