@@ -1,0 +1,161 @@
+THIRD-PARTY NOTICES
+
+このスキルの CSS、JS、トークンの値、設計書は、次のソフトウェアから値と規則を写して作った非公式の再現である。
+Fluent、Microsoft、Segoe は Microsoft Corporation の商標である。このスキルは Microsoft の製品ではなく、Microsoft が推奨するものでもない。
+
+------------------------------------------------------------------------
+1. Fluent UI（microsoft/fluentui、commit f9720c35ba893c9630f4c0389d07dc6d6fd6068d）
+   対象: トークンの値（@fluentui/tokens）、コンポーネントのスタイルの規則（@fluentui/react-components、@fluentui/web-components）、
+         scripts/brand_ramp.py と scripts/_hue_map.py（テーマデザイナー packages/react-components/theme-designer の色の計算を写したもの。
+         テーマデザイナーの色の変換は CSSWG の CSS Color 4 のサンプルコード、曲線は three.js に由来すると、元のコードに記されている）
+   https://github.com/microsoft/fluentui
+------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) Microsoft Corporation.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE
+
+NOTE: Usage of the fonts and icons referenced in Fluent UI React is subject to the terms listed at https://aka.ms/fluentui-assets-license
+
+------------------------------------------------------------------------
+2. Fluent UI System Icons（microsoft/fluentui-system-icons、@fluentui/svg-icons 1.1.345）
+   対象: 設計書と参照の原稿の例に埋め込んだ SVG のアイコンの形
+   https://github.com/microsoft/fluentui-system-icons
+------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2020 Microsoft Corporation
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+------------------------------------------------------------------------
+3. three.js（mrdoob/three.js、r133 の当時の版）
+   対象: scripts/brand_ramp.py の 2 次ベジェ曲線の計算。テーマデザイナーの colors/geometry.ts が three.js から写したと記している
+   https://github.com/mrdoob/three.js
+------------------------------------------------------------------------
+
+The MIT License
+
+Copyright © 2010-2021 three.js authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+------------------------------------------------------------------------
+4. css.land の lch.js と multiply-matrices.js（Lea Verou）
+   対象: scripts/brand_ramp.py の色域への収め方（snap_into_gamut）と、行列とベクトルの積。
+         テーマデザイナーの colors/csswg.ts が、LeaVerou/css.land の lch/lch.js と、
+         「@author Lea Verou 2020 MIT License」と記した multiply-matrices.js から写したと記している
+   https://github.com/LeaVerou/css.land
+------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2021 Lea Verou
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+------------------------------------------------------------------------
+5. CSS Color Module Level 4 のサンプルコード（W3C の CSS Working Group）
+   対象: scripts/brand_ramp.py の色空間の変換（sRGB、XYZ、D50 と D65、Lab、LCH）。
+         テーマデザイナーの colors/csswg.ts が https://drafts.csswg.org/css-color-4/conversions.js から写したと記している
+------------------------------------------------------------------------
+
+This software includes material derived from CSS Color Module Level 4, sample code for color conversions
+(https://drafts.csswg.org/css-color-4/conversions.js). Copyright © 2021 World Wide Web Consortium.
+https://www.w3.org/copyright/software-license-2023/
+
+W3C Software and Document License（2023 年版）
+https://www.w3.org/copyright/software-license-2023/
+
+This work is being provided by the copyright holders under the following license.
+
+License
+
+By obtaining and/or copying this work, you (the licensee) agree that you have read, understood, and will comply with the following terms and conditions.
+
+Permission to copy, modify, and distribute this work, with or without modification, for any purpose and without fee or royalty is hereby granted, provided that you include the following on ALL copies of the work or portions thereof, including modifications:
+
+- The full text of this NOTICE in a location viewable to users of the redistributed or derivative work.
+- Any pre-existing intellectual property disclaimers, notices, or terms and conditions. If none exist, the W3C software and document short notice should be included.
+- Notice of any changes or modifications, through a copyright statement on the new code or document such as "This software or document includes material copied from or derived from [title and URI of the W3C document]. Copyright © [$year-of-document] World Wide Web Consortium. https://www.w3.org/copyright/software-license-2023/"
+
+Disclaimers
+
+THIS WORK IS PROVIDED "AS IS," AND COPYRIGHT HOLDERS MAKE NO REPRESENTATIONS OR WARRANTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO, WARRANTIES OF MERCHANTABILITY OR FITNESS FOR ANY PARTICULAR PURPOSE OR THAT THE USE OF THE SOFTWARE OR DOCUMENT WILL NOT INFRINGE ANY THIRD PARTY PATENTS, COPYRIGHTS, TRADEMARKS OR OTHER RIGHTS.
+
+COPYRIGHT HOLDERS WILL NOT BE LIABLE FOR ANY DIRECT, INDIRECT, SPECIAL OR CONSEQUENTIAL DAMAGES ARISING OUT OF ANY USE OF THE SOFTWARE OR DOCUMENT.
+
+The name and trademarks of copyright holders may NOT be used in advertising or publicity pertaining to the work without specific, written prior permission. Title to copyright in this work will at all times remain with copyright holders.
+
+------------------------------------------------------------------------
+6. 書体について
+------------------------------------------------------------------------
+
+フォントの並び（font-family）は Segoe UI、Yu Gothic UI、Meiryo UI などの書体名を指すだけで、書体のファイルは同梱しない。
+これらの書体を Web フォントとして配ったり、形式を変えたりしてはならない。
