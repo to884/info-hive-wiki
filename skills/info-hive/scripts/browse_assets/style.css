@@ -97,6 +97,7 @@ body.fui-FluentProvider {
 
 /* --- 木（Nav の NavCategory を各段に繰り返す独自の拡張） --- */
 .tree { padding-bottom: var(--spacingVerticalL); }
+.nav-incomplete { margin: 0 var(--spacingHorizontalM) var(--spacingVerticalS); color: var(--colorNeutralForeground2); }
 .tree-name { flex: 1; min-width: 0; white-space: normal; }
 .tree-count { color: var(--colorNeutralForeground3); font-variant-numeric: tabular-nums; }
 .fui-NavCategoryItem { gap: var(--spacingHorizontalXS); height: auto; min-height: var(--f2-size360); }
@@ -178,12 +179,14 @@ body.fui-FluentProvider {
 .fx-bar .fui-Select { max-width: 100%; min-width: 0; }
 .fx-bar .fui-Select__select { max-width: 100%; text-overflow: ellipsis; }
 
-/* 種類の印: パレットの色（独自）。Avatar の色の組と同じ Background2 と Foreground2 */
+/* 種類の印は、既定で中立の色にする。色を持つのは知っている 4 つの種類だけ（Fluent 2 の設計の 4）。
+   t-<種類> の名前は種類の値から作るので、知らない種類も Fluent の既定（brand）の色にならないよう、ここで決める */
+.fui-Badge.badge { background-color: var(--colorNeutralBackground4); color: var(--colorNeutralForeground3); border-color: transparent; }
+/* 知っている 4 つの種類: パレットの色（独自）。Avatar の色の組と同じ Background2 と Foreground2 */
 .fui-Badge.t-source { background-color: var(--colorPalettePumpkinBackground2); color: var(--colorPalettePumpkinForeground2); border-color: transparent; }
 .fui-Badge.t-entity { background-color: var(--colorPaletteLavenderBackground2); color: var(--colorPaletteLavenderForeground2); border-color: transparent; }
 .fui-Badge.t-concept { background-color: var(--colorPaletteTealBackground2); color: var(--colorPaletteTealForeground2); border-color: transparent; }
 .fui-Badge.t-synthesis { background-color: var(--colorPaletteCornflowerBackground2); color: var(--colorPaletteCornflowerForeground2); border-color: transparent; }
-.fui-Badge.t-other { background-color: var(--colorNeutralBackground4); color: var(--colorNeutralForeground3); border-color: transparent; }
 
 mark { background-color: var(--colorPaletteYellowBackground2); color: var(--colorNeutralForeground1); border-radius: var(--borderRadiusSmall); }
 
@@ -237,7 +240,7 @@ img { max-width: 100%; }
 /* --- 強制カラー: 今のページと絞っているグループを、システムの色で示す --- */
 @media (forced-colors: active) {
   .fui-NavItem.is-current, .fui-NavSubItem.is-current { outline: var(--strokeWidthThick) solid Highlight; }
-  .fui-Badge.t-source, .fui-Badge.t-entity, .fui-Badge.t-concept, .fui-Badge.t-synthesis, .fui-Badge.t-other {
+  .fui-Badge.badge {
     border-color: CanvasText;
   }
   .wl-unresolved, .wl-ambiguous { color: LinkText; }

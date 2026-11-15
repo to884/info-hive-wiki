@@ -445,6 +445,11 @@
     navBody.appendChild(results);
     for (var n = 0; n < (NAV.groups || []).length; n++) { tree.appendChild(treeGroup(NAV.groups[n], 0)); }
   }
+  // 読めない索引のファイルがあるとき、木が不完全であることを示す（構造の直しの設計の 4.1、10）
+  if (NAV.incomplete) {
+    tree.insertBefore(el("p", "fui-Caption1 nav-incomplete", "読めない索引のファイルがあるので、この木は不完全"),
+                      tree.firstChild);
+  }
   drawer.appendChild(tree);
   navBody.appendChild(drawer);
 
@@ -530,7 +535,8 @@
     if (noscript) { bar.removeChild(noscript); }
 
     var fsb = searchBox("題名、タグ、見出し、要約で絞る", function (q) { filt.q = q; apply(); }, function () {
-      var first = rows.filter(function (r) { return !r.hidden; })[0];
+      // いま見えている先頭の行は、DOM の今の並び（並べ替えのあと）から読む。行の順は DOM だけが持つ
+      var first = list.querySelector(".fx-row:not([hidden])");
       if (first) { location.href = first.querySelector(".ix-title").href; }
     });
     var fhint = el("p", "fui-Caption1 fx-hint");
