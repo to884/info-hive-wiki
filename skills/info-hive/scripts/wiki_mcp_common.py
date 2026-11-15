@@ -362,13 +362,42 @@ _TLS_ERROR_MARKERS = ("invalid peer certificate", "certificate verify failed", "
                       "use of native tls")
 
 
-class UvTlsError(RuntimeError):
+# uv が依存を解決できなかったときの出力の句（小文字で比べる）。使う Python に合う配布物（wheel）がない、
+# 版の固定どうしが食い違う、など。環境は作られていないので、入れ直しても直らない。
+_RESOLVE_ERROR_MARKERS = ("no solution found when resolving",)
+
+
+class UvSetupError(RuntimeError):
+    """uv が環境を用意できなかった。環境を入れ直しても直らない失敗で、_uv_sync が launch.log に記録済み。"""
+
+
+class UvTlsError(UvSetupError):
     """uv が TLS 証明書を検証できず、依存を取得できなかった。環境を入れ直しても直らない。"""
+
+
+class UvResolveError(UvSetupError):
+    """uv が依存を解決できなかった（使う Python に合う配布物がない、など）。環境を入れ直しても直らない。"""
 
 
 def is_tls_error(text: str) -> bool:
     lowered = text.lower()
     return any(marker in lowered for marker in _TLS_ERROR_MARKERS)
+
+
+def is_resolve_error(text: str) -> bool:
+    lowered = text.lower()
+    return any(marker in lowered for marker in _RESOLVE_ERROR_MARKERS)
+
+
+def resolve_error_message(script: Path, text: str) -> str:
+    # uv の出力のうち、理由（cause）と手がかり（hint）の行を、それぞれ最初の 1 つだけ添える。
+    lines = [line.strip() for line in text.splitlines()]
+    picked = [next((line for line in lines if line.startswith(prefix)), None) for prefix in ("cause:", "hint:")]
+    detail = " ".join(line for line in picked if line)
+    return (f"uv が {script.name} の依存を解決できなかった。使う Python の版に合う配布物（wheel）がない依存が"
+            "あると起きる。環境を入れ直しても直らないので、入れ直さずに止まる。"
+            + (f"uv の出力: {detail} " if detail else "")
+            + "対処: プラグインを新しい版に更新する。直らなければ、uv の出力をそえて報告する。")
 
 
 def tls_error_message(script: Path, user_setting: str | None, ignored_setting: str | None = None,
@@ -509,6 +538,19 @@ def _user_tls_setting():
     return None, setting, reads
 
 
+def _unless_unresolvable(script: Path, code: int, text: str) -> int:
+    """uv が依存を解決できずに失敗していれば、launch.log に記録して UvResolveError にする。それ以外は code を返す。
+
+    解決できないときは環境が作られていないので、壊れた環境とみなして入れ直しても直らない。入れ直すと、
+    「環境が作りかけで壊れているかもしれない」と誤った理由を残し、同じ失敗を繰り返す。
+    """
+    if code != 0 and is_resolve_error(text):
+        message = resolve_error_message(script, text)
+        record_failure(f"UvResolveError: {message}")
+        raise UvResolveError(message)
+    return code
+
+
 def _uv_sync(script: Path, *, reinstall: bool, output, timeout: float, log=None) -> int:
     """`uv sync --script` の終了コードを返す。TLS 証明書を検証できずに失敗したときは、利用者が
     この uv が読む証明書の設定を決めていなければ、OS の証明書ストアを使って 1 回だけやり直す（_user_tls_setting）。
@@ -524,7 +566,7 @@ def _uv_sync(script: Path, *, reinstall: bool, output, timeout: float, log=None)
     env = {**os.environ, "PYTHONUTF8": "1"}
     code, text = _run_uv(command, env, output, timeout)
     if code == 0 or not is_tls_error(text):
-        return code
+        return _unless_unresolvable(script, code, text)
     user_setting, ignored_setting, reads = _user_tls_setting()
     if user_setting is None:
         if reads is _UNCHECKED:
@@ -543,7 +585,7 @@ def _uv_sync(script: Path, *, reinstall: bool, output, timeout: float, log=None)
         code, text = _run_uv(command, {**env, **retry}, output, timeout)
         if code == 0 or not is_tls_error(text):
             os.environ.update(retry)
-            return code
+            return _unless_unresolvable(script, code, text)
     message = tls_error_message(script, user_setting, ignored_setting, reads)
     # 中継がサーバーの環境を用意するときも、利用者が読む場所（launch.log）に残す。
     record_failure(f"UvTlsError: {message}")
@@ -576,8 +618,22 @@ def prepare_script(script: Path, *, output, timeout: float, log, force: bool = F
       スクリプトごとのロックを取り、ほかのセッションが先に直していないかを `uv sync` と import の確認
       （`<script> --check-imports`。RECORD との照合と import）で確かめる。直っていなければ `--reinstall` で入れ直し、もう一度確かめる。
       ロックの中で確かめ直すので、2 つのセッションが同時に入れ直して、動いている環境を壊すことはない。
-    - uv が TLS 証明書を検証できなかったとき（_uv_sync）: 環境は壊れていないので入れ直さず、UvTlsError を送り出す。
+    - uv が TLS 証明書を検証できなかったとき、依存を解決できなかったとき（_uv_sync）: 環境は壊れていないので
+      入れ直さず、UvTlsError か UvResolveError（どちらも UvSetupError）を送り出す。
+
+    失敗は、どれも利用者が読む logs/launch.log に残す。ホストは標準エラーを見せないことがあり、中継が
+    サーバーの環境を用意するときは、uv の出力は server.log にしか書かれないためである。
     """
+    try:
+        return _prepare_script(script, output=output, timeout=timeout, log=log, force=force)
+    except UvSetupError:
+        raise  # _uv_sync が記録済み
+    except Exception as exc:
+        record_failure(f"{script.name} の環境を用意できなかった: {type(exc).__name__}: {exc}")
+        raise
+
+
+def _prepare_script(script: Path, *, output, timeout: float, log, force: bool) -> str:
     if not force and _uv_sync(script, reinstall=False, output=output, timeout=timeout, log=log) == 0:
         return script_python(script)
     with FileLock(env_lock_path(script), timeout=timeout):
