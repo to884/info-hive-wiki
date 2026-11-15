@@ -681,8 +681,10 @@
     }
 
     function fromHash() {
+      // グループの ID は `_g` と英小文字か数字だけで、URL で符号化されない。断片は解かずに、そのまま形と木にあるかを
+      // 確かめる（解くと、`%` のような壊れた断片で例外になり、前の絞り込みが残る。2 回目の実装のレビューの A）
       var m = /^#group=(.+)$/.exec(location.hash);
-      var id = m ? decodeURIComponent(m[1]) : "";
+      var id = m ? m[1] : "";
       filt.group = GROUP_ID.test(id) && has(groupIds, id) ? id : "";
       apply();
     }
