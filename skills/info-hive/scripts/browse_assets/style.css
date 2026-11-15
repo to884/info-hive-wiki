@@ -28,7 +28,7 @@
    色、間隔、角丸、線、書体、時間はトークンの CSS 変数で書き、hex と px を直に書かない。
    土台は [data-theme] に 14px を当てるので、長さに rem を使わない（media query の rem は初期値の 16px で決まる）。
    日本語の組版の指定（禁則、折り返し、字間）は、選択肢のレポートの 6.7 節と 7.2 節による。
-   記事のページの本文、メタ欄、被リンク、関係表、診断は、配置と大きさを今のままにし、色だけをトークンにする（F1。設計の 4.1）。 */
+   記事のページの本文、メタ欄、被リンク、関係表、診断は、Fluent の部品とトークンで描く（F2。設計の 5）。 */
 
 /* --- 配色の宣言（ブラウザが描くスクロールバーや選択の一覧を、配色に合わせる。v9 からの逸脱） --- */
 :root[data-theme="light"] { color-scheme: light; }
@@ -61,7 +61,7 @@ body.fui-FluentProvider {
   padding: var(--spacingVerticalXXL) var(--spacingHorizontalXXXL) var(--spacingVerticalXXXL);
 }
 /* 記事の本文の大きさと行間は今と同じ 16px と 1.8（土台の 14px と 20px にしない） */
-.page-article #_main { font-size: var(--fontSizeBase400); line-height: 1.8; max-width: 46em; }
+.page-article #_main { font-size: var(--fontSizeBase400); line-height: 1.8; max-width: 48em; }
 .page-index #_main { max-width: 64em; }
 #_main, #_nav { line-break: strict; word-break: normal; overflow-wrap: anywhere; }
 @supports (text-autospace: normal) { #_main { text-autospace: normal; } }
@@ -200,25 +200,89 @@ p.notice, p.incomplete {
   border-radius: var(--borderRadiusMedium);
 }
 
-/* --- 記事のページ（F1: 配置と大きさは今のまま、色をトークンにする） --- */
+/* --- 記事のページ（F2。Fluent 2 の設計の 5） --- */
+/* リンクは brand のリンクの色。祖先の地が状態で変わらない場所（本文、メタ欄、被リンク、関係表）だけで使う（4.2）。
+   ホバーでは地を変えず、文字を Hover の色にする（Fluent の Link と同じ）。押下の色（LinkPressed）は、暗い配色で
+   地との比が 3.85:1 になり 4.5:1 を割るので使わない。押している間もホバーの色のままにする */
 #_main a { color: var(--colorBrandForegroundLink); }
 #_main a:hover { color: var(--colorBrandForegroundLinkHover); }
+/* 文中のリンクは、色だけで見分けさせないように下線を付ける */
+#_body a, #_meta a, #_backlinks a, #_relations a { text-decoration-line: underline; text-underline-offset: 0.15em; }
+
+/* 本文（Markdown の出力。class は足さない）。16px と行間 1.8 は記事のページの #_main が持つ */
+#_body h1, #_body h2, #_body h3, #_body h4 { font-weight: var(--fontWeightSemibold); }
+#_body h1 { font-size: var(--fontSizeHero700); line-height: var(--lineHeightHero700); margin: var(--spacingVerticalL) 0 var(--spacingVerticalM); }
+#_body h2 {
+  font-size: var(--fontSizeBase600); line-height: var(--lineHeightBase600);
+  margin: var(--spacingVerticalXXL) 0 var(--spacingVerticalS); padding-bottom: var(--spacingVerticalXS);
+  border-bottom: var(--strokeWidthThin) solid var(--colorNeutralStroke2);
+}
+#_body h3 { font-size: var(--fontSizeBase500); line-height: var(--lineHeightBase500); margin: var(--spacingVerticalXL) 0 var(--spacingVerticalXS); }
+#_body h4 { font-size: var(--fontSizeBase400); line-height: var(--lineHeightBase400); }
 code, pre { font-family: var(--browse-font-mono); }
-pre { overflow-x: auto; white-space: pre; background-color: var(--colorNeutralBackground3); padding: 0.75em; }
-code { overflow-wrap: anywhere; }
-#_main table { border-collapse: collapse; display: block; overflow-x: auto; max-width: 100%; }
-#_main th, #_main td { border: var(--strokeWidthThin) solid var(--colorNeutralStroke1); padding: 0.25em 0.5em; vertical-align: top; }
-#_main .ta-left { text-align: left; }
-#_main .ta-center { text-align: center; }
-#_main .ta-right { text-align: right; }
-.meta th { text-align: left; white-space: nowrap; }
+code {
+  font-size: 0.9em; background-color: var(--colorNeutralBackground3); color: var(--colorNeutralForeground1);
+  padding: 0 var(--spacingHorizontalXXS); border-radius: var(--borderRadiusSmall); overflow-wrap: anywhere;
+}
+pre {
+  overflow-x: auto; white-space: pre; background-color: var(--colorNeutralBackground3); color: var(--colorNeutralForeground1);
+  padding: var(--spacingVerticalM) var(--spacingHorizontalM); border-radius: var(--borderRadiusMedium); line-height: 1.6;
+}
+pre code { background: none; padding: 0; font-size: var(--fontSizeBase300); overflow-wrap: normal; }
+/* 本文の表は、今と同じく display: block で横に送る */
+#_body table {
+  border-collapse: collapse; display: block; overflow-x: auto; max-width: 100%;
+  font-size: var(--fontSizeBase300); line-height: var(--lineHeightBase300);
+}
+#_body th, #_body td {
+  border-bottom: var(--strokeWidthThin) solid var(--colorNeutralStroke2);
+  padding: var(--spacingVerticalS) var(--spacingHorizontalM); vertical-align: top;
+}
+#_body th { font-weight: var(--fontWeightSemibold); text-align: start; }
+/* 配置の class は、#_body th の揃えに詳細度で負けないように #_body を付ける */
+#_body .ta-left { text-align: left; }
+#_body .ta-center { text-align: center; }
+#_body .ta-right { text-align: right; }
+#_body blockquote {
+  margin: var(--spacingVerticalM) 0; padding: 0 var(--spacingHorizontalL);
+  border-inline-start: var(--strokeWidthThicker) solid var(--colorNeutralStroke1); color: var(--colorNeutralForeground2);
+}
+#_body hr { border: none; border-top: var(--strokeWidthThin) solid var(--colorNeutralStroke2); margin: var(--spacingVerticalXL) 0; }
+img { max-width: 100%; }
+/* wikilink の状態は色だけで区別せず、下線の形でも示す。未解決と曖昧は span で、木の項目にも使う。
+   見出しのない行き先は a なので、#_body a の下線に詳細度で負けないように、形を #_main a で決める */
 .wl-unresolved { color: var(--colorPaletteRedForeground1); text-decoration: underline dotted; }
 .wl-ambiguous { color: var(--colorPaletteMarigoldForeground2); text-decoration: underline wavy; }
-.wl-missing-heading { text-decoration: underline dotted; }
+.wl-missing-heading, #_main a.wl-missing-heading { text-decoration: underline dotted; }
 a.ext::after { content: " ↗"; }
 .state-error { color: var(--colorPaletteRedForeground1); }
 .state-empty { color: var(--colorNeutralForeground3); }
-img { max-width: 100%; }
+
+/* メタ欄: Fluent の Table（small）。幅は内容に合わせる（独自） */
+#_meta.fui-Table { width: auto; max-width: 100%; table-layout: auto; margin-bottom: var(--spacingVerticalL); }
+#_meta .fui-TableCell, #_meta .fui-TableHeaderCell { height: auto; padding-block: var(--spacingVerticalXS); vertical-align: top; }
+#_meta th {
+  white-space: nowrap; text-align: start; color: var(--colorNeutralForeground3);
+  font-weight: var(--fontWeightRegular); padding-inline-end: var(--spacingHorizontalL);
+}
+
+/* 被リンク、関係、診断の節 */
+#_backlinks, #_relations, #_diagnostics { margin-top: var(--spacingVerticalXXL); font-size: var(--fontSizeBase300); line-height: var(--lineHeightBase300); }
+#_backlinks h2, #_relations h2, #_diagnostics h2 { margin: 0 0 var(--spacingVerticalS); }
+#_backlinks .fui-ListItem { padding-block: var(--spacingVerticalXS); }
+/* 関係表: 9 列なので最小幅を 48em にし、表だけを横に送る（独自の入れ物）。
+   語はセルの中で折らない（keep-all。日本語も文字の間では折らず、空白と句読点で折り返す）。長い値は入れ物の中で送る */
+.table-scroll { overflow-x: auto; max-width: 100%; border-radius: var(--borderRadiusMedium); }
+.table-scroll:focus-visible { outline: var(--strokeWidthThick) solid var(--colorStrokeFocus2); outline-offset: var(--strokeWidthThin); }
+.relations.fui-Table { table-layout: auto; min-width: 48em; }
+.relations .fui-TableCell, .relations .fui-TableHeaderCell {
+  height: auto; padding-block: var(--spacingVerticalXS); vertical-align: top; overflow-wrap: normal; word-break: keep-all;
+}
+.relations .fui-TableHeaderCell { white-space: nowrap; text-align: start; }
+/* 診断: 一覧の印だけを警告の色にし、文字は中立の色にする */
+.diag-list { margin: 0; padding-inline-start: var(--spacingHorizontalXL); }
+.diag-list li { color: var(--colorNeutralForeground1); }
+.diag-list li::marker { color: var(--colorStatusWarningForeground3); }
 
 /* --- フォーカス（独自の要素） --- */
 .ix-title:focus-visible, #_main a:focus-visible, .tree-filter:focus-visible, summary:focus-visible {
