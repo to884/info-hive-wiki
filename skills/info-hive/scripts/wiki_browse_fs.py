@@ -1292,22 +1292,33 @@ def read_record(state_dir) -> "dict | None":
     return data if isinstance(data, dict) else None
 
 
+def _record_while_locked(state_dir):
+    """ロックが取られているときに記録を読む。(記録か None, 読めなかった Unknown か None) を返す。
+
+    記録を読めない（分からない）なら、ロックがあるので「動いているが、届かない」とし、呼ぶ側が待つ（設計の 7.1）。
+    サーバーが記録を消している途中（Windows で、名前が削除待ちのあいだ）は、どの共有で開いても読めない。
+    読めなかった答えは、ないこと（None）にしない。呼ぶ側は、待つあいだに読めた記録だけで続け、時間が切れたら、
+    読めなかった理由を知らせる。
+    """
+    try:
+        return read_record(state_dir), None
+    except Unknown as e:
+        return None, e
+
+
 def serve_start(root, browse_root, state_dir, owner, make_record):
-    """起動。('started', Server) か、('reuse', 記録か None) を返す。別の Wiki のものなら Stop。
+    """起動。('started', Server)、('reuse', 記録か None)、('unreadable', Unknown) のどれかを返す。別の Wiki のものなら Stop。
 
     ロックを取る、待ち受けを始める（make_record。記録の中身を返す）、記録を置き換える、の順にする。記録を
     書けなければ、ロックを離して失敗する（呼ぶ側が待ち受けを閉じる）。動いているサーバーがあれば、記録を返す
-    （読めないか、まだないなら None。呼ぶ側が待つ）。
+    （まだないなら None）。記録を読めなければ、読めなかった失敗を返す。どちらも、呼ぶ側が待つ（設計の 7.1）。
     """
     _enter_state(root, browse_root, state_dir, owner, create=True)
     lock = Lock(os.path.join(state_dir, "server.lock"))
     if not lock.try_acquire():
-        try:
-            rec = read_record(state_dir)
-        except Unknown:
-            # 記録を読めない（分からない）。ロックがあるので「動いているが、届かない」。使い回さず、呼ぶ側が待ち、
-            # 時間が切れたら知らせて失敗で終わる（設計の 7.1）
-            rec = None
+        rec, unreadable = _record_while_locked(state_dir)
+        if unreadable is not None:
+            return "unreadable", unreadable
         if rec is not None and rec.get("owner") != owner and "skip_owner" not in MUTANTS:
             raise Stop("動いているのは、別の Wiki のサーバーである。使い回さない")
         return "reuse", rec
@@ -1346,10 +1357,12 @@ def serve_finish(server) -> None:
 
 
 def probe_server(root, browse_root, state_dir, owner):
-    """動いているか。('not-running', None) か、('running', 記録か None) を返す。何も作らない（設計の 6.2、7.1）。
+    """動いているか。('not-running', None)、('running', 記録か None)、('unreadable', Unknown) のどれかを返す。
+    何も作らない（設計の 6.2、7.1）。
 
     真実はロックである。記録は手がかりで、Wiki のルートの識別子（owner）が今の Wiki と違えば、止める相手に
     しないで Stop にする。目印の持ち主が違い、ロックが取られていれば、別の Wiki が今使っている（Stop）。
+    ロックが取られていて記録を読めなければ、'unreadable' で、動いているが届かない（呼ぶ側が待つ。設計の 7.1）。
     """
     if not _enter_state(root, browse_root, state_dir, owner):
         return "not-running", None
@@ -1359,7 +1372,12 @@ def probe_server(root, browse_root, state_dir, owner):
     current = read_text(marker) if kind(marker) == "file" else None
     if current != owner and "skip_owner" not in MUTANTS:
         raise Stop("動いているのは、別の Wiki のサーバーである。止めない")
-    rec = read_record(state_dir)
+    if "unreadable_record_fails" in MUTANTS:
+        rec = read_record(state_dir)        # 対照: 0.18.0 までの形（stop が、置き換えの途中の記録で止まる）
+    else:
+        rec, unreadable = _record_while_locked(state_dir)
+        if unreadable is not None:
+            return "unreadable", unreadable
     if rec is not None and rec.get("owner") != owner and "skip_owner" not in MUTANTS:
         raise Stop("動いているのは、別の Wiki のサーバーである。止めない")
     return "running", rec

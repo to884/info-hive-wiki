@@ -724,7 +724,8 @@ def serve(root: PurePath, page: "str | None", open_browser: bool, idle: float, v
         if outcome == "started":
             server = value
             break
-        live = _answering(value)
+        # 記録を読めなければ（'unreadable'）、動いているが届かないので待つ。読めた記録だけで使い回す（設計の 7.1）
+        live = _answering(value) if outcome == "reuse" else None
         if live is not None:
             rec = value
             key = rec.get("wiki_key") or app.key
@@ -736,6 +737,8 @@ def serve(root: PurePath, page: "str | None", open_browser: bool, idle: float, v
             _emit(url, int(rec["port"]), True, state, open_browser, _drawn_scope(live))
             return EXIT_OK
         if time.monotonic() >= deadline:
+            if outcome == "unreadable":
+                raise Failed(f"動いているサーバーの記録を読めないので、使い回せない: {_unknown_text(value)}")
             raise Failed("動いているサーバーに届かないので、使い回せない。/wiki:browse --stop で止めてからやり直す")
         time.sleep(0.2)
     try:
@@ -764,9 +767,12 @@ def stop(root: PurePath) -> int:
         if state == "not-running":
             _print_json({"stopped": False, "running": False})
             return EXIT_OK
-        if _answering(rec) is not None:
+        # 記録を読めなければ（'unreadable'）、動いているが届かないので待つ。止める要求は、読めた記録にだけ送る（設計の 7.1）
+        if state == "running" and _answering(rec) is not None:
             break
         if time.monotonic() >= deadline:
+            if state == "unreadable":
+                raise Failed(f"サーバーの記録を読めないので、止められない: {_unknown_text(rec)}")
             raise Failed("サーバーが応答しないので、止められない。操作がなければ、いずれ終わる")
         time.sleep(0.2)
     try:
@@ -774,6 +780,8 @@ def stop(root: PurePath) -> int:
     except (OSError, http.client.HTTPException):
         pass
     deadline = time.monotonic() + STOP_WAIT
+    # 真実はロックである。サーバーが終わる途中で記録を消していて読めなくても（'unreadable'）、ロックがあるあいだは
+    # 終わっていないので待つ
     while fs.probe_server(root, bdir, state_dir, owner)[0] != "not-running":
         if time.monotonic() >= deadline:
             raise Failed("サーバーが終わらないので、止められなかった")
