@@ -50,13 +50,13 @@ uv run --script "<skill-root>/scripts/wiki_search.py" "軽減税率の対象" --
 
 ## 手順 4: 必要なら被リンクを探す
 
-クエリが「X について wiki には何が書いてある？」や「X はどこで言及されている？」で、X に専用のページがある場合は、そのページ自体よりも、そこへの被リンクのほうが興味深いことが多い。次のコマンドで見つける。
+クエリが「X について wiki には何が書いてある？」や「X はどこで言及されている？」で、X に専用のページがある場合は、そのページ自体よりも、そこへの被リンクのほうが興味深いことが多い。付属の `wiki_search.py` の `--backlinks` で見つける。MCP のツールにはこの機能がない。
 
 ```bash
-grep -rl "\[\[<page-slug>\]\]" wiki/
+python "<skill-root>/scripts/wiki_search.py" "" --wiki "<absolute-wiki-root>" --backlinks <page-slug>
 ```
 
-ページを読んで言及を探すより速い。ただし、この grep は `[[slug|表示名]]` や `[[dir/slug]]` の形のリンクを拾わない。付属の `wiki_search.py` には、同じことをして順位付きの結果を返す `--backlinks <slug>` モードもあり、こちらはそれらの形のリンクも数える。
+ページを読んで言及を探すより速く、`[[slug|表示名]]` や `[[dir/slug]]` の形のリンクも数え、順位を付けて返す。`grep -rl "\[\[<page-slug>\]\]"` はこれらの形を拾わないので、使わない。
 
 ## 手順 5: 回答をまとめる
 
