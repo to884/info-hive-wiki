@@ -25,7 +25,7 @@ PDF のヘッダー（`%PDF-`）は、登録のあとの処理で確かめ、ヘ
 短時間待つ場合は `wait_seconds=30` を使い、細かい連続呼び出しを避ける。
 `queued`、`running`、`paused` の間は受付・処理中であり、索引化完了でも wiki の取り込み完了でもない。
 会話を終える場合はジョブ ID を報告して手順を止める。次回 rag の MCP 接続時に、未完了ジョブが保存済みのページと埋め込みバッチから自動再開する。
-`failed` の理由を直した後は `retry_job` を使う。`cancelled` は明示的な依頼なしに再試行しない。
+`failed` の理由を直した後は `retry_job` を使う。`cancelled` は明示的な依頼なしに再試行しない。`failed` のときも、`result.page_report` があれば、失敗するまでに判定したページの番号を伝える（`lists.pending` は、判定まで済んで本文が決まらなかったページ）。
 
 `completed` になったら `result.extracted_markdown` を分割して読み、手順 2 の「PDF を読む」の「rag で取り込んだとき」で読めないページを確かめてから、手順 3 以降へ進む。
 ソースの要約ページには `raw: "<result.raw>"`、`raw_sha256: "<result.sha256>"`、`rag_job_id: "<job_id>"` を書く。
@@ -236,12 +236,21 @@ uv run --script "<skill-root>/scripts/wiki_pdf.py" "<PDF>"
 
 Read は、図と版面を見るとき、確かめるべきページと、判定が `text` 以外のページを見るときに使う。本文を読むためには使わない。
 
-**rag で取り込んだとき。** 今の rag は、ページの判定を返さない。そこで、`job_status` が `completed` になったら、同じ PDF に `wiki_pdf.py --json` を動かし、判定と確かめるべきページを得る。まず、`--json` の `sha256` が rag の `result.sha256` と同じかを確かめる。違えば、rag が処理したあとで PDF が変わっている。ページの情報は使えないので、そのことをユーザーに伝える。同じなら、次のように進める。
+**rag で取り込んだとき（rag が `page_report` を返すとき）。** rag 0.6.0 以降は、`job_status` の `result.page_report` にページの情報が入る。`wiki_pdf.py` は動かさず、これを使う。
+
+1. 判定が `text` 以外のページ（`lists.kind:vertical`、`kind:garbled`、`kind:scan`、`kind:blank`）と、確かめるべきページ（`lists.needs_check`）の番号と数を伝える。一覧の形は `wiki_pdf.py --json` と同じで、範囲の数が 200 を超えると `next` に位置が入るので、`job_status` の `page_report_from` にその位置を渡して続きを取る。
+2. OCR したページ（`lists.ocr`）と、OCR の結果が空のページ（`lists.ocr_empty`）を伝える。OCR の結果が空のページは、読めなかったページとして扱う。
+3. 今の OCR の設定は、`status` の `settings`（`ocr_mode`、`ocr_dpi`）で分かる。`page_report.ocr.mode` は、そのジョブを処理したときの設定である。
+4. 確かめるべきページ（判定は `text`）と `blank` のページは、`ocr_mode` が `auto` なら OCR されていない。Read でページの画像を見る。
+
+rag の本文は `result.extracted_markdown` を読む。判定が `text` のページの本文は、同じ抽出の識別（`result.extraction`）なら `wiki_pdf.py` の本文と同じである。
+
+**rag で取り込んだとき（rag が `page_report` を返さないとき）。** rag 0.5 以前は、ページの判定を返さない。そこで、`job_status` が `completed` になったら、同じ PDF に `wiki_pdf.py --json` を動かし、判定と確かめるべきページを得る。まず、`--json` の `sha256` が rag の `result.sha256` と同じかを確かめる。違えば、rag が処理したあとで PDF が変わっている。ページの情報は使えないので、そのことをユーザーに伝える。同じなら、次のように進める。
 
 1. 判定が `text` 以外のページと、確かめるべきページの番号と数を伝える。
 2. rag の本文（`result.extracted_markdown`）で、`## p. <番号>` のあとの本文が空のページを、判定によらず、すべてのページで探す（rag の `ocr_mode` が `always` なら、判定が `text` のページも OCR され、その結果が空のこともある）。
-3. そのうち、`--json` の `lists.empty_text` に入っていないページ（文字の層には本文があるページ）を、「rag の本文が空のページ」として伝える。OCR の結果が空だった見込みが高いが、今の rag では確かめられない。
-4. 今の rag は設定（`ocr_mode`）を返さないので、どのページが OCR されたかは分からない。そのこともユーザーに伝える。
+3. そのうち、`--json` の `lists.empty_text` に入っていないページ（文字の層には本文があるページ）を、「rag の本文が空のページ」として伝える。OCR の結果が空だった見込みが高いが、古い rag では確かめられない。
+4. 古い rag は設定（`ocr_mode`）を返さないので、どのページが OCR されたかは分からない。そのこともユーザーに伝える。
 
 rag の抽出の識別は分からないので、rag の本文が `wiki_pdf.py` の本文と同じとは言えない。本文は rag の `extracted_markdown` を読む。
 

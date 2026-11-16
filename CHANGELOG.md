@@ -6,6 +6,13 @@
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-11-16
+
+### Changed
+
+- rag 0.6.0 以降で PDF を取り込んだときは、`job_status` の `result.page_report` から、判定が `text` 以外のページ、確かめるべきページ、OCR したページ、OCR の結果が空のページを伝えるようにした（ADR-0025）。`wiki_pdf.py --json` は動かさない。範囲の数が 200 を超える一覧は、`page_report_from` で続きを取る。今の OCR の設定は `status` の `settings` で確かめる。`page_report` を返さない rag 0.5 以前のときは、0.21.0 の代わりの手順のまま使う。
+- rag のジョブが `failed` のときも、`result.page_report` があれば、失敗するまでに判定したページの番号を伝える。
+
 ## [0.21.0] - 2026-11-16
 
 ### Added
