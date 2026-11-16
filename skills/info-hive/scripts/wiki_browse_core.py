@@ -511,6 +511,8 @@ ICON_ERROR = ('<svg class="fui-Icon" width="20" height="20" viewBox="0 0 20 20" 
 TYPE_LABELS = {"source": "ソース", "entity": "エンティティ", "concept": "コンセプト", "synthesis": "シンセシス"}
 SUMMARY_SEPARATORS = ":：—–-"
 GROUP_ID_RE = re.compile(r"_g[0-9a-z]+\Z")
+TAG_GROUP_ID_RE = re.compile(r"_gt[0-9]+\Z")
+NO_TAG_LABEL = "タグなし"
 TYPE_CLASS_RE = re.compile(r"[a-z][a-z0-9_-]*\Z")
 LEAD_LIMIT = 120
 
@@ -578,6 +580,21 @@ def _check_tree(top: list) -> None:
         raise NavInvariantError("グループの ID が重なる")
     if not all(GROUP_ID_RE.match(i) for i in ids):
         raise NavInvariantError("グループの ID の形が違う")
+    # タグでまとめる設計の 2.4: ページの項目を持つのはタグのグループだけで、タグのグループは子を持たず、
+    # 同じ親の下のタグのグループどうしは、同じページを持たない
+    for g in _walk(top):
+        is_tag = bool(TAG_GROUP_ID_RE.match(g["id"]))
+        if is_tag and (g["children"] or any(it["state"] != "resolved" for it in g["items"])):
+            raise NavInvariantError("タグのグループが、子のグループかページでない項目を持つ")
+        if not is_tag and any(it["state"] == "resolved" for it in g["items"]):
+            raise NavInvariantError("タグのグループでないグループが、ページの項目を持つ")
+        seen = set()
+        for ch in g["children"]:
+            if TAG_GROUP_ID_RE.match(ch["id"]):
+                pids = {it["id"] for it in ch["items"] if it["state"] == "resolved"}
+                if pids & seen:
+                    raise NavInvariantError("同じページが、同じ親の 2 つのタグのグループに入っている")
+                seen |= pids
     shown = set(ids)
     titles = {g["id"]: g["title"] for g in _walk(top)}
     for g in _walk(top):
@@ -940,7 +957,7 @@ class Core:
                 rest[str(self.page(pid)["meta"].get("type") or "")].append(pid)
         rest_groups = []
         if rest:
-            g = new_group("索引にないページ")
+            g = new_group("Index にないページ")
             for t in sorted(rest):
                 # N7: 名前だけを日本語にする。ID と並び（type の値の順）は 1 つ目の段のまま
                 sub = new_group(type_label(t))
@@ -951,7 +968,10 @@ class Core:
         self._page_listing()
 
     def _nav_stage_two(self, file_groups: list, rest_groups: list) -> list:
-        """木の 2 つ目の段（探しやすさの設計の 2.1 の N2〜N8）。新しい ID は作らない。"""
+        """木の 2 つ目の段（探しやすさの設計の 2.1 の N2〜N7）、3 つ目の段（N9）、件数（N8）。
+
+        2 つ目の段は新しい ID を作らない。ID を作るのは 3 つ目の段（`_gt` の番号）だけである。
+        """
         listed_before = _page_ids([g for _f, g in file_groups])
         by_id = {g["id"]: g for _f, g in file_groups}
         index_g = next((g for f, g in file_groups if f.rel == "index.md"), None)
@@ -961,7 +981,7 @@ class Core:
                 x["origin"] = origin
                 x.setdefault("summary", "")
             if g is index_g:
-                g["title"] = "索引"                                  # N2
+                g["title"] = "Index"                                  # N2
             if not g["items"] and len(g["children"]) == 1:           # N3: 1 度だけ畳む
                 child = g["children"][0]
                 g["items"], g["children"] = child["items"], child["children"]
@@ -973,7 +993,7 @@ class Core:
         top = []
         if index_g is not None:                                      # N4
             if index_g["items"]:
-                top.append({**index_g, "title": "索引", "children": []})
+                top.append({**index_g, "title": "Index", "children": []})
             top.extend(index_g["children"])
         order, summaries = [], {}                                    # N5: 順と要約はグループの ID で決める
         if index_g is not None:
@@ -1008,6 +1028,7 @@ class Core:
             for x in _walk([g]):
                 x["origin"], x["summary"] = "", ""
             top.append(g)
+        self._nav_tag_stage(top)                                     # N9: 件数（N8）より前に当てる
 
         def count(g):                                                # N8
             ids = {it["id"] for it in g["items"] if it["state"] == "resolved"}
@@ -1020,6 +1041,60 @@ class Core:
             count(g)
         _check_tree(top)
         return top
+
+    def _nav_tag_stage(self, top: list) -> None:
+        """木の 3 つ目の段 N9（タグでまとめる設計の 2 節）。
+
+        ページの項目を自分の項目に持つグループのすべてで、ページの項目を、ページの最初のタグごとの子のグループ
+        （タグのないページは「タグなし」）に移す。ページでない項目は元のグループに残す。タグのグループは、
+        元のグループの項目の並びでタグが初めて現れた順に、元の子のグループより前に並べ、「タグなし」を最後に置く。
+        ID は `_gt` と、木を深さ優先でたどって（親、子の順）作った順の番号で、タグの文字を入れない。
+        """
+        before = {g["id"]: [it["id"] for it in g["items"] if it["state"] == "resolved"] for g in _walk(top)}
+        listed = _page_ids(top)
+        first_tag = {}
+        counter = [0]
+
+        def tag_of(pid):
+            if pid not in first_tag:
+                tags = self.page_tags(pid)
+                first_tag[pid] = tags[0] if tags else None
+            return first_tag[pid]
+
+        def apply(g):
+            original_children = g["children"]
+            pages = [it for it in g["items"] if it["state"] == "resolved"]
+            if pages:
+                buckets = {}           # 最初のタグ（なければ None）-> 項目。dict は入れた順を保つ
+                for it in pages:
+                    buckets.setdefault(tag_of(it["id"]), []).append(it)
+                keys = [k for k in buckets if k is not None] + ([None] if None in buckets else [])
+                made = []
+                for k in keys:
+                    counter[0] += 1
+                    made.append({"id": f"_gt{counter[0]}", "title": NO_TAG_LABEL if k is None else k,
+                                 "summary": "", "origin": "tag", "items": buckets[k], "children": []})
+                g["items"] = [it for it in g["items"] if it["state"] != "resolved"]
+                g["children"] = made + original_children
+            for ch in original_children:
+                apply(ch)
+
+        for g in top:
+            apply(g)
+        # 2.4 の性質のうち、N9 の前の木と比べるもの。形だけで決まるものは _check_tree() が確かめる
+        if _page_ids(top) != listed:
+            raise NavInvariantError("3 つ目の段で、木に載ったページが変わった")
+        by_id = {g["id"]: g for g in _walk(top)}
+        for gid, pids in before.items():
+            # ページ -> そのページを持つタグのグループの名前の並び。ページ数に比例する時間で数える
+            holders = defaultdict(list)
+            for ch in by_id[gid]["children"]:
+                if ch.get("origin") == "tag":
+                    for pid in {it["id"] for it in ch["items"] if it["state"] == "resolved"}:
+                        holders[pid].append(ch["title"])
+            for pid in set(pids):
+                if holders.get(pid) != [tag_of(pid) or NO_TAG_LABEL]:
+                    raise NavInvariantError("ページが、最初のタグのグループのちょうど 1 つに入っていない")
 
     def _page_listing(self) -> None:
         """索引のページの一覧と検索の索引に使う、ページごとの並び、グループ、階層、索引の行の要約（4.1、4.2）。"""
@@ -1329,9 +1404,9 @@ class Core:
                 f'<body class="fui-FluentProvider {kind}">\n'
                 f'<nav id="_nav" class="fui-NavDrawer" aria-label="wiki のナビゲーション">'
                 f'<div class="fui-NavDrawerHeader nav-head">{self._scope_html()}'
-                f'<a class="fui-NavItem nav-home" href="{prefix}index.html">索引</a></div>'
+                f'<a class="fui-NavItem nav-home" href="{prefix}index.html">Index</a></div>'
                 f'<div class="fui-NavDrawerBody" id="_navbody">'
-                f'<noscript><a class="fui-Link" href="{prefix}index.html">索引へ</a></noscript></div></nav>\n'
+                f'<noscript><a class="fui-Link" href="{prefix}index.html">Index へ</a></noscript></div></nav>\n'
                 f'<main id="_main">\n{banner}')
 
     def _tail(self, path: str, extra_data: tuple = ()) -> str:
@@ -1441,7 +1516,7 @@ class Core:
             where = f'<span class="fui-Caption1 state">（{html.escape(" › ".join(trail))}）</span>' if trail else ""
             lis.append(f'<li><span class="wl wl-{it["state"]}" title="{title}">{html.escape(it["label"])}</span>'
                        f"{where}</li>")
-        return ('<section id="_index_unresolved"><h2 class="fui-Subtitle2">ページに決まらない索引の行</h2>'
+        return ('<section id="_index_unresolved"><h2 class="fui-Subtitle2">ページに決まらない Index の行</h2>'
                 f'<ul>{"".join(lis)}</ul></section>\n')
 
     def render_index(self, stale: "str | None" = None) -> str:
@@ -1452,16 +1527,16 @@ class Core:
         nav_note = ""
         if self.unreadable_indexes:
             nav_note = (self._message_bar("_nav_incomplete", "warning", "ナビゲーションは不完全",
-                                          f"読めない索引のファイルがある（{len(self.unreadable_indexes)} 件）。",
+                                          f"読めない Index のファイルがある（{len(self.unreadable_indexes)} 件）。",
                                           "notice incomplete"))
         diag_note = self._incomplete_html()
         total = len(self.page_order)
         rows = "".join(self._index_row(pid, k + 1, path) for k, pid in enumerate(self.page_order))
-        return (self._head(path, "索引", stale)
-                + f'<header id="_ixhead"><h1 class="fui-Title2">索引</h1>'
+        return (self._head(path, "Index", stale)
+                + f'<header id="_ixhead"><h1 class="fui-Title2">Index</h1>'
                   f'<p class="ix-stats fui-Caption1">{total} ページ</p></header>\n{nav_note}'
                 + '<div id="_filters" class="fx-bar"><noscript><p class="state fui-Caption1">絞り込みと検索には '
-                  'JavaScript が要る。一覧は索引の順に並んでいる。</p></noscript></div>\n'
+                  'JavaScript が要る。一覧は Index の順に並んでいる。</p></noscript></div>\n'
                 + f'<p id="_count" class="fx-count fui-Caption1" aria-live="polite">{total} 件</p>\n'
                 + f'<ul id="_index" class="fx-list">{rows}</ul>\n'
                 + self._index_unresolved_html()

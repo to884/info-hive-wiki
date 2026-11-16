@@ -20,8 +20,11 @@
     search: "M13.73 14.44a6.5 6.5 0 1 1 .7-.7l3.42 3.4a.5.5 0 0 1-.63.77l-.07-.06zm-.71-.71A5.5 5.5 0 0 0 15 9.5a5.5 5.5 0 1 0-1.98 4.23",
     dismiss: "m4.09 4.22.06-.07a.5.5 0 0 1 .63-.06l.07.06L10 9.29l5.15-5.14a.5.5 0 0 1 .63-.06l.07.06c.18.17.2.44.06.63l-.06.07L10.71 10l5.14 5.15c.18.17.2.44.06.63l-.06.07a.5.5 0 0 1-.63.06l-.07-.06L10 10.71l-5.15 5.14a.5.5 0 0 1-.63.06l-.07-.06a.5.5 0 0 1-.06-.63l.06-.07L9.29 10 4.15 4.85a.5.5 0 0 1-.06-.63l.06-.07z",
     warning: "M7.37 3.56a3 3 0 0 1 5.26 0l5.5 10A3 3 0 0 1 15.5 18h-11a3 3 0 0 1-2.63-4.44zM10 12.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5m0-6.25a.5.5 0 0 0-.5.5v4a.5.5 0 0 0 1 0V7a.5.5 0 0 0-.5-.5",
-    error: "M7.88 1.88a3 3 0 0 1 4.24 0l6 6a3 3 0 0 1 0 4.24l-6 6a3 3 0 0 1-4.24 0l-6-6a3 3 0 0 1 0-4.24zM13.1 6.9a.5.5 0 0 0-.7 0L10 9.3 7.6 6.9a.5.5 0 0 0-.7.7L9.3 10l-2.4 2.4a.5.5 0 0 0 .7.7l2.4-2.4 2.4 2.4a.5.5 0 0 0 .7-.7L10.7 10l2.4-2.4a.5.5 0 0 0 0-.7"
+    error: "M7.88 1.88a3 3 0 0 1 4.24 0l6 6a3 3 0 0 1 0 4.24l-6 6a3 3 0 0 1-4.24 0l-6-6a3 3 0 0 1 0-4.24zM13.1 6.9a.5.5 0 0 0-.7 0L10 9.3 7.6 6.9a.5.5 0 0 0-.7.7L9.3 10l-2.4 2.4a.5.5 0 0 0 .7.7l2.4-2.4 2.4 2.4a.5.5 0 0 0 .7-.7L10.7 10l2.4-2.4a.5.5 0 0 0 0-.7",
+    // Tree の枝のシェブロン（ChevronRight12Regular）。viewBox は 12 × 12
+    chevronRight: "M4.65 2.15a.5.5 0 0 0 0 .7L7.79 6 4.65 9.15a.5.5 0 1 0 .7.7l3.5-3.5a.5.5 0 0 0 0-.7l-3.5-3.5a.5.5 0 0 0-.7 0"
   };
+  var ICON_BOX = { chevronRight: "0 0 12 12" };
 
   function has(obj, key) { return Object.prototype.hasOwnProperty.call(obj, key); }
   function typeLabel(t) { return has(TYPE_LABELS, t) ? TYPE_LABELS[t] : (t || "種類なし"); }
@@ -40,7 +43,7 @@
     svg.setAttribute("class", "fui-Icon");
     svg.setAttribute("width", size || "20");
     svg.setAttribute("height", size || "20");
-    svg.setAttribute("viewBox", "0 0 20 20");
+    svg.setAttribute("viewBox", has(ICON_BOX, name) ? ICON_BOX[name] : "0 0 20 20");
     svg.setAttribute("fill", "currentColor");
     svg.setAttribute("aria-hidden", "true");
     svg.setAttribute("focusable", "false");
@@ -103,31 +106,44 @@
   if (manifest.stale) { state.stale = true; }
   var incompletePages = !!(manifest.incomplete && manifest.incomplete.unreadable_pages);
 
-  /* --- 配色の切り替え（Fluent の Select）。theme.js が描く前に当てた値を表す --- */
+  /* --- 配色の切り替え（Fluent の Switch。左のペインの木の設計の 7 節）。オンがダークで、theme.js が描く前に当てた値を表す --- */
   function themeField() {
     var api = window.__browseTheme;
     if (!api) { return null; }
-    var wrap = el("div", "theme-field");
-    var label = el("label", "fui-Label theme-label", "配色");
-    label.htmlFor = "_theme";
-    var box = el("span", "fui-Select");
-    box.setAttribute("data-size", "small");
-    var select = el("select", "fui-Select__select");
-    select.id = "_theme";
-    var names = { auto: "OS に合わせる", light: "ライト", dark: "ダーク" };
-    for (var k = 0; k < api.values.length; k++) {
-      var o = el("option", "", names[api.values[k]]);
-      o.value = api.values[k];
-      select.appendChild(o);
+    var osDark = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+    function osTheme() { return osDark && osDark.matches ? "dark" : "light"; }
+    function shown() {
+      var t = document.documentElement.getAttribute("data-theme");
+      return t === "dark" || t === "light" ? t : osTheme();
     }
-    select.value = api.read();
-    select.addEventListener("change", function () { api.save(select.value); });
-    var ic = el("span", "fui-Select__icon");
-    ic.appendChild(icon("chevron", "1em"));
-    box.appendChild(select);
-    box.appendChild(ic);
+    // 形は Fluent 2 のサイトの「Theme」のトグル（線の枠と丸のつまみ。オンでつまみが右に移り、三日月になる）
+    var wrap = el("div", "theme-switch");
+    var label = el("label", "fui-Label theme-label", "テーマ");
+    label.htmlFor = "_theme";
+    var box = el("span", "theme-toggle");
+    var input = el("input", "theme-input");
+    input.type = "checkbox";
+    input.id = "_theme";
+    input.setAttribute("role", "switch");
+    // 読み上げの名前は、見えている「テーマ」を含み、オンが何かを表す
+    input.setAttribute("aria-label", "ダークテーマ");
+    var track = el("span", "theme-track");
+    track.setAttribute("aria-hidden", "true");
+    track.appendChild(el("span", "theme-knob"));
+    box.appendChild(input);
+    box.appendChild(track);
     wrap.appendChild(label);
     wrap.appendChild(box);
+    function sync() { input.checked = shown() === "dark"; }
+    sync();
+    // 切り替えたあとの見た目が OS と同じなら auto（OS に合わせる）を、違えばその見た目を保存する
+    input.addEventListener("change", function () {
+      var want = input.checked ? "dark" : "light";
+      api.save(want === osTheme() ? "auto" : want);
+      sync();
+    });
+    // OS に合わせている間は、OS の配色の変化にトグルを合わせる
+    if (osDark && osDark.addEventListener) { osDark.addEventListener("change", sync); }
     return wrap;
   }
   var head = document.querySelector("#_nav .nav-head");
@@ -338,72 +354,77 @@
     }
   });
 
-  /* --- 左の木 --- */
-  function groupLink(g) {
-    var a = el("a", "fui-Link tree-filter", "一覧");
-    a.href = href("index.html") + "#group=" + encodeURIComponent(g.id);
-    return a;
+  /* --- 左の木（Fluent 2 の Tree。左のペインの木の設計の 2 節、9 節） --- */
+  // 項目の入れ物。どの項目も TreeItemLayout と __main を持つ（2.2）。a の項目の中は span にする
+  function treeNode(tag, cls, level) {
+    var item = el(tag, "fui-TreeItem" + (cls ? " " + cls : ""));
+    item.setAttribute("role", "treeitem");
+    item.setAttribute("aria-level", String(level));
+    item.tabIndex = -1;
+    if (level >= 5) { item.classList.add("tree-deep"); }     // 字下げは 4 段目で止める（2.3）
+    var inner = tag === "div" ? "div" : "span";
+    var layout = el(inner, "fui-TreeItemLayout");
+    item.appendChild(layout);
+    return { item: item, layout: layout, inner: inner };
   }
 
-  function containsCurrent(g) {
+  function nodeMain(n, text, cls) {
+    n.layout.appendChild(el(n.inner, "fui-TreeItemLayout__main" + (cls ? " " + cls : ""), text));
+  }
+
+  // 件数のバッジ（6.3）。読み上げには項目の aria-label で伝えるので、バッジは隠す
+  function nodeCount(n, g) {
+    var aside = el(n.inner, "fui-TreeItemLayout__aside");
+    var b = el("span", "fui-Badge fui-CounterBadge tree-count", String(g.count));
+    b.setAttribute("data-appearance", "tint");
+    b.setAttribute("data-color", "informative");
+    b.setAttribute("data-size", "small");
+    b.setAttribute("data-shape", "circular");
+    b.setAttribute("aria-hidden", "true");
+    b.title = g.count + " ページ";
+    aside.appendChild(b);
+    n.layout.appendChild(aside);
+    n.item.setAttribute("aria-label", g.title + "（" + g.count + " ページ）");
+  }
+
+  // グループの一覧への行き先。Index のページでは断片だけ（右の一覧を絞る）、記事のページでは Index のページ
+  function groupHref(id) { return (isIndex ? "" : href("index.html")) + "#group=" + encodeURIComponent(id); }
+
+  // 今のページを、自分の項目として持つグループか（記事のページで印を付けるグループ。左のペインの木の設計の 9 節）
+  function holdsCurrent(g) {
     for (var k = 0; k < g.items.length; k++) { if (g.items[k].state === "resolved" && g.items[k].id === current) { return true; } }
-    for (var c = 0; c < g.children.length; c++) { if (containsCurrent(g.children[c])) { return true; } }
     return false;
   }
 
-  function treeItem(it) {
-    if (it.state === "resolved") {
-      var a = el("a", "fui-NavSubItem", it.label);
-      a.href = href(it.path) + (it.anchor ? "#" + encodeURIComponent(it.anchor) : "");
-      var here = it.id === current;
-      a.setAttribute("aria-current", here ? "page" : "false");
-      if (here) { a.classList.add("is-current"); }
-      return a;
+  // 木は、記事のページも Index のページも、グループの名前と件数だけを描く（記事の題名は描かない。9 節）。
+  // 子のないグループは、グループの一覧へのリンクの葉にする。子を持つグループは枝にする
+  function groupNode(g, level) {
+    if (!g.children.length) {
+      var n = treeNode("a", "tree-index", level);
+      n.item.href = groupHref(g.id);
+      n.item.setAttribute("data-group", g.id);
+      nodeMain(n, g.title, "tree-name");
+      nodeCount(n, g);
+      if (!isIndex && holdsCurrent(g)) {
+        n.item.setAttribute("aria-current", "true");
+        n.item.classList.add("is-current");
+      }
+      return n.item;
     }
-    if (it.state === "group") {
-      var g = el("a", "fui-NavSubItem", it.label);
-      g.href = href("index.html") + "#group=" + encodeURIComponent(it.group);
-      return g;
-    }
-    var span = el("span", "fui-NavSubItem wl wl-" + it.state, it.label);
-    span.title = it.state === "unresolved" ? "ページがない" : "行き先を 1 つに決められない";
-    return span;
-  }
-
-  function treeGroup(g, depth) {
-    var d = el("details", "fui-NavCategory tree-group nav-depth-" + Math.min(depth, 6));
-    d.open = containsCurrent(g);
-    var sum = el("summary", "fui-NavCategoryItem");
-    sum.appendChild(el("span", "tree-name", g.title));
-    sum.appendChild(el("span", "fui-Caption1 tree-count", String(g.count)));
-    sum.appendChild(groupLink(g));
-    var exp = el("span", "fui-NavCategoryItem__expandIcon");
+    var b = treeNode("div", "tree-group", level);
+    b.item.setAttribute("data-group", g.id);
+    b.item.setAttribute("aria-expanded", level === 1 ? "true" : "false");
+    var exp = el("div", "fui-TreeItemLayout__expandIcon");
     exp.setAttribute("aria-hidden", "true");
-    exp.appendChild(icon("chevron"));
-    sum.appendChild(exp);
-    d.appendChild(sum);
-    var sub = el("div", "fui-NavSubItemGroup");
-    for (var k = 0; k < g.items.length; k++) { sub.appendChild(treeItem(g.items[k])); }
-    for (var c = 0; c < g.children.length; c++) { sub.appendChild(treeGroup(g.children[c], depth + 1)); }
-    d.appendChild(sub);
-    return d;
-  }
-
-  function indexTree(groups, depth) {
-    var ul = el("ul", "tree-groups nav-depth-" + Math.min(depth, 6));
-    for (var k = 0; k < groups.length; k++) {
-      var g = groups[k];
-      var li = el("li");
-      var a = el("a", "fui-NavItem");
-      a.href = "#group=" + encodeURIComponent(g.id);
-      a.setAttribute("data-group", g.id);
-      a.appendChild(el("span", "tree-name", g.title));
-      a.appendChild(el("span", "fui-Caption1 tree-count", String(g.count)));
-      li.appendChild(a);
-      if (g.children.length) { li.appendChild(indexTree(g.children, depth + 1)); }
-      ul.appendChild(li);
-    }
-    return ul;
+    exp.appendChild(icon("chevronRight", "12"));
+    b.layout.appendChild(exp);
+    nodeMain(b, g.title, "tree-name");
+    nodeCount(b, g);
+    var sub = el("div", "fui-Tree");
+    sub.setAttribute("role", "group");
+    b.item.appendChild(sub);
+    for (var c = 0; c < g.children.length; c++) { sub.appendChild(groupNode(g.children[c], level + 1)); }
+    return b.item;
   }
 
   var groupIds = {};
@@ -421,14 +442,19 @@
   drawerSum.setAttribute("data-appearance", "subtle");
   drawer.appendChild(drawerSum);
   var tree = el("div", "tree");
+  var treeRoot = el("div", "fui-Tree");
+  treeRoot.setAttribute("role", "tree");
+  treeRoot.setAttribute("aria-label", "Index の木");
+  tree.appendChild(treeRoot);
 
   if (isIndex) {
-    var all = el("a", "fui-NavItem tree-all");
+    var allNode = treeNode("a", "tree-all", 1);
+    var all = allNode.item;
     all.href = "#";
     all.setAttribute("data-group", "");
-    all.appendChild(el("span", "tree-name", "すべてのページ"));
-    tree.appendChild(all);
-    tree.appendChild(indexTree(NAV.groups || [], 0));
+    nodeMain(allNode, "すべてのページ", "tree-name");
+    treeRoot.appendChild(all);
+    for (var gi = 0; gi < (NAV.groups || []).length; gi++) { treeRoot.appendChild(groupNode(NAV.groups[gi], 1)); }
   } else {
     // 記事のページ: 検索欄と、その結果の場所（木の場所に出す）
     var results = el("div", "sr-area");
@@ -443,11 +469,17 @@
     field.appendChild(hint);
     navBody.appendChild(field);
     navBody.appendChild(results);
-    for (var n = 0; n < (NAV.groups || []).length; n++) { tree.appendChild(treeGroup(NAV.groups[n], 0)); }
+    for (var n = 0; n < (NAV.groups || []).length; n++) { treeRoot.appendChild(groupNode(NAV.groups[n], 1)); }
+    // 今のページを持つグループの祖先の枝を開く。ページが 2 つのグループに載っていれば、どちらも開く
+    Array.prototype.forEach.call(treeRoot.querySelectorAll(".fui-TreeItem.is-current"), function (c) {
+      for (var p = c.parentElement.closest(".fui-TreeItem"); p; p = p.parentElement.closest(".fui-TreeItem")) {
+        p.setAttribute("aria-expanded", "true");
+      }
+    });
   }
   // 読めない索引のファイルがあるとき、木が不完全であることを示す（構造の直しの設計の 4.1、10）
   if (NAV.incomplete) {
-    tree.insertBefore(el("p", "fui-Caption1 nav-incomplete", "読めない索引のファイルがあるので、この木は不完全"),
+    tree.insertBefore(el("p", "fui-Caption1 nav-incomplete", "読めない Index のファイルがあるので、この木は不完全"),
                       tree.firstChild);
   }
   drawer.appendChild(tree);
@@ -515,6 +547,112 @@
   function syncDrawer() { if (!narrow || !narrow.matches) { drawer.open = true; } }
   syncDrawer();
   if (narrow && narrow.addEventListener) { narrow.addEventListener("change", syncDrawer); }
+
+  /* --- 木の操作（左のペインの木の設計の 2.4。fluent2.js の enhanceTree を下敷きにし、葉の Enter と同期を直した） --- */
+  function treeItems() { return Array.prototype.slice.call(treeRoot.querySelectorAll(".fui-TreeItem")); }
+  function isBranch(item) { return item.hasAttribute("aria-expanded"); }
+  function parentItem(item) { return item.parentElement ? item.parentElement.closest(".fui-TreeItem") : null; }
+  function firstChild(item) { return item.querySelector(":scope > .fui-Tree > .fui-TreeItem"); }
+  function isShown(item) {
+    for (var p = parentItem(item); p; p = parentItem(p)) { if (p.getAttribute("aria-expanded") === "false") { return false; } }
+    return true;
+  }
+  function shownItems() { return treeItems().filter(isShown); }
+
+  // ローヴィング: tabindex="0" の項目をちょうど 1 つにする
+  function roving(item) {
+    treeItems().forEach(function (t) { t.tabIndex = t === item ? 0 : -1; });
+  }
+  function rovingToCurrent() {
+    var c = treeRoot.querySelector(".fui-TreeItem.is-current");
+    var shown = shownItems();
+    roving(c && isShown(c) ? c : shown[0] || null);
+  }
+  function setOpen(item, open) {
+    if (!isBranch(item)) { return; }
+    item.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) { return; }
+    // 閉じた枝の中にフォーカスか Tab の入口があれば、枝に移す（隠れた項目を入口に残さない）
+    var r = treeRoot.querySelector('.fui-TreeItem[tabindex="0"]');
+    if (item.contains(document.activeElement) && document.activeElement !== item) { item.focus(); }
+    else if (r && r !== item && item.contains(r)) { roving(item); }
+  }
+  function openAncestors(item) {
+    for (var p = parentItem(item); p; p = parentItem(p)) { p.setAttribute("aria-expanded", "true"); }
+  }
+  // 枝を選ぶ: そのグループの一覧に移る。Index のページでは右の一覧を絞り、閉じていれば開く。
+  // 記事のページでは、Index のページをそのグループに絞って開く（9 節）
+  function selectGroup(item) {
+    var id = item.getAttribute("data-group");
+    if (isIndex) {
+      setOpen(item, true);
+      location.hash = "#group=" + id;
+    } else {
+      location.href = groupHref(id);
+    }
+  }
+
+  // 同期はフォーカスが移ったことで行う。矢印キー、押す操作、focus() のどれでもここを通る
+  treeRoot.addEventListener("focusin", function (ev) {
+    var item = ev.target.closest(".fui-TreeItem");
+    if (item && treeRoot.contains(item)) { roving(item); }
+  });
+
+  treeRoot.addEventListener("click", function (ev) {
+    var layout = ev.target.closest(".fui-TreeItemLayout");
+    if (!layout) { return; }
+    var item = layout.parentElement;
+    if (!item.classList.contains("fui-TreeItem")) { return; }
+    // 葉はリンクの既定の動きに任せる。WebKit はリンクを押してもフォーカスを移さないので、ここで移し、
+    // ローヴィングの同期（focusin）を通す（Tab の入口を押した葉にする）
+    if (item.tagName !== "DIV") { item.focus(); return; }
+    // 枝の名前は、そのグループの一覧に移る。シェブロンは開閉だけをする
+    if (isBranch(item) && !ev.target.closest(".fui-TreeItemLayout__expandIcon")) {
+      item.focus();
+      selectGroup(item);
+      return;
+    }
+    setOpen(item, item.getAttribute("aria-expanded") !== "true");
+    item.focus();
+  });
+
+  treeRoot.addEventListener("keydown", function (ev) {
+    if (ev.isComposing || ev.keyCode === 229) { return; }        // かな漢字の変換中のキーは扱わない
+    if (ev.ctrlKey || ev.metaKey || ev.altKey) { return; }        // Ctrl+Enter などは既定の動き
+    var item = ev.target;
+    if (!item.classList || !item.classList.contains("fui-TreeItem")) { return; }
+    var items = shownItems();
+    var i = items.indexOf(item);
+    var handled = true;
+    if (ev.key === "ArrowDown") { if (items[i + 1]) { items[i + 1].focus(); } }
+    else if (ev.key === "ArrowUp") { if (i > 0) { items[i - 1].focus(); } }
+    else if (ev.key === "Home") { if (items[0]) { items[0].focus(); } }
+    else if (ev.key === "End") { if (items.length) { items[items.length - 1].focus(); } }
+    else if (ev.key === "ArrowRight") {
+      if (isBranch(item)) {
+        if (item.getAttribute("aria-expanded") !== "true") { setOpen(item, true); }
+        else if (firstChild(item)) { firstChild(item).focus(); }
+      }
+    } else if (ev.key === "ArrowLeft") {
+      if (isBranch(item) && item.getAttribute("aria-expanded") === "true") { setOpen(item, false); }
+      else if (parentItem(item)) { parentItem(item).focus(); }
+    } else if (ev.key === "Enter") {
+      // 葉では止めない: リンクの葉はリンクの既定の動きで移る（1 回目のレビューの 1）
+      if (item.tagName !== "DIV") { handled = false; }
+      else if (isBranch(item)) { selectGroup(item); }
+    } else if (ev.key.length === 1 && /\S/.test(ev.key) && ev.key !== "/") {
+      // 先頭の文字での移動。「/」は検索欄に移るキーなので扱わない
+      var key = ev.key.toLowerCase();
+      var order = items.slice(i + 1).concat(items.slice(0, i + 1));
+      for (var k = 0; k < order.length; k++) {
+        var m = order[k].querySelector(":scope > .fui-TreeItemLayout > .fui-TreeItemLayout__main");
+        if (m && m.textContent.trim().toLowerCase().indexOf(key) === 0) { order[k].focus(); break; }
+      }
+    } else { handled = false; }
+    if (handled) { ev.preventDefault(); }
+  });
+
+  if (!isIndex) { rovingToCurrent(); }
 
   var cur = tree.querySelector(".is-current");
   if (cur && cur.scrollIntoView) {
@@ -598,7 +736,7 @@
     sortBox.setAttribute("data-size", "small");
     var sortSel = el("select", "fui-Select__select");
     sortSel.setAttribute("aria-label", "並べ方");
-    [["order", "索引の順"], ["updated", "更新の新しい順"], ["title", "題名の順"]].forEach(function (o) {
+    [["order", "Index の順"], ["updated", "更新の新しい順"], ["title", "題名の順"]].forEach(function (o) {
       var op = el("option", "", o[1]);
       op.value = o[0];
       sortSel.appendChild(op);
@@ -672,10 +810,11 @@
       if (incompletePages || state.searchIncomplete) {
         countEl.appendChild(el("span", "count-incomplete", "（読めないページがあるので不完全）"));
       }
-      Array.prototype.forEach.call(tree.querySelectorAll("[data-group]"), function (a) {
+      Array.prototype.forEach.call(treeRoot.querySelectorAll(".fui-TreeItem[data-group]"), function (a) {
         var on = a.getAttribute("data-group") === filt.group;
         a.setAttribute("aria-current", on ? "true" : "false");
         a.classList.toggle("is-current", on);
+        if (on) { openAncestors(a); }                 // 絞っているグループの祖先の枝を開く（2.3）
       });
       groupChip.hidden = !filt.group;
       groupChip.textContent = filt.group ? "グループ: " + groupTitles[filt.group] + " ×" : "";
@@ -696,6 +835,8 @@
       fromHash();
     });
     fromHash();
+    // Tab の入口は、絞っているグループ（なければ「すべてのページ」）にする。木の中にフォーカスがあれば変えない
+    if (!treeRoot.contains(document.activeElement)) { rovingToCurrent(); }
   }
   state.navLoaded = true;
 })();
