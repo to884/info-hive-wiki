@@ -20,7 +20,7 @@
 
 インデックスからよい候補が見つからない場合（クエリがあいまいな言葉や分野特有の言葉を使っていて、インデックスの要約と一致しない場合）は、検索を使う。
 
-まず wiki の MCP サーバーのツール `query` を使う。`wiki` に wiki のルートの絶対パス、`query` に検索語を渡す（`top`、`type`、`tags`、`since`、`per_page` で絞り込める）。結果の形は下の CLI の `--json` と同じで、セクション単位のハイブリッド検索の結果が返る。サーバーの埋め込みは cl-nagoya/ruri-v3-130m の ONNX、ベクトル索引は usearch、語彙検索は Tantivy で、索引は wiki の外に置く（`mcp-server.md`）。初回の埋め込みの途中は、結果の `warning` に理由が入り、`index.state` が `embedding` になる。そのときも語彙検索は wiki 全体を対象にするので、結果をそのまま使い、意味の検索が一部だけであることを回答に添える。ツールが結果を返したら、0 件でも、同じ検索を CLI でやり直さない。
+まず wiki の MCP サーバーのツール `query` を使う。`wiki` に wiki のルートの絶対パス、`query` に検索語を渡す（`top`、`type`、`tags`、`since`、`per_page` で絞り込める）。結果の形は下の CLI の `--json` と同じで、セクション単位のハイブリッド検索の結果が返る。サーバーの埋め込みは cl-nagoya/ruri-v3-130m の ONNX、ベクトル索引は usearch、語彙検索は Tantivy で、索引は wiki の外に置く（`mcp-server.md`）。埋め込みモデルを用意している途中か使えないとき、または索引を埋め込んでいる途中は、結果の `warning` に理由が入る。埋め込みの途中は `index.state` が `embedding` になる。どのときも語彙検索は wiki 全体を対象にするので、結果をそのまま使い、意味の検索を使えなかったか一部だけだったことを回答に添える（手順 5b の「検索の縮退」）。ツールが結果を返したら、0 件でも、同じ検索を CLI でやり直さない。
 
 ツールが使えないとき、呼び出しが返らないとき、ページ単位の順位（`--granularity page`）や依存パッケージを使わない決定的な検索が要るときは、検索スクリプトを使う。使い分けは `SKILL.md` の「MCP のツールと CLI の使い分け」にある。
 
@@ -56,7 +56,7 @@ uv run --script "<skill-root>/scripts/wiki_search.py" "軽減税率の対象" --
 python "<skill-root>/scripts/wiki_search.py" "" --wiki "<absolute-wiki-root>" --backlinks <page-slug>
 ```
 
-ページを読んで言及を探すより速く、`[[slug|表示名]]` や `[[dir/slug]]` の形のリンクも数え、順位を付けて返す。`grep -rl "\[\[<page-slug>\]\]"` はこれらの形を拾わないので、使わない。
+ページを読んで言及を探すより速く、`[[slug|表示名]]` や `[[dir/slug]]` の形のリンクも数える。結果は見つけた順に並び、関係の深さの順ではない。`grep -rl "\[\[<page-slug>\]\]"` はこれらの形を拾わないので、使わない。
 
 ## 手順 5: 回答をまとめる
 
