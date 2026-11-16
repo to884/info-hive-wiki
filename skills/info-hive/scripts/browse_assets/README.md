@@ -15,11 +15,11 @@
 
 | 項目 | 値 |
 | --- | --- |
-| 写した元 | スキル `fluent2-html-replica` の `assets/fluent2.css`（スキルの `computedHash` は `14bc59994c3d16920cc9ffd1e4b4d124fe32b1bcc7624fbcdd9778a0b511cb29`） |
+| 写した元 | スキル `fluent2-html-replica` 0.1.5（タグ `v0.1.5`、commit `638ad7109577671d3acd8ed5173594006116fc3c`）の `assets/fluent2.css`（スキルの `computedHash` は `326ec308208eefadb3c371d3b5f746a0d88a8c0d903ff0583d17a27ba8ca7faf`） |
 | 基準の版 | `@fluentui/react-components` 9.75.2、`@fluentui/tokens` 1.0.0-alpha.24、microsoft/fluentui の commit `f9720c35ba893c9630f4c0389d07dc6d6fd6068d` |
-| 大きさ | 625,811 バイト |
-| SHA-256 | `0b393938b1b5349f2436780eda73d8786e730bc793f4c3fc103ecf6913e8b4bb` |
-| 写した日 | 2026年11月14日 |
+| 大きさ | 626,488 バイト |
+| SHA-256 | `05d35361e0340e1029507beb90ce280a1db76a473e7aaf0d896436bf1f231fba` |
+| 写した日 | 2026年11月16日 |
 | ライセンス | MIT（[licenses/fluent2-html-replica.LICENSE](licenses/fluent2-html-replica.LICENSE)）。元になった Fluent UI（MIT、Copyright (c) Microsoft Corporation）と Fluent UI System Icons（MIT）の表示は [licenses/fluent2-html-replica.THIRD-PARTY-NOTICES.txt](licenses/fluent2-html-replica.THIRD-PARTY-NOTICES.txt) にある。同じ表示が `fluent2.css` の先頭のコメントにも入っているので、閲覧の出力に写した `fluent2.css` にも表示が付いて回る |
 
 - このプラグインと `fluent2.css` は Microsoft の製品ではなく、Microsoft の提携、推薦、承認を受けたものでもない。Fluent、Microsoft、Segoe は Microsoft Corporation の商標である。
