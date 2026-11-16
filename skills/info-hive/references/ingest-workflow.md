@@ -25,7 +25,7 @@ PDF のヘッダー（`%PDF-`）は、登録のあとの処理で確かめ、ヘ
 短時間待つ場合は `wait_seconds=30` を使い、細かい連続呼び出しを避ける。
 `queued`、`running`、`paused` の間は受付・処理中であり、索引化完了でも wiki の取り込み完了でもない。
 会話を終える場合はジョブ ID を報告して手順を止める。次回 rag の MCP 接続時に、未完了ジョブが保存済みのページと埋め込みバッチから自動再開する。
-`failed` の理由を直した後は `retry_job` を使う。`cancelled` は明示的な依頼なしに再試行しない。`failed` のときも、`result.page_report` があれば、失敗するまでに判定したページの番号を伝える（`lists.pending` は、判定まで済んで本文が決まらなかったページ）。
+`failed` の理由を直した後は `retry_job` を使う。ただし、rag のジョブは登録したときの設定（`ocr_mode`、`ocr_dpi` など）のまま動き、`retry_job` も同じ設定で動かす。失敗の理由が設定のとき（`ocr_mode` が `off` で OCR が要るページがあった、など）は、`configure` で設定を変えたあとで、`register_pdf` で新しく登録する。`cancelled` は明示的な依頼なしに再試行しない。`failed` のときも、`result.page_report` があれば、失敗するまでに判定したページの番号を伝える（`lists.pending` は、判定まで済んで本文が決まらなかったページ）。
 
 `completed` になったら `result.extracted_markdown` を分割して読み、手順 2 の「PDF を読む」の「rag で取り込んだとき」で読めないページを確かめてから、手順 3 以降へ進む。
 ソースの要約ページには `raw: "<result.raw>"`、`raw_sha256: "<result.sha256>"`、`rag_job_id: "<job_id>"` を書く。
@@ -243,7 +243,7 @@ Read は、図と版面を見るとき、確かめるべきページと、判定
 3. 今の OCR の設定は、`status` の `settings`（`ocr_mode`、`ocr_dpi`）で分かる。`page_report.ocr.mode` は、そのジョブを処理したときの設定である。
 4. 確かめるべきページ（判定は `text`）と `blank` のページは、`ocr_mode` が `auto` なら OCR されていない。Read でページの画像を見る。
 
-rag の本文は `result.extracted_markdown` を読む。判定が `text` のページの本文は、同じ抽出の識別（`result.extraction`）なら `wiki_pdf.py` の本文と同じである。
+rag の本文は `result.extracted_markdown` を読む。OCR しなかったページ（`lists.ocr` に入っていないページ）の本文は、同じ抽出の識別（`result.extraction`）なら `wiki_pdf.py` の本文と同じである。`ocr_mode` が `always` なら、判定が `text` のページも OCR の結果になるので、`wiki_pdf.py` の本文とは違う。
 
 **rag で取り込んだとき（rag が `page_report` を返さないとき）。** rag 0.5 以前は、ページの判定を返さない。そこで、`job_status` が `completed` になったら、同じ PDF に `wiki_pdf.py --json` を動かし、判定と確かめるべきページを得る。まず、`--json` の `sha256` が rag の `result.sha256` と同じかを確かめる。違えば、rag が処理したあとで PDF が変わっている。ページの情報は使えないので、そのことをユーザーに伝える。同じなら、次のように進める。
 
