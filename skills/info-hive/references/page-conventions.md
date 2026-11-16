@@ -48,6 +48,7 @@ frontmatter を日本語で書くときは、次の4点を守る。どれも lin
 
 種類ごとのフィールドは次のとおりである。
 - ソースのページには、`authors`、`url`、`raw`（raw ファイルへのパス）、`ingested`（`YYYY-MM-DD`）を加える。
+- YouTube の動画のソースのページには、さらに `video_id`、`caption_kind`（raw の値を写す。`"uploaded"` か `"asr"`）、`confidence`（`"high"`、`"medium"`、`"low"`。親の要約ページだけに書き、分割したページには書かない）、`fetched_at`（時差つきの ISO 8601 の文字列）を加える。`confidence` は、字幕の訂正と留保の定義から計算する値で、決め方は `ingest-workflow.md` の「confidence の決め方」にある（info-hive-dev の ADR-0027）。ほかの経路のソースには `confidence` を書かない。書かれていないことは「判定していない」を表す。
 - エンティティのページには、`aliases`（同じエンティティの別名や表記の違い）、`kind`（`person`、`paper`、`product` など）を加えてもよい。
 - シンセシスのページには、`question`（クエリから保存した場合は、元の質問）、`asked`（質問した日付）、`sources_consulted` を加えてもよい。`sources` にはソースの要約ページだけを入れ、`sources_consulted` には種類を問わず参照したページ（コンセプト、エンティティ、ほかのシンセシスを含む）を入れる。
 
@@ -218,6 +219,28 @@ Web ページから取り込んだソースは、`raw/` に置いた訳文から
 | `turns` | ターンの数 |
 | `excluded_records` | 中身を除いた記録の種類と数（`"種類=数, …"`） |
 | `auto_redactions`、`manual_redactions`、`dropped_turns` | 自動の伏せ字の数、人が伏せた区間の数、確認で消したターンの数 |
+
+## YouTube の動画の raw の frontmatter
+
+`wiki_youtube.py write` が `raw/<スラッグ>.md` に書く frontmatter の項目は次のとおりである（この順に書く）。これは raw の原本の記録で、wiki のページの frontmatter ではない。取得の時刻は書かない（要約ページの `fetched_at` に書く）。
+
+| キー | 内容 |
+| --- | --- |
+| `url` | `https://www.youtube.com/watch?v=<ID>` の形にそろえた URL |
+| `video_id` | 動画の ID（11 文字） |
+| `title`、`channel` | 動画の題名とチャンネルの名前（YouTube から来た文字。信頼できない入力） |
+| `uploaded` | 投稿日（`YYYY-MM-DD`。分からなければ `""`） |
+| `duration` | 動画の長さ（秒） |
+| `video_lang` | 話された言語 |
+| `caption_track` | 取ったトラックの名前（同じ自動字幕の `<lang>` と `<lang>-orig` は 1 つにまとめた名前） |
+| `caption_kind` | `"uploaded"`（投稿者の字幕）か `"asr"`（元の言語の自動字幕） |
+| `caption_lang` | 字幕の言語 |
+| `source_sha256`、`source_sha256_of` | 字幕（json3）のバイト列の SHA-256 と `"json3"`。同じ資料かは、`video_id` とこの値で決める |
+| `fetched_by` | スクリプトと yt-dlp の版 |
+
+## 字幕の訂正と留保の印
+
+自動字幕の聞き違いを、要約ページと関係するページの文で訂正するときは、訂正した語の直後に `〔訂正 L123-1〕`、留保の語の直後に `〔留保 L123-1〕` を置き、要約ページの `## 字幕の訂正と留保` の節に定義を書く。関係するページの印は `〔訂正 [[要約ページ]] L123-1〕` の形にする。書き方の全体は `ingest-workflow.md` の「字幕の訂正と留保」にあり、lint が印と定義と raw の食い違いを指摘する。印は縦棒とバッククォートを含まないので、表のセルにも置ける。
 
 ## 留保の書き方
 

@@ -226,7 +226,7 @@ def _is_junction(entry):
     return read_os(entry.is_junction)
 
 
-def walk_markdown(start, prefix: str = "", skip_top: bool = False) -> Walk:
+def walk_markdown(start, prefix: str = "", skip_top: bool = False, visited: "list | None" = None) -> Walk:
     """start の下をたどり、名前が .md で終わるふつうのファイルと、知らせを返す。
 
     - 起点には、リンクであっても降りる。途中のディレクトリのシンボリックリンクには降りない。ジャンクションには降りる
@@ -235,6 +235,9 @@ def walk_markdown(start, prefix: str = "", skip_top: bool = False) -> Walk:
     - ジャンクションを 1 つでも通った道筋では、入ろうとするディレクトリの識別子が、起点からそこまでに通った
       ディレクトリのどれかと同じなら、降りない（同じ場所を回る道筋）。識別子を取れなければ、unknown に入れて降りない。
     - prefix は、返す相対パスの先頭に付ける。並びは posix_rel の順、同じなら綴りの順である。
+    - visited にリストを渡すと、一覧を作れたディレクトリの相対パス（起点は prefix から末尾の / を除いたもの。
+      prefix が空なら ""）を足す。この一覧が降りる場所かを、規則を写さずに確かめるためのもの（YouTube の字幕の
+      照合が、用意したページの場所を確かめるのに使う）。
     """
     files, unlistable, unknown = [], [], []
     start = os.fspath(start)
@@ -248,6 +251,8 @@ def walk_markdown(start, prefix: str = "", skip_top: bool = False) -> Walk:
         if state == "denied":
             unlistable.append(pre.rstrip("/") or ".")
             continue
+        if visited is not None:
+            visited.append(pre.rstrip("/"))
         for entry in entries:
             name = entry.name
             rel = pre + name
@@ -298,9 +303,9 @@ def walk_markdown(start, prefix: str = "", skip_top: bool = False) -> Walk:
     return Walk(files, sorted(unlistable, key=_sort_key), sorted(unknown, key=_sort_key))
 
 
-def walk_pages(wiki_root) -> Walk:
-    """ページのファイルと、知らせ。知らせは、たどった全体のものをそのまま返す。"""
-    found = walk_markdown(wiki_root, skip_top=True)
+def walk_pages(wiki_root, visited: "list | None" = None) -> Walk:
+    """ページのファイルと、知らせ。知らせは、たどった全体のものをそのまま返す。visited は walk_markdown と同じ。"""
+    found = walk_markdown(wiki_root, skip_top=True, visited=visited)
     return Walk([f for f in found.files if is_page_path(f.rel)], found.unlistable, found.unknown)
 
 

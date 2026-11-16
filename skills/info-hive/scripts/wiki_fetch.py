@@ -29,7 +29,8 @@ Markdown への変換、画像のダウンロード、frontmatter の出力を�
 （<スラッグ>-<YYYYMMDD>）を提案する。--force を付けると上書きする。
 
 終了コード: 0 = 保存した（または内容が同じ）、1 = 引数やファイルのエラー、2 = 取得の失敗、
-3 = 既存のファイルと内容が違う。
+3 = 既存のファイルと内容が違う、4 = YouTube の URL なので取らない（渡された URL、--page-url、リダイレクトの先の
+どれかのホストが youtube.com か youtu.be。本文を読む前に止まる。動画は wiki_youtube.py で取り込む。ADR-0027）。
 """
 
 from __future__ import annotations
@@ -59,6 +60,7 @@ from wiki_text import format_fm_value, localize_argparse, parse_frontmatter_text
 import wiki_initialized  # noqa: E402
 import wiki_pages  # noqa: E402
 import wiki_rawcheck  # noqa: E402
+import wiki_youtube_url  # noqa: E402
 
 FETCHED_BY = "wiki_fetch.py 0.1"
 USER_AGENT = "Mozilla/5.0 (compatible; info-hive-wiki-fetch/0.1; +https://github.com/to884/info-hive-wiki)"
@@ -69,6 +71,36 @@ FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
 class FetchError(Exception):
     """取得に失敗した。終了コード 2 になる。"""
+
+
+class YouTubeRefused(Exception):
+    """YouTube の URL なので、Web ページの経路では取らない（ADR-0027）。終了コード 4 になる。"""
+
+    def __init__(self, url: str, where: str):
+        self.url = url
+        self.found = wiki_youtube_url.classify(url)
+        if self.found.kind == "video":
+            hint = f"動画（{self.found.video_id}）なので、動画の分岐（wiki_youtube.py）で取り込む"
+        else:
+            hint = f"動画でない YouTube の URL なので取らない（{self.found.reason}）"
+        super().__init__(f"{where}が YouTube の URL なので、本文を読まずに止めた（{url}）。{hint}")
+
+
+def refuse_youtube(url: str, where: str) -> None:
+    """URL を開くときにつなぐホストが youtube.com か youtu.be なら、YouTubeRefused を上げる。
+
+    ホストは、URL の字面でなく、通信の処理がつなぐもので決める（wiki_youtube_url.effective_host と、
+    送る形にした URL の urllib のホストの両方）。パーセントエンコードや全角の文字で書いたホストを通さない。
+    """
+    if not url:
+        return
+    hosts = {wiki_youtube_url.effective_host(url)}
+    try:
+        hosts.add((urllib.request.Request(request_url(url)).host or "").lower().rsplit(":", 1)[0].rstrip("."))
+    except (ValueError, UnicodeError):
+        pass
+    if any(wiki_youtube_url.is_youtube_host(h) for h in hosts if h):
+        raise YouTubeRefused(url, where)
 
 
 # ---------------------------------------------------------------------------
@@ -100,14 +132,18 @@ def is_private_host(host: str) -> bool:
 class _SafeRedirect(urllib.request.HTTPRedirectHandler):
     """http と https の中だけでリダイレクトを許す。block_private なら、内部のアドレスへの転送も拒む。"""
 
-    def __init__(self, block_private: bool = False):
+    def __init__(self, block_private: bool = False, refuse_youtube: bool = False):
         super().__init__()
         self.block_private = block_private
+        self.refuse_youtube = refuse_youtube
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         parts = urllib.parse.urlsplit(newurl)
         if parts.scheme.lower() not in ("http", "https"):
             raise FetchError(f"http/https 以外へのリダイレクトは拒む: {newurl}")
+        # ページの取得では、リダイレクトの先が YouTube なら、先の本文を読む前に止める（ADR-0027）。
+        if self.refuse_youtube:
+            refuse_youtube(newurl, "リダイレクトの先")
         if self.block_private and is_private_host(parts.hostname or ""):
             raise FetchError(f"内部のアドレスへのリダイレクトは拒む: {newurl}")
         return super().redirect_request(req, fp, code, msg, headers, newurl)
@@ -138,7 +174,7 @@ def request_url(url: str) -> str:
 
 
 def fetch(url: str, timeout: float, max_bytes: int, accept: str = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
-          block_private: bool = False):
+          block_private: bool = False, refuse_youtube_redirect: bool = False):
     """URL を GET し、(バイト列, 最終的な URL, Content-Type) を返す。
 
     block_private を付けると、内部のアドレス（ループバック、LAN、リンクローカル）への取得と
@@ -148,7 +184,7 @@ def fetch(url: str, timeout: float, max_bytes: int, accept: str = "text/html,app
     if block_private and is_private_host(urllib.parse.urlsplit(url).hostname or ""):
         raise FetchError(f"内部のアドレスは取得しない: {url}")
     req = urllib.request.Request(request_url(url), headers={"User-Agent": USER_AGENT, "Accept": accept})
-    opener = urllib.request.build_opener(_SafeRedirect(block_private))
+    opener = urllib.request.build_opener(_SafeRedirect(block_private, refuse_youtube_redirect))
     try:
         with opener.open(req, timeout=timeout) as resp:  # encoding: default-ok（ファイルではなく URL を開く）
             chunks = []
@@ -1289,6 +1325,10 @@ def build(args) -> tuple[int, dict]:
 
     wiki = getattr(args, "wiki", None)
     html_file = getattr(args, "html_file", None)
+    # YouTube の URL は、Web ページの経路で取らない（ADR-0027）。途中の取り込みの再開よりも先に止める。
+    refuse_youtube(args.url, "渡された URL ")
+    if getattr(args, "page_url", None):
+        refuse_youtube(args.page_url, "--page-url ")
     # 途中の取り込みは、取得の前に再開する。続けるかは写しと raw の状態だけで決まるので、ページを取り直さない。
     # 取り直して原文を比べると、--html-file で取ったページ（DOM のハッシュ）や、取得のたびに変わるページでは、
     # 写しがそろっていても内容が違うとして止まり、ネットにつながらなければ取得の失敗で止まる。
@@ -1297,6 +1337,8 @@ def build(args) -> tuple[int, dict]:
     if wiki is not None and not html_file and not args.force and target.exists():
         saved = wiki_rawcheck.resumable_fetch(wiki, args.slug, target)
         if saved is not None and saved["url"] == args.url:
+            # 前の版で始めた取り込みの転送先が YouTube なら、続けずに止まる（ADR-0027）。
+            refuse_youtube(saved.get("final_url") or "", "前の取得の最後の URL ")
             # 前の取得の出力（警告を含む）に、取得しなかったことと、どの段まで進んだかを足して返す。
             result = {"path": target.as_posix(), "url": args.url, "final_url": saved["final_url"],
                       "source_sha256": saved["source_sha256"], "unchanged": True, "fetch_skipped": True,
@@ -1319,7 +1361,9 @@ def build(args) -> tuple[int, dict]:
             raise ValueError(f"--html-file は UTF-8 で保存した HTML にする（{exc.reason}、{exc.start} バイト目）") from None
         final_url, content_type = args.page_url, "text/html; charset=utf-8"
     else:
-        data, final_url, content_type = fetch(args.url, args.timeout, args.max_bytes, block_private=block_private)
+        data, final_url, content_type = fetch(args.url, args.timeout, args.max_bytes, block_private=block_private,
+                                              refuse_youtube_redirect=True)
+        refuse_youtube(final_url, "最後の URL ")
     ctype = content_type.split(";")[0].strip().lower()
     if ctype and ctype not in ("text/html", "application/xhtml+xml", "text/plain", "application/xml", "text/xml"):
         raise FetchError(f"HTML のページではない（Content-Type: {ctype}）。PDF などは保存してから通常の手順で取り込む")
@@ -1634,7 +1678,9 @@ def report_failure(args, exc: BaseException) -> int:
     """
     old = has_old_work_dir(args, args.raw_root / f"{args.slug}.md")
     error = None  # --json のときに出す error の値。None なら標準出力には何も出さない（今までどおり）。
-    if isinstance(exc, FetchError):
+    if isinstance(exc, YouTubeRefused):
+        code, error, message, text = 4, "youtube", str(exc), str(exc)
+    elif isinstance(exc, FetchError):
         code, error, message, text = 2, "fetch_failed", str(exc), f"取得に失敗した: {exc}"
     elif isinstance(exc, RecursionError):
         message = "HTML の入れ子が深すぎて変換できない"
@@ -1651,6 +1697,8 @@ def report_failure(args, exc: BaseException) -> int:
         text = f"{trace}\n予期しない誤りで止まった（{type(exc).__name__}: {exc}）"
     if args.json and error is not None:
         failed = {"error": error, "message": message}
+        if isinstance(exc, YouTubeRefused):
+            failed["youtube"] = {"kind": exc.found.kind, "video_id": exc.found.video_id, "url": exc.url}
         if old:
             failed["old_work_dir"] = True
         print(json.dumps(failed, ensure_ascii=False))

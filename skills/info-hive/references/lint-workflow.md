@@ -46,6 +46,7 @@ lint のレポートには、次のものが含まれる。
 - **出典の参照切れ**（`unresolved_sources`）: frontmatter の `sources:` に、ないページ（`reason` が `missing`）か、`type` が `source` でないページ（`not_source`）を書いているもの。`sources_consulted` は種類を問わないので見ない。
 - **原本がない**（`missing_raw`）: source ページの `raw:` が指すファイルかディレクトリがないもの。相対パスは、wiki のルート（`../raw/...`、`../W1_Raw/...`）、wiki の親（取り込みのひな形の `raw/...`）、ページのディレクトリのどれかを基準にして見つかればよい。rag が書く `C:/...` のような絶対パスはそのまま確かめる。URL は見ない。
 - **タグの体系にないタグ**（`unknown_tags`）: `allowed_tags`（`--allowed-tags`）を渡したときだけ、そこにないタグを持つページを挙げる。タグは NFKC にそろえてから比べる。
+- **字幕の訂正と留保の食い違い**（`caption_corrections`）: YouTube の動画の raw を `raw` に持つ要約ページと、`〔訂正 …〕`、`〔留保 …〕` の印のあるページを、raw と照らす（info-hive-dev の ADR-0027）。定義の字幕の語が raw の行にないもの、根拠の場所に訂正した語がないもの、印と定義の対応の誤り、印の直前の本文の末尾が語と合わないもの、要約ページの間で食い違う定義、書かれた `confidence` と計算した値の違いを挙げる。各項目は `path`、`line`、`code`、`message` を持つ。直し方は `ingest-workflow.md` の「字幕の訂正と留保」と「confidence の決め方」に従い、ユーザーの承認を得てからページを直す。raw は直さない。
 - **日本語の書き損じ**: 英語のキーと日本語の別名を両方書いている frontmatter（`title` と `タイトル` など）、キーのあとが全角の「：」になっている frontmatter、リストの値を「、」で区切っている frontmatter、全角の「｜」か「＃」を使った wikilink、`created`・`updated`・`ingested` の日付が `YYYY-MM-DD` の形になっていないページ、文字列の値が二重引用符で囲まれていない frontmatter（`unquoted_strings`。配列の要素も含む。日付と数値は対象外）。
 
 このスクリプトは控えめに動く。検出結果を報告するが、修正はしない。レポートをユーザーに示す。
