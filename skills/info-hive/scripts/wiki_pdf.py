@@ -17,18 +17,22 @@ wiki_pdf_layer.py（rag の rag_pdf_layer.py と同じ中身）が行う。取�
     ページごとに `## p. <番号>`、空行、ページの本文を並べ、ページのあいだを空行（\\n\\n）でつなぐ。
     判定が vertical のページは本文の前に 1 行の注意を付け、garbled と scan のページは本文を出さずに
     1 行の説明だけを出し、blank のページは見出しだけを出す。
-    1 回の出力は --max-chars 文字までである。続きがあれば、標準エラーに続きの位置を書く。
-    続きの位置は `<PDF の SHA-256 の先頭 12 文字>:<ページ>:<ページの本文の中の文字の位置>` で、
+    1 回の出力は --max-chars 文字（500 以上。既定は 20000）を超えない。続きがあれば、標準エラーに
+    続きの位置を書き、終了コード 3 で終わる。続きの位置は
+    `<PDF の SHA-256 の先頭 12 文字>:<ページ>:<ページの本文の中の文字の位置>:<抽出の識別の 8 文字>` で、
     --from に渡すと、その位置から本文だけを続ける（見出しと注意の 1 行は出し直さない）。
-    分けて読んだ出力をつなぐと、一度に出した出力と同じになる。PDF が変わっていたら止まる。
+    分けて読んだ出力をつなぐと、一度に出した出力と同じになる。PDF か抽出の識別が変わっていたら止まる。
 
 --json:
     全体の要約（PDF の SHA-256、ページの数、判定ごとのページの数、確かめるべきページの数、抽出の識別、
-    ページの一覧）を返す。ページの一覧は、続いた番号をまとめた範囲で、範囲の数が 200 を超えると
+    ページの一覧）を返す。一覧は、判定ごとのページ（kind:<判定>）、確かめるべきページ（needs_check）、
+    文字の層の本文が空のページ（empty_text。判定によらず、pdfminer の本文が空のページ）である。
+    ページの一覧は、続いた番号をまとめた範囲で、範囲の数が 200 を超えると
     先頭の 200 個と、続きを取る位置（next）を返す。--list-from <next> で続きを取る。
     --pages を付けると、その範囲のページの詳細（判定、判定の数値、本文の崩れの数、本文の SHA-256）も返す。
 
-終了コード: 0 は成功、1 は PDF が読めないなど、2 は引数の誤りか、続きの位置が今の PDF と合わないとき。
+終了コード: 0 は成功（最後まで出した）、3 は続きがある、1 は PDF が読めないなど、2 は引数の誤りか、
+続きの位置が今の PDF と合わないとき。
 """
 
 from __future__ import annotations
@@ -47,6 +51,9 @@ NOTES = {
     "scan": "（このページはスキャンの画像と判定した。文字の層の本文はない）",
 }
 DEFAULT_MAX_CHARS = 20000
+# 見出しと注意の 1 行（100 文字に満たない）に、本文の 1 文字を足しても、上限を超えないようにする
+MIN_CHARS = 500
+EXIT_MORE = 3
 
 
 def fail(message: str, code: int = 1) -> None:
@@ -77,12 +84,24 @@ def body(page: dict) -> str:
     return page["text"] if page["kind"] in ("text", "vertical") else ""
 
 
-def parse_token(token: str, digest: str) -> tuple[int, int]:
+def identity_tag(layer) -> str:
+    """続きの位置に入れる、抽出の識別の短い印。"""
+    canonical = json.dumps(layer.extraction_identity(), sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:8]
+
+
+def make_token(digest: str, tag: str, page: int, offset: int) -> str:
+    return f"{digest[:12]}:{page}:{offset}:{tag}"
+
+
+def parse_token(token: str, digest: str, tag: str) -> tuple[int, int]:
     parts = token.split(":")
-    if len(parts) != 3 or not parts[1].isdigit() or not parts[2].isdigit():
-        fail(f"続きの位置の形が違う: {token}（<SHA-256 の先頭 12 文字>:<ページ>:<位置>）", 2)
+    if len(parts) != 4 or not parts[1].isdigit() or not parts[2].isdigit():
+        fail(f"続きの位置の形が違う: {token}（<SHA-256 の先頭 12 文字>:<ページ>:<位置>:<抽出の識別>）", 2)
     if parts[0] != digest[:12]:
         fail(f"PDF が、続きの位置を出したときと違う（位置 {parts[0]}、今の PDF {digest[:12]}）。最初から読み直す。", 2)
+    if parts[3] != tag:
+        fail(f"抽出の識別が、続きの位置を出したときと違う（位置 {parts[3]}、今 {tag}）。最初から読み直す。", 2)
     page, offset = int(parts[1]), int(parts[2])
     if page < 1:
         fail("続きの位置のページは 1 以上にする", 2)
@@ -90,43 +109,42 @@ def parse_token(token: str, digest: str) -> tuple[int, int]:
 
 
 def render(layer, data: bytes, digest: str, max_chars: int, start_page: int, start_offset: int) -> tuple[str, str | None]:
-    """出力する文字列と、続きの位置（なければ None）を返す。"""
-    out: list[str] = []
-    used = 0
-    offset = start_offset
+    """出力する文字列と、続きの位置（なければ None）を返す。出力の長さは max_chars を超えない。"""
+    if max_chars < MIN_CHARS:
+        fail(f"--max-chars は {MIN_CHARS} 以上にする", 2)
+    tag = identity_tag(layer)
     count = layer.pdfium_page_count(data)
     if start_page > count:
         fail(f"続きの位置のページ（{start_page}）が、PDF のページの数（{count}）を超えている", 2)
+    out: list[str] = []
+    used = 0
+    offset = start_offset
     for page in layer.analyze_pages(data, start=start_page):
         number = page["page"]
         text = body(page)
         if offset > len(text):
             fail(f"続きの位置（{number} ページの {offset} 文字目）が、ページの本文の長さ（{len(text)}）を超えている。最初から読み直す。", 2)
-        added_header = False
         if offset == 0:
             head = header(page)
-            if used and used + len(head) > max_chars:
-                return "".join(out), f"{digest[:12]}:{number}:0"
+            # 見出しと、本文があればその 1 文字目までが入らなければ、見出しの前で分ける。
+            # 呼び出しの最初のページは MIN_CHARS があるので、必ず入る
+            if used + len(head) + (1 if text else 0) > max_chars:
+                return "".join(out), make_token(digest, tag, number, 0)
             out.append(head)
             used += len(head)
-            added_header = True
         rest = text[offset:]
         room = max_chars - used
-        if not rest or len(rest) <= room:
+        if len(rest) <= room:
             out.append(rest)
             used += len(rest)
             offset = 0
             continue
-        if room < 1 and added_header and len(out) > 1:
-            # 見出しだけを出して本文を 1 文字も出せないなら、見出しの前で分ける
-            out.pop()
-            return "".join(out), f"{digest[:12]}:{number}:0"
-        cut = max(1, room)
+        cut = room
         newline = rest.rfind("\n", 0, cut)
         if newline + 1 > cut // 2:
             cut = newline + 1
         out.append(rest[:cut])
-        return "".join(out), f"{digest[:12]}:{number}:{offset + cut}"
+        return "".join(out), make_token(digest, tag, number, offset + cut)
     return "".join(out), None
 
 
@@ -153,16 +171,19 @@ def summary(layer, data: bytes, digest: str, path: Path, pages_arg: str | None, 
     count = len(pages)
     kinds = {kind: [p["page"] for p in pages if p["kind"] == kind] for kind in layer.KINDS}
     check = [p["page"] for p in pages if p["needs_check"]]
+    empty = [p["page"] for p in pages if not p["text"]]
     result = {
         "pdf": str(path),
         "sha256": digest,
         "pages": count,
         "kinds": {kind: len(numbers) for kind, numbers in kinds.items()},
         "needs_check": len(check),
+        "empty_text": len(empty),
         "extraction": layer.extraction_identity(),
         "list_from": list_from,
         "lists": {**{f"kind:{kind}": layer.page_list(numbers, list_from) for kind, numbers in kinds.items()},
-                  "needs_check": layer.page_list(check, list_from)},
+                  "needs_check": layer.page_list(check, list_from),
+                  "empty_text": layer.page_list(empty, list_from)},
     }
     if pages_arg:
         chosen = set(parse_pages(pages_arg, count))
@@ -185,8 +206,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--pages", default=None)
     parser.add_argument("--list-from", type=int, default=0)
     args = parser.parse_args(argv)
-    if args.max_chars < 1:
-        fail("--max-chars は 1 以上にする", 2)
+    if args.max_chars < MIN_CHARS:
+        fail(f"--max-chars は {MIN_CHARS} 以上にする", 2)
     if args.list_from < 0:
         fail("--list-from は 0 以上にする", 2)
     if args.json and args.start:
@@ -204,7 +225,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.json:
             print(json.dumps(summary(layer, data, digest, path, args.pages, args.list_from), ensure_ascii=False, indent=1))
             return 0
-        page, offset = parse_token(args.start, digest) if args.start else (1, 0)
+        page, offset = parse_token(args.start, digest, identity_tag(layer)) if args.start else (1, 0)
         text, following = render(layer, data, digest, args.max_chars, page, offset)
     except SystemExit:
         raise
@@ -214,6 +235,7 @@ def main(argv: list[str] | None = None) -> int:
     sys.stdout.flush()
     if following:
         print(f"\n続きがある。続きは --from {following} で読む。", file=sys.stderr)
+        return EXIT_MORE
     return 0
 
 
