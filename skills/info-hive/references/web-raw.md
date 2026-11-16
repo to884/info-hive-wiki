@@ -43,7 +43,7 @@
      | `old_work_dir` | 0.14.1 までの版で始めた取り込みの途中の作業用の写しがあり、この版では続けられない | 取り直すなら `fetch.force` を `true` にする（写しと raw を作り直し、途中の削除や訳は消える） |
      | `needs_browser` | 本文が空か短すぎる（JavaScript で描くページ、ログインが要るページ） | ユーザーがふだん使っているブラウザで本文を表示し、ページの HTML を UTF-8 のファイルに保存する。`fetch.html_file` にそのファイルの絶対パス、`fetch.page_url` に本文を表示したときのアドレス欄の URL を入れ、`fetch.force` を `true` にする（この取り込みで書いた、本文の足りない raw を置き換える）。`question.message` に、本文がもうブラウザで保存した HTML から取ってある（`source_sha256_of` が `dom`）と書いてあれば、取り直すかをユーザーに先に聞く（`fetch.force` で取り直すと、途中の作業は消える）。取り直さずに今の本文で続けるなら（ページの本文がもともと短い、など）、`fetch` は 4 のとおりに戻したまま（取り直さない）、`conditions` に「本文が短いまま続ける（fetched_sha256: <`question.fetched_sha256` の値>）」を足す。承認は、この値の本文にだけ効く（エージェントが取り直して本文が変われば、また問いが返る）。ログインが要るページは、wiki に入れてよいかをユーザーに先に確かめる |
 
-   - `failed`: `error.message` をそのまま伝えて止まる。
+   - `failed`: `error.message` をそのまま伝えて止まる。`error.kind` が `youtube` なら、Web ページとしては取らず、`commands/ingest.md` の「YouTube の動画の取り込み」（V1〜V10）で取り込み直す。
 6. `done` か `warnings` なら、W9 に進む前に、raw の `translated_by` と補足の表示名を見る。どちらかが空でなく、`Sonnet` が入っていなければ（前の取り込みの途中で、別のモデルが訳した raw を続けて検査した、など）、ユーザーに伝え、作り直すかを聞く。作り直すなら、`fetch.force` を `true` にして 3 から行う。訳さないページの空の `translated_by` と、画像がないときの補足のなさは、そのままでよい。
 7. W9 に進む。raw はエージェントが作ったので、取り込みの手順 3 で raw を読む。
 8. log の段で、取り込みの行のサブ行に、raw の段の分担を書く。エージェントに任せたときは「raw: `wiki:web-raw` に任せた（報告したモデル: Claude Sonnet 5.5）。訳: Claude Sonnet 5.5、補足: Claude Sonnet 5.5」、`wiki:web-raw` がなく自分で作ったときは「raw: 自分のモデル（Claude Opus 5.5）で作った（`wiki:web-raw` がなかった）。訳: …、補足: …」と書く。訳と補足の名前は、raw の `translated_by` と補足の表示名から取る（訳していなければ「訳: なし」、画像がなければ「補足: なし」）。これらはモデルが自分で書いた名前であり、記録の目安である。
@@ -78,7 +78,7 @@
 | `done` | raw ができ、`check --finish` で作業用の写しを消した | `warnings` は空。`question` と `error` は `null` |
 | `warnings` | raw はできたが、直さなかった警告が残っている。作業用の写しは残してある | `warnings` に、`check` が出した警告の `kind`、`line`、`message` と、受け入れる理由の案 `proposed_reason` を、出た順に並べる |
 | `needs_user` | ユーザーの判断が要る | `question` に `kind`（上の表の 4 つのどれか）と `message`。`existing_differs` なら `suggested_slug` も、`needs_browser` なら、その本文の `fetched_sha256`（最後に実行した `wiki_fetch.py` の出力の値）も |
-| `failed` | 続けられない（取得の失敗、初期化されていない wiki、raw のルートがない、自分のモデル名が分からない） | `error` に `kind`（`fetch_failed`、`not_initialized`、`no_raw_root`、`model_unknown`、`other`）と `message` |
+| `failed` | 続けられない（取得の失敗、YouTube の URL、初期化されていない wiki、raw のルートがない、自分のモデル名が分からない） | `error` に `kind`（`fetch_failed`、`youtube`、`not_initialized`、`no_raw_root`、`model_unknown`、`other`）と `message` |
 
 - `warnings` の各項目の `line` は、`check` の出力の `line` をそのまま書く。行のない警告（文体の混在）は `null` にする。
 - `language_override` は、`check` に `--language-override` を付けたときの `{"value": "translate" か "keep", "reason": "…"}`。付けなければ `null`。
@@ -114,6 +114,7 @@
   - 終了コード 0 で `"unchanged": true` なら、raw がすでにあり、何も書かなかった。`"work_dir": true` なら前の取り込みの途中である。URL だけで呼んだときに途中の取り込みがあれば、スクリプトはページを取得せずに返す（`"fetch_skipped": true`。ネットにつながらなくても続けられる。ページが更新されたかは見ていない）。`"work_stage": "fetched"` なら W3 から（出力の `warnings` と `removed_by_rule` は前の取得のもの）、`"work_stage": "frozen"` なら削除はもう固定してあるので、出力の `freeze`（W5 の `freeze` の出力の、消した行、一部を消した行、警告）を読んで W5 の確かめ（本文を消していないか）をしてから、W6（訳と補足）から続ける（raw が訳したあとなら、W8 の `check` から）。出力には、前の取得の `needs_translation` と `images`（`frozen` なら、削除のあとに残った画像だけ）も入っている。`"work_dir": false` なら、すでに取り込んだものか、途中で作業用の写しを失ったもの（raw と別の取得の写しや、0.14.1 までの版が書いた写しも含む）である。取り込み直すかをユーザーに聞く（`already_ingested`）。取り込み直すなら `--force` で取り直す（写しと raw の両方を作り直す）。
   - 終了コード 3 は、同じスラッグのファイルがあり、原文の内容が違うことを示す。ページが更新されたので、別版として `--slug <提案されたスラッグ>` で取り直すか、`--force` で上書きするかをユーザーに聞く（`existing_differs`）。
   - 終了コード 2 は取得の失敗である（エージェントなら `failed`、`fetch_failed`）。HTTP のエラー、HTML でないページ（PDF などは保存してから通常の手順で取り込む）、大きすぎるページがある。
+  - 終了コード 4 は、渡された URL、`--page-url`、リダイレクトの先のどれかが YouTube の URL（ホストが `youtube.com` か `youtu.be`）であることを示す（エージェントなら `failed`、`youtube`）。本文は読んでおらず、何も書いていない。動画は Web ページの経路で取らず、字幕から raw を作る経路（info-hive-dev の ADR-0027）で取り込む。短縮 URL が動画へリダイレクトしたときも同じである。
   - どの終了コードでも、出力に `"old_work_dir": true` があれば（JSON を出さない終了コード 1 では、標準エラーの「0.14.1 までの版で始めた取り込みの途中の作業用の写しがある」の案内）、終了コード 0 と 3 では、上の終了コードごとの扱いより先にこれを見る。終了コード 1 と 2 では、まずその誤り（取得の失敗、`--html-file` の誤りなど）を扱い（エージェントなら `failed` で返し、`error.message` に、0.14.1 までの版の写しがあることも書く）、誤りを直して呼び直したときにこれを扱う。0.14.1 までの版で始めた取り込みの途中の作業用の写しがあり、この版では続けられない。終了コード 3 でも、ページが更新されたとは限らない（ブラウザで保存した HTML から取った取り込みを、URL で取り直したときなど）。`--force` で取り直すか（写しと raw の両方を作り直し、途中の削除や訳は消える）をユーザーに聞く（`old_work_dir`）。
 - **W3.** 出力の `warnings` と `removed_by_rule` を見る。
   - 本文が空か短すぎるときは、JavaScript で描くページか、ログインが要るページかもしれない。ユーザーがふだん使っているブラウザで本文を表示し、ページの HTML を UTF-8 のファイルに保存して、`--html-file <ファイル> --page-url <本文を表示したときのアドレス欄の URL> --force` を付けて W2 をやり直す（`source_sha256_of` は `"dom"` になる。`--force` で、前の取得の raw と作業用の写しを作り直す）。出力の `source_sha256_of` がもう `"dom"` なら、本文はブラウザで保存した HTML から取ってあるので、自分で取り直さずに、取り直すかをユーザーに聞く（`--force` で取り直すと、途中の作業は消える）。ログインが要るページの本文には非公開の情報が含まれうるので、wiki に入れてよいかをユーザーに確かめる。エージェントはブラウザを操作できないので、どちらの場合も `needs_browser` で返す（`question.message` に、`dom` かどうかを書く）。ただし、依頼の `conditions` に「本文が短いまま続ける（fetched_sha256: <値>）」があり、その値が、最後に実行した `wiki_fetch.py` の出力の `fetched_sha256` と同じなら、呼び出す側がこの本文についてユーザーに確かめてあるので、取り直さず、`needs_browser` も返さずに続ける。値が違う（下の `--keep-noise --force` や W5 の `--force` で取り直して、本文が変わった）か、値がなければ、承認はこの本文のものではないので、本文が短ければ `needs_browser` で返す。
