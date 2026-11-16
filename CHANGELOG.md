@@ -6,6 +6,15 @@
 
 ## [Unreleased]
 
+## [0.23.2] - 2026-11-16
+
+### Changed
+
+- `wiki_youtube.py` の `inspect` と `write` が、字幕を取った時刻 `fetched_at`（時差つきの ISO 8601）を返すようにした。要約ページの `fetched_at` には、`write` の結果の値を写す（手順 V5 と `ingest-workflow.md` の「YouTube の動画」）。これまでは時刻を別に取る必要があった。
+
+### Fixed
+
+- `wiki_youtube.py verify` の「raw にない語」に、`## 主張と行き先` の表の行き先の値（`create`、`source_only`）が混ざっていた。表の「行き先」の列で、中身がちょうど手順の値（`create`、`update`、`source_only`）のセルだけを目印から外す。表に書いた主張や、本文の同じ語は、これまでどおり目印の対象にする。使い捨ての wiki で自動字幕の講義を最初から最後まで取り込んで見つけた。
 ## [0.23.1] - 2026-11-16
 
 ### Fixed
