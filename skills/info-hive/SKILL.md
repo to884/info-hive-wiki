@@ -216,6 +216,7 @@ gist をめぐるコミュニティの議論で、このパターンがうまく
 - `scripts/wiki_session.py`: Claude Code のセッションの記録（JSONL）から会話だけを抜き出し、自動の伏せ字と、人が決めた伏せる位置と消すターンを当てて、raw を 1 回で、重ねて書かない形で書き、読み取り専用にする。raw と同じ文の表示（`show`）、raw の照合（`verify`）、wiki に書く予定の文に伏せた文字列がないかの検査（`scan`）も行う。確認の前の会話の文はディスクに書かない
 - `scripts/wiki_rawcheck.py`: Web ページの raw のモデルによる書き換えを、取得した直後の写しと照らして検査する。雑音の削除の段（`freeze`。消すことだけをしたか）と、訳と補足の段（`check`。ブロック、コード、リンク、画像、表の形が変わっていないか）
 - `scripts/wiki_encoding.py`: テキストのソースの文字コード（UTF-8、Shift_JIS、EUC-JP、ISO-2022-JP）を調べ、必要なら UTF-8 に変換した別のファイルを書き出す。元のファイルは書き換えない
+- `scripts/wiki_pdf.py`: PDF の文字の層を、ページごとに判定して取り出す（`uv run --script` で動かす。ADR-0025）。本文を分けて読む `--from` と、判定と確かめるべきページの一覧を返す `--json` がある。取り出しと判定は `scripts/wiki_pdf_layer.py` が行い、rag の `rag_pdf_layer.py` と同じ中身である
 - `scripts/wiki_graph_extract.py`: グラフのメタデータと wikilink を、バージョンを固定した PyYAML を使って JSONL、SQLite、GraphML にコンパイルする
 - `scripts/wiki_graph_lint.py`: バージョンを固定した PyYAML を使い、型付きエッジをオントロジーと照らして検証する
 - `scripts/wiki_graph_query.py`: `graph.sqlite` に対する neighbors、edges、facts、最短経路のクエリ
