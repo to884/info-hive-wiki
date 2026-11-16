@@ -242,19 +242,19 @@ Read は、図と版面を見るとき、確かめるべきページと、判定
 2. OCR したページ（`lists.ocr`）と、OCR の結果が空のページ（`lists.ocr_empty`）を伝える。OCR の結果が空のページは、読めなかったページとして扱う。
 3. 今の OCR の設定は、`status` の `settings`（`ocr_mode`、`ocr_dpi`）で分かる。`page_report.ocr.mode` は、そのジョブを処理したときの設定である。
 4. 確かめるべきページ（判定は `text`）と `blank` のページは、`ocr_mode` が `auto` なら OCR されていない。Read でページの画像を見る。
-5. OCR の確信度の低いページ（`lists.ocr_low_confidence`）があれば、要約のページを書く前に、下の「OCR の確信度の低いページを確かめる」のとおりにユーザーに確かめてもらう。確信度が不明のページ（`lists.ocr_unknown_confidence`。rag 0.5 以前の OCR の結果を移したページなど）は、数と番号を伝える。不明のページは、確信度が高いとは扱わない。
+5. 確認が要るページがあれば、要約のページを書く前に、下の「OCR の確信度の低いページを確かめる」のとおりにユーザーに確かめてもらう。確認が要るのは、確信度が低くまだ決めていないページ（`lists.review:pending`）と、前に決めたあとで OCR をやり直して本文が変わったページ（`lists.review:stale`。新しい本文の確信度が高くても、前の結果は当てていない）である。確信度が不明のページ（`lists.ocr_unknown_confidence`。rag 0.5 以前の OCR の結果を移したページなど）は、数と番号を伝える。不明のページは、確信度が高いとは扱わない。
 
 **OCR の確信度の低いページを確かめる。** 確信度は、OCR の認識器が文字を読み違えた確からしさと、行の読み終わりを迷った確からしさだけを表す。検出の漏れ、縦書きの列の順、表の崩れは、確信度を下げない。閾値は仮の値（`page_report.confidence.threshold_calibrated` が `false`）なので、そのこともユーザーに伝える。
 
-1. 確信度の低いページの数と番号を伝え、1 回の質問で、次から選んでもらう。
+1. 確認が要るページ（`review:pending` と `review:stale`）の数と番号を伝え、1 回の質問で、次から選んでもらう。古くなったページは、前に決めた結果（`ocr_page_detail` の `decision`）と、本文が変わったことも伝える。
    - **いま確かめる:** 確信度の低い順に、1 回に 10 ページまでを示す。ページごとに `ocr_page_detail(wiki_root, job_id, page)` を呼び、確信度の低い行（行の番号、本文、確信度）を示す。ユーザーは PDF のそのページを見て、ページごとに「そのまま使う」「直す」「却下する」「あとで」を選ぶ。エージェントは Read でページの画像を見て、どの行が怪しいかを説明してよい。残りのページは、続けるか、あとにするかを聞く。
-   - **すべてそのまま使う:** 確信度の低いページを、すべて「そのまま使う」にする。
+   - **すべてそのまま使う:** 確認が要るページを、すべて「そのまま使う」にする。
    - **あとで確かめる:** 確認待ちのまま残す。
 2. **直す:** ユーザーが直した本文を書く。エージェントがページの画像から直した本文の案を作ってもよいが、ユーザーが案を承認するまで送らない。ユーザーが書いたときは `decided_by` を `user`、エージェントの案をユーザーが承認したときは `agent_draft_approved` にする。
 3. 決めたページを `decide_ocr_pages(wiki_root, job_id, base_version, decisions)` で送る。`base_version` は `ocr_page_detail` の `ledger_version`、各ページの `ocr_sha256` は `ocr_page_detail` で確かめた値にする（`action` は `accept`、`fix`、`reject`）。受け付けられないとき（別のセッションで決めた、OCR をやり直した）は、`ocr_page_detail` で取り直して、もう一度ユーザーに確かめる。「あとで」のページは送らない。
 4. **却下する:** その wiki の索引から、そのページを外す。返す本文のそのページは、見出しと、却下したことを書いた 1 行だけになる。
-5. **要約との順:** 送ったあとは、結果の `rebuild_job` を `job_status` で待ち、`page_report.review.published_version` が台帳の版（`ledger_version`）に追いついてから、要約のページを書く。本文は、確認を当てた本文（`page_report.review.extracted_markdown`、または `rebuild_job` の結果の `extracted_markdown`）を読み直す。確認待ち（`lists.review:pending`）と「あとで」のページの本文は、要約に使わず、要約のページに確認待ちのページの番号を書く。確認が済んだら、要約のページを直すかをユーザーに聞く。
-6. **答えがないとき:** セッションが終わるなどして答えがないページは、確認待ちのまま残す。黙って「そのまま使う」にはしない。`status` の `review.pending_pages` が、wiki ごとの確認待ちのページの数を返すので、次の取り込みのときに伝える。
+5. **要約との順:** 送ったあとは、結果の `rebuild_job` を `job_status` で待ち、`page_report.review.published_version` が台帳の版（`ledger_version`）に追いついてから、要約のページを書く。本文は、確認を当てた本文（`page_report.review.extracted_markdown`、または `rebuild_job` の結果の `extracted_markdown`）を読み直す。確認待ち（`lists.review:pending`）、古くなった（`lists.review:stale`）、「あとで」のページの本文は、要約に使わず、要約のページに確認待ちのページの番号を書く。確認が済んだら、要約のページを直すかをユーザーに聞く。
+6. **答えがないとき:** セッションが終わるなどして答えがないページは、確認待ちのまま残す。黙って「そのまま使う」にはしない。`status` の `review.pending_pages` が、wiki ごとの確認待ちのページ（古くなったページを含む）の数を返すので、次の取り込みのときに伝える。
 7. **検索の印:** 確認待ちのページも検索の対象になり、検索の結果の `review.state` が `pending` になる。反映待ち（確認を送ったが、まだ索引に反映されていない）のページは `review.awaiting_publish` が真になる。確認待ちのページを根拠にするときは、そのことを書く。
 
 rag の本文は `result.extracted_markdown` を読む。OCR しなかったページ（`lists.ocr` に入っていないページ）の本文は、同じ抽出の識別（`result.extraction`）なら `wiki_pdf.py` の本文と同じである。`ocr_mode` が `always` なら、判定が `text` のページも OCR の結果になるので、`wiki_pdf.py` の本文とは違う。
