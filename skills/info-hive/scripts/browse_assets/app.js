@@ -686,6 +686,10 @@
     var chips = el("div", "chips");
     chips.setAttribute("role", "group");
     chips.setAttribute("aria-label", "種類");
+    var chipList = [];                                  // [ボタン, 種類の値]。「すべて」の値は null
+    function pressType(value) {
+      chipList.forEach(function (c) { c[0].setAttribute("aria-pressed", c[1] === value ? "true" : "false"); });
+    }
     function chip(label, value) {
       var b = el("button", "fui-ToggleButton fui-Button", label);
       b.type = "button";
@@ -694,9 +698,16 @@
       b.setAttribute("aria-pressed", value === null ? "true" : "false");
       b.addEventListener("click", function () {
         filt.type = value;
-        Array.prototype.forEach.call(chips.children, function (c) { c.setAttribute("aria-pressed", c === b ? "true" : "false"); });
+        pressType(value);
+        // 種類とグループは、あとから選んだほうだけを効かせる（種類とグループの設計の 2 節）。
+        // 「すべて」でない種類を選んだら、グループの絞り込みを外す。断片は replaceState で消すので hashchange は起きない
+        if (value !== null && filt.group) {
+          filt.group = "";
+          history.replaceState(null, "", location.pathname + location.search);
+        }
         apply();
       });
+      chipList.push([b, value]);
       chips.appendChild(b);
     }
     chip("すべて", null);
@@ -825,7 +836,14 @@
       // 確かめる（解くと、`%` のような壊れた断片で例外になり、前の絞り込みが残る。2 回目の実装のレビューの A）
       var m = /^#group=(.+)$/.exec(location.hash);
       var id = m ? m[1] : "";
-      filt.group = GROUP_ID.test(id) && has(groupIds, id) ? id : "";
+      var next = GROUP_ID.test(id) && has(groupIds, id) ? id : "";
+      // グループが別の値に変わったときだけ、種類を「すべて」に戻す（種類とグループの設計の 2 節）。
+      // 同じグループを読み直したときや、グループを外したときは、選んだ種類を残す
+      if (next && next !== filt.group && filt.type !== null) {
+        filt.type = null;
+        pressType(null);
+      }
+      filt.group = next;
       apply();
     }
     window.addEventListener("hashchange", fromHash);
