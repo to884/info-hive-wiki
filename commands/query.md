@@ -25,7 +25,8 @@ argument-description: "wiki に問い合わせる質問。日本語の質問は�
    - 取り込むとよいソースは、資料の種類と、質問文か wiki のページにある語で示す（「CQRS を説明した記事」「uv の公式ドキュメント」）。
 5. 「X にリンクしているページは？」という質問には、grep ではなく `python "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_search.py" "" --wiki "<WIKI_ROOT>" --backlinks <slug>` を使う。MCP のツールにはこの機能がない。
 6. 使った wiki ページへの `[[wikilink]]` を出典として付け、回答をまとめる。矛盾がある場合は、どちらか一方を選ばず、矛盾をそのまま示す。
-6b. 回答の終わりに、確からしさ（confidence）を「高」「中」「低」で示し、理由を添える。書く前に、`${CLAUDE_PLUGIN_ROOT}/skills/info-hive/references/query-confidence.md` を Read で開き、そこに書かれた決め方と書き方に従う。この手順の文だけで決めてはならない。特に次の 4 つを守る。
+6b. 回答の終わりに、確からしさ（confidence）を「高」「中」「低」で示し、理由を添える。書く前に、`${CLAUDE_PLUGIN_ROOT}/skills/info-hive/references/query-confidence.md` を Read で開き、そこに書かれた決め方と書き方に従う。この手順の文だけで決めてはならない。特に次の 5 つを守る。
+   - 確からしさは、答えた結論にだけ付ける。結論でない補足には付けない。質問の結論に 1 つも答えなかったとき（「答えられない」「wiki からは言えない」）は、関係する内容を示していても、確からしさを付けず、決まった 1 行も書かない（手順 7）。
    - ソースの要約ページに書かれている前提は「高」である。raw ソースまで読む必要はない。
    - wiki 自身の事柄（何をいつ取り込んだか、wiki の規約）を `log.md` などの wiki の記録で答えたときも「高」である。
    - 確からしさを下げる上限は、`query-confidence.md` の上限の表の行だけである。観測や実行の回数、再現したかどうか、raw ソースや git の履歴で確かめていないことでは下げない。
