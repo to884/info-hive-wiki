@@ -550,7 +550,17 @@ def cmd_write(args) -> int:
     result.update({k: v for k, v in rel.items() if not k.startswith("_")})
     if rel["_same"]:
         path = rel["_same"][0]["path"]
-        result.update({"status": "same", "raw_path": path.as_posix(), "raw_ref": raw_ref_of(wiki, path)})
+        # 置いてある同じ資料の raw も、行き先を確かめてから読み取り専用に戻す。Git で取り直した raw や、公開と
+        # 読み取り専用のあいだで止まった raw は書き込みできる（セッションの raw の identical と同じ。
+        # to884/info-hive-wiki#74 のレビュー）。
+        import wiki_session as ws
+        try:
+            ws.check_destination(wiki, raw_root, path)
+        except ws.Fail as exc:
+            raise Fail(str(exc))
+        ws.make_read_only(path)
+        result.update({"status": "same", "raw_path": path.as_posix(), "raw_ref": raw_ref_of(wiki, path),
+                       "read_only": not (os.stat(path).st_mode & 0o222)})
         return emit(args, result, 0)
     if rel["slug_state"] == "different":
         result["status"] = "different"

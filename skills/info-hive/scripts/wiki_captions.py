@@ -1076,6 +1076,10 @@ def check_pages(pages: list[PageIn], wiki_root: Path, only_raw: str | None = Non
 
     def load(path: Path):
         key = raw_key(path)
+        if key not in raw_cache and path.suffix.lower() != ".md":
+            # 動画の raw は、wiki_youtube.py がいつも .md で書く。PDF などのほかの形式の原本は動画の raw でないので、
+            # 読まずに動画でないものとする（UTF-8 で読もうとして誤りにしない。to884/info-hive-wiki#74 のレビュー）。
+            raw_cache[key] = (None, None, None)
         if key not in raw_cache:
             try:
                 text = path.read_text(encoding="utf-8-sig")
