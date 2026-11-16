@@ -11601,6 +11601,11 @@ summary.fui-AccordionHeader__button:where([aria-disabled="true"]) {
   color: var(--colorNeutralForeground2);
   padding-inline-end: var(--spacingHorizontalNone);
 }
+/* リンクの葉（a.fui-TreeItem）: v9 の TreeItem の根は div だけ（TreeItem.types.ts:12）なので出典はなく、この再現の追加である。
+   リンクの既定の下線を消す（下線は子に伝わり、子では消せない）。色は上の color が UA の a の色に勝つ */
+.fui-TreeItem:where(a) {
+  text-decoration-line: none;
+}
 .fui-TreeItem:focus,
 .fui-TreeItem:focus-visible {
   outline-style: none;
@@ -11741,14 +11746,16 @@ summary.fui-AccordionHeader__button:where([aria-disabled="true"]) {
   padding-inline-start: var(--spacingHorizontalXXS);
 }
 
-/* actions と aside の切り替え（useTreeItemLayout.tsx の isActionsVisible の近似）: ホバーかフォーカスの間だけ actions を出し、aside を隠す */
+/* actions と aside の切り替え（useTreeItemLayout.tsx:219-237, 327-348 の isActionsVisible の近似）: 行（TreeItemLayout）自身の
+   ホバー、項目自身のフォーカス、actions の中のフォーカスの間だけ actions を出し、aside を隠す。v9 は対象が子の木にある mouseover を
+   除くので、子の行にポインターを置いても祖先の actions は出ない。項目（TreeItem）のホバーで選ぶと子の木も含むので、行のホバーで選ぶ */
 .fui-TreeItemLayout__actions {
   display: none;
 }
-.fui-TreeItemLayout__actions:where(.fui-TreeItem:hover > .fui-TreeItemLayout > *, .fui-TreeItem:focus-visible > .fui-TreeItemLayout > *, .fui-TreeItemLayout:has(:focus-visible) > *) {
+.fui-TreeItemLayout__actions:where(.fui-TreeItemLayout:hover > *, .fui-TreeItem:focus-visible > .fui-TreeItemLayout > *, .fui-TreeItemLayout:has(:focus-visible) > *) {
   display: flex;
 }
-.fui-TreeItemLayout__aside:where(.fui-TreeItemLayout:has(> .fui-TreeItemLayout__actions) > *):where(.fui-TreeItem:hover > .fui-TreeItemLayout > *, .fui-TreeItem:focus-visible > .fui-TreeItemLayout > *, .fui-TreeItemLayout:has(:focus-visible) > *) {
+.fui-TreeItemLayout__aside:where(.fui-TreeItemLayout:has(> .fui-TreeItemLayout__actions) > *):where(.fui-TreeItemLayout:hover > *, .fui-TreeItem:focus-visible > .fui-TreeItemLayout > *, .fui-TreeItemLayout:has(:focus-visible) > *) {
   display: none;
 }
 
