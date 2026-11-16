@@ -65,6 +65,7 @@ lint は、ここに並ぶタグを `wiki_lint.py` の `--allowed-tags`（MCP �
 
 種類ごとに、さらに次の項目が必要である。
 - `source` ページ: `authors`、`url`（該当する場合）、`raw`、`ingested`
+- YouTube の動画の `source` ページ: さらに `video_id`、`caption_kind`、`confidence`（親の要約ページだけ）、`fetched_at`
 - source 以外のページ: 参照したソースの要約ページを並べた `sources`
 
 `synthesis` ページの `question`、`asked`、`sources_consulted` は任意項目である。`sources` にはソースの要約ページだけを入れ、`sources_consulted` には種類を問わず参照したページを入れる。
@@ -92,6 +93,7 @@ frontmatter のキーと、`type`・`kind` の値は、日本語の別名でも�
 | `取り込み日` | `ingested` |
 | `質問` | `question` |
 | `参照した出典` | `sources_consulted` |
+| `確かさ` | `confidence` |
 
 | `type` の値の別名 | 英語の値 |
 |---|---|
