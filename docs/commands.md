@@ -53,6 +53,12 @@ Claude Code のセッションの会話は、`session`（実行中のセッシ�
 /wiki:ingest session
 ```
 
+YouTube の動画の URL を渡すと、`wiki_youtube.py` が固定した版の yt-dlp で字幕だけを取り、raw を 1 回で、重ねて書かない形で書く（動画と音声は落とさない。raw は読み取り専用になる）。投稿者の字幕があればそれを、なければ元の言語の自動字幕を使い、YouTube の自動翻訳は使わない。raw は字幕の言語のままで、行に `L<番号> [時刻]` を振り、チャプターか 10 分ごとの区間に分ける。自動字幕の聞き違いは raw では直さず、要約ページの文で `〔訂正 L123-1〕` の印を付けて訂正し、何をどの根拠で訂正したかをページの下に残す。訂正と留保の多さから、要約ページに `confidence`（`high`、`medium`、`low`）を付ける。書く前に、訂正の一覧と confidence をユーザーに見せる。公式の API ではない取り方なので、YouTube の変更で取れなくなることがある。そのときは、yt-dlp の版を上げたプラグインのパッチ版を待つ。再生リストとチャンネルの一括の取り込み、ログインや年齢の制限のある動画、字幕のない動画は扱わない。
+
+```bash
+/wiki:ingest https://www.youtube.com/watch?v=<動画の ID>
+```
+
 PDF で `rag@info-hive` の MCP ツールが使える場合は、原本を `raw/` に複製せず、先に `register_pdf` で登録する。`job_status` がジョブの `completed` を返してから、抽出済みの Markdown を読んで要約ページを作る。`queued`、`running`、`paused` は処理中であり、取り込みの完了とは報告しない。
 
 ## `/wiki:query <question>`

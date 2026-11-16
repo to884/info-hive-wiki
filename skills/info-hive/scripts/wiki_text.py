@@ -49,6 +49,7 @@ KEY_ALIASES: dict[str, str] = {
     "取り込み日": "ingested",
     "質問": "question",
     "参照した出典": "sources_consulted",
+    "確かさ": "confidence",
 }
 
 # type の値の日本語の別名。

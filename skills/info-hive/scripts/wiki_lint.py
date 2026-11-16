@@ -11,6 +11,8 @@ frontmatter の文字列の値（配列の要素を含む）が二重引用符�
 source ページを指していないもの、source ページの `raw:` の原本がないもの、（--allowed-tags を
 渡した場合は）タグの体系にないタグも報告する。
 大文字と小文字だけが違うページとディレクトリも報告する。
+YouTube の動画のソースの、字幕の訂正と留保の印と定義、confidence を raw と照らした食い違いも報告する
+（caption_corrections、info-hive-dev の ADR-0027。照合は wiki_captions.py が行う）。
 本文の画像（`![説明](../assets/x.svg)`）の参照先がないものも報告する。参照先はページのファイルが
 あるディレクトリを基準に解決する。ページの大きさは、コードフェンス（mermaid を含む）の中身と
 画像だけの行を除いて数える。
@@ -396,8 +398,11 @@ DEFAULT_REQUIRED_FM = ("type", "title", "tags", "created", "updated")
 
 def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str], suggest_pages: bool, suggest_min: int,
          soft_char_cap: int = 10000, hard_char_cap: int = 25000, index_entries: "list[dict] | None" = None,
-         allowed_tags: "list[str] | None" = None) -> dict:
+         allowed_tags: "list[str] | None" = None, wiki_root: "Path | None" = None) -> dict:
     """検出結果を返す。
+
+    wiki_root を渡すと、YouTube の字幕の訂正と留保の印と定義、confidence を raw と照らす
+    （caption_corrections、ADR-0027）。None なら照らさず、summary の caption_corrections を None にする。
 
     index_entries は collect_index_entries の結果で、None なら索引の検査（index_type_mismatch）をしない。
     allowed_tags はタグの体系で、None か空ならタグの検査（unknown_tags）をせず、summary の
@@ -430,9 +435,17 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         "unresolved_sources": [],
         "missing_raw": [],
         "unknown_tags": [],
+        "caption_corrections": [],
         "suggested_pages": [],
         "summary": {},
     }
+
+    # YouTube の字幕の訂正と留保（ADR-0027）。ページは照合のモジュールが読み直す（印の行の番号をファイルの
+    # 行で示すため）。動画の raw を持たない wiki では、印のあるページだけを見る。
+    if wiki_root is not None:
+        import wiki_captions
+        result = wiki_captions.check_wiki(Path(wiki_root))
+        findings["caption_corrections"] = [f.as_dict() for f in result.findings]
 
     # 読み込みのエラー
     for p in pages:
@@ -671,6 +684,7 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         "missing_raw": len(findings["missing_raw"]),
         # タグの体系を渡さなかったときは、検査していないことを 0 と区別できるよう None にする。
         "unknown_tags": len(findings["unknown_tags"]) if allowed is not None else None,
+        "caption_corrections": len(findings["caption_corrections"]) if wiki_root is not None else None,
         "suggested_pages": len(findings["suggested_pages"]),
     }
     return findings
@@ -723,6 +737,8 @@ def render_text(findings: dict) -> str:
         ("missing_raw", "source ページの raw: の原本がない",
          lambda f: f"  - {f['path']}  raw: {f['raw']}"),
         ("unknown_tags", "タグの体系にないタグ", lambda f: f"  - {f['path']}  {', '.join(f['tags'])}"),
+        ("caption_corrections", "YouTube の字幕の訂正と留保の印、定義、confidence の食い違い",
+         lambda f: f"  - {f['path']}:{f['line']}  {f['message']}"),
     ]
 
     for key, label, formatter in sections:
@@ -781,7 +797,7 @@ def main():
         allowed_tags = [t.strip() for t in args.allowed_tags.split(",") if t.strip()] or None
     findings = lint(pages, args.soft_cap, args.hard_cap, required_fm, args.suggest_pages, args.suggest_min,
                     args.soft_char_cap, args.hard_char_cap, index_entries=collect_index_entries(args.wiki),
-                    allowed_tags=allowed_tags)
+                    allowed_tags=allowed_tags, wiki_root=args.wiki)
 
     if args.json:
         print(json.dumps(findings, indent=2, default=str, ensure_ascii=False))

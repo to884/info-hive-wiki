@@ -387,7 +387,7 @@ def build_app(state: State, token: str, port: int):
             findings = wiki_lint.lint(wiki_lint.collect_pages(root), soft_cap, hard_cap, fields, suggest_pages,
                                       suggest_min, soft_char_cap, hard_char_cap,
                                       index_entries=wiki_lint.collect_index_entries(root),
-                                      allowed_tags=allowed_tags)
+                                      allowed_tags=allowed_tags, wiki_root=root)
             result = plain(findings)
             result["graph"] = lint_graph(root) if graph else {"state": "skipped"}
             return result
