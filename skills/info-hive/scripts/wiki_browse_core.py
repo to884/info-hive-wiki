@@ -1260,7 +1260,7 @@ class Core:
                 rows.append('<tr class="fui-TableRow">'
                             + "".join(f'<td class="fui-TableCell">{c}</td>' for c in cells) + "</tr>")
         cols = "".join(f'<th class="fui-TableHeaderCell" scope="col">{h}</th>'
-                       for h in ("向き", "述語", "相手", "状態", "開始", "終了", "確からしさ", "出典", "証拠"))
+                       for h in ("向き", "述語", "相手", "状態", "開始", "終了", "確信度", "出典", "証拠"))
         # 9 列の表は狭い幅で本文からはみ出すので、表だけを横に送る入れ物で包む（Fluent 2 の設計の 5）。
         # 入れ物はキーボードでも送れるように、フォーカスできる領域にする
         return (f'<section id="_relations">{head}{self._incomplete_html()}'
