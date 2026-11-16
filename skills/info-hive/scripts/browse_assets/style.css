@@ -128,8 +128,6 @@ body.fui-FluentProvider {
 /* --- 木（Fluent 2 の Tree。見た目は Fluent 2 のサイトの左のペインに合わせる。左のペインの木の設計の 2、6） --- */
 .tree { padding: 0 var(--spacingHorizontalS) var(--spacingVerticalL); }
 .nav-incomplete { margin: 0 var(--spacingHorizontalM) var(--spacingVerticalS); color: var(--colorNeutralForeground2); }
-/* リンクの項目の既定の下線を消す。要素の名前で選ばず、木の中の a の項目すべてに当てる（2.2） */
-.tree a.fui-TreeItem { text-decoration: none; }
 /* 行: 角丸 8px。長い名前は折り返し、行の高さを中身に合わせる（2.3、6.1） */
 .tree .fui-TreeItemLayout { border-radius: var(--borderRadiusXLarge); padding-block: var(--spacingVerticalXXS); }
 .tree .fui-TreeItemLayout__main { flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
