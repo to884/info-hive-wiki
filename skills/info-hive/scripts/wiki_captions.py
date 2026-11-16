@@ -589,6 +589,7 @@ class InlineText:
     targets: dict
     line: int
     quote: bool
+    workflow_value: bool = False   # `## 主張と行き先` の表の「行き先」の列の、手順が決めた値だけのセル
 
 
 def _wikilink_label(match: "re.Match") -> str:
@@ -607,7 +608,24 @@ def inline_texts(body_lines: list[str]) -> list[InlineText]:
     tokens = wiki_pages.new_parser().parse("\n".join(body_lines))
     out: list[InlineText] = []
     depth = 0
-    for tok in tokens:
+    # `## 主張と行き先` の表の「行き先」の列の値を見分けるための状態。見出しと表の列は、パーサーのトークンで決める。
+    section = ""
+    headers: list = []
+    col = -1
+    cell = None        # 次の inline が入るセル（"th" か "td"）
+    for i, tok in enumerate(tokens):
+        if tok.type == "heading_open" and tok.level == 0 and tok.tag in ("h1", "h2"):
+            nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+            section = nxt.content.strip() if tok.tag == "h2" and nxt is not None else ""
+        elif tok.type == "table_open":
+            headers = []
+        elif tok.type == "tr_open":
+            col = -1
+        elif tok.type in ("th_open", "td_open"):
+            col += 1
+            cell = tok.type[:2]
+        elif tok.type in ("th_close", "td_close"):
+            cell = None
         if tok.type == "blockquote_open":
             depth += 1
             continue
@@ -616,6 +634,12 @@ def inline_texts(body_lines: list[str]) -> list[InlineText]:
             continue
         if tok.type != "inline" or tok.map is None:
             continue
+        workflow_value = False
+        if cell == "th":
+            headers.append(tok.content.strip())
+        elif (cell == "td" and section == CLAIMS_HEADING and 0 <= col < len(headers)
+              and headers[col] == CLAIMS_DESTINATION_COLUMN and tok.content.strip() in CLAIMS_DESTINATIONS):
+            workflow_value = True
         chars: list = []
         kinds: list = []
         runs: list = []
@@ -667,7 +691,8 @@ def inline_texts(body_lines: list[str]) -> list[InlineText]:
                     put(f"（{suffix}）", "other")
             # そのほか（強調の開きと閉じ）は文字を持たず、続きを切るだけである。
             state["run"] += 1
-        out.append(InlineText("".join(chars), kinds, runs, segs, lines, targets, tok.map[0], depth > 0))
+        out.append(InlineText("".join(chars), kinds, runs, segs, lines, targets, tok.map[0], depth > 0,
+                              workflow_value))
     return out
 
 
@@ -747,8 +772,20 @@ def _is_code_example(it: InlineText, start: int) -> bool:
     return all(it.kinds[i] == "code" and it.runs[i] == run for i in range(mk.start(), mk.end()))
 
 
+# 取り込みの手順が決めた `## 主張と行き先` の表の「行き先」の列と、その値（ingest-workflow.md の手順 7b）。
+CLAIMS_HEADING = "主張と行き先"
+CLAIMS_DESTINATION_COLUMN = "行き先"
+CLAIMS_DESTINATIONS = ("create", "update", "source_only")
+
+
 def _prose(it: InlineText) -> str:
-    """「raw にない語」を探す文字（本文、wikilink の表示名、画像の代替の文字。コードは空白にし、印を除く）。"""
+    """「raw にない語」を探す文字（本文、wikilink の表示名、画像の代替の文字。コードは空白にし、印を除く）。
+
+    `## 主張と行き先` の表の「行き先」の列で、中身がちょうど手順の値（create、update、source_only）のセルは、本文の
+    語でないので探さない。節や字面で外すと、表の主張や本文の同じ語まで隠れた（wiki 0.23.2 のレビューの 1 回目と 2 回目）。
+    """
+    if it.workflow_value:
+        return ""
     text = "".join(ch if k in ("text", "link", "image") else " " for ch, k in zip(it.display, it.kinds))
     return DISPLAY_MARK_RE.sub(" ", text)
 

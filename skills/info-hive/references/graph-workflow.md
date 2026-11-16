@@ -160,7 +160,7 @@ python "<skill-root>/scripts/wiki_graph_query.py" wiki/ facts    --about company
 1. いつもどおりインデックスを読む。
 2. `graph.sqlite` が古い（`log.md` にある最新の `## [YYYY-MM-DD] ingest |` の行より前に作られた）なら、先に extract で作り直す。
 3. 候補のページの周りにある型付きエッジを問い合わせる。`neighbors`、`edges`、`facts` がもっとも役に立つ。
-4. 関係するノードやエッジの元になっている wiki ページを読む。重要な主張については、グラフの行だけをもとに答えてはならない。`evidence` フィールドは手がかりであって、正本ではない。
+4. 関係するノードやエッジの元になっている wiki ページを読む。重要な主張については、グラフの行だけをもとに答えてはならない。`evidence` フィールドは手がかりであって、正本ではない。`/wiki:query` の回答で、ソースの要約ページの本文で関係を確かめられなかったときの扱いと確からしさは、`references/query-confidence.md` の「グラフのエッジの上限」に従う。
 5. 引用には、グラフの行ではなく wiki ページへの `[[wikilinks]]` を使う。
 
 ### 有効化

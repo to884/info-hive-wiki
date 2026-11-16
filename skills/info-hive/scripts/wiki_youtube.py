@@ -43,6 +43,7 @@ import sys
 import time
 import urllib.parse
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -494,6 +495,8 @@ def take(url: str, requested: str | None) -> dict:
             result["warnings"] = s.warnings()
             return result
         data = s.json3(track)
+        # 字幕を取った時刻。raw には書かず、要約ページの fetched_at に写す（ADR-0027）。時差つきの ISO 8601。
+        result["fetched_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
         result["warnings"] = s.warnings()
     text, sha, count = render(info, found.video_id, track, lang or track.lang, data)
     result.update({"track": track.public(), "source_sha256": sha, "lines": count, "_raw": text})
