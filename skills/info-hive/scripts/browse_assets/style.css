@@ -46,9 +46,9 @@ body.fui-FluentProvider {
   display: grid;
   grid-template-columns: var(--f2-nav-width) minmax(0, 1fr);
   min-height: 100vh;
-  /* ナビの列の地を、ナビより下までのばす（ナビは画面の高さで止まる） */
-  background-image: linear-gradient(to right, var(--colorNeutralBackground4) var(--f2-nav-width), transparent 0);
 }
+/* ペインの地はページと同じにする（Fluent 2 のサイトの左のペイン。左のペインの木の設計の 6.1） */
+#_nav.fui-NavDrawer { background-color: transparent; }
 #_nav {
   position: sticky;
   top: 0;
@@ -71,9 +71,39 @@ body.fui-FluentProvider {
 .scope { margin: 0; }
 .scope .fui-Badge { white-space: normal; height: auto; }
 .nav-home { font-weight: var(--fontWeightSemibold); }
-.theme-field { display: flex; align-items: center; gap: var(--spacingHorizontalS); }
-.theme-label { font-size: var(--fontSizeBase200); color: var(--colorNeutralForeground3); }
-.theme-field .fui-Select { flex: 1; }
+/* NavItem は NavDrawer の地（colorNeutralBackground4）を自分にも塗る。ペインの地をページと同じにしたので、
+   地を透明にし、ホバーと押下は木の項目と同じ brand の地と文字にする（左のペインの木の設計の 6.1、6.2） */
+#_nav .nav-home { background-color: transparent; border-radius: var(--borderRadiusXLarge); }
+#_nav .nav-home:hover { background-color: var(--colorBrandBackground2); color: var(--colorBrandForeground2); }
+#_nav .nav-home:active { background-color: var(--colorBrandBackground2Hover); color: var(--colorBrandForeground2Hover); }
+/* 配色のトグル（左のペインの木の設計の 7 節）。形は Fluent 2 のサイトの「Theme」のトグル: 文字の色の線の丸い枠と、
+   丸いつまみ。オンでつまみが右に移り、ページの地の色の丸を重ねて三日月にする。大きさは em で書く（14px で 35 × 21px） */
+.theme-switch { display: flex; align-items: center; gap: var(--spacingHorizontalS); padding-inline: var(--spacingHorizontalS); }
+.theme-label { color: var(--colorNeutralForeground1); }
+.theme-toggle { position: relative; display: inline-flex; font-size: var(--fontSizeBase300); }
+.theme-input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; z-index: 1; }
+.theme-track {
+  position: relative; display: block; box-sizing: border-box; width: 2.5em; height: 1.5em;
+  border: var(--strokeWidthThick) solid var(--colorNeutralForeground1); border-radius: var(--borderRadiusCircular);
+}
+.theme-knob {
+  position: absolute; top: 50%; inset-inline-start: 0.2em; width: 0.75em; height: 0.75em;
+  border-radius: var(--borderRadiusCircular); background-color: var(--colorNeutralForeground1);
+  transform: translateY(-50%); transition: inset-inline-start var(--durationNormal) var(--curveEasyEase);
+}
+.theme-input:checked + .theme-track .theme-knob { inset-inline-start: calc(100% - 0.95em); }
+/* 三日月: つまみの左上に、ページの地の色の丸を重ねる */
+.theme-input:checked + .theme-track .theme-knob::after {
+  content: ""; position: absolute; top: -0.12em; inset-inline-start: -0.12em; width: 0.6em; height: 0.6em;
+  border-radius: var(--borderRadiusCircular); background-color: var(--colorNeutralBackground1);
+}
+.theme-input:focus-visible + .theme-track { outline: var(--strokeWidthThick) solid var(--colorStrokeFocus2); outline-offset: var(--strokeWidthThick); }
+@media (prefers-reduced-motion: reduce) { .theme-knob { transition: none; } }
+@media (forced-colors: active) {
+  .theme-track { border-color: CanvasText; }
+  .theme-knob { background-color: CanvasText; }
+  .theme-input:checked + .theme-track .theme-knob::after { background-color: Canvas; }
+}
 
 /* --- 検索欄と結果 --- */
 .search { padding: 0 var(--spacingHorizontalM) var(--spacingVerticalS); }
@@ -95,39 +125,58 @@ body.fui-FluentProvider {
 .sr-title { display: block; font-weight: var(--fontWeightSemibold); color: var(--colorNeutralForeground1); }
 .sr-meta, .sr-hit { display: block; color: var(--colorNeutralForeground2); }
 
-/* --- 木（Nav の NavCategory を各段に繰り返す独自の拡張） --- */
-.tree { padding-bottom: var(--spacingVerticalL); }
+/* --- 木（Fluent 2 の Tree。見た目は Fluent 2 のサイトの左のペインに合わせる。左のペインの木の設計の 2、6） --- */
+.tree { padding: 0 var(--spacingHorizontalS) var(--spacingVerticalL); }
 .nav-incomplete { margin: 0 var(--spacingHorizontalM) var(--spacingVerticalS); color: var(--colorNeutralForeground2); }
-.tree-name { flex: 1; min-width: 0; white-space: normal; }
-.tree-count { color: var(--colorNeutralForeground3); font-variant-numeric: tabular-nums; }
-.fui-NavCategoryItem { gap: var(--spacingHorizontalXS); height: auto; min-height: var(--f2-size360); }
-.fui-NavSubItem { white-space: normal; height: auto; padding-block: var(--spacingVerticalSNudge); }
-/* 1〜4 段目は 1 段ごとに字下げし、5 段目より深い段は 4 段目と同じ位置に置き、左の線で段を示す（作者の決定） */
-.fui-NavSubItemGroup .tree-group { margin-inline-start: var(--spacingHorizontalL); }
-.tree-group.nav-depth-4, .tree-group.nav-depth-5, .tree-group.nav-depth-6 { margin-inline-start: 0; }
-.tree-group.nav-depth-4, .tree-group.nav-depth-5, .tree-group.nav-depth-6 {
-  border-inline-start: var(--strokeWidthThin) solid var(--colorNeutralStroke2);
+/* リンクの項目の既定の下線を消す。要素の名前で選ばず、木の中の a の項目すべてに当てる（2.2） */
+.tree a.fui-TreeItem { text-decoration: none; }
+/* 行: 角丸 8px。長い名前は折り返し、行の高さを中身に合わせる（2.3、6.1） */
+.tree .fui-TreeItemLayout { border-radius: var(--borderRadiusXLarge); padding-block: var(--spacingVerticalXXS); }
+.tree .fui-TreeItemLayout__main { flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+/* 枝は semibold と colorNeutralForeground1。葉は Tree の既定（colorNeutralForeground2） */
+.tree .tree-group > .fui-TreeItemLayout { color: var(--colorNeutralForeground1); }
+.tree .tree-group > .fui-TreeItemLayout > .fui-TreeItemLayout__main { font-weight: var(--fontWeightSemibold); }
+/* 区画の間の線: 深さ 1 の枝と、その前の深さ 1 の項目のあいだ（6.1） */
+.tree .fui-Tree[role="tree"] > .fui-TreeItem + .tree-group[aria-level="1"] {
+  border-block-start: var(--strokeWidthThin) solid var(--colorNeutralStroke2);
+  padding-block-start: var(--spacingVerticalXXS);
 }
-.fui-NavSubItemGroup { overflow: visible; }
-/* 「一覧」は地が状態で変わる summary の中にあるので、押下の色を含めて中立の文字にする（4.2） */
-.tree-filter, .tree-filter:hover, .tree-filter:active { visibility: hidden; font-size: var(--fontSizeBase200); color: var(--colorNeutralForeground2); }
-.fui-NavCategoryItem:hover .tree-filter, .fui-NavCategoryItem:focus-within .tree-filter, .tree-filter:focus-visible,
-.fui-NavCategoryItem .tree-filter:active {
-  visibility: visible;
+/* 状態の色（6.2）。Tree の既定のホバーと押下（中立の地）を、brand の薄い地と brand の文字に置き換える */
+.tree .fui-TreeItemLayout:hover { background-color: var(--colorBrandBackground2); color: var(--colorBrandForeground2); }
+.tree .fui-TreeItemLayout:active { background-color: var(--colorBrandBackground2Hover); color: var(--colorBrandForeground2Hover); }
+.tree .fui-TreeItem.is-current > .fui-TreeItemLayout { background-color: var(--colorBrandBackground2Hover); color: var(--colorBrandForeground2Hover); }
+.tree .fui-TreeItem.is-current > .fui-TreeItemLayout > .fui-TreeItemLayout__main { font-weight: var(--fontWeightSemibold); }
+.tree .fui-TreeItemLayout:hover > .fui-TreeItemLayout__expandIcon,
+.tree .fui-TreeItemLayout:active > .fui-TreeItemLayout__expandIcon,
+.tree .fui-TreeItem.is-current > .fui-TreeItemLayout > .fui-TreeItemLayout__expandIcon { color: inherit; }
+/* 件数のバッジ（6.3）: tint の informative の地を、ページよりわずかに離れた灰色（colorNeutralBackground6）にする。
+   tint の既定の地（colorNeutralBackground4）は、暗い配色で #0a0a0a になり、黒く沈む（作者の決定） */
+.tree .tree-count { font-variant-numeric: tabular-nums; background-color: var(--colorNeutralBackground6); }
+/* バッジは名前のすぐ隣に置く（作者の決定。Badge の使い方の「隣に置く」形）。名前は中身の幅にし、aside を名前の直後に置く */
+.tree .fui-TreeItemLayout > .fui-TreeItemLayout__main { flex: 0 1 auto; }
+.tree .fui-TreeItemLayout > .fui-TreeItemLayout__aside { margin-inline-start: 0; padding-inline: var(--spacingHorizontalS) 0; }
+/* 字下げ（2.3、6.1。作者の決定で Fluent 2 のサイトに合わせる）: 名前の位置は「シェブロンの幅 + 段の数 × 1 段」。
+   1 段目と 2 段目の名前は同じ位置にそろえ（サイトの区画の見出しと、その子）、3 段目から 1 段ごとに字下げする。
+   1 段は 18px（トークンの和）。サイトの 35px から、作者の決定で 16px ほど左に寄せた。枝はシェブロンの分だけ前から描く。
+   4 段目で止める */
+.tree { --browse-tree-indent: calc(var(--spacingHorizontalL) + var(--spacingHorizontalXXS)); }
+.tree .fui-TreeItem { --browse-tree-steps: 0; }
+.tree .fui-TreeItem[aria-level="3"] { --browse-tree-steps: 1; }
+.tree .fui-TreeItem[aria-level="4"], .tree .fui-TreeItem.tree-deep { --browse-tree-steps: 2; }
+.tree .fui-TreeItemLayout:where(.fui-TreeItem[aria-expanded] > *) {
+  padding-inline-start: calc(var(--browse-tree-steps) * var(--browse-tree-indent));
 }
-.tree-groups { list-style: none; margin: 0; padding: 0; }
-.tree-groups .tree-groups { padding-inline-start: var(--spacingHorizontalL); }
-.tree-groups.nav-depth-4, .tree-groups.nav-depth-5, .tree-groups.nav-depth-6 {
-  padding-inline-start: 0; border-inline-start: var(--strokeWidthThin) solid var(--colorNeutralStroke2);
+.tree .fui-TreeItemLayout:where(.fui-TreeItem:not([aria-expanded]) > *) {
+  padding-inline-start: calc(var(--browse-tree-steps) * var(--browse-tree-indent) + var(--spacingHorizontalXXL));
 }
-.tree-groups .fui-NavItem, .tree-all { display: flex; gap: var(--spacingHorizontalS); height: auto; min-height: var(--f2-size360); }
-.fui-NavItem.is-current, .fui-NavSubItem.is-current {
-  background-color: var(--colorNeutralBackground4Selected);
-  /* Nav の選択の印（::after）は、入れ子の NavSubItemGroup と details の中で切れて見えない。
-     印は内側の影で描く（独自。日本語の画面だけなので左に描く） */
-  box-shadow: inset var(--strokeWidthThicker) 0 0 var(--colorCompoundBrandForeground1);
+/* 線は背景で描き、箱の大きさを変えない。margin や border で描くと、深い段ごとに字下げが増える（実装の 1 回目のレビューの 1）。
+   位置は 4 段目の枝のシェブロンの中ほど（2 段の字下げ + 12px）で、どの深い段でも同じ所に引く */
+.tree .tree-group.tree-deep > .fui-Tree {
+  background-image: linear-gradient(var(--colorNeutralStroke2), var(--colorNeutralStroke2));
+  background-size: var(--strokeWidthThin) 100%;
+  background-repeat: no-repeat;
+  background-position: calc(2 * var(--browse-tree-indent) + var(--spacingHorizontalM)) 0;
 }
-.fui-NavSubItem.is-current::after { content: none; }
 
 /* hidden の要素は、Fluent の部品（Button など）の display より強く隠す。app.js は hidden だけで出し入れする */
 #_nav [hidden], #_main [hidden] { display: none !important; }
@@ -285,7 +334,7 @@ a.ext::after { content: " ↗"; }
 .diag-list li::marker { color: var(--colorStatusWarningForeground3); }
 
 /* --- フォーカス（独自の要素） --- */
-.ix-title:focus-visible, #_main a:focus-visible, .tree-filter:focus-visible, summary:focus-visible {
+.ix-title:focus-visible, #_main a:focus-visible, summary:focus-visible {
   outline: var(--strokeWidthThick) solid var(--colorStrokeFocus2);
   outline-offset: var(--strokeWidthThin);
   border-radius: var(--borderRadiusSmall);
@@ -303,7 +352,7 @@ a.ext::after { content: " ↗"; }
 
 /* --- 強制カラー: 今のページと絞っているグループを、システムの色で示す --- */
 @media (forced-colors: active) {
-  .fui-NavItem.is-current, .fui-NavSubItem.is-current { outline: var(--strokeWidthThick) solid Highlight; }
+  .tree .fui-TreeItem.is-current > .fui-TreeItemLayout { outline: var(--strokeWidthThick) solid Highlight; outline-offset: calc(var(--strokeWidthThick) * -1); }
   .fui-Badge.badge {
     border-color: CanvasText;
   }
