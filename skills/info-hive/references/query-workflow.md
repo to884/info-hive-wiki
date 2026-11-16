@@ -38,7 +38,7 @@ uv run --script "<skill-root>/scripts/wiki_search.py" "軽減税率の対象" --
 
 ## 手順 2b: グラフを使って調べる（`wiki/graph/ontology.yaml` がある場合のみ）
 
-関係を問う質問（「X とつながっているものは？」「Y を提案したのは誰？」「A から B への経路をたどって」）では、インデックスを読んだあと、ページを読む前に、コンパイル済みのグラフに必ず問い合わせる（`graph.sqlite` がなければ飛ばす）。ページの frontmatter の `graph.relationships` を読むことで、これに代えてはならない。呼び方とノードの ID の形はコマンドの手順 5b に、鮮度の確かめ方は `references/graph-workflow.md` の「問い合わせ（query）」にある。
+関係を問う質問（「X とつながっているものは？」「Y を提案したのは誰？」「A から B への経路をたどって」）では、インデックスを読んだあと、ページを読む前に、コンパイル済みのグラフに必ず問い合わせる（`graph.sqlite` がなければ飛ばす）。ページの frontmatter の `graph.relationships` を読むことで、これに代えてはならない。呼び方とノードの ID の決め方はコマンドの手順 2b に、鮮度の確かめ方は `references/graph-workflow.md` の「問い合わせ（query）」にある。
 
 構造化された隣接ノードや事実は、読むべき wiki ページを選ぶのに使う。重要な主張については、グラフの行だけをもとに答えてはならない。証拠になるのは wiki ページとその raw ソースである。ページで確かめられなかったときの確からしさは、`references/query-confidence.md` の「グラフのエッジの上限」に従う。`ontology.yaml` がない wiki では、`graph.sqlite` が残っていてもこの手順を飛ばす。
 
