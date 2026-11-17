@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-11-17
+
 ### Changed
 
 - wiki と raw の記事にリンクを置かない規則（info-hive-dev の ADR-0029）の段階 1。ページの走査（`wiki_pages.walk_markdown()`）は、リンクに降りず、リンクの記事を読まない（`docs/plans/wiki-links-2026-11-16.md`）。
@@ -819,7 +821,8 @@ Web ページの取得（`wiki_fetch.py`）が、Medium の記事の図とコー
 - 移植元の調査メモ `research/` と、移植元の英語の評価セットでの測定記録（`eval/decisions/results-*.json`）は取り込んでいない。
 - Paperclip 連携は移植元の v4.0.0 で削除されており、info-hive にもない。
 
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.30.0...HEAD
+[0.30.0]: https://github.com/to884/info-hive-wiki/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.29.0
 [0.7.0]: https://github.com/to884/info-hive-wiki/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/to884/info-hive-wiki/compare/v0.6.0...v0.6.1
