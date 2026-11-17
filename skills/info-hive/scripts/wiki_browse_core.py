@@ -312,6 +312,10 @@ def take_snapshot(root, entries=None) -> Snapshot:
     transient = []
     gen = hashlib.sha256(CORE_VERSION.encode("utf-8"))
     for kind, rel_disk, size, _mtime in first:
+        if kind == "link":
+            # リンクなので読まない（ADR-0029）。読まないことも内容なので、世代に入れる
+            gen.update(f"link\0{rel_disk}\0{_mtime}\n".encode("utf-8"))
+            continue
         f = InputFile(kind=kind, disk_rel=rel_disk, rel=posix_rel(rel_disk))
         if kind in ("asset", "asset_dir"):
             _read_asset(root, f, size)     # asset_dir（assets/ の一覧を作れない）は大きさがなく、読めない入力になる
@@ -805,6 +809,10 @@ class Core:
         self._render_lock = threading.Lock()
         self._build_pages()
         self._build_assets()
+        # 走査がリンクなので読まなかった記事と記事までの道（ADR-0029）。黙って消さず、診断に出す
+        for kind, rel, _size, link_kind in snapshot.entries:
+            if kind == "link":
+                self.diagnostics.append({"kind": "link", "path": rel, "link_kind": link_kind})
         self.out_name = assign_names(sorted(self.drawn), name_limit)
         self.name_to_id = {name: pid for pid, name in self.out_name.items()}
         for pid in sorted(self.drawn):

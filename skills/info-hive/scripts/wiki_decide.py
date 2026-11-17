@@ -494,6 +494,10 @@ def search_candidates(source_query: str, wiki: Path, top: int, no_embed: bool) -
     # 子の Python も UTF-8 モードで動かし、cp932 の既定に左右されないようにする。
     env = {**os.environ, "PYTHONUTF8": "1"}
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", env=env)
+    # 検索が出した知らせ（リンクなので読まなかったページ、調べられなかった場所）は、捨てずに利用者へ渡す
+    for line in (proc.stderr or "").splitlines():
+        if line.startswith(("リンクなので読まない:", "調べられない:")):
+            print(line, file=sys.stderr)
     if proc.returncode != 0 or not proc.stdout.strip():
         return []
     return json.loads(proc.stdout).get("results", [])
@@ -501,7 +505,9 @@ def search_candidates(source_query: str, wiki: Path, top: int, no_embed: bool) -
 
 def cmd_shortlist(args, client: DecisionClient | None) -> int:
     source_path = Path(args.source)
-    text = source_path.read_text(encoding="utf-8-sig")
+    # 入力が wiki の中の記事なら、記事を読む口を通す（info-hive-dev の ADR-0029）
+    import wiki_pages
+    text = wiki_pages.read_user_file(source_path, args.wiki)
     title, body = strip_frontmatter(text)
     title = title or source_path.stem
     t = QUESTIONS["changes"]
@@ -511,9 +517,13 @@ def cmd_shortlist(args, client: DecisionClient | None) -> int:
     started = time.monotonic()
     candidates = []
     for rank, row in enumerate(rows, 1):
-        page_file = args.wiki / row["rel_path"]
+        # 記事は、記事を読む口を通して読む（info-hive-dev の ADR-0029）。読めなければ、検索の抜粋を使う
+        import wiki_pages
+        opened = wiki_pages.article_path(args.wiki, row["rel_path"])
         try:
-            _, page_body = strip_frontmatter(page_file.read_text(encoding="utf-8-sig"))
+            if opened.state != "ok":
+                raise OSError(opened.state)
+            _, page_body = strip_frontmatter(opened.path.read_text(encoding="utf-8-sig"))
         except OSError:
             page_body = row.get("snippet", "")
         candidates.append({"rel_path": row["rel_path"], "title": row["title"], "search_rank": rank, "text": page_body})

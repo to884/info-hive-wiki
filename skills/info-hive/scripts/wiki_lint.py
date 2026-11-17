@@ -55,7 +55,7 @@ import urllib.parse
 import sys
 from collections import Counter, defaultdict
 from datetime import date, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 # 同じディレクトリの wiki_text を import する。スクリプトとして実行したときも、
 # テストから import したときも見つかるようにする。
@@ -98,6 +98,9 @@ from wiki_pages import (  # noqa: E402
     iter_page_files,
     ref_values,
     resolve_link,
+    article_path,
+    is_page_path,
+    walk_pages,
     scalar_value,
     text_value,
     type_value,
@@ -342,6 +345,33 @@ def parse_frontmatter_raw(text: str) -> "tuple[dict, str | None, str, bool]":
     return parse_frontmatter_text(fm_text), fm_text, body, False
 
 
+def link_report(wiki_root: Path) -> dict:
+    """wiki の側の記事と記事までの道のリンク（info-hive-dev の ADR-0029）。何も書かず、直さない。
+
+    走査（walk_pages、walk_index_files）が拒んだ項目と、最上位の SCHEMA.md と log.md を読む口（article_path）が
+    拒んだものを、{"path", "kind"} で返す。走査の知らせ（一覧を作れなかったディレクトリと、種類を調べられなかった
+    項目）は unchecked に入れる。raw の側（source ページの raw: が指すもの）は、この版では調べない。
+    """
+    root = Path(wiki_root)
+    pages, index = walk_pages(root), walk_index_files(root)
+    seen, links = set(), []
+    for walk in (pages, index):
+        for rel, kind in walk.links:
+            if rel not in seen:
+                seen.add(rel)
+                links.append({"path": rel, "kind": kind})
+    unchecked = set(pages.unlistable) | set(pages.unknown) | set(index.unlistable) | set(index.unknown)
+    for name in ("SCHEMA.md", "log.md"):
+        found = article_path(root, name)
+        if found.state == "link" and found.link[0] not in seen:
+            seen.add(found.link[0])
+            links.append({"path": found.link[0], "kind": found.link[1]})
+        elif found.state == "denied":
+            unchecked.add(name)
+    links.sort(key=lambda item: (posix_rel(item["path"]), item["path"]))
+    return {"links": links, "unchecked": [{"path": rel} for rel in sorted(unchecked, key=lambda r: (posix_rel(r), r))]}
+
+
 def collect_pages(wiki_root: Path) -> list[dict]:
     pages = []
     for md_path in iter_page_files(wiki_root):
@@ -446,9 +476,28 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         "missing_raw": [],
         "unknown_tags": [],
         "caption_corrections": [],
+        "links": [],
+        "links_unchecked": [],
         "suggested_pages": [],
         "summary": {},
     }
+
+    # 記事と記事までの道のリンク（ADR-0029）。走査はリンクの記事を読まないので、ページの集合に入らない。
+    # そのページへの wikilink は、リンク切れではなく、ここで挙げる（拒んだことを「ない」に変えない。I4）。
+    refused_by_path, refused_slugs = {}, set()
+    if wiki_root is not None:
+        report = link_report(Path(wiki_root))
+        findings["links"] = report["links"]
+        findings["links_unchecked"] = report["unchecked"]
+        # どの読む側の結果にも、同じ名前の欄で知らせる（MCP の query、get_page などと同じ形）
+        findings["link_warnings"] = list(report["links"])
+        for item in report["links"]:
+            rel = item["path"]
+            if rel.lower().endswith(".md") and is_page_path(rel, native=True):
+                stem = posix_rel(rel)[:-3]
+                slug = nfc(PurePosixPath(stem).name)
+                refused_by_path[stem] = slug
+                refused_slugs.add(slug)
 
     # YouTube の字幕の訂正と留保（ADR-0027）。ページは照合のモジュールが読み直す（印の行の番号をファイルの
     # 行で示すため）。動画の raw を持たない wiki では、印のあるページだけを見る。
@@ -538,9 +587,9 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         if not inbound.get(p["slug"]):
             findings["orphans"].append({"slug": p["slug"], "path": p["rel_path"]})
 
-        # リンク切れ
+        # リンク切れ。リンクなので読まなかったページを指すものは、links で挙げるので、ここでは数えない
         for link in p["links"]:
-            if resolve_link(link, by_path, by_slug) is None:
+            if resolve_link(link, by_path, by_slug) is None and resolve_link(link, refused_by_path, refused_slugs) is None:
                 findings["broken_links"].append({
                     "from": p["slug"],
                     "from_path": p["rel_path"],
@@ -695,9 +744,17 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         # タグの体系を渡さなかったときは、検査していないことを 0 と区別できるよう None にする。
         "unknown_tags": len(findings["unknown_tags"]) if allowed is not None else None,
         "caption_corrections": len(findings["caption_corrections"]) if wiki_root is not None else None,
+        # wiki の根を渡さなかったときは、リンクを調べていない。raw の側は、この版ではまだ調べない（None）。
+        "links": len(findings["links"]) if wiki_root is not None else None,
+        "links_unchecked": len(findings["links_unchecked"]) if wiki_root is not None else None,
+        "links_raw": None,
         "suggested_pages": len(findings["suggested_pages"]),
     }
     return findings
+
+
+LINK_KIND_LABELS = {"symlink": "シンボリックリンク", "junction": "ジャンクション", "reparse": "名前の代理のリパースポイント",
+                    "hardlink": "ハードリンク"}
 
 
 def size_text(f: dict) -> str:
@@ -749,6 +806,10 @@ def render_text(findings: dict) -> str:
         ("unknown_tags", "タグの体系にないタグ", lambda f: f"  - {f['path']}  {', '.join(f['tags'])}"),
         ("caption_corrections", "YouTube の字幕の訂正と留保の印、定義、confidence の食い違い",
          lambda f: f"  - {f['path']}:{f['line']}  {f['message']}"),
+        ("links", "記事か記事までの道のリンク（読まずに飛ばした。プラグインは直さない。直し方は lint の手順の文書にある）",
+         lambda f: f"  - {f['path']}  （{LINK_KIND_LABELS.get(f['kind'], f['kind'])}）"),
+        ("links_unchecked", "リンクかを調べられなかった項目（一覧を作れないか、属性を取れない）",
+         lambda f: f"  - {f['path']}"),
     ]
 
     for key, label, formatter in sections:
@@ -771,6 +832,10 @@ def render_text(findings: dict) -> str:
 
     if s.get("unknown_tags") is None:
         out.append("タグの検査はしていない（--allowed-tags にタグの体系を渡すと、体系にないタグを報告する）。")
+        out.append("")
+
+    if s.get("links_raw") is None:
+        out.append("raw の側のリンク（source ページの raw: が指すもの）は、この版ではまだ調べていない。")
         out.append("")
 
     # None は検査していない項目なので、問題がないものとして扱う。

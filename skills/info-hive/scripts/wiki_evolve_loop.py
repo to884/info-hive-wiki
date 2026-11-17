@@ -21,6 +21,7 @@ from wiki_evolve import (atomic, copy_tree, digest, encode, event, finite, insid
                          propose, read_json, require, run_runner, slug, tree, capture)
 from wiki_text import format_fm_value, format_frontmatter, localize_argparse, quote_in_text
 import wiki_initialized
+import wiki_pages
 
 
 def contract(suite, corpus):
@@ -417,6 +418,18 @@ def consolidate(rows, patterns, history, calls, workspace, iteration):
 
 def publish_learning(args, rows, patterns, iteration):
     """観測できる学習の raw の証拠と、検索できる通常のソースとコンセプトのページ。"""
+    import wiki_pages
+    # 読み書きする記事（観察のソース、パターンのページ、索引、ログ）を、どれかを読む前にすべて記事を読む口で確かめる。
+    # リンクなら読まず、置き換えもしない（info-hive-dev の ADR-0029 の I2）。途中まで書いて止まらないよう、先に確かめる
+    articles = []
+    for row in rows:
+        key_text = str(args.id) + ':' + str(iteration) + ':' + str(row['task'])
+        articles.append('sources/evolution-' + digest(key_text.encode())[:20] + '.md')
+    articles += ['concepts/evolution-pattern-' + key + '.md' for key, pattern in patterns.items()
+                 if pattern.get('run') == args.id and pattern['iteration'] == iteration]
+    for name in articles + ['index.md', 'log.md']:
+        opened = wiki_pages.article_path(args.wiki, name)
+        require(opened.state in ('ok', 'absent'), f'{name} はリンクか、調べられないので、学習の記録を書かない（{opened.state}）')
     raw = getattr(args, 'raw', None) or args.wiki.parent / 'raw'
     raw.mkdir(parents=True, exist_ok=True)
     today = time.strftime('%Y-%m-%d')
@@ -489,19 +502,22 @@ def run(args, state):
     require(not archive.exists(), 'この実行の ID はすでにある。最終テストを使ったあとの実行は、完了したものも中断したものも再開できない')
     require(not args.skill.is_symlink() and not args.skill.resolve().is_relative_to(state.resolve()),
             'スキルには、実験の記録の外にある作業用のディレクトリを指定する')
-    require(not args.skill.exists() or (args.skill / 'SKILL.md').is_file() or not tree(args.skill),
+    wiki_pages.absolute_user_path(args.skill)
+    require(not args.skill.exists() or (args.skill / 'SKILL.md').is_file() or not tree(args.skill, args.wiki),
             'スキルのディレクトリには SKILL.md が必要である（空のディレクトリならよい）')
-    suite_path = args.suite.resolve()
-    suite = read_json(suite_path)
+    suite_path = wiki_pages.user_file_path(args.suite, args.wiki).resolve()
+    suite = read_json(suite_path, args.wiki)
     corpus = inside(suite_path.parent, suite['corpus'])
+    corpus_root = wiki_pages.source_wiki_root(corpus, args.wiki)
+    tree(corpus, corpus_root)
     tasks = contract(suite, corpus)
     consumed_path = state / 'consumed-tests.json'
     consumed = read_json(consumed_path) if consumed_path.exists() else {}
     test_keys = [digest(encode({'question': t['question'], 'rubric': t['rubric'],
-                  'sources': {name: inside(corpus, name).read_text(encoding='utf-8-sig') for name in t['sources']}}).encode())
+                  'sources': {name: wiki_pages.read_user_file(inside(corpus, name), corpus_root) for name in t['sources']}}).encode())
                  for t in tasks if t['split'] == 'test']
     require(not any(key in consumed for key in test_keys), '最終テストの課題はすでに使われた。新しい最終テスト用の課題を用意する')
-    config = read_json(args.config)
+    config = read_json(args.config, args.wiki)
     slug(args.id + '-selected')
     require(type(config.get('iterations')) is int and config['iterations'] > 0, 'iterations は正の整数にする')
     require(type(config.get('repeats')) is int and config['repeats'] > 0, 'repeats は正の整数にする')
@@ -513,10 +529,10 @@ def run(args, state):
     for script in Path(__file__).parent.glob('wiki_evolve*.py'):
         shutil.copy2(script, runtime / script.name)
     atomic(archive / 'runtime-hashes.json', encode(tree(runtime)).encode())
-    corpus_hash = copy_tree(corpus, archive / 'corpus')
+    corpus_hash = copy_tree(corpus, archive / 'corpus', corpus_root)
     initial = archive / 'baseline'
     if args.skill.exists():
-        copy_tree(args.skill, initial)
+        copy_tree(args.skill, initial, args.wiki)
     else:
         initial.mkdir()
     copy_tree(initial, archive / 'best')

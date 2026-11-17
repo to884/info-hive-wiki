@@ -35,7 +35,7 @@ import wiki_workspace  # noqa: E402
 # ページの集合とリンクの抜き出しは、lint と同じ規則（wiki_pages）を使う。
 from wiki_pages import (  # noqa: E402,F401
     SKIP_TOP_LEVEL_DIRS, SKIP_TOP_LEVEL_FILES, WIKILINK_RE, extract_wikilinks, is_page_path, read_os, type_value,
-    walk_markdown,
+    walk_markdown, link_warnings,
 )
 
 
@@ -132,9 +132,10 @@ def compute_stats(wiki: Path) -> dict:
 
     # ページと同じたどり方（wiki_pages.walk_markdown）で、最上位の除くディレクトリには降りない。読むのは、最上位の
     # index.md（行数を数える）と、ページ（lint と同じ is_page_path）だけで、読むかどうかは読む前に決める。
-    for found in walk_markdown(wiki, skip_top=True).files:
+    walk = walk_markdown(wiki, skip_top=True)
+    for found in walk.files:
         top_index = found.rel == "index.md"
-        if not top_index and not is_page_path(found.rel):
+        if not top_index and not is_page_path(found.rel, native=True):
             continue
         rel = PurePosixPath(found.rel)
         try:
@@ -197,6 +198,8 @@ def compute_stats(wiki: Path) -> dict:
                     for chars, lines, path in largest[:TOP_N]],
         "most_linked": [{"slug": slug, "count": count} for slug, count in by_count(most_linked_in)[:TOP_N]],
         "advice": scale_advice(total_pages, index_lines, has_indexes),
+        # 走査がリンクなので読まなかったページと、記事までの道のリンク（ADR-0029）。拒んだものがなければ空
+        "link_warnings": link_warnings(walk),
     }
 
 
