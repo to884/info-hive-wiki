@@ -835,7 +835,9 @@ Web ページの取得（`wiki_fetch.py`）が、Medium の記事の図とコー
 - 移植元の調査メモ `research/` と、移植元の英語の評価セットでの測定記録（`eval/decisions/results-*.json`）は取り込んでいない。
 - Paperclip 連携は移植元の v4.0.0 で削除されており、info-hive にもない。
 
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.31.0...HEAD
+[0.31.0]: https://github.com/to884/info-hive-wiki/compare/v0.30.0...v0.31.0
+[0.30.0]: https://github.com/to884/info-hive-wiki/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.29.0
 [0.7.0]: https://github.com/to884/info-hive-wiki/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/to884/info-hive-wiki/compare/v0.6.0...v0.6.1
