@@ -1,0 +1,16 @@
+{
+  "description": "指示に関係しそうな wiki のページの候補を知らせる（ADR-0031）。起動行の末尾の exit 0 は、uv の段の失敗（終了コード 2）で利用者の指示が止まらないようにするためのもの。",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --quiet --offline --no-python-downloads --script \"${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_prompt_hook.py\"; exit 0",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
