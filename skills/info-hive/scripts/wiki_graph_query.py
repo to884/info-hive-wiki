@@ -244,14 +244,20 @@ def run_query(wiki: Path, command: str, *, node: str | None = None, subject: str
     conn = open_db(Path(db) if db else wiki / "graph" / "graph.sqlite")
     try:
         if command == "neighbors":
-            return cmd_neighbors(conn, node)
-        if command == "edges":
-            return cmd_edges(conn, subject, predicate)
-        if command == "path":
-            return cmd_path(conn, start, goal, max_depth)
-        return cmd_facts(conn, about)
+            result = cmd_neighbors(conn, node)
+        elif command == "edges":
+            result = cmd_edges(conn, subject, predicate)
+        elif command == "path":
+            result = cmd_path(conn, start, goal, max_depth)
+        else:
+            result = cmd_facts(conn, about)
     finally:
         conn.close()
+    # グラフは、リンクなので読まなかったページを含まない（抽出も同じ走査を使う。info-hive-dev の ADR-0029）。
+    # CLI と MCP の graph の結果に、同じ欄で知らせる
+    import wiki_pages
+    result["link_warnings"] = wiki_pages.link_warnings(wiki_pages.walk_pages(wiki))
+    return result
 
 
 def main():

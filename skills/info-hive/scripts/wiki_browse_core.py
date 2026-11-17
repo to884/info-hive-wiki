@@ -312,6 +312,10 @@ def take_snapshot(root, entries=None) -> Snapshot:
     transient = []
     gen = hashlib.sha256(CORE_VERSION.encode("utf-8"))
     for kind, rel_disk, size, _mtime in first:
+        if kind == "link":
+            # リンクなので読まない（ADR-0029）。読まないことも内容なので、世代に入れる
+            gen.update(f"link\0{rel_disk}\0{_mtime}\n".encode("utf-8"))
+            continue
         f = InputFile(kind=kind, disk_rel=rel_disk, rel=posix_rel(rel_disk))
         if kind in ("asset", "asset_dir"):
             _read_asset(root, f, size)     # asset_dir（assets/ の一覧を作れない）は大きさがなく、読めない入力になる
@@ -805,6 +809,12 @@ class Core:
         self._render_lock = threading.Lock()
         self._build_pages()
         self._build_assets()
+        self.link_warnings = [{"path": rel, "kind": kind} for entry, rel, _size, kind in snapshot.entries
+                              if entry == "link"]
+        # 走査がリンクなので読まなかった記事と記事までの道（ADR-0029）。黙って消さず、診断に出す
+        for kind, rel, _size, link_kind in snapshot.entries:
+            if kind == "link":
+                self.diagnostics.append({"kind": "link", "path": rel, "link_kind": link_kind})
         self.out_name = assign_names(sorted(self.drawn), name_limit)
         self.name_to_id = {name: pid for pid, name in self.out_name.items()}
         for pid in sorted(self.drawn):
@@ -933,8 +943,11 @@ class Core:
         pid = self.pages[disks[0]]["id"]
         return pid if self.drawn.get(pid) == disks[0] else None
 
-    def resolve(self, target: str) -> dict:
+    def resolve(self, target: str, *, articles: bool = False) -> dict:
         """wikilink の行き先を解決する（設計の 3.3）。"""
+        refused = wiki_pages.refused_link(target, self.link_warnings, articles=articles)
+        if refused is not None:
+            return {"state": "refused", "target": target, "path": refused["path"], "link_kind": refused["kind"]}
         disks = wiki_pages.link_candidates(target, self.pages_by_path, self.pages_by_slug)
         if not disks:
             return {"state": "unresolved", "target": target}
@@ -1010,7 +1023,11 @@ class Core:
             for r in found:
                 where = {"page": pid} if drawn else {"page": None, "source_page": pid}
                 if r["state"] != "resolved":
-                    self.diagnostics.append({"kind": r["state"], **where, "target": r["target"]})
+                    if r["state"] == "refused":
+                        self.diagnostics.append({"kind": "link", **where, "target": r["target"],
+                                                 "path": r["path"], "link_kind": r["link_kind"]})
+                    else:
+                        self.diagnostics.append({"kind": r["state"], **where, "target": r["target"]})
                 elif r.get("missing_heading"):
                     self.diagnostics.append({"kind": "missing_heading", **where, "target": r["target"]})
 
@@ -1072,7 +1089,7 @@ class Core:
                            "links": links, "fm_problems": problems})
         try:
             _nodes, page_node_ids, _aliases = wiki_graph_extract.build_nodes(gpages, ontology, diag)
-            edges = wiki_graph_extract.build_edges(gpages, page_node_ids, diag)
+            edges = wiki_graph_extract.build_edges(gpages, page_node_ids, diag, link_warnings=self.link_warnings)
         except Exception:  # noqa: BLE001  オントロジーの中の形が誤っている（node_types が配列など）
             self.relations_state = "error"
             self.diagnostics.append({"kind": "relations_error", "reason": "invalid"})
@@ -1362,7 +1379,7 @@ class Core:
                     self.page_groups[pid].update(x["id"] for x in trail)
                     if pid not in self.index_summary and it.get("after"):
                         self.index_summary[pid] = it["after"]
-                elif it["state"] in ("unresolved", "ambiguous"):
+                elif it["state"] in ("unresolved", "ambiguous", "refused"):
                     self.index_unresolved.append(([x["title"] for x in trail if x["title"]], it))
             for ch in g["children"]:
                 rec(ch, trail)
@@ -1382,7 +1399,7 @@ class Core:
                 after = _after_first_link(inline_tok)
                 if clean in group_of_file and clean.startswith("indexes/"):
                     return {"state": "group", "group": group_of_file[clean], "label": label, "after": after}
-                r = self.resolve(target)
+                r = self.resolve(target, articles=True)
                 if r["state"] == "resolved":
                     return {"state": "resolved", "id": r["id"], "label": self.title(r["id"]),
                             "anchor": r.get("anchor"), "after": after}
@@ -1407,6 +1424,8 @@ class Core:
             return f'<a class="{cls}" href="{html.escape(href)}">{label}</a>'
         if r["state"] == "ambiguous":
             return f'<span class="wl wl-ambiguous" title="行き先を 1 つに決められない">{label}</span>'
+        if r["state"] == "refused":
+            return f'<span class="wl wl-unresolved" title="リンクなので読まない">{label}</span>'
         return f'<span class="wl wl-unresolved" title="ページがない">{label}</span>'
 
     def _transform_inline(self, children, path: str, counter: list, file: str) -> list:
@@ -1520,7 +1539,11 @@ class Core:
             cells = []
             for ref in sources:
                 _status, found, _t = wiki_pages.classify_source_ref(
-                    ref, self.pages_by_path, self.pages_by_slug, lambda d: self.pages[d]["meta"].get("type"))
+                    ref, self.pages_by_path, self.pages_by_slug, lambda d: self.pages[d]["meta"].get("type"),
+                    link_warnings=self.link_warnings)
+                if _status == "refused":
+                    cells.append(self._link_html(path, {"state": "refused", "label": ref}))
+                    continue
                 sp = self.resolve_disks(found)
                 if sp is not None:
                     cells.append(f'<a href="{html.escape(rel_href(path, self.out_name[sp]))}">'
@@ -1603,7 +1626,7 @@ class Core:
         lis = []
         for d in items:
             parts = [d["kind"]]
-            for key in ("target", "reason", "output", "node_id", "predicate", "object", "source", "source_page"):
+            for key in ("target", "path", "link_kind", "reason", "output", "node_id", "predicate", "object", "source", "source_page"):
                 if d.get(key):
                     parts.append(f"{key}: {d[key]}")
             lis.append(f"<li>{html.escape(' / '.join(map(str, parts)))}</li>")
@@ -1764,10 +1787,8 @@ class Core:
             return ""
         lis = []
         for trail, it in self.index_unresolved:
-            title = "ページがない" if it["state"] == "unresolved" else "行き先を 1 つに決められない"
             where = f'<span class="fui-Caption1 state">（{html.escape(" › ".join(trail))}）</span>' if trail else ""
-            lis.append(f'<li><span class="wl wl-{it["state"]}" title="{title}">{html.escape(it["label"])}</span>'
-                       f"{where}</li>")
+            lis.append(f'<li>{self._link_html("index.html", it)}{where}</li>')
         return ('<section id="_index_unresolved"><h2 class="fui-Subtitle2">ページに決まらない Index の行</h2>'
                 f'<ul>{"".join(lis)}</ul></section>\n')
 

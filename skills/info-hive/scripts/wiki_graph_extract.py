@@ -75,6 +75,9 @@ from wiki_pages import (  # noqa: E402
     build_page_index,
     classify_source_ref,
     iter_page_files,
+    walk_pages,
+    link_warnings as page_link_warnings,
+    refused_link,
     link_candidates,
     link_lookup,
     kind_value,
@@ -374,9 +377,19 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
     return meta, body
 
 
+class GraphPages(list):
+    """同じ走査で得たページと拒否の情報を、一緒に使う側へ渡す。"""
+
+    def __init__(self, walk):
+        super().__init__()
+        self.link_warnings = page_link_warnings(walk)
+
+
 def collect_pages(wiki_root: Path) -> list[dict]:
-    pages = []
-    for md_path in iter_page_files(wiki_root):
+    walk = walk_pages(wiki_root)
+    pages = GraphPages(walk)
+    for entry in walk.files:
+        md_path = wiki_root / entry.rel
         rel = md_path.relative_to(wiki_root)
         try:
             # BOM 付きの UTF-8 でも frontmatter を読めるように utf-8-sig で読む。
@@ -661,7 +674,7 @@ def make_edge(*, subject, predicate, obj, source, evidence, confidence, status,
 
 
 def build_edges(pages: list[dict], page_node_ids: dict[str, str],
-                diagnostics: list | None = None) -> list[dict]:
+                diagnostics: list | None = None, *, link_warnings=None) -> list[dict]:
     """エッジを作る。page_node_ids は build_nodes が返す、page_key(p) から node_id を引くインデックス。
 
     - 主語は、そのエッジを書いたページのノードである。スラッグから引き直さない。
@@ -682,6 +695,8 @@ def build_edges(pages: list[dict], page_node_ids: dict[str, str],
     """
     edges: list[dict] = []
     seen_ids: set[str] = set()
+    if link_warnings is None:
+        link_warnings = getattr(pages, "link_warnings", ())
 
     # 行き先のページを引くインデックス。パスは .md を除いた wiki からの相対パス（NFC、大文字と小文字を区別）、
     # スラッグはファイル名の stem である。どちらも、当たるページのキーをすべて並べる。
@@ -695,6 +710,8 @@ def build_edges(pages: list[dict], page_node_ids: dict[str, str],
 
     def link_target(link: str) -> str | None:
         """wikilink が指すページのキー。ページがちょうど 1 つのときだけ返す。"""
+        if refused_link(link, link_warnings) is not None:
+            return None
         found = link_candidates(link, pages_by_path, pages_by_slug)
         return found[0] if len(found) == 1 else None
 
@@ -793,7 +810,10 @@ def build_edges(pages: list[dict], page_node_ids: dict[str, str],
         # 分け方は lint の unresolved_sources と同じ wiki_pages.classify_source_ref に任せる。lint が source でない
         # ページを指すと挙げる値（not_source）も、ページが 1 つなら sourced_from を作る（lint がそれを挙げる）。
         for ref in ref_values(meta.get("sources")):
-            _status, found, _wrong_type = classify_source_ref(ref, pages_by_path, pages_by_slug, type_by_key.get)
+            _status, found, _wrong_type = classify_source_ref(ref, pages_by_path, pages_by_slug, type_by_key.get,
+                                                           link_warnings=link_warnings)
+            if _status == "refused":
+                continue  # 同じ走査の link_warnings が、拒否の理由を伝える
             if len(found) != 1:
                 note("ambiguous_source" if found else "unresolved_source", p, source=ref, pages=sorted(found))
                 continue

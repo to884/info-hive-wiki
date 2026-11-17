@@ -73,6 +73,10 @@ from wiki_pages import (  # noqa: E402
     split_lines,
     extract_wikilinks,
     iter_page_files,
+    NOTICE_UNVERIFIED,
+    capture_notices,
+    link_warnings,
+    walk_pages,
     ref_values,
     resolve_link,
     scalar_value,
@@ -851,7 +855,11 @@ def emit_json(args, results: list[dict], mode: str = "lexical", decision: dict |
         "granularity": args.granularity,
         "mode": mode,
         "results": results,
+        # 走査がリンクなので読まなかったページ（ADR-0029）。拒んだものがなければ空
+        "link_warnings": getattr(args, "link_warnings", []),
     }
+    if getattr(args, "unverified", None):
+        payload["unverified"] = args.unverified  # 調べられなかった場所
     if decision is not None:
         payload["decision"] = decision
     print(json.dumps(payload, ensure_ascii=False))
@@ -1153,8 +1161,16 @@ def main():
     if args.cache:
         cache_path = args.wiki / ".wiki-cache" / "search-index.json" if args.cache == "AUTO" else Path(args.cache)
 
-    pages = collect_pages(args.wiki, cache_path)
+    # 記事か記事までの道がリンクなら、走査は読まない（ADR-0029）。黙って消さず、JSON の link_warnings と標準エラーで知らせる。
+    # JSON の link_warnings は、実際にページを集めた走査の知らせから作る（別に走査すると、間に変わったものを取り逃がす）
+    with capture_notices() as notes:
+        pages = collect_pages(args.wiki, cache_path)
+    args.link_warnings = [n for n in notes.items if n["kind"] not in NOTICE_UNVERIFIED]
+    args.unverified = [n for n in notes.items if n["kind"] in NOTICE_UNVERIFIED]
     if not pages:
+        if getattr(args, "json", False) and args.query:
+            emit_empty_json(args)  # JSON を求められたら、ページがなくても link_warnings を返す
+            sys.exit(0)
         print(f"wiki のページが見つからない: {args.wiki}", file=sys.stderr)
         sys.exit(0)
 

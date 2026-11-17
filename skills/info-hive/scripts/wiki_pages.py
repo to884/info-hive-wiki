@@ -7,18 +7,23 @@ lint、検索（とそれを使う MCP の索引）、グラフ、統計、判�
 
 - ページは、wiki のルートからの相対パスが `.md`（大文字と小文字は問わない）で終わり、最上位の SCHEMA.md、
   index.md、log.md、README.md と、最上位の indexes/、graph/、raw/、assets/、.evolution/、.wiki-cache/ に
-  当たらず、ファイル名が `.` で始まらないファイルである。
+  当たらず、どの要素の名前も `.` で始まらないファイルである。
+- wiki の側の記事（is_article_path）は、ページと、最上位の index.md、log.md、SCHEMA.md と、indexes の下の .md である。
+  記事と記事までの道のリンクは、読まず、たどらず、Walk.links と article_path() の結果で知らせる（info-hive-dev の
+  ADR-0029）。リンクの判定は wiki_links.link_kind() の 1 か所にある。
 - wikilink は、閲覧が使う markdown-it（commonmark、html は無効、表は有効）が本文の文字とするところだけから
   拾う。コードブロックの中、インラインのコードの中、参照リンクの定義の中のものは数えない。
 - パスとリンクの行き先は NFC にそろえて比べ、大文字と小文字を区別する。
 - wiki をたどる経路は walk_markdown() の 1 つで、ページ（walk_pages）と索引のファイル（walk_index_files）は、
-  起点を変えて同じたどり方を使う。最上位の除く名前の項目には、どの OS の呼び出しもしない。OS の呼び出しの失敗は、
-  read_os() の 1 か所で「ない」「分からない」「そのほか（送出）」に分ける。設計は info-hive-dev の
-  `docs/plans/wiki-walk-excluded-dirs-2026-11-11.md`（7 版目）にある。
+  起点を変えて同じたどり方を使う。最上位の除く名前の項目と、名前が `.` で始まる項目には、どの OS の呼び出しもしない。
+  OS の呼び出しの失敗は、read_os() の 1 か所で「ない」「分からない」「そのほか（送出）」に分ける。設計は info-hive-dev の
+  `docs/plans/wiki-walk-excluded-dirs-2026-11-11.md`（7 版目）と、リンクを拒む形に変えた
+  `docs/plans/wiki-links-2026-11-16.md`（ADR-0029 の実装の設計）にある。
 """
 
 from __future__ import annotations
 
+import atexit
 import errno
 import functools
 import hashlib
@@ -26,12 +31,14 @@ import os
 import re
 import stat
 import sys
+import threading
 import unicodedata
 from collections import defaultdict
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
 from wiki_text import canonical_kind, canonical_type, nfc, posix_rel
+from wiki_links import link_kind
 
 SKIP_TOP_LEVEL_FILES = frozenset({"SCHEMA.md", "index.md", "log.md", "README.md"})
 SKIP_TOP_LEVEL_DIRS = frozenset({"indexes", "graph", "raw", "assets", ".evolution", ".wiki-cache"})
@@ -46,11 +53,17 @@ WIKILINK_FULL_RE = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
 # ページの集合
 # ---------------------------------------------------------------------------
 
-def is_page_path(rel: "str | PurePosixPath") -> bool:
+def _relative_text(rel, native: bool) -> str:
+    """コマンドの区切りはそろえる。OS から得た名前は、その OS の文字のまま扱う。"""
+    text = str(rel)
+    return text if native and not NT else text.replace("\\", "/")
+
+
+def is_page_path(rel: "str | PurePosixPath", *, native: bool = False) -> bool:
     """wiki のルートからの相対パス（/ 区切り）がページかを返す。"""
-    parts = PurePosixPath(str(rel).replace("\\", "/")).parts
+    parts = PurePosixPath(_relative_text(rel, native)).parts
     # 拡張子は大文字と小文字を区別しない。Windows の rglob("*.md") は Upper.MD も返し、0.8.0 までもページだった。
-    if not parts or not parts[-1].lower().endswith(".md") or parts[-1].startswith("."):
+    if not parts or not parts[-1].lower().endswith(".md") or any(part.startswith(".") for part in parts):
         return False
     if len(parts) == 1:
         return parts[0] not in SKIP_TOP_LEVEL_FILES
@@ -61,13 +74,107 @@ def is_page_path(rel: "str | PurePosixPath") -> bool:
 # wiki をたどる
 # ---------------------------------------------------------------------------
 #
-# 走査が OS を呼ぶ口は、os.scandir()（開く、項目を 1 つ取り出す、閉じる）、項目の is_symlink()、is_dir()、
-# is_junction()、os.stat()、Windows の win_file_id() だけである。どれも、呼ぶたびに os から引いて呼ぶ
+# 走査が OS を呼ぶ口は、os.scandir()（開く、項目を 1 つ取り出す、閉じる）、項目の stat(follow_symlinks=False)、
+# POSIX でリンクの項目の is_dir()、os.lstat() だけである。どれも、呼ぶたびに os から引いて呼ぶ
 # （試験が差し替えられるように）。pathlib の入出力、os.walk、os.path.realpath、os.path.isfile は使わない。内側で
 # いくつもの呼び出しをして、失敗を版ごとに違う形で読み替えるからである。口の各行の内側の扱いと、それが結果を
 # 変えない理由は、設計の「決めること」の 1 の表にある。
 
 NT = os.name == "nt"
+
+
+# ---------------------------------------------------------------------------
+# 拒んだことの知らせ（info-hive-dev の ADR-0029 の I4）
+# ---------------------------------------------------------------------------
+#
+# 走査と記事を読む口は、リンクなので読まなかったもの（種類は wiki_links.KINDS）と、調べられなかったもの（種類は
+# "unknown"、"unlistable"）を、拒んだその場で受け皿に入れる。知らせを出すのは使う側の仕事にしない。使う側は
+# 10 か所を超え、1 か所の付け忘れで「ない」に変わるからである（実装の 2 回目のレビュー）。
+# - MCP のサーバーは、ツールの呼び出しごとに capture_notices() で受け皿を開き、結果か誤りの文に付ける。
+# - CLI（スクリプトのディレクトリにあるスクリプトを直接動かしたとき）は、プロセスの終わりに標準エラーへまとめて出す。
+# 相対パスは、走査や読む口に渡した起点からのものである。
+
+NOTICE_UNVERIFIED = ("unknown", "unlistable")
+_SINK = threading.local()
+# CLI のときだけ、プロセスの終わりに出す知らせを貯める（重ねない。MCP のサーバーや試験では貯めない）
+_PROCESS_NOTICES: dict = {}
+_CLI = False
+
+
+def _remember(item: dict) -> None:
+    if _CLI:
+        _PROCESS_NOTICES.setdefault((item["path"], item["kind"]), item)
+
+
+def _notice(path: str, kind: str) -> None:
+    item = {"path": path, "kind": kind}
+    sink = getattr(_SINK, "items", None)
+    if sink is not None:
+        sink.append(item)
+    else:
+        _remember(item)
+
+
+class capture_notices:
+    """with の間に、この実行の筋で走査と読む口が入れた知らせを集める（入れ子にできる）。items に、重ねない並びを返す。"""
+
+    def __enter__(self):
+        self._outer = getattr(_SINK, "items", None)
+        _SINK.items = []
+        return self
+
+    def __exit__(self, *exc):
+        found = _SINK.items
+        _SINK.items = self._outer
+        if self._outer is not None:
+            self._outer.extend(found)
+        else:
+            for item in found:  # CLI では、受け皿で集めたものも、終わりに標準エラーへ出す
+                _remember(item)
+        self.items = dedupe_notices(found)
+        return False
+
+
+def dedupe_notices(items) -> list:
+    seen, out = set(), []
+    for item in items or ():
+        key = (item["path"], item["kind"])
+        if key not in seen:
+            seen.add(key)
+            out.append(dict(item))
+    return out
+
+
+def notice_lines(items) -> list:
+    """知らせを、利用者に見せる 1 行ずつの文にする。"""
+    out = []
+    for item in dedupe_notices(items):
+        if item["kind"] in NOTICE_UNVERIFIED:
+            out.append(f"調べられない: {item['path']}（{'一覧を作れない' if item['kind'] == 'unlistable' else '属性を取れない'}）")
+        else:
+            out.append(f"リンクなので読まない: {item['path']}（{item['kind']}）")
+    return out
+
+
+def _print_process_notices() -> None:
+    for line in notice_lines(list(_PROCESS_NOTICES.values())):
+        print(line, file=sys.stderr)
+
+
+# スクリプトのディレクトリのスクリプトを直接動かしたときだけ、終わりに出す（試験や、ほかのプログラムが読み込んだときは
+# 出さない）。MCP のサーバーは、呼び出しごとに受け皿を開くので、ここには残らない。
+def _same_dir(a: str, b: str) -> bool:
+    try:
+        return os.path.samefile(os.path.dirname(os.path.abspath(a)), os.path.dirname(os.path.abspath(b)))
+    except OSError:
+        return os.path.normcase(os.path.dirname(os.path.abspath(a))) == os.path.normcase(os.path.dirname(os.path.abspath(b)))
+
+
+if sys.argv and sys.argv[0] and _same_dir(sys.argv[0], __file__) \
+        and os.path.basename(sys.argv[0]).lower() not in ("wiki_mcp_server.py", "wiki_browse.py"):
+    # 常駐するもの（MCP のサーバー、閲覧のサーバー）は貯めない。呼び出しごとに受け皿を開く
+    _CLI = True
+    atexit.register(_print_process_notices)
 
 
 class MdFile(NamedTuple):
@@ -78,10 +185,14 @@ class MdFile(NamedTuple):
 
 
 class Walk(NamedTuple):
-    """走査の結果。知らせ（unlistable と unknown）がどちらも空なら、たどる間に変わらなかったものは欠けていない。"""
+    """走査の結果。知らせ（unlistable と unknown）がどちらも空なら、たどる間に変わらなかったものは欠けていない。
+
+    links は、ADR-0029 の規則に反した配置で、読まなかったものである。files に入らないが、黙って消えたのではない。
+    """
     files: list            # MdFile の並び
     unlistable: list       # 一覧を作れなかったディレクトリ（相対パス）
-    unknown: list          # 種類か、同じ場所を回っていないかを、調べられなかった項目（相対パス）
+    unknown: list          # 種類を調べられなかった項目（相対パス）
+    links: list = ()       # リンクなので読まず、降りなかった記事と、記事までの道（(相対パス, 種類) の並び。ADR-0029）
 
 
 class NoFileId(OSError):
@@ -180,13 +291,17 @@ def _sort_key(rel: str) -> "tuple[str, str]":
 
 
 def _stat_entry(path: str):
-    """(状態, stat の結果)。.md の項目と最上位の index.md がふつうのファイルかどうかを調べる os.stat()。
+    """(状態, stat の結果)。.md の項目と、最上位の記事（index.md、log.md、SCHEMA.md）を調べる os.lstat()。
 
-    Windows の os.stat() は、属性の取得がエラー 1、50、87 で失敗すると、S_IFBLK の成功に読み替える。一覧に載る項目が
+    リンクをたどらない。リンクかどうか（wiki_links.link_kind）と、ふつうのファイルかどうかと、ハードリンクの
+    リンクの数（st_nlink。Windows の DirEntry.stat() ではいつも 0 なので、この呼び出しでしか分からない）を、
+    1 回の呼び出しで決める。
+
+    Windows の os.lstat() は、属性の取得がエラー 1、50、87 で失敗すると、S_IFBLK の成功に読み替える。一覧に載る項目が
     ボリュームや物理ディスクであることはないので、Windows で S_IFBLK が返ったら「分からない」にする。POSIX の S_IFBLK は
     本物のデバイスのファイルなので、ふつうのファイルでない（今と同じ）。
     """
-    state, st = read_os(os.stat, path)
+    state, st = read_os(os.lstat, path)
     if state == "ok" and NT and stat.S_ISBLK(st.st_mode):
         return "denied", None
     return state, st
@@ -199,52 +314,53 @@ def _list_dir(directory: str) -> list:
         return list(it)
 
 
-def _identity(path: str):
-    """(状態, 識別子)。識別子は win_file_id() の値。FileId がすべて 0 なら、分からない。Windows でだけ呼ばれる。"""
-    state, value = read_os(win_file_id, path)
-    if state != "ok":
-        return state, None
-    if not any(value[1]):
-        return "denied", None
-    return "ok", value
+def _entry_lstat(entry):
+    """(状態, stat の結果)。一覧の項目の、リンクをたどらない属性。Windows では一覧の情報（再解析のタグと属性）から
+    答え、OS を呼ばない。POSIX では lstat を 1 回呼ぶ。st_nlink は使わない（Windows では 0 になる）。"""
+    return read_os(entry.stat, follow_symlinks=False)
 
 
-def _chain_identities(chain: tuple):
-    """(状態, 識別子の並び)。chain の各ディレクトリの識別子を、起点から順に取る。"""
-    found = []
-    for path in chain:
-        state, one = _identity(path)
-        if state != "ok":
-            return state, None
-        found.append(one)
-    return "ok", tuple(found)
-
-
-def _is_junction(entry):
-    """(状態, ジャンクションか)。DirEntry.is_junction()（3.12 から）は、Windows では一覧の情報（再解析のタグ）から答え、
-    OS を呼ばない。Windows のほかでは、いつも偽を返す。"""
-    return read_os(entry.is_junction)
+def _link_is_dir(entry, est):
+    """(状態, ディレクトリへのリンクか)。Windows では属性の FILE_ATTRIBUTE_DIRECTORY で決め、OS を呼ばない（ジャンクションと
+    ディレクトリのシンボリックリンクに立つ）。POSIX では、リンクの先をたどる is_dir() を呼ぶ。"""
+    if NT:
+        return "ok", bool((getattr(est, "st_file_attributes", 0) or 0) & 0x10)
+    return read_os(entry.is_dir)
 
 
 def walk_markdown(start, prefix: str = "", skip_top: bool = False, visited: "list | None" = None) -> Walk:
-    """start の下をたどり、名前が .md で終わるふつうのファイルと、知らせを返す。
+    """start の下をたどり、名前が .md で終わるふつうのファイルと、拒んだリンクと、知らせを返す（ADR-0029）。
 
-    - 起点には、リンクであっても降りる。途中のディレクトリのシンボリックリンクには降りない。ジャンクションには降りる
-      （どちらも 0.10 までの rglob と同じ）。
+    - 起点には、リンクであっても降りる（根と祖先のリンクは許す）。
+    - 起点の下の、名前が . で始まる項目には、どの深さでも、どの呼び出しもしない（記事でない）。
     - skip_top が真なら、起点の直下の、名前が SKIP_TOP_LEVEL_DIRS に入っている項目には、どの呼び出しもしない。
-    - ジャンクションを 1 つでも通った道筋では、入ろうとするディレクトリの識別子が、起点からそこまでに通った
-      ディレクトリのどれかと同じなら、降りない（同じ場所を回る道筋）。識別子を取れなければ、unknown に入れて降りない。
+    - リンク（wiki_links.link_kind が種類を返すもの）には降りず、読まない。ディレクトリへのリンクと、名前が .md で
+      終わるもののリンクは、links に (相対パス, 種類) で入れる。名前が .md で終わらないファイルのリンクは、記事で
+      ないので入れない。ハードリンク（リンクの数が 2 以上）の .md も、読まずに links に入れる。
     - prefix は、返す相対パスの先頭に付ける。並びは posix_rel の順、同じなら綴りの順である。
     - visited にリストを渡すと、一覧を作れたディレクトリの相対パス（起点は prefix から末尾の / を除いたもの。
       prefix が空なら ""）を足す。この一覧が降りる場所かを、規則を写さずに確かめるためのもの（YouTube の字幕の
       照合が、用意したページの場所を確かめるのに使う）。
     """
-    files, unlistable, unknown = [], [], []
+    files, unlistable, unknown, links = [], [], [], []
     start = os.fspath(start)
-    # スタックの項目: (ディレクトリのパス, 相対パスの接頭辞, 起点からここまでのパスの並び, 識別子の並びか None)
-    stack = [(start, prefix, (start,), None)]
+    stack = [(start, prefix)]
     while stack:
-        directory, pre, chain, ids = stack.pop()
+        directory, pre = stack.pop()
+        if pre != prefix:
+            # 一覧で見たあと、降りる前に、ディレクトリがリンクに替わっていないかを確かめる（起点は、リンクでも降りる）
+            state, dst = _stat_entry(directory)
+            if state == "absent":
+                continue
+            if state == "denied":
+                unknown.append(pre.rstrip("/"))
+                continue
+            kind = link_kind(dst)
+            if kind is not None:
+                links.append((pre.rstrip("/"), kind))
+                continue
+            if not stat.S_ISDIR(dst.st_mode):
+                continue
         state, entries = read_os(_list_dir, directory)
         if state == "absent":
             continue
@@ -258,72 +374,306 @@ def walk_markdown(start, prefix: str = "", skip_top: bool = False, visited: "lis
             rel = pre + name
             if skip_top and pre == prefix and name in SKIP_TOP_LEVEL_DIRS:
                 continue  # 名前だけで決める。リンクかどうかも、ディレクトリかどうかも調べない
-            is_link = is_dir = junction = False
-            state, is_link = read_os(entry.is_symlink)
-            if state == "ok":
-                state, is_dir = read_os(entry.is_dir)  # リンクの先で判定する
-            if state == "ok" and is_dir and not is_link:
-                state, junction = _is_junction(entry)
+            if name.startswith("."):
+                continue  # 名前が . で始まる項目は、どの深さでも記事でない。どの呼び出しもしない
+            state, est = _entry_lstat(entry)
             if state == "absent":
                 continue
             if state == "denied":
                 unknown.append(rel)
                 continue
-            if is_dir:
-                if is_link:
-                    continue  # ディレクトリのシンボリックリンク。降りず、ファイルでもない
-                child_ids = None
-                if junction or ids is not None:
-                    state, child = _identity(entry.path)
-                    path_ids = ids
-                    if state == "ok" and path_ids is None:
-                        # このジャンクションで、道筋に初めて識別子が要る。起点からここまでの識別子を、
-                        # このジャンクションのためだけに取る。兄弟の項目には引き継がない。
-                        state, path_ids = _chain_identities(chain)
-                    if state == "absent":
-                        continue
-                    if state == "denied":
-                        unknown.append(rel)  # 同じ場所を回っていないかを、調べられなかった
-                        continue
-                    if child in path_ids:
-                        continue  # 道筋の上のディレクトリに戻る。降りない
-                    child_ids = path_ids + (child,)
-                stack.append((entry.path, rel + "/", chain + (entry.path,), child_ids))
+            kind = link_kind(est, nlink_known=False)
+            if kind is not None:
+                # 名前が .md で終わるリンクは、記事のリンクとして入れる。ただし起点の直下の README.md は記事でない
+                # ので、ディレクトリへのリンク（記事までの道）のときだけ入れる（下の判定に回す）
+                if name.lower().endswith(".md") and not (skip_top and pre == prefix and name == "README.md"):
+                    links.append((rel, kind))
+                    continue
+                state, is_dir = _link_is_dir(entry, est)
+                if state == "denied":
+                    unknown.append(rel)
+                elif state == "ok" and is_dir:
+                    links.append((rel, kind))  # ディレクトリへのリンク。降りない
+                continue  # .md でないファイルのリンクと、先のないリンクは、記事でない
+            if stat.S_ISDIR(est.st_mode):
+                stack.append((entry.path, rel + "/"))
                 continue
             if name.lower().endswith(".md"):
                 state, st = _stat_entry(entry.path)
                 if state == "absent":
-                    continue  # 先のないリンク
+                    continue
                 if state == "denied":
                     unknown.append(rel)
                     continue
-                if stat.S_ISREG(st.st_mode):
+                kind = link_kind(st)
+                if kind is not None:
+                    if kind == "hardlink" and skip_top and pre == prefix and name == "README.md":
+                        continue  # 起点の直下の README.md は記事でない（ふつうのファイルのハードリンクは道でもない）
+                    links.append((rel, kind))  # ハードリンク（一覧と lstat の間に置き換えられたリンクも）
+                elif stat.S_ISREG(st.st_mode):
                     files.append(MdFile(rel, st.st_size, st.st_mtime_ns))
     files.sort(key=lambda f: _sort_key(f.rel))
-    return Walk(files, sorted(unlistable, key=_sort_key), sorted(unknown, key=_sort_key))
+    links.sort(key=lambda item: _sort_key(item[0]))
+    for rel, kind in links:
+        _notice(rel, kind)
+    for rel in unknown:
+        _notice(rel, "unknown")
+    for rel in unlistable:
+        _notice(rel, "unlistable")
+    return Walk(files, sorted(unlistable, key=_sort_key), sorted(unknown, key=_sort_key), links)
 
 
 def walk_pages(wiki_root, visited: "list | None" = None) -> Walk:
-    """ページのファイルと、知らせ。知らせは、たどった全体のものをそのまま返す。visited は walk_markdown と同じ。"""
+    """ページのファイルと、知らせ。知らせは、たどった全体のものをそのまま返す。visited は walk_markdown と同じ。
+
+    links は、走査が拒んだものをそのまま返す（最上位の index.md、log.md、SCHEMA.md のリンクも入る。どの記事の
+    リンクを入れるかは walk_markdown の 1 か所で決め、使う側で絞らない）。
+    """
     found = walk_markdown(wiki_root, skip_top=True, visited=visited)
-    return Walk([f for f in found.files if is_page_path(f.rel)], found.unlistable, found.unknown)
+    return Walk([f for f in found.files if is_page_path(f.rel, native=True)], found.unlistable, found.unknown, found.links)
 
 
 def walk_index_files(wiki_root) -> Walk:
-    """索引のファイル（最上位の index.md と、indexes を起点にした .md）と、知らせ。
+    """索引のファイル（最上位の index.md と、indexes を起点にした .md）と、拒んだリンクと、知らせ。
 
-    indexes は、リンクであっても起点として降りる。ページの側とは別の呼び出しでたどるので、indexes がページの
-    ディレクトリを指していても、ページと索引の両方がそろう。
+    最上位の index.md と indexes そのものがリンクなら、読まず、降りず、links に入れる（ADR-0029。indexes は記事までの道）。
     """
     root = os.fspath(wiki_root)
-    files, unknown = [], []
+    files, unknown, links = [], [], []
     state, st = _stat_entry(os.path.join(root, "index.md"))
     if state == "denied":
         unknown.append("index.md")
-    elif state == "ok" and stat.S_ISREG(st.st_mode):
-        files.append(MdFile("index.md", st.st_size, st.st_mtime_ns))
+        _notice("index.md", "unknown")
+    elif state == "ok":
+        kind = link_kind(st)
+        if kind is not None:
+            links.append(("index.md", kind))
+            _notice("index.md", kind)
+        elif stat.S_ISREG(st.st_mode):
+            files.append(MdFile("index.md", st.st_size, st.st_mtime_ns))
+    state, ist = _stat_entry(os.path.join(root, "indexes"))
+    if state == "denied":
+        _notice("indexes", "unknown")
+        return Walk(files, [], unknown + ["indexes"], links)
+    if state == "absent":
+        return Walk(files, [], unknown, links)
+    kind = link_kind(ist)
+    if kind is not None and kind != "hardlink":  # ふつうのファイルのハードリンクは、記事でも記事までの道でもない
+        _notice("indexes", kind)
+        return Walk(files, [], unknown, links + [("indexes", kind)])
     below = walk_markdown(os.path.join(root, "indexes"), prefix="indexes/")
-    return Walk(files + below.files, below.unlistable, unknown + below.unknown)
+    return Walk(files + below.files, below.unlistable, unknown + below.unknown, links + below.links)
+
+
+TOP_ARTICLES = ("index.md", "log.md", "SCHEMA.md")
+
+
+def is_article_path(rel: "str | PurePosixPath", *, native: bool = False) -> bool:
+    """wiki のルートからの相対パス（/ 区切り）が、wiki の側の記事かを、名前の規則だけで返す（ADR-0029 の作者の決定の 6）。
+
+    記事は、ページ（is_page_path）と、最上位の index.md、log.md、SCHEMA.md と、indexes の下の .md（どの要素も名前が
+    . で始まらないもの）である。リンクかどうかは定義に入れない。raw の記事は、source ページの raw: で決まる。
+    """
+    parts = PurePosixPath(_relative_text(rel, native)).parts
+    if not parts or any(part.startswith(".") for part in parts):
+        return False
+    if len(parts) == 1 and parts[0] in TOP_ARTICLES:
+        return True
+    if parts[0] == "indexes" and len(parts) > 1:
+        return parts[-1].lower().endswith(".md")
+    return is_page_path(rel, native=native)
+
+
+class ArticlePath(NamedTuple):
+    """記事を読む口の結果。state は "ok"、"absent"（ない、ふつうのファイルでない）、"denied"（分からない）、
+    "link"（記事か記事までの道がリンク。link に (相対パス, 種類)）、"not_article"（名前の規則で記事でない）。"""
+    state: str
+    path: "Path | None" = None
+    link: "tuple | None" = None
+
+
+def article_path(wiki_root, rel, *, directory: bool = False, native: bool = False) -> ArticlePath:
+    """記事を読む口（ADR-0029 の I2、I4）。根から rel までの道と rel そのものに、走査と同じ判定を当てる。
+
+    根そのものと、その祖先のリンクは許す。rel の要素ごとに os.lstat() を呼び、リンクに当たれば読まずに "link" を返す。
+    directory が真なら、記事を含みうるディレクトリまでの道を検査する。
+    native が真なら、POSIX のファイル名に含まれるバックスラッシュを区切りに変えない。
+    呼ぶ側は、"ok" のときだけ path を読むか降りる。拒んだことを「ない」に変えない。
+    """
+    rel = _relative_text(rel, native)
+    if directory and not rel:
+        return ArticlePath("ok", Path(wiki_root))  # 起点そのもののリンクは許す
+    parts = rel.split("/")
+    # 根の外へ出る名前（絶対パス、ドライブ、..、空の要素）は、記事の名前ではない
+    if rel.startswith("/") or any(part in ("", ".", "..") or (NT and ":" in part) for part in parts):
+        return ArticlePath("not_article")
+    if not is_article_path(rel + "/article.md" if directory else rel, native=native):
+        return ArticlePath("not_article")
+    current = os.fspath(wiki_root)
+    st = None
+    for i, part in enumerate(parts):
+        current = os.path.join(current, part)
+        state, st = _stat_entry(current)
+        if state == "denied":
+            _notice("/".join(parts[:i + 1]), "unknown")
+        if state != "ok":
+            return ArticlePath(state)
+        kind = link_kind(st)
+        if kind is not None:
+            _notice("/".join(parts[:i + 1]), kind)
+            return ArticlePath("link", link=("/".join(parts[:i + 1]), kind))
+    if not (stat.S_ISDIR(st.st_mode) if directory else stat.S_ISREG(st.st_mode)):
+        return ArticlePath("absent")
+    return ArticlePath("ok", Path(current))
+
+
+def absolute_user_path(path) -> Path:
+    """利用者のパスを、意味を変えずに絶対化する。途中の .. は解決する前に拒む（ADR-0029）。"""
+    if ".." in Path(path).parts:
+        raise ValueError(f".. を含むパスの所属は決められない。.. を含まないパスを指定する: {path}")
+    return Path(os.path.abspath(os.fspath(path)))
+
+
+def user_file_path(path, wiki_root=None, *, directory: bool = False) -> Path:
+    """記事と記事までの道を検査し、同じパスを返す。記事でない入力は規則の対象外。"""
+    path = Path(path)
+    absolute_user_path(path)  # 所属を調べない場合も、検査後と読み取り時で意味が変わる名前を受け取らない
+    if wiki_root is not None:
+        found = _article_rel(path, wiki_root)
+        if found is not None:
+            root, rel = found
+            if directory and not rel:
+                return Path(root)
+            if not is_article_path(rel + "/article.md" if directory else rel, native=True):
+                return path
+            opened = article_path(root, rel, directory=directory, native=True)
+            if opened.state == "link":
+                raise ValueError(f"リンクなので読まない: {opened.link[0]}（{opened.link[1]}）")
+            if opened.state == "denied":
+                raise ValueError(f"調べられない: {rel}")
+            if opened.state == "ok":
+                return opened.path
+            if opened.state == "absent":
+                raise FileNotFoundError(f"記事がないか、通常のファイルでない: {rel}")
+            # 記事の定義に入る名前を、読む口の入力検証の失敗で対象外に落とさない
+            _notice(rel, "unknown")
+            raise ValueError(f"記事として検査できないので読まない: {rel}")
+    return path
+
+
+def user_directory_path(path, wiki_root=None) -> Path:
+    """記事を含みうるディレクトリを、降りる前に検査する。"""
+    return user_file_path(path, wiki_root, directory=True)
+
+
+def read_user_file(path, wiki_root=None, encoding: str = "utf-8-sig") -> str:
+    """記事かどうかを判定し、記事ならリンクを拒んでから本文を読む。"""
+    return user_file_path(path, wiki_root).read_text(encoding=encoding)
+
+
+def read_user_bytes(path, wiki_root=None) -> bytes:
+    """read_user_file と同じ規則で、改行や BOM を変えずに読む。"""
+    return user_file_path(path, wiki_root).read_bytes()
+
+
+def _article_rel(path, wiki_root) -> "tuple[str, str] | None":
+    """path が wiki の中なら (比べた根, 根からの / 区切りの相対パス)。外なら None。
+
+    根の別名を通る入力は、祖先を上から解決し、既知の根に届いたところで止める。根より下の要素は解決しない。
+    外のファイルの別名も展開する。根より下のファイルのリンクは、記事を読む口で検査する。
+    大小文字の比較と、相対パスの要素の切り出しを分ける。
+    """
+    given = os.fspath(absolute_user_path(path))
+    roots = [os.fspath(absolute_user_path(wiki_root))]
+    try:
+        roots.append(os.path.realpath(roots[0]))
+    except OSError:
+        pass
+    def relative(candidate, root):
+        parts, base = Path(candidate).parts, Path(root).parts
+        if len(parts) < len(base) or any(os.path.normcase(a) != os.path.normcase(b)
+                                         for a, b in zip(parts, base)):
+            return None
+        return "/".join(parts[len(base):])
+
+    for root in roots:
+        rel = relative(given, root)
+        if rel is not None:
+            return root, rel
+    # 外の別名は、リンクの行き先を 1 つずつ開く。realpath で連鎖をまとめて
+    # 解くと、wiki の中から外へ出るリンクまで解き、wiki の所属を失ってしまう。
+    pending = list(Path(given).parts)
+    current = Path(pending.pop(0))
+    followed = 0
+
+    def found(root):
+        if ".." in pending:
+            raise ValueError("リンクの行き先に wiki 内の .. があるので、所属を決められない")
+        return root, "/".join(pending)
+
+    while True:
+        for root in roots:
+            if relative(str(current), root) == "":
+                return found(root)
+            # current は、起点か、リンクを展開し終えた通常の祖先である。
+            try:
+                same_root = os.path.samefile(current, root)
+            except OSError:
+                same_root = False
+            if same_root:
+                return found(root)
+        if not pending:
+            return None
+        name = pending.pop(0)
+        if name == ".":
+            continue
+        if name == "..":
+            current = current.parent
+            continue
+        current = current / name
+        # 明示された根そのもののリンクは許す。根より下には進まない。
+        for root in roots:
+            if relative(str(current), root) == "":
+                return found(root)
+        state, st = _stat_entry(os.fspath(current))
+        if state == "absent":
+            return None
+        if state == "denied":
+            raise ValueError(f"パスの所属を調べられない: {current}")
+        if link_kind(st, nlink_known=False) is not None:
+            followed += 1
+            if followed > 64:
+                raise ValueError(f"リンクが循環しているか、多すぎるので所属を決められない: {path}")
+            try:
+                target = Path(os.readlink(current))
+            except (OSError, ValueError) as exc:
+                raise ValueError(f"リンクの行き先を調べられない: {current}") from exc
+            if target.is_absolute():
+                target_parts = list(target.parts)
+                current = Path(target_parts.pop(0))
+            else:
+                target_parts = list(target.parts)
+                current = current.parent
+            pending = target_parts + pending
+            continue
+
+
+def source_wiki_root(path, wiki_root=None):
+    """部分木は元の wiki の記事規則を引き継ぐ。wiki 外のコーパスだけを独立した根として扱う。"""
+    if wiki_root is not None and _article_rel(path, wiki_root) is not None:
+        return wiki_root
+    return path
+
+
+def link_warnings(*walks) -> list:
+    """走査の結果の links を、結果の欄 link_warnings の形（{"path", "kind"} の並び）にする。重ねて出さない。"""
+    seen, out = set(), []
+    for walk in walks:
+        for rel, kind in getattr(walk, "links", ()) or ():
+            if rel not in seen:
+                seen.add(rel)
+                out.append({"path": rel, "kind": kind})
+    return out
 
 
 ASSETS_DIR = "assets"
@@ -343,8 +693,8 @@ def walk_assets(wiki_root) -> Walk:
       下位のディレクトリには降りない。
     - 守るのは、走査の時点で木に置かれたリンクである。読む間だけリンクに替えて戻す同時の書き手は対象にしない
       （図の描画の設計の 6.1）。
-    OS の呼び出しは、walk_markdown と同じ口（_list_dir、DirEntry の is_symlink と is_dir、_is_junction、
-    _stat_entry）だけを使う。
+    OS の呼び出しは、walk_markdown と同じ口（_list_dir、_stat_entry）だけを使う。
+    リンクの種類は wiki_links.link_kind で決め、記事と違ってハードリンクは拒まない。
     """
     root = os.fspath(wiki_root)
     files, unlistable, unknown = [], [], []
@@ -354,19 +704,15 @@ def walk_assets(wiki_root) -> Walk:
     top = next((e for e in entries or [] if e.name == ASSETS_DIR), None)
     if top is None:
         return Walk([], [], [])
-    state, is_link = read_os(top.is_symlink)
-    if state == "ok" and not is_link:
-        state, is_dir = read_os(top.is_dir)
-        if state == "ok" and is_dir:
-            state, is_link = _is_junction(top)
-        elif state == "ok":
-            return Walk([], [], [])        # assets がディレクトリでない
+    state, st = _stat_entry(top.path)
     if state == "absent":
         return Walk([], [], [])
     if state == "denied":
         return Walk([], [], [ASSETS_DIR])
-    if is_link:
+    if link_kind(st, nlink_known=False) is not None:
         return Walk([], [], [])            # assets がリンクかジャンクション。たどらない
+    if not stat.S_ISDIR(st.st_mode):
+        return Walk([], [], [])            # assets がディレクトリでない
     state, children = read_os(_list_dir, top.path)
     if state == "absent":
         return Walk([], [], [])
@@ -377,20 +723,14 @@ def walk_assets(wiki_root) -> Walk:
         if not _is_figure_name(name):
             continue
         rel = f"{ASSETS_DIR}/{name}"
-        state, link = read_os(entry.is_symlink)
-        if state == "absent":
-            continue
-        if state == "denied":
-            unknown.append(rel)
-            continue
-        if link:
-            continue                       # ファイルのシンボリックリンク。読まない
         state, st = _stat_entry(entry.path)
         if state == "absent":
             continue
         if state == "denied":
             unknown.append(rel)
             continue
+        if link_kind(st, nlink_known=False) is not None:
+            continue                       # ファイルのリンク。ハードリンクは許す
         if stat.S_ISREG(st.st_mode):
             files.append(MdFile(rel, st.st_size, st.st_mtime_ns))
     files.sort(key=lambda f: _sort_key(f.rel))
@@ -702,17 +1042,21 @@ def build_page_index(pages: list[dict], value=lambda p: p) -> "tuple[dict, dict]
     return pages_by_path, pages_by_slug
 
 
-def classify_source_ref(ref: str, pages_by_path: dict, pages_by_slug: dict, page_type) -> "tuple[str, list, object]":
+def classify_source_ref(ref: str, pages_by_path: dict, pages_by_slug: dict, page_type,
+                        *, link_warnings=None) -> "tuple[str, list, object]":
     """`sources:` の値 1 つを分ける。(状態, 当たるページ, source でない type) を返す。
 
     値は ref_link で外側の [[ ]] を外し、wikilink と同じ規則（link_candidates）でページを探す。状態は次のどれかである。
     - "missing": 当たるページがない。
     - "not_source": 当たるページのうち type のあるものが 1 つ以上あり、どれも source でない。3 つ目の値は最初の type。
     - "ok": それ以外。
+    - "refused": link_warnings が渡され、リンクなので読まなかった記事を指す。
     lint の unresolved_sources（missing と not_source）と、グラフの抽出の sourced_from が、この関数を共有する。
     当たるページが 2 つ以上かどうか（曖昧さ）は、状態に含めない。呼び出す側が、当たるページの数で見る。
     page_type は、ページ（pages_by_* の値）から type を返す。
     """
+    if link_warnings and refused_link(ref_link(ref), link_warnings) is not None:
+        return "refused", [], None
     found = link_candidates(ref_link(ref), pages_by_path, pages_by_slug)
     if not found:
         return "missing", [], None
@@ -737,6 +1081,31 @@ def resolve_link(link: str, by_path: dict, by_slug) -> "str | None":
     if kind == "path":
         return by_path.get(target)
     return target if target in by_slug else None
+
+
+def refused_link(link: str, warnings: list, *, articles: bool = False) -> "dict | None":
+    """読まなかった記事か、その途中の道を指す wikilink なら、その知らせを返す。
+
+    降りなかったディレクトリの下のスラッグは推測しない。パスを指定したときだけ、
+    要素の境界で照合する。lint と閲覧が、拒否をリンク切れに読み替えないために共用する。
+    articles は Index の行用で、パスで指す索引の記事も含める。本文と sources はページだけを照合する。
+    """
+    lookup = link_lookup(link)
+    if lookup is None:
+        return None
+    kind, target = lookup
+    accepts = is_article_path if articles and kind == "path" else is_page_path
+    for item in warnings:
+        # OS 上の読み取りのパスは変えず、wikilink の照合だけをページの索引と同じ鍵にする。
+        rel = posix_rel(item["path"])
+        if kind == "path" and accepts(target + ".md", native=True) and target.startswith(rel + "/"):
+            return item
+        if rel.lower().endswith(".md") and accepts(rel, native=True):
+            stem = rel[:-3]
+            expected = stem if kind == "path" else PurePosixPath(stem).name
+            if target == expected:
+                return item
+    return None
 
 
 # ---------------------------------------------------------------------------
