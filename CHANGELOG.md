@@ -6,7 +6,7 @@
 
 ## [Unreleased]
 
-## [0.30.0] - 2026-11-18
+## [0.31.0] - 2026-11-18
 
 ### Changed
 
@@ -39,6 +39,14 @@
 ### Fixed
 
 - MCP のサーバーの版（`SERVER_FILES`）に、サーバーが関数の中で遅れて読み込む `wiki_captions.py`（lint の字幕の照合）、それが読み込む `wiki_browse_core.py` と `wiki_browse_fs.py`、`wiki_decide.py` が入っていなかった。これらだけを直したときに、接続し直しても古いサーバーが使われ続けていた。足りているかを確かめる試験を、info-hive-dev の `tests/wiki/test_wiki_links.py` に足した。
+
+
+## [0.30.0] - 2026-11-18
+
+### Added
+
+- `/wiki:ingest` と Codex の `$wiki:info-hive ingest` で、HTTP の本文が空白を除いて 500 文字未満、または HTTP 401/403 のときに、Playwright で DOM を取得するようにした。翻訳、画像の保存、raw の検査は従来と共用する。Windows では OS の既定の Chrome または Edge へ公式 Playwright 拡張で接続し、利用者が開いて許可した対象タブを、普段のログイン状態で読む。Cookie やプロファイルは書き出さず、本文内の読み込み済みの同一 origin の画像は PNG として保存する。Node.js 20 以上、npm、公式拡張が必要で、接続の実装は playwright-core 1.66.0-alpha-2026-11-09 に固定した。`--browser-only` は HTTP を飛ばし、`--browser-session isolated` は独立したブラウザで取得する。独立した取得では `uv` で Playwright 1.65.2 を使い、Chromium の自動導入は明示したときだけ行う。手動の HTML の経路も引き続き使える。
+- Web の raw と取得の出力に `fetch_method` を記録する。Playwright の場合は `playwright` で、`source_sha256_of: dom` と DOM の UTF-8 のバイト列のハッシュを残す。途中の再開では、ブラウザもネットでの取得も行わない。
 
 ## [0.29.0] - 2026-11-17
 
@@ -827,8 +835,7 @@ Web ページの取得（`wiki_fetch.py`）が、Medium の記事の図とコー
 - 移植元の調査メモ `research/` と、移植元の英語の評価セットでの測定記録（`eval/decisions/results-*.json`）は取り込んでいない。
 - Paperclip 連携は移植元の v4.0.0 で削除されており、info-hive にもない。
 
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.30.0...HEAD
-[0.30.0]: https://github.com/to884/info-hive-wiki/compare/v0.29.0...v0.30.0
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.29.0...HEAD
 [0.29.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.29.0
 [0.7.0]: https://github.com/to884/info-hive-wiki/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/to884/info-hive-wiki/compare/v0.6.0...v0.6.1
