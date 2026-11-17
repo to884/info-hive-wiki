@@ -647,8 +647,8 @@ def walk_assets(wiki_root) -> Walk:
       下位のディレクトリには降りない。
     - 守るのは、走査の時点で木に置かれたリンクである。読む間だけリンクに替えて戻す同時の書き手は対象にしない
       （図の描画の設計の 6.1）。
-    OS の呼び出しは、walk_markdown と同じ口（_list_dir、DirEntry の is_symlink と is_dir、_is_junction、
-    _stat_entry）だけを使う。
+    OS の呼び出しは、walk_markdown と同じ口（_list_dir、_stat_entry）だけを使う。
+    リンクの種類は wiki_links.link_kind で決め、記事と違ってハードリンクは拒まない。
     """
     root = os.fspath(wiki_root)
     files, unlistable, unknown = [], [], []
@@ -658,19 +658,15 @@ def walk_assets(wiki_root) -> Walk:
     top = next((e for e in entries or [] if e.name == ASSETS_DIR), None)
     if top is None:
         return Walk([], [], [])
-    state, is_link = read_os(top.is_symlink)
-    if state == "ok" and not is_link:
-        state, is_dir = read_os(top.is_dir)
-        if state == "ok" and is_dir:
-            state, is_link = _is_junction(top)
-        elif state == "ok":
-            return Walk([], [], [])        # assets がディレクトリでない
+    state, st = _stat_entry(top.path)
     if state == "absent":
         return Walk([], [], [])
     if state == "denied":
         return Walk([], [], [ASSETS_DIR])
-    if is_link:
+    if link_kind(st, nlink_known=False) is not None:
         return Walk([], [], [])            # assets がリンクかジャンクション。たどらない
+    if not stat.S_ISDIR(st.st_mode):
+        return Walk([], [], [])            # assets がディレクトリでない
     state, children = read_os(_list_dir, top.path)
     if state == "absent":
         return Walk([], [], [])
@@ -681,20 +677,14 @@ def walk_assets(wiki_root) -> Walk:
         if not _is_figure_name(name):
             continue
         rel = f"{ASSETS_DIR}/{name}"
-        state, link = read_os(entry.is_symlink)
-        if state == "absent":
-            continue
-        if state == "denied":
-            unknown.append(rel)
-            continue
-        if link:
-            continue                       # ファイルのシンボリックリンク。読まない
         state, st = _stat_entry(entry.path)
         if state == "absent":
             continue
         if state == "denied":
             unknown.append(rel)
             continue
+        if link_kind(st, nlink_known=False) is not None:
+            continue                       # ファイルのリンク。ハードリンクは許す
         if stat.S_ISREG(st.st_mode):
             files.append(MdFile(rel, st.st_size, st.st_mtime_ns))
     files.sort(key=lambda f: _sort_key(f.rel))
