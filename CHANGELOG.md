@@ -6,10 +6,12 @@
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-11-18
+
 ### Added
 
 - raw のリンク検証（ADR-0029 段階2）。lint の CLI に `--raw-root`、MCP に `raw_root` を追加し、source ページの `raw:` とその途中の道、ディレクトリ内の記事のリンクを、読まずに報告する。根そのものと祖先のリンクは許し、守る木の外の rag の原本は検査しない。途中の道を調べられない参照も明示する。リンクと既存の `raw:` は書き換えない。
-- raw の複数候補（`raw_ambiguous`）、検査不能（`raw_unknown`）、版未検証（`raw_version_unverified`）、途中の検査の不足（`raw_paths_unchecked`）を区別して報告する。`summary.links_raw` は、検査した raw のリンクの件数になる。
+- raw の複数候補（`raw_ambiguous`）、検査不能（`raw_unknown`）、版未検証（`raw_version_unverified`）、途中の検査の不足（`raw_paths_unchecked`）を区別して報告する。`summary.links_raw` は、検査した raw のリンクの件数になる。summary.links は報告した全件数、links_wiki / links_raw はそれぞれの範囲の件数で、未検査は null とする。
 
 ### Changed
 
@@ -863,7 +865,6 @@ Web ページの取得（`wiki_fetch.py`）が、Medium の記事の図とコー
 - 移植元の調査メモ `research/` と、移植元の英語の評価セットでの測定記録（`eval/decisions/results-*.json`）は取り込んでいない。
 - Paperclip 連携は移植元の v4.0.0 で削除されており、info-hive にもない。
 
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.31.0...HEAD
 [0.31.0]: https://github.com/to884/info-hive-wiki/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/to884/info-hive-wiki/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.29.0
@@ -879,3 +880,6 @@ Web ページの取得（`wiki_fetch.py`）が、Medium の記事の図とコー
 [0.2.0]: https://github.com/to884/info-hive-wiki/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/to884/info-hive-wiki/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.1.0
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.33.0...HEAD
+[0.33.0]: https://github.com/to884/info-hive-wiki/compare/v0.32.0...v0.33.0
+[0.32.0]: https://github.com/to884/info-hive-wiki/compare/v0.31.1...v0.32.0

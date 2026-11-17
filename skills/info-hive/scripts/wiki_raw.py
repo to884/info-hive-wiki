@@ -33,6 +33,8 @@ class RawResolution:
     version_unverified: bool = False
     reason: str = ""
     external: bool = False
+    scope_unverified: bool = False
+    mismatches: list[dict] = field(default_factory=list)
 
 
 def within(path, root) -> bool:
@@ -198,6 +200,11 @@ def resolve_raw(meta, page_path, wiki_root, wiki_root_given=None, allowed_roots=
     if type_value(meta.get("type")) != "source":
         return []
     refs = ref_values(meta.get("raw"))
+    sessions, urls = ref_values(meta.get("session_id")), ref_values(meta.get("url"))
+    if len(sessions) > 1 or len(urls) > 1:
+        return [RawResolution(ref, "unknown", reason="session_id と url は値を1つだけ指定する") for ref in refs]
+    session = sessions[0] if sessions else None
+    url = urls[0] if urls else None
     hashes = ref_values(meta.get("raw_sha256"))
     aligned = len(refs) == len(hashes) and all(_SHA256.fullmatch(h) for h in hashes)
     try:
@@ -240,7 +247,7 @@ def resolve_raw(meta, page_path, wiki_root, wiki_root_given=None, allowed_roots=
                 bases = []
                 for w in wiki_roots:
                     bases.append(w.parent)
-                    if not meta.get("session_id"):
+                    if not session:
                         bases.extend((w, w / rel_page.parent if rel_page is not None else page.parent))
                 candidates = list(dict.fromkeys(Path(os.path.abspath(b / ref)) for b in bases))
         except (OSError, ValueError, RuntimeError) as exc:
@@ -262,6 +269,7 @@ def resolve_raw(meta, page_path, wiki_root, wiki_root_given=None, allowed_roots=
                 continue
             external = bool(meta.get("rag_job_id") and absolute and origin is None)
             if external:
+                result.scope_unverified = not known_raw
                 # 外の原本は記事ではない。リンクを含め、raw の版もここでは読まない。
                 try:
                     st = p.stat()
@@ -286,35 +294,47 @@ def resolve_raw(meta, page_path, wiki_root, wiki_root_given=None, allowed_roots=
         if result.unchecked:
             result.state, result.reason = "unknown", "raw を調べられない"
             continue
-        matched = {}
+        matched = []
         for p, scan, external in inspected:
             try:
                 if not external:
                     if aligned:
                         if _digest(scan).lower() != hashes[index].lower():
+                            result.mismatches.append({"path": str(p), "kind": "version", "reason": "raw_sha256 と一致しない"})
                             continue
                     else:
                         result.version_unverified = True
-                        if stat.S_ISREG(scan["stat"].st_mode) and (meta.get("session_id") or meta.get("url")):
+                        if stat.S_ISREG(scan["stat"].st_mode) and (session or url):
                             rm = _raw_meta(p)
-                            if meta.get("session_id"):
-                                if rm.get("session_id") and rm["session_id"] != meta["session_id"]:
+                            actual_session = ref_values(rm.get("session_id"))
+                            actual_urls = ref_values(rm.get("url")) + ref_values(rm.get("final_url"))
+                            if session:
+                                if actual_session and session not in actual_session:
+                                    result.mismatches.append({"path": str(p), "kind": "identity", "reason": "session_id と一致しない"})
                                     continue
-                            elif (rm.get("url") or rm.get("final_url")) and meta["url"] not in (rm.get("url"), rm.get("final_url")):
+                            elif actual_urls and url not in actual_urls:
+                                result.mismatches.append({"path": str(p), "kind": "identity", "reason": "url / final_url と一致しない"})
                                 continue
-                # 外の原本は絶対パス1つだけ。記事の同一性の検査のために FileIdInfo を要求しない。
-                key = ("external", str(p)) if external else _identity(p, scan["stat"])
-                matched.setdefault(key, (p, external))
+                matched.append((p, external, scan["stat"]))
             except (OSError, UnicodeError, ValueError) as exc:
                 result.unchecked.append({"path": str(p), "reason": str(exc)})
+        # 候補が1つだけなら実体の比較は不要。複数の候補を同じ実体にまとめるときだけ識別子を求める。
+        if len(matched) > 1:
+            identities = {}
+            for p, external, st in matched:
+                try:
+                    identities.setdefault(_identity(p, st), (p, external, st))
+                except OSError as exc:
+                    result.unchecked.append({"path": str(p), "reason": str(exc)})
+            matched = list(identities.values())
         if result.unchecked:
             result.state, result.reason = "unknown", "raw の版か身元を確かめられない"
         elif len(matched) == 1:
-            result.path, result.external = next(iter(matched.values()))
+            result.path, result.external, _st = matched[0]
             result.state = "resolved"
         elif len(matched) > 1:
             result.state, result.reason = "ambiguous", "別の実体の raw が複数ある"
-            result.candidates = [str(p) for p, _ in matched.values()]
+            result.candidates = [str(p) for p, _, _ in matched]
         elif excluded:
             result.state, result.reason = "outside", "許した根の外か、隠し項目の候補がある"
         else:

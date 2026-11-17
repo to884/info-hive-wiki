@@ -651,8 +651,11 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
             for item in raw_results:
                 location = {"path": p["rel_path"], "raw": item.raw}
                 if item.state == "missing":
-                    findings["missing_raw"].append({**location, "absolute": bool(DRIVE_PATH_RE.match(item.raw)
-                                                    or item.raw.startswith(("/", "\\", "~")))})
+                    notice = {**location, "absolute": bool(DRIVE_PATH_RE.match(item.raw)
+                              or item.raw.startswith(("/", "\\", "~")))}
+                    if item.mismatches:
+                        notice["mismatches"] = item.mismatches
+                    findings["missing_raw"].append(notice)
                 elif item.state in ("ambiguous", "unknown"):
                     key = "raw_ambiguous" if item.state == "ambiguous" else "raw_unknown"
                     findings[key].append({**location, "candidates": item.candidates, "reason": item.reason})
@@ -662,6 +665,9 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
                     findings["raw_version_unverified"].append(location)
                 for path in item.parents_unchecked:
                     findings["raw_paths_unchecked"].append({**location, "candidate": path})
+                if item.state == "resolved" and item.scope_unverified:
+                    findings["raw_paths_unchecked"].append({**location, "candidate": str(item.path),
+                        "reason": "raw の根が未指定のため、外の原本かは未確認", "scope_unverified": True})
                 for link in item.links:
                     notice = {**link, "scope": "raw", "source": p["rel_path"], "raw": item.raw}
                     findings["links"].append(notice)
@@ -768,8 +774,9 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         "overview_stale": len(findings["overview_stale"]) if findings["overview_stale"] is not None else None,
         "overview_problems": len(findings["overview_problems"]) if findings["overview_problems"] is not None else None,
         # wiki の根を渡さなかったときは、リンクを調べていない。
-        "links": len(findings["links"]) if wiki_root is not None else None,
-        "links_unchecked": len(findings["links_unchecked"]) if wiki_root is not None else None,
+        "links": len(findings["links"]) if raw_wiki_root is not None else None,
+        "links_wiki": sum(f.get("scope") != "raw" for f in findings["links"]) if wiki_root is not None else None,
+        "links_unchecked": len(findings["links_unchecked"]) if raw_wiki_root is not None else None,
         "links_raw": sum(f.get("scope") == "raw" for f in findings["links"]) if raw_wiki_root is not None else None,
         "raw_ambiguous": len(findings["raw_ambiguous"]) if raw_wiki_root is not None else None,
         "raw_unknown": len(findings["raw_unknown"]) if raw_wiki_root is not None else None,
@@ -829,8 +836,9 @@ def render_text(findings: dict) -> str:
         ("unresolved_sources", "sources: が source ページを指していない",
          lambda f: f"  - {f['path']}  {f['source']}: "
          + ("ページがない" if f["reason"] == "missing" else f"type が {f.get('type')} のページを指している")),
-        ("missing_raw", "source ページの raw: の原本がない",
-         lambda f: f"  - {f['path']}  raw: {f['raw']}"),
+        ("missing_raw", "source ページの raw: に一致する原本がない（版・身元の不一致を含む）",
+         lambda f: f"  - {f['path']}  raw: {f['raw']}" +
+                   ("  不一致: " + "、".join(x["path"] + "（" + x["reason"] + "）" for x in f["mismatches"]) if f.get("mismatches") else "")),
         ("unknown_tags", "タグの体系にないタグ", lambda f: f"  - {f['path']}  {', '.join(f['tags'])}"),
         ("caption_corrections", "YouTube の字幕の訂正と留保の印、定義、confidence の食い違い",
          lambda f: f"  - {f['path']}:{f['line']}  {f['message']}"),
@@ -849,8 +857,8 @@ def render_text(findings: dict) -> str:
          lambda f: f"  - {f['path']}  raw: {f['raw']}  {f['reason']}"),
         ("raw_version_unverified", "raw の版を確かめていない（raw_sha256 がないか値の数・形が合わない）",
          lambda f: f"  - {f['path']}  raw: {f['raw']}"),
-        ("raw_paths_unchecked", "raw の途中の道を調べていない（--raw-root で根を指定する）",
-         lambda f: f"  - {f['path']}  raw: {f['raw']}  候補: {f['candidate']}"),
+        ("raw_paths_unchecked", "raw の範囲か途中の道を調べていない（--raw-root で根を指定する）",
+         lambda f: f"  - {f['path']}  raw: {f['raw']}  候補: {f['candidate']}" + ("  " + f["reason"] if f.get("reason") else "")),
     ]
 
     for key, label, formatter in sections:
@@ -881,6 +889,9 @@ def render_text(findings: dict) -> str:
 
     if s.get("links_raw") is None:
         out.append("wiki の根を渡していないため、raw の側のリンクを調べていない。")
+        out.append("")
+    if s.get("links_wiki") is None:
+        out.append("wiki の側のリンクは調べていない。links は、検査できた範囲の知らせの件数である。")
         out.append("")
 
     # None は検査していない項目なので、問題がないものとして扱う。

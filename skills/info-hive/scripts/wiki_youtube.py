@@ -538,6 +538,12 @@ def cmd_inspect(args) -> int:
 
 def cmd_write(args) -> int:
     wiki, raw_root = Path(args.wiki), Path(args.raw_root)
+    from wiki_pages import absolute_user_path
+    try:
+        absolute_user_path(wiki)
+        absolute_user_path(raw_root)
+    except ValueError as exc:
+        raise Fail(str(exc)) from None
     if not raw_root.is_dir():
         raise Fail(f"raw のルートがない: {raw_root}")
     check_slug(args.slug)

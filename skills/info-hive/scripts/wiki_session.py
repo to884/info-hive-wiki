@@ -1680,6 +1680,12 @@ def cmd_decide(args) -> int:
 def cmd_write(args) -> int:
     wiki = Path(args.wiki)
     raw_root = Path(args.raw_root)
+    from wiki_pages import absolute_user_path
+    try:
+        absolute_user_path(wiki)
+        absolute_user_path(raw_root)
+    except ValueError as exc:
+        raise Fail(str(exc)) from None
     if not os.path.isdir(raw_root):
         raise Fail(f"raw のルートがない（作らない）: {raw_root}")
     import wiki_fetch

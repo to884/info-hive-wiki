@@ -64,6 +64,10 @@ class CaptionError(Exception):
     """json3 か raw を読めない。"""
 
 
+class EvidenceUnavailable(CaptionError):
+    """訂正の根拠の raw を拒んだか、照合できない。欠落と区別する。"""
+
+
 # ---------------------------------------------------------------- json3 から行へ
 
 
@@ -947,7 +951,10 @@ def check_definition(d: Definition, raw: RawDoc, other_raw_texts) -> str | None:
             return f"{d.ident} の訂正した語 `{w}` が、raw の L{n} にない"
     elif basis.startswith("wiki_source:"):
         slug = basis[len("wiki_source:"):]
-        texts = other_raw_texts(slug)
+        try:
+            texts = other_raw_texts(slug)
+        except EvidenceUnavailable as exc:
+            return f"{d.ident} の根拠のソース `{slug}` の raw を使えない（{exc}）"
         if not texts:
             return f"{d.ident} の根拠のソース `{slug}` の raw が見つからない（同じ raw は使えない）"
         if not any(w in t for t in texts):
@@ -1125,6 +1132,7 @@ def check_pages(pages: list[PageIn], wiki_root: Path, only_raw: str | None = Non
     # 訂正の根拠に使う他の source は、other_raw_texts と check_definition が依存する時点で検査する。
     from wiki_pages import resolve_raw
     paths_by_page = {}
+    problems_by_page = {}
     raw_warnings = []
     scans = {p.rel: scan_page(p.rel, p.text) for p in pages}
     relevant = {}
@@ -1133,11 +1141,14 @@ def check_pages(pages: list[PageIn], wiki_root: Path, only_raw: str | None = Non
         selected_path = Path(os.path.abspath(only_raw if os.path.isabs(only_raw) else wiki_root.parent / only_raw))
     for p in pages:
         paths_by_page[p.rel] = []
+        problems_by_page[p.rel] = []
         is_video = bool(p.meta.get("video_id") or p.meta.get("caption_kind") or scans[p.rel].definitions)
         relevant[p.rel] = is_video
         for resolved in resolve_raw(p.meta, wiki_root / p.rel, wiki_root, wiki_root_given, raw_roots=raw_roots):
             selected = selected_path is not None and any(Path(c) == selected_path for c in resolved.candidates)
             relevant[p.rel] = relevant[p.rel] or selected
+            if resolved.state not in ("resolved", "outside") or (resolved.state == "outside" and resolved.candidates):
+                problems_by_page[p.rel].append(f"{resolved.raw}: {resolved.state}: {resolved.reason}")
             if resolved.state in ("link", "unknown", "ambiguous") or (resolved.state == "outside" and resolved.candidates):
                 raw_warnings.append({"source": p.rel, "raw": resolved.raw, "state": resolved.state,
                                      "reason": resolved.reason, "candidates": resolved.candidates,
@@ -1151,6 +1162,9 @@ def check_pages(pages: list[PageIn], wiki_root: Path, only_raw: str | None = Non
                                      "candidates": resolved.parents_unchecked})
             if resolved.state == "resolved" and resolved.version_unverified and not resolved.external:
                 raw_warnings.append({"source": p.rel, "raw": resolved.raw, "state": "version_unverified"})
+            if resolved.state == "resolved" and resolved.scope_unverified:
+                raw_warnings.append({"source": p.rel, "raw": resolved.raw, "state": "scope_unverified",
+                                     "reason": "raw の根が未指定のため、外の原本かは未確認"})
 
     # 要約ページ（type が source で、raw が動画の raw のもの）を集める。
     summaries: dict = {}        # rel -> (raw の鍵, RawDoc)
@@ -1185,14 +1199,20 @@ def check_pages(pages: list[PageIn], wiki_root: Path, only_raw: str | None = Non
 
     def other_raw_texts(slug: str) -> list[str]:
         texts = []
+        problems = []
         for sp in by_slug.get(nfc(slug), []):
             if _type(sp.meta) != "source":
                 continue
+            problems.extend(problems_by_page[sp.rel])
             for path in paths_by_page[sp.rel]:
                 _doc, err, text = load(path)
                 if err or text is None:
+                    if err:
+                        problems.append(err)
                     continue
                 texts.append(text)
+        if not texts and problems:
+            raise EvidenceUnavailable("、".join(problems))
         return texts
 
     for p in pages:
