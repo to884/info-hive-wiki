@@ -931,7 +931,7 @@ def is_kana(character: str) -> bool:
 
 def is_han(character: str) -> bool:
     """基本面と拡張 B 以降を、Unicode の漢字の名前でそろえて読む。"""
-    return character == "〇" or unicodedata.name(character, "").startswith(
+    return unicodedata.name(character, "").startswith(
         ("CJK UNIFIED IDEOGRAPH-", "CJK COMPATIBILITY IDEOGRAPH-"))
 
 
@@ -958,7 +958,16 @@ def translation_block(source: str, output: str, node_type: str) -> tuple[bool, l
     letters = sum(c.isalpha() for c in out)
     if not kana and not han and (len(words) >= 2 or letters >= 20):
         return True, [out.strip()]
-    passages, runs, current = [], [], []
+    # 段落の別の日本語の文に薄められないよう、文単位でも同じ候補の条件を当てる。
+    # 同一文内で混ざる語の意味や言語は、この文字の条件では確定しない。
+    out_units = re.split(r"[。！？.!?;；\n]+", out)
+    passages = []
+    for unit in out_units:
+        unit_kana, unit_han = script_counts(unit)
+        if unit_han and unit_kana / (unit_kana + unit_han) < 0.35:
+            if unit.strip() not in passages:
+                passages.append(unit.strip())
+    runs, current = [], []
     # 文末、大小文字、原文との完全一致に依存せず、かな・漢字以外の文字体系を同じ条件で見る。
     for character in out:
         if is_kana(character) or is_han(character):
@@ -971,7 +980,6 @@ def translation_block(source: str, output: str, node_type: str) -> tuple[bool, l
         if len(UNICODE_WORD_RE.findall(run)) >= 4 or sum(c.isalpha() for c in run) >= 20:
             passages.append(run.strip())
     # 共有する漢字が原文に近い場合も確認する。原文に仮名があっても照合を省略しない。
-    out_units = re.split(r"[。！？.!?;；\n]+", out)
     for unit in re.split(r"[。！？.!?;；\n]+", src):
         original = "".join(c for c in unit if is_han(c))
         if len(original) < 8:
@@ -1086,7 +1094,7 @@ def compare(a: Node, b: Node, translate: bool, errors: list[dict], warnings: lis
                     [(c.type, c.content, tuple(sorted((c.attrs or {}).items()))) for c in ib]:
                 errors.append({"kind": "text", **detail, "message": "訳さないページで本文が変わった"})
         else:
-            checked, passages = translation_block(src_text, out_text, a.type)
+            checked, passages = translation_block(inline_text(ia, newline="\n"), inline_text(ib, newline="\n"), a.type)
             if checked and translation is not None:
                 translation["checked_blocks"] += 1
             for index, text in enumerate(passages):
