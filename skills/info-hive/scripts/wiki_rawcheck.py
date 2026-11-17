@@ -918,49 +918,86 @@ def names_of(text: str, title_case_ok: bool = True) -> list[str]:
     return out
 
 
-def translation_prose(text: str, protected: list[str]) -> str:
-    """言語の簡易検査から、保持すべき固有名詞と URL を除く。構造はパーサーで別に検査する。"""
-    text = re.sub(r"https?://\S+", " ", text)
-    for word in sorted(set(protected), key=len, reverse=True):
-        text = re.sub(r"(?<!\w)" + re.escape(word) + r"(?!\w)", " ", text)
-    return text
+LATIN_WORD_RE = re.compile(r"[A-Za-z\u00c0-\u024f]+(?:[’'][A-Za-z\u00c0-\u024f]+)?")
+KANA_RE = re.compile(r"[\u3040-\u30ff]")
+HAN_RE = re.compile(r"[\u3400-\u9fff\uf900-\ufaff]")
+GRAMMAR_WORDS = {word.casefold() for word in FUNCTION_WORDS} | {"how", "what", "which", "because", "than"}
 
 
-def translation_block(source: str, output: str, title_case_ok: bool) -> tuple[bool, bool]:
-    """（検査対象か、未翻訳の疑いがあるか）。短い名前やコードだけのブロックは対象外。
+def translation_text(text: str) -> str:
+    """URL は訳す文章ではない。コードと画像は呼び出す側のパーサーが除いている。"""
+    return re.sub(r"https?://\S+", " ", text)
 
-    20 文字以上の英字か、かなを含まない 20 文字以上の文章を調べる。英語は 4 語以上を要する。
-    日本語の文字が文章の文字の 2 割に届かない出力と、変化のない外国語の文章を止める。
-    訳の意味や完全性を保証する検査ではない。元から日本語の文章と保持する名前は残してよい。
+
+def normalized_prose(text: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKC", text).casefold() if c.isalnum())
+
+
+def plain_latin_prose(text: str) -> bool:
+    """名前の綴りを推定して削らず、文章に見られる語と文末を材料にする。"""
+    words = LATIN_WORD_RE.findall(text)
+    lower_content = [w for w in words if w.islower() and w.casefold() not in GRAMMAR_WORDS]
+    grammar = sum(w.casefold() in GRAMMAR_WORDS for w in words)
+    sentence = bool(re.search(r"[.!?]", text))
+    pronoun = bool(words and words[0].casefold() in {"we", "you", "they", "he", "she", "this", "these", "those", "it"})
+    return len(lower_content) >= 2 or (len(words) >= 4 and grammar >= 2 and (sentence or pronoun))
+
+
+def prose_units(text: str) -> list[str]:
+    """段落の途中を残す場合も見る。小数点では分けず、文末と節の区切りで分ける。"""
+    return [s.strip() for s in re.split(r"(?<![0-9])[.!?。！？;；]+|[.!?。！？;；]+(?![0-9])", text) if s.strip()]
+
+
+def translation_block(source: str, output: str, node_type: str) -> tuple[bool, str | None]:
+    """（文章を調べたか、誤りか確認を要する警告）。比率で翻訳済みとは推定しない。
+
+    長い外国語の出力と、原文の文・節の残存を調べる。見出しやセルの名前は日本語の文字数で
+    判定しない。変更のない名前らしい句は確認の警告とし、根拠を残して受理できる。
     """
-    # 長い全大文字の文章を、すべて略語とみなして検査対象から消してはならない。
-    protected = [word for word in names_of(source, title_case_ok)
-                 if not word.isupper() or len(word) < 6 or word in JAPANESE_ABBREVIATIONS]
-    src = translation_prose(source, protected)
-    out = translation_prose(output, protected)
-    same = lambda text: re.sub(r"\s+", "", unicodedata.normalize("NFKC", text)).casefold()
-    # 日本語と英語が同じ段落にある場合も、長い英語部分の丸残しを全体の割合で隠さない。
-    foreign_runs = re.split(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]+", src)
-    if any(len(re.findall(r"[A-Za-z]", run)) >= 20 and len(re.findall(r"[A-Za-z]+", run)) >= 4
-           and same(run) in same(out) for run in foreign_runs):
-        return True, True
+    src, out = translation_text(source), translation_text(output)
+    if not src.strip() and not out.strip():
+        return False, None
+    src_norm, out_norm = normalized_prose(src), normalized_prose(out)
 
-    def counts(text: str) -> tuple[int, int, int]:
-        letters = [c for c in text if c.isalpha()]
-        japanese = sum(bool(re.fullmatch(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]", c)) for c in letters)
-        latin = sum(c.isascii() for c in letters)
-        return len(letters), japanese, latin
+    def possible_name(text: str) -> bool:
+        content = [w for w in LATIN_WORD_RE.findall(text) if w.casefold() not in GRAMMAR_WORDS]
+        return bool(content) and all(w[:1].isupper() for w in content)
 
-    total, japanese, latin = counts(src)
-    kana = bool(re.search(r"[\u3040-\u30ff]", src))
-    if total < 20 or (kana and japanese / total >= 0.2):
-        return False, False
-    if latin >= total / 2 and len(re.findall(r"[A-Za-z]+", src)) < 4:
-        return False, False
-    if kana and latin < total / 2:
-        return False, False
-    out_total, out_japanese, _ = counts(out)
-    return True, same(src) in same(out) or not out_total or out_japanese / out_total < 0.2
+    named_phrase = possible_name(out) and not re.search(r"[!?]|\.(?:\s|$)", out)
+    # 短い説明を含むリストや、単語を大文字で始めた文章も、丸残しを許さない。
+    if (src_norm and src_norm == out_norm and plain_latin_prose(src) and not named_phrase
+            or plain_latin_prose(out) and not KANA_RE.search(out) and not HAN_RE.search(out) and not named_phrase):
+        return True, "untranslated"
+    # 一段落の一部だけを訳したときは、残った外国語の節を個別に調べる。
+    for run in re.split(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]+", out):
+        if (len(LATIN_WORD_RE.findall(run)) >= 4 and len(re.findall(r"[A-Za-z]", run)) >= 20
+                and plain_latin_prose(run) and not (named_phrase and possible_name(run))):
+            return True, "untranslated"
+    uncertain = False
+    # 漢字を日本語の証拠にしない。中国語の文の丸残しと、かなを少しだけ入れた近似コピーを見る。
+    out_units = prose_units(out)
+    source_units = prose_units(src)
+    for unit in source_units:
+        han = len(HAN_RE.findall(unit))
+        if han < 8 or KANA_RE.search(unit):
+            continue
+        unit_norm = normalized_prose(unit)
+        copied = unit_norm in out_norm
+        near = any(len(KANA_RE.findall(candidate)) <= 2
+                   and difflib.SequenceMatcher(None, unit_norm, normalized_prose(candidate), autojunk=False).ratio() >= 0.85
+                   for candidate in out_units)
+        if copied or near:
+            if node_type in ("heading", "th", "td") or (han < 20 and len(source_units) == 1):
+                uncertain = True
+            else:
+                return True, "untranslated"
+    # 製品名・論文名か、訳し忘れた短い句かは、見出しの大文字や文字数だけでは確定しない。
+    if src_norm and src_norm == out_norm and not KANA_RE.search(src):
+        words = LATIN_WORD_RE.findall(src)
+        identifier = len(words) <= 1 or (len(words) == 2 and all(w[:1].isupper() for w in words))
+        if not identifier and (words or HAN_RE.search(src)):
+            uncertain = True
+    return True, "translation_uncertain" if uncertain else None
 
 
 def compare(a: Node, b: Node, translate: bool, errors: list[dict], warnings: list[dict], style: Counter,
@@ -1004,13 +1041,17 @@ def compare(a: Node, b: Node, translate: bool, errors: list[dict], warnings: lis
                     [(c.type, c.content, tuple(sorted((c.attrs or {}).items()))) for c in ib]:
                 errors.append({"kind": "text", **detail, "message": "訳さないページで本文が変わった"})
         else:
-            checked, untranslated = translation_block(src_text, out_text, a.type not in ("heading", "th", "td"))
+            checked, translation_issue = translation_block(src_text, out_text, a.type)
             if checked and translation is not None:
                 translation["checked_blocks"] += 1
-            if untranslated:
+            if translation_issue == "untranslated":
                 errors.append({"kind": "untranslated", **detail,
-                               "message": "文章が未翻訳か、訳文の大半が外国語のまま。"
-                               "本文を日本語に訳す。翻訳者名や図の補足だけでは完了にできない"})
+                               "message": "外国語の文章が残っている。文や節を日本語に訳す。"
+                               "翻訳者名や図の補足だけでは完了にできない"})
+            elif translation_issue:
+                warnings.append({"kind": translation_issue, **detail,
+                                 "message": "原文のままの句がある。固有名詞として保持したのか、訳し忘れたのかを確認し、"
+                                 "保持する場合は理由をログに残す"})
             src_tokens = [x.lower() for x in TOKEN_RE.findall(src_text)]
             # 同じ語のくり返し、大文字と小文字の違い、原文の語の頭に当たる語（BLOBs → BLOB）、日本語の文で
             # ふつうに使う略語（JAPANESE_ABBREVIATIONS）は数えない。
@@ -1080,6 +1121,10 @@ def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: s
     names: set[str] = set()
     caption_ranges: list[tuple[int, int]] = []
     strip_captions(out_tree, fetched_images(fetch), raw_path.parent, errors, names, caption_ranges)
+    if translate and any(n.type == "html_block" for tree in (src_tree, out_tree) for n in walk(tree)):
+        errors.append({"kind": "translation_html",
+                       "message": "HTML ブロックは文章の翻訳を検査できない。未検査のまま完了にはしない。"
+                       "比較元を含めて Markdown として取得し直す。コードフェンスの中の HTML はそのまま保持できる"})
     if not translate:
         # 訳さないページは、補足の行を除いた本文が、文字どおり同じでなければならない（記法の書き換えも含めて）。
         # 入れ物の記号だけの空の行（空の行、`>`、字下げだけの行）は、補足を挟むと増えるので比べない。
@@ -1109,7 +1154,8 @@ def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: s
     result = {"stage": "check", "ok": not errors, "needs_translation": translate,
               "language_override": {"value": override, "reason": reason} if override else None,
               "translated_by": translator, "caption_names": sorted(names),
-              "translation": {"state": "incomplete" if errors else "checked" if translate else "not_required",
+              "translation": {"state": ("incomplete" if errors else "not_required" if not translate
+                                        else "checked" if translation["checked_blocks"] else "no_prose"),
                               "checked_blocks": translation["checked_blocks"]},
               "completed": False,
               "errors": errors, "warnings": warnings}
