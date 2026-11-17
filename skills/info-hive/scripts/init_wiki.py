@@ -286,7 +286,7 @@ def init_wiki(project_root: Path, wiki_dir: str, raw_dir: str, upgrade: bool = F
     print(f"  1. {wiki_dir}/SCHEMA.md を読み、扱う分野に合わせて書き換える。")
     print(f"  2. （任意）{wiki_dir}/graph/ontology.yaml に、分野に固有の述語を加える。")
     print(f"  3. 最初のソースを {raw_dir}/ に置く。")
-    print("  4. Claude にそのソースの取り込みを頼む。")
+    print("  4. エージェントにそのソースの取り込みを頼む。")
 
 
 def main():

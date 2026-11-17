@@ -2,6 +2,8 @@
 
 # info-hive のドキュメント
 
+Codex で使い始める場合は、[プラグインの導入と呼び出し方](agents.md#インストールのコマンド例)を参照。スキルと MCP を一緒に導入できる。
+
 info-hive は、Praney Behl の [llm-wiki-plugin](https://github.com/praneybehl/llm-wiki-plugin) v4.0.1 を日本語向けに移植したものである。この文書群は移植元のドキュメントの訳をもとにしており、LLM Wiki はこの仕組みの名前として使っている。
 
 PDF、記事、文字起こし、メモを、AI エージェントが検索・引用し、最新に保てる共有 wiki に変える。
