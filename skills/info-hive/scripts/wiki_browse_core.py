@@ -46,12 +46,29 @@ except (ImportError, SystemExit):
     wiki_graph_extract = None
 
 PROTOCOL_VERSION = 2   # 探しやすさの設計の 2.3、6（nav.js の形とグループの並びが変わった）
-CORE_VERSION = "browse-core-3"   # 3: 図の svg を出す（図の描画の設計の 9）
+CORE_VERSION = "browse-core-4"   # 3: 図の svg を出す。4: Mermaid の図の枠（frame-src と figures.js。図の描画の設計の 9）
 NAME_LIMIT = 200
-CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+# frame-src 'self' は、figures.js が作る Mermaid の図の枠のため（図の描画の設計の 7.3）
+CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src 'self'; "
        "base-uri 'none'; form-action 'none'")
+# Mermaid の図の枠（ADR-0030、図の描画の設計の 7.2）。サーバーだけが、トークンのない /_frame/<版>/ から配る。
+# 3 つのどれかを変えたら FRAME_VERSION を上げる（browse_assets/README.md と figures.js の定数も）
+FRAME_VERSION = "mermaid-12.3.0-1"
+FRAME_ASSETS = ("mermaid-frame.html", "mermaid-frame.js", "mermaid.tiny.js")
+FRAME_PREFIX = "_frame"
 # 図の svg の応答（図の描画の設計の 6.5）。直接開かれても、中のスクリプトを動かさない
 CSP_SVG = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+
+
+def frame_csp(port: int) -> str:
+    """Mermaid の図の枠の文書の CSP（図の描画の設計の 7.3）。応答のヘッダーだけに付ける（<meta> は置かない）。
+
+    script-src は /_frame/<版>/ だけに限る。'self' は使わない。WebKit は、sandbox で不透明になった文書の 'self' を
+    配信元に一致させない（PoC）。style-src 'unsafe-inline' は、Mermaid が描く途中で <style> と style 属性を使うため
+    で、この文書にだけ許す。sandbox allow-scripts は、枠の文書を直接開かれたときにも、不透明なオリジンにする。
+    """
+    return (f"default-src 'none'; script-src http://127.0.0.1:{int(port)}/{FRAME_PREFIX}/{FRAME_VERSION}/; "
+            "style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; sandbox allow-scripts")
 # 図の svg（ADR-0030）。wiki/assets/ の直下の、UTF-8 の、この大きさまでのものを読む
 ASSET_MAX_BYTES = 2 * 1024 * 1024
 ASSET_OUT_DIR = "assets/wiki"
@@ -60,7 +77,8 @@ ASSET_OUT_DIR = "assets/wiki"
 ICON_LINK = '<link rel="icon" href="data:,">'
 RAW_MODES = ("text", "link", "basename", "none")
 # 画面の部品。fluent2.css は Fluent 2 の再現の CSS の同梱の写し（Fluent 2 の設計の 2）、theme.js は配色を描く前に決める
-ASSETS = ("assets/app.js", "assets/style.css", "assets/fluent2.css", "assets/theme.js")
+# figures.js は Mermaid の図を描く（ADR-0030）。静的の書き出しでは何もしない
+ASSETS = ("assets/app.js", "assets/style.css", "assets/fluent2.css", "assets/theme.js", "assets/figures.js")
 ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "browse_assets")
 DATA_FILES = ("nav.js", "data/manifest.js", "data/diagnostics.js", "data/search.js")
 EXTERNAL_SCHEMES = ("http", "https", "mailto")
@@ -1643,8 +1661,10 @@ class Core:
 
     def _tail(self, path: str, extra_data: tuple = ()) -> str:
         prefix = root_prefix(path)
+        # figures.js は app.js と別のファイルにする。app.js は契約の版が違うときなどに途中で抜けるので、図の描画を
+        # それに縛らない（図の描画の設計の 7.4）
         scripts = "".join(f'<script src="{prefix}{name}"></script>\n'
-                          for name in ("nav.js", "data/manifest.js", *extra_data, "assets/app.js"))
+                          for name in ("nav.js", "data/manifest.js", *extra_data, "assets/app.js", "assets/figures.js"))
         return f"</main>\n{scripts}</body>\n</html>\n"
 
     def render_page(self, pid: str, raw_mode: str = "text", stale: "str | None" = None) -> str:
@@ -1884,11 +1904,19 @@ def js_data(name: str, value) -> str:
 
 
 def load_assets() -> dict:
-    """同梱の画面の部品（app.js、style.css）を読む。serve と build の始めに 1 度だけ呼ぶ（設計の 3.3）。
+    """同梱の画面の部品（app.js、style.css など）を読む。serve と build の始めに 1 度だけ呼ぶ（設計の 3.3）。
 
     読めなければ fs.Unknown か fs.Absent を送出する（呼ぶ側は起動しない）。
     """
     return {name: fs.read_file(os.path.join(ASSET_DIR, PurePosixPath(name).name)) for name in ASSETS}
+
+
+def load_frame_assets() -> dict:
+    """Mermaid の図の枠の同梱物を読む（図の描画の設計の 7.2）。serve の始めに 1 度だけ呼ぶ。静的の書き出しには入れない。
+
+    鍵は、同梱物の名前（FRAME_ASSETS）。読めなければ fs.Unknown か fs.Absent を送出する。
+    """
+    return {name: fs.read_file(os.path.join(ASSET_DIR, name)) for name in FRAME_ASSETS}
 
 
 # ---------------------------------------------------------------------------

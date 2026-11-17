@@ -168,6 +168,7 @@ flowchart LR
 - **説明を添える。** 図表の直後に `> <モデルの表示名> 補足: ` で始まる引用ブロックを置き、図表を見なくても内容が分かるように書く。取り込んだ画像の補足と同じ形である。検索は図の中身を文章として拾えないので、この説明が索引に入る。表示名は推測しない。
 - **図の中の文字は日本語にする。** 識別子だけ英語のままにする。
 - **svg の参照はページからの相対パスで書く。** 知識ページは `wiki/<種類>/` にあるので、`wiki/assets/` の svg は `../assets/<ページのスラッグ>-NN.svg` で指す。`assets/...` と書くと `wiki/<種類>/assets/` を指し、GitHub、VS Code、Obsidian で表示されない。lint は参照先をページの位置から解決し、見つからなければ `missing_assets` として指摘する。
+- **mermaid は、同梱した版が描ける図の種類で書く。** `/wiki:browse` は、サーバーで開いたときに mermaid を図として描く。同梱した `@mermaid-js/tiny` は、マインドマップ、アーキテクチャ図、KaTeX の数式、`layout: elk` を描けず、コードのまま出す。流れ、順序、状態、関係、時系列は、flowchart、sequenceDiagram、stateDiagram-v2、classDiagram、erDiagram、gantt、timeline で書く。図の側の `%%{init}%%` で色や書体を変えても、閲覧は画面の配色を使う。
 - **svg は UTF-8 で書き、`wiki/assets/` の直下に置く。** `/wiki:browse` が図として表示するのは、`wiki/assets/` の直下の、UTF-8 の、2 MiB までの、リンクでない svg である。下位のディレクトリに置いた svg と、ほかの符号化の svg は、説明の文字だけになる。
 - **画像の参照は標準の `![説明](パス)` で書く。** Obsidian の埋め込み `![[x.svg]]` は wikilink として扱われ、リンク切れとして指摘される。
 - **png などのラスター画像は使わない。** 差分が読めず、モデルが描き直せない。

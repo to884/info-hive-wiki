@@ -176,7 +176,8 @@ def build(root: PurePath, out_arg: "str | None", raw: "str | None", scope: "str 
     # 公開の前の検査（構造の直しの設計の 8）。見つかれば警告を出す。書き出しは止めない。
     needles, unresolved = _machine_needles(root, snap)
     tokens, unreadable_records = fs.server_tokens(bdir)
-    findings = core.scan_machine_info(files, needles, tokens)
+    # 同梱の画面の部品は入力の中身を含まないので、調べない（図の描画の設計の 7.2）
+    findings = core.scan_machine_info({n: v for n, v in files.items() if n not in assets}, needles, tokens)
     warnings = []
     for name, what in findings:
         warnings.append(f"この出力に、{'絶対パス' if what == 'path' else 'サーバーの操作のトークン'}がある"
@@ -464,6 +465,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # デコードしたあとで分け、`..`、`.`、空の要素、`\`、NUL を含めば拒む（設計の 8.1）。
         if any(p in ("", ".", "..") or "\\" in p or "\0" in p for p in parts):
             return self._text(404, "Not Found")
+        if len(parts) == 3 and parts[0] == core.FRAME_PREFIX:
+            # Mermaid の図の枠の同梱物。トークンなしで配る（ADR-0001 の例外。ADR-0030、図の描画の設計の 7.2）
+            self._kind = "frame"
+            if self.command not in ("GET", "HEAD"):
+                return self._text(405, "Method Not Allowed", {"Allow": "GET, HEAD"})
+            return self._frame(parts[1], parts[2])
         if len(parts) >= 3 and _same(parts[0], app.control_token) and parts[1] == "control":
             self._kind = "control"
             return self._control(parts[2:])
@@ -474,6 +481,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._text(405, "Method Not Allowed", {"Allow": "GET, HEAD"})
             return self._view("/".join(parts[3:]) or "index.html")
         return self._text(404, "Not Found")
+
+    def _frame(self, version: str, name: str):
+        """/_frame/<版>/<名前> を返す。同梱の固定のファイルだけで、wiki の中身と状態を返さない。
+
+        URL にトークンを含まないので、キャッシュを許す。版がパスにあるので、同梱物を変えれば別の URL になる。
+        リダイレクトは返さない（枠の CSP の script-src はパスで限っていて、リダイレクトのあとはパスを見ない）。
+        """
+        app = self.server.app
+        body = app.frame_assets.get(name) if version == core.FRAME_VERSION else None
+        if body is None:
+            return self._text(404, "Not Found")
+        if name.endswith(".html"):
+            return self._send(200, body, "text/html; charset=utf-8", csp=core.frame_csp(app.port),
+                              cache="private, max-age=86400")
+        return self._send(200, body, "text/javascript; charset=utf-8", cache="private, max-age=86400")
 
     def _view(self, name: str):
         app = self.server.app
@@ -563,12 +585,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 class App:
     def __init__(self, root: PurePath, idle: float, verbose: bool = False, scope: "str | None" = None,
-                 assets: "dict | None" = None):
+                 assets: "dict | None" = None, frame_assets: "dict | None" = None):
         self.root = root
         self.key = common.wiki_key(root)
         self.idle = idle
         self.verbose = verbose
         self.assets = assets or {}
+        self.frame_assets = frame_assets or {}   # Mermaid の図の枠の同梱物（図の描画の設計の 7.2）
         self.view_token = secrets.token_urlsafe(24)
         self.control_token = secrets.token_urlsafe(24)
         self.instance = secrets.token_hex(12)
@@ -707,8 +730,9 @@ def serve(root: PurePath, page: "str | None", open_browser: bool, idle: float, v
     if os.name == "nt" and os.environ.get(common.DATA_DIR_ENV, "").strip():
         say("警告: INFO_HIVE_DATA_DIR を指定している。ほかの利用者が読める場所なら、サーバーの記録のトークンを読まれる")
     assets = core.load_assets()
+    frame_assets = core.load_frame_assets()
     owner = fs.owner_of(root)
-    app = App(root, idle, verbose, scope, assets)
+    app = App(root, idle, verbose, scope, assets, frame_assets)
 
     def make_record():
         # ロックを取ったあとに待ち受けを始め、記録を置き換える（設計の 7.1）
