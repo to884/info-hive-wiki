@@ -958,13 +958,13 @@ def translation_block(source: str, output: str, node_type: str) -> tuple[bool, l
     letters = sum(c.isalpha() for c in out)
     if not kana and not han and (len(words) >= 2 or letters >= 20):
         return True, [out.strip()]
-    # 段落の別の日本語の文に薄められないよう、文単位でも同じ候補の条件を当てる。
+    # 段落の別の日本語の文に薄められないよう、文単位ではかなを含まない漢字の文を確認する。
     # 同一文内で混ざる語の意味や言語は、この文字の条件では確定しない。
-    out_units = re.split(r"[。！？.!?;；\n]+", out)
+    out_units = re.split(r"[。！？!?;；\n]+|\.(?=\s|$)", out)
     passages = []
     for unit in out_units:
         unit_kana, unit_han = script_counts(unit)
-        if unit_han and unit_kana / (unit_kana + unit_han) < 0.35:
+        if unit_han and not unit_kana:
             if unit.strip() not in passages:
                 passages.append(unit.strip())
     runs, current = [], []
