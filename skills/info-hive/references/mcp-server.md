@@ -40,6 +40,8 @@ wiki のプラグインは、検索のためのローカルの MCP サーバー�
 | `graph` | グラフ（`graph/graph.sqlite`）への問い合わせ（`wiki_graph_query.py --json` と同じ結果）。DB は読み取り専用で開く |
 | `index_chunks` | rag などからチャンクを受け取り、wiki の外の索引に加える |
 
+**拒んだリンクの知らせ（`link_warnings`）。** wiki の記事か記事までの道がリンク（シンボリックリンク、ジャンクション、名前の代理のリパースポイント、ハードリンク）なら、どのツールもその記事を読まない（info-hive-dev の ADR-0029）。`query`、`get_page`、`list_index`、`lint`、`stats`、`graph` の結果には、読まなかったものを `link_warnings`（`{"path", "kind"}` の並び。なければ空）で必ず付ける。`get_page` と `list_index` の `name` で、リンクなので読まない記事を名前で引くと、「見つからない」ではなく「リンクなので読まない」のエラーを返す。
+
 `index_chunks` 以外のツールには、`wiki` に wiki のルートの絶対パスを渡す。渡すのは初期化された wiki（ルートに `SCHEMA.md` がある）のルートである。`SCHEMA.md` のないディレクトリには、どのツールも「初期化された wiki ではない」のエラーを返し、索引も作らない。そのときは CLI でやり直さず、`/wiki:init` を提案する。`lint`、`stats`、`graph` は、同じ名前のスクリプトの関数をサーバーの中で呼ぶ。結果のキーも CLI の `--json` と同じ英語のままである。
 
 ### query

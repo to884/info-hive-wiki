@@ -590,7 +590,7 @@ def cmd_write(args) -> int:
     return emit(args, result, 0)
 
 
-def parse_page_args(values: list[str] | None) -> dict:
+def parse_page_args(values: list[str] | None, wiki=None) -> dict:
     overlay = {}
     for value in values or []:
         if "=" not in value:
@@ -603,8 +603,10 @@ def parse_page_args(values: list[str] | None) -> dict:
         if rel in overlay:
             raise Fail(f"--page に同じ場所を 2 回渡した（片方を黙って捨てない）: {rel}")
         try:
-            overlay[rel] = Path(file).read_text(encoding="utf-8-sig")
-        except (OSError, UnicodeDecodeError) as exc:
+            # wiki の中の記事を渡されたら、記事を読む口を通す（info-hive-dev の ADR-0029。リンクなら読まない）
+            import wiki_pages
+            overlay[rel] = wiki_pages.read_user_file(Path(file), wiki)
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
             raise Fail(f"--page のファイルを読めない（{exc}）: {file}")
     return overlay
 
@@ -617,7 +619,7 @@ def cmd_verify(args) -> int:
         doc = wc.parse_raw(raw_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, wc.CaptionError) as exc:
         raise Fail(f"動画の raw を読めない（{exc}）: {raw_path}")
-    overlay = parse_page_args(args.page)
+    overlay = parse_page_args(args.page, wiki)
     label = wc.raw_label(raw_path, wiki)
     # 指摘は wiki 全体のものを返す（この raw に関わるかで絞らない）。結果と「raw にない語」だけをこの raw に絞る。
     try:

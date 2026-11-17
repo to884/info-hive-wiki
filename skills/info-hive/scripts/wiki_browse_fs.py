@@ -1435,7 +1435,8 @@ def remove_record(root, browse_root, state_dir, owner, instance) -> None:
 def walk_inputs(root):
     """入力の一覧（設計の 4）。(entries, problem) を返す。
 
-    entries は (種類, ディスク上の / 区切りの相対パス, 大きさ, 更新時刻) の並びで、ページ、索引、オントロジーの順。
+    entries は (種類, ディスク上の / 区切りの相対パス, 大きさ, 更新時刻) の並びで、ページ、索引、リンク、オントロジーの順。
+    リンク（種類 "link"）は、走査がリンクなので読まなかった記事と記事までの道で、大きさは None、4 つ目はリンクの種類である。
     ページと索引の集合は、lint と同じ走査の関数（wiki_pages.walk_pages、walk_index_files）が決める。オントロジーは、
     層の stat で種類、大きさ、更新時刻を得る（ないなら入れない。調べられなければ、大きさと更新時刻を None にする）。
     problem は、名前の集合が分からないとき（走査が送出した、一覧を作れない場所、種類を調べられない項目）に、
@@ -1456,6 +1457,8 @@ def walk_inputs(root):
             return [], "種類を調べられない項目がある"
     entries = [("page", f.rel, f.size, f.mtime_ns) for f in pages.files]
     entries += [("index", f.rel, f.size, f.mtime_ns) for f in indexes.files]
+    # 記事か記事までの道がリンクなので、走査が読まなかったもの（ADR-0029）。読まず、診断に出す。4 つ目は種類
+    entries += [("link", item["path"], None, item["kind"]) for item in wiki_pages.link_warnings(pages, indexes)]
     if "drop_ontology" not in MUTANTS:
         onto = wiki_pages.ONTOLOGY_REL if hasattr(wiki_pages, "ONTOLOGY_REL") else "graph/ontology.yaml"
         try:

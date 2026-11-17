@@ -12,6 +12,8 @@ wiki_rawcheck.py — Web ページの raw を、取得した直後の内容と�
             画像、リンク先、インラインのコード、改行の数が一致しなければ誤りにする。訳さないページでは、
             本文は 1 文字も変えてはならない。原文にない英字や記号、消えた固有の名前、文体の混在、
             極端に短い訳は警告にとどめる。
+            翻訳が必要な入力を keep で完了にはできない。未解決の外国語はエラーとし、対象ごとの保持の記録なしに一括受理できない。
+            JSON の completed が真になるのは、検査を通して --finish が成功したときだけである。
 
 本文は、lint や閲覧と同じ設定のパーサー（同梱の markdown-it-py。wiki_pages.new_parser()）で読み、
 トークンで照らす。行の接頭辞や正規表現で、入れ物や構造を推し量らない。
@@ -24,7 +26,7 @@ check --finish は、誤りも警告もなければ（警告を受け入れる -
     python wiki_rawcheck.py freeze --wiki <WIKI_ROOT> --raw-root <RAW_ROOT> --slug <スラッグ> [--json]
     python wiki_rawcheck.py check  --wiki <WIKI_ROOT> --raw-root <RAW_ROOT> --slug <スラッグ> [--json]
                                    [--language-override translate|keep --reason <理由>]
-                                   [--finish [--accept-warnings]]
+                                   [--translation-review] [--finish [--accept-warnings]]
 
 終了コード: 0 = 通った（警告があってもよい）、1 = 規則に反している、またはファイルのエラー。
 """
@@ -40,6 +42,7 @@ import os
 import re
 import shutil
 import sys
+import unicodedata
 from collections import Counter
 from pathlib import Path
 
@@ -283,7 +286,8 @@ def work_dir_matches_raw(wiki: Path, slug: str, raw_path: Path) -> bool:
 # 途中から続けるときに返す、前の取得の出力の値（wiki_fetch.py の出力のキー）。取得の出力のうち、取得した内容から
 # 作ったものすべてである（警告もここに入る。続きの手順は、前の取得の出力を見て、本文を取れたかを確かめる）。
 RESUME_KEYS = ("source_sha256_of", "fetched_sha256", "title", "source_lang", "encoding", "content_root", "ja_ratio",
-               "needs_translation", "chars", "images", "dropped_images", "removed_by_rule", "warnings")
+               "needs_translation", "chars", "images", "dropped_images", "removed_by_rule", "warnings",
+               "fetch_method", "browser_fallback_reason", "browser_session")
 # 続けるときに使う、取得の記録のキーと型。取得器はいつもこれを書く。0.14.1 までの版が書いた記録には fetched_sha256 と
 # source_sha256_of がないので、続けられない記録になる（fetch.json と fetched.md を結べず、どの取得かも分からない）。
 _FETCH_TYPES = {"url": str, "final_url": str, "source_sha256": str, "fetched_sha256": str, "source_sha256_of": str,
@@ -915,8 +919,153 @@ def names_of(text: str, title_case_ok: bool = True) -> list[str]:
     return out
 
 
+UNICODE_WORD_RE = re.compile(r"[^\W\d_]+(?:[’'][^\W\d_]+)?")
+REVIEW_KINDS = {"proper_name", "identifier", "ui_text", "error_message", "bibliography", "term", "quotation", "japanese_text"}
+
+
+def is_kana(character: str) -> bool:
+    """中黒や長音符だけを、日本語の説明の証拠にしない。補助面の仮名も読む。"""
+    return unicodedata.name(character, "").startswith(
+        ("HIRAGANA LETTER", "KATAKANA LETTER", "HALFWIDTH KATAKANA LETTER", "HENTAIGANA LETTER"))
+
+
+def is_han(character: str) -> bool:
+    """基本面と拡張 B 以降を、Unicode の漢字の名前でそろえて読む。"""
+    return unicodedata.name(character, "").startswith(
+        ("CJK UNIFIED IDEOGRAPH-", "CJK COMPATIBILITY IDEOGRAPH-"))
+
+
+def script_counts(text: str) -> tuple[int, int]:
+    return sum(map(is_kana, text)), sum(map(is_han, text))
+
+
+def translation_text(text: str) -> str:
+    """URL は訳す文章ではない。コードと画像は呼び出す側のパーサーが除いている。"""
+    return re.sub(r"https?://\S+", " ", unicodedata.normalize("NFKC", text))
+
+
+def translation_block(source: str, output: str, node_type: str) -> tuple[bool, list[str]]:
+    """残った外国語を対象ごとに返す。文章か名前かの意味の判断は自動化しない。"""
+    src, out = translation_text(source), translation_text(output)
+    if not src.strip() and not out.strip():
+        return False, []
+    kana, han = script_counts(out)
+    # 漢字を共有するので、短い語や、原文と違う言い換えも確認に回す。日本語の見出しも該当し得る。
+    # 比率は候補を拾うためだけに使い、翻訳済みや中国語とは確定しない。
+    if han and kana / (kana + han) < 0.35:
+        return True, [out.strip()]
+    words = UNICODE_WORD_RE.findall(out)
+    letters = sum(c.isalpha() for c in out)
+    if not kana and not han and (len(words) >= 2 or letters >= 20):
+        return True, [out.strip()]
+    # 段落の別の日本語の文に薄められないよう、文単位ではかなを含まない漢字の文を確認する。
+    # 同一文内で混ざる語の意味や言語は、この文字の条件では確定しない。
+    out_units = re.split(r"[。！？!?;；:…\n]+|(?<!\d)\.|\.(?!\d)", out)
+    passages = []
+    for unit in out_units:
+        unit_kana, unit_han = script_counts(unit)
+        if unit_han and not unit_kana:
+            if unit.strip() not in passages:
+                passages.append(unit.strip())
+    # 区切り記号や別のかなの語が混ざっても、長い漢字のまとまりを薄めない。
+    # 日本語の複合語も候補になるので、意味は対象ごとの確認に委ねる。
+    han_run = []
+    for character in out + " ":
+        if is_han(character):
+            han_run.append(character)
+        else:
+            text = "".join(han_run)
+            if len(han_run) >= 8 and not any(text in passage for passage in passages):
+                passages.append(text)
+            han_run = []
+    runs, current = [], []
+    # 文末、大小文字、原文との完全一致に依存せず、かな・漢字以外の文字体系を同じ条件で見る。
+    for character in out:
+        if is_kana(character) or is_han(character):
+            runs.append("".join(current))
+            current = []
+        else:
+            current.append(character)
+    runs.append("".join(current))
+    for run in runs:
+        if len(UNICODE_WORD_RE.findall(run)) >= 4 or sum(c.isalpha() for c in run) >= 20:
+            passages.append(run.strip())
+    # 共有する漢字が原文に近い場合も確認する。原文に仮名があっても照合を省略しない。
+    for unit in re.split(r"[。！？.!?;；\n]+", src):
+        original = "".join(c for c in unit if is_han(c))
+        if len(original) < 8:
+            continue
+        for candidate in out_units:
+            target = "".join(c for c in candidate if is_han(c))
+            if len(target) < 8:
+                continue
+            matcher = difflib.SequenceMatcher(None, original, target, autojunk=False)
+            if matcher.find_longest_match().size >= 8 or matcher.ratio() >= 0.8:
+                text = candidate.strip()
+                if text not in passages:
+                    passages.append(text)
+    return True, passages
+
+
+def apply_translation_review(wd: Path, basis: dict, enabled: bool,
+                             errors: list[dict], warnings: list[dict]) -> dict:
+    """確認の記録を現在の原文・raw と、対象ごとの ID に結び付ける。一括受理では解除しない。"""
+    pending = [e for e in errors if e["kind"] == "translation_review_required"]
+    result = {"basis": basis, "reviewed_by": "", "reviewed_passages": 0,
+              "pending_reviews": len(pending), "decisions": []}
+    if not enabled:
+        return result
+    try:
+        path = wd / "translation-review.json"
+        if path.is_symlink():
+            raise ValueError("translation-review.json をシンボリックリンクにしない")
+        record = json.loads(read_text(path))
+        if not isinstance(record, dict) or type(record.get("translation_review")) is not int or record["translation_review"] != 1:
+            raise ValueError("translation_review: 1 の確認の記録が必要")
+        if any(record.get(k) != v for k, v in basis.items()):
+            raise ValueError("確認の記録のハッシュが現在の原文・raw と違う。もう一度確認する")
+        reviewer = record.get("reviewed_by")
+        if not isinstance(reviewer, str) or not reviewer.strip():
+            raise ValueError("reviewed_by に実際に確認したモデル名を書く")
+        entries = record.get("decisions")
+        if not isinstance(entries, list):
+            raise ValueError("decisions は対象ごとの確認の判断の配列にする")
+        available = {e["review_id"]: e for e in pending}
+        accepted = {}
+        for entry in entries:
+            if not isinstance(entry, dict) or set(entry) != {"id", "text", "kind", "reason"}:
+                raise ValueError("確認の記録には id、text、kind、reason を書く")
+            key = entry["id"]
+            if not isinstance(key, str) or key not in available or key in accepted:
+                raise ValueError("確認の対象の ID が現在の検査にないか重複している")
+            if entry["text"] != available[key]["text"]:
+                raise ValueError("確認する text が対象の文字列全体と違う")
+            if not isinstance(entry["kind"], str) or entry["kind"] not in REVIEW_KINDS:
+                raise ValueError("確認の kind が決まった値ではない")
+            if not isinstance(entry["reason"], str) or not entry["reason"].strip():
+                raise ValueError("確認の対象ごとに具体的な理由を書く")
+            if entry["kind"] in {"ui_text", "error_message", "term", "quotation", "japanese_text"} and not available[key]["has_japanese_letters"]:
+                raise ValueError("表示文・原語・引用の保持には、同じブロックに日本語の説明や訳を添える")
+            accepted[key] = entry
+    except (OSError, ValueError, UnicodeDecodeError) as exc:
+        errors.append({"kind": "translation_review_invalid", "message": str(exc)})
+        return result
+    errors[:] = [e for e in errors if e.get("review_id") not in accepted]
+    for item in pending:
+        if item["review_id"] not in accepted:
+            continue
+        entry = accepted[item["review_id"]]
+        warnings.append({**item, "kind": "translation_reviewed", "review_kind": entry["kind"],
+                         "reason": entry["reason"], "reviewed_by": reviewer.strip(),
+                         "message": "翻訳の確認の記録: " + entry["reason"]})
+        result["decisions"].append({**entry, "line": item["line"]})
+    result.update(reviewed_by=reviewer.strip(), reviewed_passages=len(accepted),
+                  pending_reviews=len(pending) - len(accepted))
+    return result
+
+
 def compare(a: Node, b: Node, translate: bool, errors: list[dict], warnings: list[dict], style: Counter,
-            path: str = "") -> None:
+            path: str = "", translation: Counter | None = None) -> None:
     """2 つの木を照らす。a は取得した内容（削除のあと）、b は補足を除いた raw。"""
     where = {"line": b.line or a.line}
     if a.signature() != b.signature():
@@ -956,6 +1105,17 @@ def compare(a: Node, b: Node, translate: bool, errors: list[dict], warnings: lis
                     [(c.type, c.content, tuple(sorted((c.attrs or {}).items()))) for c in ib]:
                 errors.append({"kind": "text", **detail, "message": "訳さないページで本文が変わった"})
         else:
+            checked, passages = translation_block(inline_text(ia, newline="\n"), inline_text(ib, newline="\n"), a.type)
+            if checked and translation is not None:
+                translation["checked_blocks"] += 1
+            for index, text in enumerate(passages):
+                review_id = hashlib.sha256(json.dumps([path, index, src_text, out_text, text],
+                                                       ensure_ascii=False).encode("utf-8")).hexdigest()
+                errors.append({"kind": "translation_review_required", **detail, "review_id": review_id,
+                               "text": text, "has_japanese_letters": any(script_counts(translation_text(out_text))),
+                               "message": "外国語が残っている。文章は日本語に訳す。名前や表示文字列などを保持する場合は、"
+                               "この対象の ID・text と保持の理由を translation-review.json に記録して確認する。"
+                               "--accept-warnings だけでは解除できない"})
             src_tokens = [x.lower() for x in TOKEN_RE.findall(src_text)]
             # 同じ語のくり返し、大文字と小文字の違い、原文の語の頭に当たる語（BLOBs → BLOB）、日本語の文で
             # ふつうに使う略語（JAPANESE_ABBREVIATIONS）は数えない。
@@ -973,11 +1133,12 @@ def compare(a: Node, b: Node, translate: bool, errors: list[dict], warnings: lis
             if letters >= 40 and len(re.sub(r"\s", "", out_text)) < letters * 0.2:
                 warnings.append({"kind": "short", **detail, "message": "訳文が原文に比べて極端に短い"})
             style.update(sentence_styles(out_text))
-    for ca, cb in zip(a.children, b.children):
-        compare(ca, cb, translate, errors, warnings, style)
+    for index, (ca, cb) in enumerate(zip(a.children, b.children)):
+        compare(ca, cb, translate, errors, warnings, style, path=f"{path}/{index}", translation=translation)
 
 
-def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: str | None) -> tuple[int, dict]:
+def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: str | None,
+          translation_review: bool = False) -> tuple[int, dict]:
     wd = work_dir(wiki, slug)
     cleaned_path = wd / "cleaned.md"
     raw_path = raw_root / f"{slug}.md"
@@ -988,16 +1149,24 @@ def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: s
     if not raw_path.is_file():
         raise FileNotFoundError(f"raw がない: {raw_path}")
     fetch = load_fetch(wd)
-    translate = bool(fetch.get("needs_translation"))
+    required = fetch.get("needs_translation")
+    if not isinstance(required, bool):
+        raise ValueError("fetch.json の needs_translation が真偽値ではない。翻訳不要とみなして続けない")
+    translate = required
     if override == "translate":
         translate = True
-    elif override == "keep":
-        translate = False
 
-    src_fm, src_body = split_frontmatter(read_text(cleaned_path))
-    out_fm, out_body = split_frontmatter(read_text(raw_path))
+    source_bytes, raw_bytes = cleaned_path.read_bytes(), raw_path.read_bytes()
+    basis = {"source_sha256": hashlib.sha256(source_bytes).hexdigest(),
+             "raw_sha256": hashlib.sha256(raw_bytes).hexdigest()}
+    src_fm, src_body = split_frontmatter(source_bytes.decode("utf-8").replace("\r\n", "\n"))
+    out_fm, out_body = split_frontmatter(raw_bytes.decode("utf-8").replace("\r\n", "\n"))
     errors: list[dict] = []
     warnings: list[dict] = []
+    if override == "keep" and required:
+        errors.append({"kind": "translation_required",
+                       "message": "翻訳が必要な入力を --language-override keep で完了にできない。"
+                       "日本語の raw を作れなければ未完了として止まり、比較用の写しを残す"})
 
     def without_translator(fm):
         return [line for line in fm if not line.startswith("translated_by:")]
@@ -1020,6 +1189,10 @@ def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: s
     names: set[str] = set()
     caption_ranges: list[tuple[int, int]] = []
     strip_captions(out_tree, fetched_images(fetch), raw_path.parent, errors, names, caption_ranges)
+    if translate and any(n.type == "html_block" for tree in (src_tree, out_tree) for n in walk(tree)):
+        errors.append({"kind": "translation_html",
+                       "message": "HTML ブロックは文章の翻訳を検査できない。未検査のまま完了にはしない。"
+                       "比較元を含めて Markdown として取得し直す。コードフェンスの中の HTML はそのまま保持できる"})
     if not translate:
         # 訳さないページは、補足の行を除いた本文が、文字どおり同じでなければならない（記法の書き換えも含めて）。
         # 入れ物の記号だけの空の行（空の行、`>`、字下げだけの行）は、補足を挟むと増えるので比べない。
@@ -1038,16 +1211,22 @@ def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: s
         errors.append({"kind": "caption", "message": f"補足の表示名が translated_by と違う: {sorted(names)}"})
 
     style: Counter = Counter()
-    compare(src_tree, out_tree, translate, errors, warnings, style)
+    translation: Counter = Counter()
+    compare(src_tree, out_tree, translate, errors, warnings, style, translation=translation)
     total = style["desu"] + style["dearu"]
     if total and min(style["desu"], style["dearu"]) > total * 0.1:
         warnings.append({"kind": "style",
                          "message": f"です・ます調（{style['desu']} 文）とである調（{style['dearu']} 文）が混ざっている"})
 
-    to_file_lines(errors + warnings, len(out_fm))
+    review = apply_translation_review(wd, basis, translation_review, errors, warnings)
+    to_file_lines(errors + warnings + review["decisions"], len(out_fm))
     result = {"stage": "check", "ok": not errors, "needs_translation": translate,
               "language_override": {"value": override, "reason": reason} if override else None,
               "translated_by": translator, "caption_names": sorted(names),
+              "translation": {"state": ("incomplete" if errors else "not_required" if not translate
+                                        else "checked" if translation["checked_blocks"] else "no_prose"),
+                              "checked_blocks": translation["checked_blocks"], **review},
+              "completed": False,
               "errors": errors, "warnings": warnings}
     return (0 if not errors else 1), result
 
@@ -1080,7 +1259,7 @@ def render(result: dict) -> str:
         out += _item(f"警告: {loc}{w['message']}")
     if result.get("work_dir_kept") == "warnings":
         out.append("警告があるので、作業用の写しを残した。直したら --finish を付けて再検査する。直さない警告は、"
-                   "理由を log.md の取り込みの行のサブ行に書いてから、--finish --accept-warnings で再検査する")
+                   "理由を log.md の prepare の記録に書いてから、--finish --accept-warnings --json で再検査する")
     elif result.get("work_dir_kept") == "errors":
         out.append("誤りがあるので、作業用の写しを残した。直して再検査する")
     elif result.get("work_dir_removed"):
@@ -1109,12 +1288,14 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--json", action="store_true", help="結果を JSON で出力する。キーは英語のまま")
         if name == "check":
             p.add_argument("--language-override", choices=("translate", "keep"),
-                           help="訳すかどうかの判定（fetch.json の needs_translation）を覆す")
+                           help="translate は翻訳を追加する。keep で翻訳必須の判定を解除することはできない")
             p.add_argument("--reason", help="--language-override の理由")
+            p.add_argument("--translation-review", action="store_true",
+                           help="作業用の translation-review.json の対象ごとの保持の記録を照合する")
             p.add_argument("--finish", action="store_true",
                            help="誤りも警告もなければ、作業用のフォルダーを消す（検査の基準も消えるので、再検査はできなくなる）")
             p.add_argument("--accept-warnings", action="store_true",
-                           help="--finish で、警告が残っていても消す。直さない警告の理由を log.md に書いてから付ける")
+                           help="--finish で、警告が残っていても消す。直さない警告の理由を log.md の prepare の記録に書いてから付ける")
     args = parser.parse_args(argv)
     # 作業用のフォルダーを読み書きする前に、初期化された wiki かを確かめる（ADR-0019）。
     found = wiki_initialized.problem(args.wiki)
@@ -1132,7 +1313,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.accept_warnings and not args.finish:
                 print("--accept-warnings は --finish と一緒に付ける", file=sys.stderr)
                 return 1
-            code, result = check(args.wiki, args.raw_root, args.slug, args.language_override, args.reason)
+            code, result = check(args.wiki, args.raw_root, args.slug, args.language_override, args.reason, args.translation_review)
             if args.finish:
                 # 作業用のフォルダーは検査の基準なので、直す作業が残るあいだは消さない。誤りがあれば直して再検査する。
                 # 警告は、直して再検査するか、直さない理由を残して受け入れる（--accept-warnings）まで残す。
@@ -1142,6 +1323,7 @@ def main(argv: list[str] | None = None) -> int:
                     result["work_dir_kept"] = "warnings"
                 else:
                     result["work_dir_removed"] = remove_work_dir(args.wiki, args.slug)
+                    result["completed"] = result["work_dir_removed"]
     except (FileNotFoundError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         print(str(exc), file=sys.stderr)
         return 1

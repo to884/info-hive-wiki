@@ -307,11 +307,33 @@ def build_app(state: State, token: str, port: int):
                                                      allowed_hosts=[f"127.0.0.1:{port}"], allowed_origins=[]),
     )
 
+    def with_notices(fn, *args):
+        """ツールの関数を、走査と読む口の知らせの受け皿を開いて動かす（ADR-0029 の I4）。
+
+        リンクなので読まなかったものを結果の link_warnings に、調べられなかったものを unverified に足す。誤りなら、
+        誤りの文に添える（「見つからない」が、読まなかった場所や調べられなかった場所のせいかもしれないため）。
+        """
+        import wiki_pages
+        with wiki_pages.capture_notices() as notes:
+            try:
+                result = fn(*args)
+            except (ValueError, FileNotFoundError) as exc:
+                error = exc
+            else:
+                error = None
+        lines = wiki_pages.notice_lines(notes.items)
+        if error is not None:
+            raise ToolError(str(error) + (f"（{'、'.join(lines)}）" if lines else "")) from error
+        if isinstance(result, dict):
+            refused = [n for n in notes.items if n["kind"] not in wiki_pages.NOTICE_UNVERIFIED]
+            result["link_warnings"] = wiki_pages.dedupe_notices(list(result.get("link_warnings") or []) + refused)
+            unverified = [n for n in notes.items if n["kind"] in wiki_pages.NOTICE_UNVERIFIED]
+            if unverified:
+                result["unverified"] = unverified
+        return result
+
     async def offload(fn, *args):
-        try:
-            return await anyio.to_thread.run_sync(fn, *args)
-        except (ValueError, FileNotFoundError) as exc:
-            raise ToolError(str(exc)) from exc
+        return await anyio.to_thread.run_sync(with_notices, fn, *args)
 
     @mcp.tool()
     async def query(query: str, wiki: str | None = None, top: int = 10, type: str | None = None,
@@ -348,6 +370,7 @@ def build_app(state: State, token: str, port: int):
             index.refresh()
             found = index.get_page(page)
             if found is None:
+                # 読まなかった場所や調べられなかった場所は、with_notices が誤りの文に添える
                 raise FileNotFoundError(f"ページが見つからない: {page}")
             return found
         return await offload(run)

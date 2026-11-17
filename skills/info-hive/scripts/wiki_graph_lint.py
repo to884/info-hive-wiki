@@ -542,6 +542,7 @@ def main():
     ontology = _extract.load_ontology(ontology_path)
 
     pages = collect_pages(args.wiki)
+    # リンクなので読まなかったページは、グラフの lint の対象に入らない（ADR-0029）。知らせは、走査が終わりに出す
     findings = lint(pages, ontology)
     if args.decide:
         unsupported, check = decide_evidence(pages, ontology, args.decide_threshold)

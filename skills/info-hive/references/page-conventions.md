@@ -6,6 +6,10 @@ wiki のすべてのページが従う構造上の規則である。特定の wi
 
 この wiki は日本語で書くことを前提にしている。本文、題名、ファイル名は日本語でよく、技術用語や固有名詞は英語のまま混ぜてよい。ただし、スクリプトが字句どおりに読む文字列（frontmatter のキー、`type` と `kind` の値、日付の形式、wikilink の書き方）は、下に書く形を守る。ソースのページの `## 主張と行き先` の表に書く行き先（`create`、`update`、`source_only`）も、英語の識別子のまま書く。
 
+## リンクを置かない
+
+wiki と raw の記事（ページ、索引、`log.md`、`SCHEMA.md`、source ページの `raw:` が指すもの）と、記事までの途中のディレクトリに、シンボリックリンク、ジャンクション、ハードリンクを置かない（info-hive-dev の ADR-0029）。記事を置くときは、中身を写したふつうのファイルを置く。リンクの記事は、検索、閲覧、統計、グラフ、lint のどれも読まず、lint の `links` と、各ツールの `link_warnings` で知らせる。wiki の根そのものと、その祖先のリンクは許す。名前が `.` で始まる項目（`.git/`、`.obsidian/` など）の下は、どの深さでも記事でない。
+
 ## frontmatter
 
 wiki のページはどれも YAML の frontmatter で始める。必須のフィールドは次のとおりである。
@@ -197,6 +201,7 @@ Web ページから取り込んだソースは、`raw/` に置いた訳文から
 | `fetched_at` | 取得した日時。タイムゾーンつきの ISO 8601 を文字列として引用符で囲む |
 | `source_sha256` | 原文の SHA-256 |
 | `source_sha256_of` | ハッシュを何に対して取ったか。スクリプトが取った HTML なら `"html"`、ブラウザで取った本文なら `"dom"` |
+| `fetch_method` | `"http"`、Playwright で自動取得した `"playwright"`、保存済み HTML の `"html_file"`。古い raw にはない |
 | `source_lang` | 原文の言語（`<html lang>`）。なければ `""` |
 | `translated_by` | 訳したモデルの表示名。訳していなければ `""` |
 | `fetched_by` | 取得に使ったスクリプトと版 |
@@ -208,14 +213,14 @@ Web ページから取り込んだソースは、`raw/` に置いた訳文から
 | キー | 内容 |
 | --- | --- |
 | `title` | 取り込みの題名（ユーザーと決めたもの） |
-| `source_kind` | `"claude-code-session"` |
+| `source_kind` | Claude Code は `"claude-code-session"`、Codex は `"codex-session"` |
 | `session_id` | セッションの ID |
 | `cwd`、`git_branch` | セッションの作業ディレクトリとブランチ（伏せ字をかけたもの） |
 | `started_at`、`ended_at` | 範囲の最初と最後の記録の時刻。`utc_offset` の時差つきの ISO 8601 |
-| `claude_code_versions` | 範囲に現れた Claude Code の版 |
+| `claude_code_versions` または `codex_versions` | 記録元のホストの版。ホストに対応するキーだけを書く |
 | `source_sha256`、`source_bytes` | 記録の範囲のバイト列の SHA-256 と大きさ |
-| `source_sha256_of` | `"jsonl-range"` |
-| `cut_before` | 範囲の終わりの記録の `uuid`（`--before`）。なければ `""` |
+| `source_sha256_of` | Claude Code は `"jsonl-range"`、Codex は `"codex-thread-range-v1"`（選んだ範囲の安定した情報を決定的に直列化したもの） |
+| `cut_before` | 範囲の終わりの記録の ID（`--before`）。Claude Code は `uuid`、Codex は item ID または turn ID。なければ `""` |
 | `extracted_by` | 抜き出したスクリプトと版 |
 | `tools`、`keep_reminders`、`utc_offset` | 抜き出しの引数 |
 | `turns` | ターンの数 |

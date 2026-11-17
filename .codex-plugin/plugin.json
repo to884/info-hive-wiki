@@ -1,0 +1,38 @@
+{
+  "name": "wiki",
+  "version": "0.31.1",
+  "description": "日本語の Markdown の wiki を構築・保守し、ローカル検索、出典つきの回答、グラフ、閲覧、経験の記録を提供する。",
+  "author": { "name": "to884" },
+  "license": "MIT",
+  "homepage": "https://github.com/to884/info-hive-wiki",
+  "repository": "https://github.com/to884/info-hive-wiki",
+  "skills": "./skills/",
+  "mcpServers": {
+    "wiki": {
+      "command": "uv",
+      "args": ["run", "--quiet", "--script", "skills/info-hive/scripts/wiki_mcp_launch.py"],
+      "cwd": ".",
+      "env": { "PYTHONUTF8": "1" },
+      "env_vars": [
+        "INFO_HIVE_DATA_DIR", "INFO_HIVE_MCP_IDLE_SECONDS", "INFO_HIVE_EMBED_THREADS",
+        "FASTEMBED_CACHE_PATH", "HF_HOME", "HF_HUB_OFFLINE",
+        "UV_SYSTEM_CERTS", "UV_NATIVE_TLS", "UV_PYTHON", "UV_PYTHON_DOWNLOADS", "UV_CACHE_DIR",
+        "SSL_CERT_FILE", "SSL_CERT_DIR", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"
+      ],
+      "startup_timeout_sec": 600
+    }
+  },
+  "interface": {
+    "displayName": "info-hive wiki",
+    "shortDescription": "日本語の資料を、出典をたどれる wiki に整理する",
+    "longDescription": "資料の取り込み、出典つきの回答、lint、統計、型付きグラフ、ブラウザでの閲覧を、ローカルの Markdown と MCP サーバーで提供する。",
+    "developerName": "to884",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": [
+      "$wiki:info-hive init",
+      "$wiki:info-hive query この wiki には何が書かれている？",
+      "$wiki:info-hive help"
+    ]
+  }
+}

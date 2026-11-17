@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-wiki_session.py — Claude Code のセッションの記録（JSONL）から会話だけを抜き出し、raw を作る。
+wiki_session.py — Claude Code と Codex の記録から会話だけを抜き出し、raw を作る。
 
 /wiki:ingest に session、session:<ID>、session:<パス>、<パス>.jsonl を渡したときに使う（info-hive-dev の
 ADR-0020）。記録から会話だけを許可リストで抜き出し、自動の伏せ字をかけ（これを「土台」と呼ぶ）、人の決定
@@ -9,6 +9,8 @@ ADR-0020）。記録から会話だけを許可リストで抜き出し、自動
 
 サブコマンド:
     locate  --session-id <ID>                     セッションの ID から記録のパスを探す
+            --host codex --current               実行中の Codex の会話と範囲を決める
+            --host codex --session-id <ID>         指定した Codex の会話を決める
     list    [--limit 20]                           記録の一覧（新しい順）。会話の文は出さない
     inspect --transcript <P> [共通] [--wiki W --raw-root R --slug S]
                                                    セッションの記録と認めるかと、件数、警告、raw の有無
@@ -28,7 +30,8 @@ ADR-0020）。記録から会話だけを許可リストで抜き出し、自動
                                                    < 書く予定の文（--path がなければ標準入力）
                                                    伏せた文字列と、自動の伏せ字の規則に当たる文字列を探す
 
-共通の引数: [--session-id <ID>] [--before <uuid>] [--tools summary|none] [--keep-reminders]
+Codex の読み取り元は --transcript codex:<ID> として渡す。locate の before を --before に固定する。
+共通の引数: [--session-id <ID>] [--before <記録の ID>] [--tools summary|none] [--keep-reminders]
             [--utc-offset +09:00] [--max-bytes 268435456]
 決定のファイルを渡すコマンドでは、省いた共通の引数を決定のファイルから取る。違う値を渡せば拒む。
 
@@ -60,6 +63,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wiki_text import format_fm_value, localize_argparse, parse_frontmatter_text  # noqa: E402
 import wiki_initialized  # noqa: E402
+
+# 直接実行した入口を、Codex アダプターからも同じモジュールとして参照する。
+# 二重に読み込むと Fail が別のクラスになり、入口で捕まえられなくなる。
+if __name__ == "__main__":
+    sys.modules["wiki_session"] = sys.modules[__name__]
 
 EXTRACTED_BY = "wiki_session.py 0.1"
 DECISIONS_FORMAT = 1
@@ -523,7 +531,7 @@ def tool_line(name: str, value: str) -> str:
 @dataclass
 class Turn:
     n: int
-    kind: str            # "user"、"claude"、"marker"
+    kind: str            # "user"、"claude"、"codex"、"marker"
     time: str
     body: str
     model: str = ""
@@ -531,14 +539,15 @@ class Turn:
 
     @property
     def fenced(self) -> bool:
-        return self.kind in ("user", "claude")
+        return self.kind in ("user", "claude", "codex")
 
     def heading(self) -> str:
         if self.kind == "user":
             return f"T{self.n} ユーザー（{self.time}）"
-        if self.kind == "claude":
+        if self.kind in ("claude", "codex"):
             target = f"T{self.reply_to} への返答" if self.reply_to is not None else "不明への返答"
-            return f"T{self.n} Claude（{self.model}、{self.time}、{target}）"
+            speaker = "Codex" if self.kind == "codex" else "Claude"
+            return f"T{self.n} {speaker}（{self.model}、{self.time}、{target}）"
         return f"T{self.n} 印（{self.time}）"
 
 
@@ -582,17 +591,26 @@ class Extract:
     humans: list                 # (uuid, 時刻, 伏せ字をかけた本文) の並び
     not_objects: int = 0
     untyped: int = 0
+    # Claude の既存の決定ファイルと raw は同じバイト列を保つ。
+    # ホストごとに異なる情報は抽出器から渡し、伏せ字・承認・書き込みは共用する。
+    source_kind: str = "claude-code-session"
+    source_sha256_of: str = "jsonl-range"
+    extracted_by: str = EXTRACTED_BY
+    version_field: str = "claude_code_versions"
 
     def base(self) -> dict:
-        return {
-            "extracted_by": EXTRACTED_BY, "session_id": self.session_id, "cwd": self.cwd,
+        result = {
+            "extracted_by": self.extracted_by, "session_id": self.session_id, "cwd": self.cwd,
             "git_branch": self.git_branch, "started_at": self.started_at, "ended_at": self.ended_at,
-            "claude_code_versions": self.versions, "source_sha256": self.source_sha256,
+            self.version_field: self.versions, "source_sha256": self.source_sha256,
             "source_bytes": self.source_bytes, "cut_before": self.cut_before, "options": self.options.as_dict(),
             "excluded_records": format_counts(self.excluded), "auto_redactions": self.redactions.count,
             "turns": [{"n": t.n, "kind": t.kind, "time": t.time, "model": t.model, "reply_to": t.reply_to,
                        "body": t.body} for t in self.turns],
         }
+        if self.source_kind != "claude-code-session":
+            result.update(source_kind=self.source_kind, source_sha256_of=self.source_sha256_of)
+        return result
 
     @property
     def base_sha256(self) -> str:
@@ -926,7 +944,7 @@ class Decisions:
 
 
 def new_decisions(ex: Extract) -> dict:
-    return {"format": DECISIONS_FORMAT, "extracted_by": EXTRACTED_BY, "session_id": ex.session_id,
+    return {"format": DECISIONS_FORMAT, "extracted_by": ex.extracted_by, "session_id": ex.session_id,
             "source_sha256": ex.source_sha256, "source_bytes": ex.source_bytes, "cut_before": ex.cut_before,
             "options": ex.options.as_dict(), "base_sha256": ex.base_sha256, "spans": [], "drop": []}
 
@@ -961,8 +979,8 @@ def load_decisions(path: Path) -> Decisions:
 def check_decisions(dec: Decisions, ex: Extract) -> None:
     """決定のファイルが、今の記録の範囲と土台に当たることを確かめる。"""
     d = dec.data
-    if d["extracted_by"] != EXTRACTED_BY:
-        raise Fail(f"決定のファイルを作った抽出器の版が違う: {d['extracted_by']}（今は {EXTRACTED_BY}）")
+    if d["extracted_by"] != ex.extracted_by:
+        raise Fail(f"決定のファイルを作った抽出器の版が違う: {d['extracted_by']}（今は {ex.extracted_by}）")
     if d["source_sha256"] != ex.source_sha256 or d["source_bytes"] != ex.source_bytes:
         raise Fail("記録の範囲が、決定のファイルを作ったときと違う（source_sha256 が一致しない）")
     if d["session_id"] != ex.session_id or d["cut_before"] != ex.cut_before:
@@ -1049,10 +1067,10 @@ def frontmatter_fields(ex: Extract, title: str, spans: list, drop: list) -> dict
     cwd = apply_spans(ex.cwd, merged.get("cwd", []))
     branch = apply_spans(ex.git_branch, merged.get("git_branch", []))
     return {
-        "title": title, "source_kind": "claude-code-session", "session_id": ex.session_id, "cwd": cwd,
+        "title": title, "source_kind": ex.source_kind, "session_id": ex.session_id, "cwd": cwd,
         "git_branch": branch, "started_at": ex.started_at, "ended_at": ex.ended_at,
-        "claude_code_versions": ex.versions, "source_sha256": ex.source_sha256, "source_sha256_of": "jsonl-range",
-        "source_bytes": ex.source_bytes, "cut_before": ex.cut_before, "extracted_by": EXTRACTED_BY,
+        ex.version_field: ex.versions, "source_sha256": ex.source_sha256, "source_sha256_of": ex.source_sha256_of,
+        "source_bytes": ex.source_bytes, "cut_before": ex.cut_before, "extracted_by": ex.extracted_by,
         "tools": ex.options.tools, "keep_reminders": "true" if ex.options.keep_reminders else "false",
         "utc_offset": ex.options.utc_offset, "turns": len(ex.turns),
         "excluded_records": format_counts(ex.excluded), "auto_redactions": ex.redactions.count,
@@ -1339,8 +1357,12 @@ def resolve_options(args, dec: Decisions | None) -> Options:
 
 def load_extract(args, dec: Decisions | None = None) -> Extract:
     opts = resolve_options(args, dec)
-    rng = read_range(Path(args.transcript), opts.before, args.max_bytes)
-    ex = extract(rng, opts)
+    if args.transcript.startswith("codex:"):
+        import wiki_codex_session
+        ex = wiki_codex_session.extract_session(args.transcript[len("codex:"):], opts, args.max_bytes)
+    else:
+        rng = read_range(Path(args.transcript), opts.before, args.max_bytes)
+        ex = extract(rng, opts)
     if dec is not None:
         check_decisions(dec, ex)
     return ex
@@ -1352,6 +1374,8 @@ def verdict(ex: Extract) -> tuple[str, str]:
     if ex.untyped:
         return "not_session", "uuid のある記録に type がない"
     if not ex.humans:
+        if ex.source_kind == "codex-session":
+            return "not_session", "選んだ範囲に、人の発言として確認できる記録が 1 件もない"
         return "not_session", "人の発言が 1 件もない（claude -p のセッションか、Claude Code の記録でない）"
     return "session", ""
 
@@ -1383,6 +1407,13 @@ def _project_dirs() -> list:
 
 
 def cmd_locate(args) -> int:
+    if args.host == "codex":
+        import wiki_codex_session
+        result = wiki_codex_session.locate(args.session_id, args.current)
+        out_json(result) if args.json else print(result["transcript"])
+        return 0
+    if args.current:
+        raise Fail("--current は --host codex のときだけ使える。Claude Code では --session-id を渡す")
     sid = args.session_id
     if not UUID_RE.match(sid or ""):
         raise Fail(f"セッションの ID は小文字の UUID で渡す: {sid!r}")
@@ -1400,6 +1431,13 @@ def cmd_locate(args) -> int:
 
 
 def cmd_list(args) -> int:
+    if args.limit <= 0:
+        raise Fail("--limit は 1 以上にする")
+    if args.host == "codex":
+        import wiki_codex_session
+        rows = wiki_codex_session.list_sessions(args.limit)
+        out_json(rows) if args.json else out_lines({"sessions": rows})
+        return 0
     items = []
     for d in _project_dirs():
         with os.scandir(d) as it:
@@ -1444,7 +1482,7 @@ def cmd_inspect(args) -> int:
     transcript = Path(args.transcript)
     sub = transcript.parent / transcript.stem / "subagents"
     subagent_files = 0
-    if os.path.isdir(sub) and not _is_link(sub):
+    if ex.source_kind == "claude-code-session" and os.path.isdir(sub) and not _is_link(sub):
         with os.scandir(sub) as it:
             subagent_files = sum(1 for e in it if e.name.endswith(".jsonl") and e.is_file(follow_symlinks=False))
     result = {
@@ -1455,6 +1493,9 @@ def cmd_inspect(args) -> int:
         "warnings": summarize_warnings(ex.warnings), "broken_lines": ex.broken_lines,
         "subagent_files": subagent_files,
     }
+    if ex.source_kind != "claude-code-session":
+        result["source_kind"] = ex.source_kind
+        result["source_sha256_of"] = ex.source_sha256_of
     if args.wiki is not None:
         raw_root = Path(args.raw_root)
         target = raw_root / f"{args.slug}.md"
@@ -1813,20 +1854,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     def common(p, transcript=True):
         if transcript:
-            p.add_argument("--transcript", required=True, help="セッションの記録（JSONL）のパス")
+            p.add_argument("--transcript", required=True, help="Claude Code の JSONL のパス、または codex:<チャットの ID>")
         p.add_argument("--session-id", default=None, help="セッションの ID（記録のどこかの sessionId にあること）")
-        p.add_argument("--before", default=None, help="この uuid の記録の行の先頭までを範囲にする")
+        p.add_argument("--before", default=None, help="この記録の手前までを範囲にする（Claude は uuid、Codex は item ID または turn ID）")
         p.add_argument("--tools", choices=("summary", "none"), default=None, help="ツールの呼び出しの 1 行の要約を残すか")
         p.add_argument("--keep-reminders", action="store_const", const=True, default=None,
                        help="人の発言の先頭の <system-reminder> を除かない")
         p.add_argument("--utc-offset", default=None, help="時刻を直す時差（+09:00 の形。既定は +00:00）")
-        p.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES, help="記録のファイルの大きさの上限")
+        p.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES, help="記録の範囲の大きさの上限")
         p.add_argument("--json", action="store_true", help="結果を JSON で出力する。キーは英語のまま")
 
     p = localize_argparse(sub.add_parser("locate", help="セッションの ID から記録のパスを探す"))
-    p.add_argument("--session-id", required=True)
+    p.add_argument("--host", choices=("claude", "codex"), default="claude")
+    source = p.add_mutually_exclusive_group(required=True)
+    source.add_argument("--session-id")
+    source.add_argument("--current", action="store_true", help="実行中の Codex のチャットを、環境の ID で特定する")
     p.add_argument("--json", action="store_true")
     p = localize_argparse(sub.add_parser("list", help="記録の一覧（新しい順）"))
+    p.add_argument("--host", choices=("claude", "codex"), default="claude")
     p.add_argument("--limit", type=int, default=20)
     p.add_argument("--json", action="store_true")
     p = localize_argparse(sub.add_parser("inspect", help="セッションの記録と認めるかと、件数、警告"))
