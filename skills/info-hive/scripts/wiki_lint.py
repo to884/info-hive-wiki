@@ -86,6 +86,7 @@ import wiki_workspace  # noqa: E402
 # ページの集合とリンクの規則は wiki_pages の 1 か所に置く（ADR-0010 の決定の 1）。ほかのスクリプトと試験が
 # wiki_lint.resolve_link などの名前で使うので、同じ名前で読み込んでおく。
 from wiki_pages import (  # noqa: E402
+    destination_src,
     SKIP_TOP_LEVEL_DIRS,
     SKIP_TOP_LEVEL_FILES,
     WIKILINK_RE,
@@ -104,7 +105,6 @@ from wiki_pages import (  # noqa: E402
 )
 
 
-MD_ESCAPE_RE = re.compile(r"\\([!-/:-@\[-`{-~])")
 URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*:")
 # Windows のドライブから始まる絶対パス（C:/Books/x.pdf、C:\Books\x.pdf）。URL_SCHEME_RE にも合うので先に見る。
 DRIVE_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
@@ -257,6 +257,18 @@ def _encode_md_path(path: str) -> str:
     return "".join(table.get(ch, ch) for ch in path)
 
 
+def image_ref_path(target: str) -> str:
+    """画像の参照先を、ファイルのパスの文字にする。
+
+    markdown-it が画像の src を作るのと同じ手順（Markdown のエスケープと文字参照を解き、URL を正規化する）を
+    destination_src で通してから、# と ? から後を落とし、パーセントエンコードを戻す。閲覧（markdown-it の src を
+    解く figure_target）と、作りの上で同じ文字を解く（図の描画の設計の 6.4）。文字参照の # を区切りと取り違えない
+    ように、切る前に解く。
+    """
+    src = destination_src(target)
+    return urllib.parse.unquote(src.split("#", 1)[0].split("?", 1)[0])
+
+
 def missing_assets(body: str, md_path: Path, wiki_root: Path) -> list[dict]:
     """本文の画像の参照のうち、ファイルがないもの（または wiki の外を指すもの）を返す。
 
@@ -273,9 +285,7 @@ def missing_assets(body: str, md_path: Path, wiki_root: Path) -> list[dict]:
             target = image_target(m).strip()
             if not target or URL_SCHEME_RE.match(target) or target.startswith(("/", "#", "\\")):
                 continue
-            # Markdown の escape（\( など）を外してから、パーセントエンコードを戻す。
-            rel = MD_ESCAPE_RE.sub(r"\1", target.split("#", 1)[0].split("?", 1)[0])
-            rel = urllib.parse.unquote(rel)
+            rel = image_ref_path(target)
             if not rel:
                 continue
             # %00 のように、ファイルのパスにできない参照先。lint を止めずに報告する。

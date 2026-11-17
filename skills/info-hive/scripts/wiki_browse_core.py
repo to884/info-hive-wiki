@@ -21,6 +21,7 @@ import html
 import io
 import json
 import os
+import posixpath
 import re
 import string
 import sys
@@ -45,10 +46,15 @@ except (ImportError, SystemExit):
     wiki_graph_extract = None
 
 PROTOCOL_VERSION = 2   # 探しやすさの設計の 2.3、6（nav.js の形とグループの並びが変わった）
-CORE_VERSION = "browse-core-2"
+CORE_VERSION = "browse-core-3"   # 3: 図の svg を出す（図の描画の設計の 9）
 NAME_LIMIT = 200
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
        "base-uri 'none'; form-action 'none'")
+# 図の svg の応答（図の描画の設計の 6.5）。直接開かれても、中のスクリプトを動かさない
+CSP_SVG = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+# 図の svg（ADR-0030）。wiki/assets/ の直下の、UTF-8 の、この大きさまでのものを読む
+ASSET_MAX_BYTES = 2 * 1024 * 1024
+ASSET_OUT_DIR = "assets/wiki"
 # アイコンがないことを宣言する。宣言がないと、製品の Chrome と Edge はサーバーの /favicon.ico を要求し、
 # 404 になってコンソールにエラーが出る（Playwright に同梱の Chromium は要求しない）。data: は CSP の img-src が許す
 ICON_LINK = '<link rel="icon" href="data:,">'
@@ -88,12 +94,13 @@ class NameCollision(Exception):
 @dataclass
 class InputFile:
     """内容の 1 つの入力。Path と絶対パスを持たない（設計の 8）。"""
-    kind: str            # "page"、"index"、"ontology"
+    kind: str            # "page"、"index"、"ontology"、"asset"（図の svg）
     disk_rel: str        # ディスク上の綴りの / 区切りの相対パス
     rel: str             # NFC にそろえた / 区切りの相対パス
     text: "str | None" = None
-    error: "str | None" = None   # "os"（読めない）か "decode"（UTF-8 でない）
+    error: "str | None" = None   # "os"（読めない）、"decode"（UTF-8 でない）、"too_large"（svg が上限を超えた）
     sha: "str | None" = None
+    data: "bytes | None" = None  # 図の svg の、読んだままのバイト列（BOM と改行を保つ）
 
     @property
     def stem(self) -> str:
@@ -154,6 +161,127 @@ class Snapshot:
         return [f for f in self.inputs if f.kind == kind]
 
 
+# XML 1.0 の文書に現れてよい文字（Char）の外。NUL と、タブ、改行、復帰のほかの制御文字を含む
+_XML_ILLEGAL_RE = re.compile("[^\t\n\r\u0020-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
+# XML の宣言。文法（XMLDecl ::= '<?xml' VersionInfo ...、VersionInfo は空白で始まる）どおり、<?xml のあとに空白が要る。
+# \b にすると <?xml-stylesheet ...?> の処理命令を宣言と取り違える（実装の 2 回目のレビューの軽微）
+_XML_DECL_RE = re.compile(r"\A<\?xml[ \t\r\n](.*?)\?>", re.S)
+_XML_ENCODING_RE = re.compile(r"""\bencoding\s*=\s*["']([^"']*)["']""")
+
+
+def is_utf8_svg(data: bytes) -> bool:
+    """svg のバイト列を、XML として UTF-8 で読むなら真（図の描画の設計の 6.2）。
+
+    公開の前の検査（scan_machine_info）は UTF-8 で読むので、XML として別の符号化で読まれる svg を出力に書くと、
+    中の絶対パスとトークンを見つけられない。UTF-8 として読めるだけでは足りない。BOM のない UTF-16 の、ASCII の
+    文字だけの XML は、UTF-8 としても読めるからである（実装の 1 回目のレビューの重大）。そこで次の 3 つを求める。
+    - UTF-8（BOM はあってもよい）として読める。
+    - XML 1.0 で許される文字だけからなる。UTF-16 と UTF-32 の ASCII の文字は NUL を伴うので、ここで落ちる。
+    - 先頭の XML の宣言が、UTF-8 のほかの符号化を名乗らない。
+    """
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return False
+    if _XML_ILLEGAL_RE.search(text):
+        return False
+    decl = _XML_DECL_RE.match(text)
+    if decl is None:
+        return True
+    enc = _XML_ENCODING_RE.search(decl.group(1))
+    return enc is None or enc.group(1).strip().lower() in ("utf-8", "utf8")
+
+
+_SVG_LENGTH_RE = re.compile(r"\s*([0-9]+(?:\.[0-9]+)?)\s*(?:px)?\s*")
+
+
+class _RootFound(Exception):
+    """svg_size が、根の要素の開始タグか DTD を読んだところで、解析を止める。"""
+
+
+def _svg_root_attrs(data: bytes) -> "dict | None":
+    """svg の根の要素の属性を、標準ライブラリの expat で読む。根が svg でないか、XML として読めないか、DTD が
+    あれば None。根の開始タグを読んだところで止めるので、それより後は解析しない。DTD があれば、その始まりで
+    止める（実体の定義を展開させない）。正規表現で探すと、コメントの中の <svg や data-width を拾う（実装の 1 回目の
+    レビューの軽微）。"""
+    import xml.parsers.expat
+    found = {}
+
+    def start(name, attrs):
+        found["name"], found["attrs"] = name, attrs
+        raise _RootFound
+
+    def doctype(*_args):
+        found["dtd"] = True
+        raise _RootFound
+
+    parser = xml.parsers.expat.ParserCreate()
+    parser.StartElementHandler = start
+    parser.StartDoctypeDeclHandler = doctype
+    try:
+        parser.Parse(data, True)
+    except _RootFound:
+        pass
+    except (xml.parsers.expat.ExpatError, ValueError):
+        return None
+    name = found.get("name")
+    if found.get("dtd") or name is None or name.rpartition(":")[2] != "svg":
+        return None
+    return found["attrs"]
+
+
+def svg_size(data: bytes) -> "tuple | None":
+    """svg の根の要素の width と height（なければ viewBox）から、表示の大きさ (幅, 高さ) を整数で返す。
+
+    分からなければ None。<img> の width と height の属性にして、読み込む前から入れ物の幅を決める（WebKit は、幅を
+    中身で決める入れ物の中の画像を、読み込んだあとに組み直さない）。単位は px か、単位なしだけを読む。
+    """
+    if not is_utf8_svg(data):
+        return None
+    attrs = _svg_root_attrs(data)
+    if attrs is None:
+        return None
+    w = _SVG_LENGTH_RE.fullmatch(attrs.get("width", ""))
+    h = _SVG_LENGTH_RE.fullmatch(attrs.get("height", ""))
+    if w and h:
+        size = (float(w.group(1)), float(h.group(1)))
+    else:
+        parts = re.split(r"[\s,]+", attrs.get("viewBox", "").strip())
+        try:
+            nums = [float(p) for p in parts] if len(parts) == 4 else []
+        except ValueError:
+            nums = []
+        if not nums:
+            return None
+        size = (nums[2], nums[3])
+    if not all(0 < v <= 20000 for v in size):
+        return None
+    return round(size[0]) or 1, round(size[1]) or 1
+
+
+def _read_asset(root, f: InputFile, size) -> None:
+    """図の svg を読み、f の data、sha、error を決める。上限は読む口が強制する（図の描画の設計の 6.2）。"""
+    if size is None:
+        f.error = "os"
+        return
+    if size > ASSET_MAX_BYTES:
+        f.error = "too_large"
+        return
+    try:
+        data = fs.read_input_capped(root, f.disk_rel, ASSET_MAX_BYTES)
+    except fs.TooLarge:
+        f.error = "too_large"
+        return
+    except (fs.Unknown, fs.Absent):
+        f.error = "os"
+        return
+    f.sha = hashlib.sha256(data).hexdigest()
+    if not is_utf8_svg(data):
+        f.error = "decode"
+        return
+    f.data = data
+
+
 def take_snapshot(root, entries=None) -> Snapshot:
     """入力の一覧を作り、入力を読み、もう 1 度一覧を作る。2 回が同じときだけ、写しを採る（設計の 4.2）。
 
@@ -167,20 +295,23 @@ def take_snapshot(root, entries=None) -> Snapshot:
     gen = hashlib.sha256(CORE_VERSION.encode("utf-8"))
     for kind, rel_disk, size, _mtime in first:
         f = InputFile(kind=kind, disk_rel=rel_disk, rel=posix_rel(rel_disk))
-        data = None
-        if size is not None:
-            try:
-                data = fs.read_input(root, rel_disk)
-            except (fs.Unknown, fs.Absent):
-                data = None
-        if data is None:
-            f.error = "os"
+        if kind in ("asset", "asset_dir"):
+            _read_asset(root, f, size)     # asset_dir（assets/ の一覧を作れない）は大きさがなく、読めない入力になる
         else:
-            f.sha = hashlib.sha256(data).hexdigest()
-            try:
-                f.text = read_text_like_lint(data)
-            except UnicodeDecodeError:
-                f.error = "decode"
+            data = None
+            if size is not None:
+                try:
+                    data = fs.read_input(root, rel_disk)
+                except (fs.Unknown, fs.Absent):
+                    data = None
+            if data is None:
+                f.error = "os"
+            else:
+                f.sha = hashlib.sha256(data).hexdigest()
+                try:
+                    f.text = read_text_like_lint(data)
+                except UnicodeDecodeError:
+                    f.error = "decode"
         if f.error is not None:
             unreadable.append((kind, f.rel))
         if f.error == "os":
@@ -436,6 +567,36 @@ def inline_text(children) -> str:
     return "".join(out)
 
 
+_URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+
+
+def figure_target(page_disk_rel: str, src: str) -> "str | None":
+    """本文の画像の参照（markdown-it の src）を、図の svg の NFC の相対パス（assets/<名前>.svg）に解く。
+
+    図の svg の形でなければ None。ファイルがあるかは見ない。lint の missing_assets と同じ順で、文字の上だけで解く
+    （図の描画の設計の 6.4）。markdown-it の src は、文字参照を解き、パーセントエンコードしたものである。
+    """
+    src = (src or "").strip()
+    if not src or src.startswith(("/", "\\", "#")) or _URL_SCHEME_RE.match(src):
+        return None
+    rel = src.split("#", 1)[0].split("?", 1)[0]
+    try:
+        rel = urllib.parse.unquote(rel, encoding="utf-8", errors="strict")
+    except UnicodeDecodeError:
+        return None
+    if not rel or "\0" in rel or "\\" in rel:
+        return None
+    base = posixpath.dirname(page_disk_rel.replace("\\", "/"))
+    joined = posixpath.normpath(posixpath.join(base, rel))
+    if joined == ".." or joined.startswith("../") or joined.startswith("/"):
+        return None
+    joined = nfc(joined)
+    parts = joined.split("/")
+    if len(parts) != 2 or parts[0] != wiki_pages.ASSETS_DIR or not wiki_pages._is_figure_name(parts[1]):
+        return None
+    return joined
+
+
 def assign_heading_ids(tokens) -> list:
     """見出しに ID を付け、(鍵, ID, 表示の文字) の並びを返す。ID は鍵に、重なれば連番を付けたもの。"""
     used = set()
@@ -625,6 +786,7 @@ class Core:
         self.unreadable_ontology = [rel for kind, rel in unreadable if kind == "ontology"]
         self._render_lock = threading.Lock()
         self._build_pages()
+        self._build_assets()
         self.out_name = assign_names(sorted(self.drawn), name_limit)
         self.name_to_id = {name: pid for pid, name in self.out_name.items()}
         for pid in sorted(self.drawn):
@@ -679,6 +841,65 @@ class Core:
                 self.diagnostics.append({"kind": "id_collision", "page": pid, "files": sorted(disks)})
         self.pages_by_path, self.pages_by_slug = wiki_pages.build_page_index(
             list(self.pages.values()), lambda p: p["disk_rel_path"])
+
+    def _build_assets(self) -> None:
+        """図の svg の表（図の描画の設計の 6.2、6.3）。NFC で同じ綴りになる svg は、どれも描かない。"""
+        by_rel = defaultdict(list)
+        for f in self.snapshot.by_kind("asset"):
+            by_rel[f.rel].append(f)
+        self.assets = {}          # NFC の相対パス -> InputFile（描けるもの）
+        self.asset_state = {}     # NFC の相対パス -> "ok"、"unreadable"
+        self.asset_out = {}       # NFC の相対パス -> 出力の名前
+        # assets/ の一覧を作れなかった。どの svg があるかが分からないので、見つからない参照も「読めない」にする
+        self.assets_unlistable = bool(self.snapshot.by_kind("asset_dir"))
+        if self.assets_unlistable:
+            self.diagnostics.append({"kind": "assets_unlistable", "target": wiki_pages.ASSETS_DIR})
+        for rel, files in sorted(by_rel.items()):
+            if len(files) > 1:
+                self.asset_state[rel] = "unreadable"
+                self.diagnostics.append({"kind": "asset_collision", "target": rel,
+                                         "files": sorted(f.disk_rel for f in files)})
+                continue
+            f = files[0]
+            if f.data is None:
+                self.asset_state[rel] = "unreadable"
+                continue
+            self.assets[rel] = f
+            self.asset_state[rel] = "ok"
+            self.asset_out[rel] = f"{ASSET_OUT_DIR}/{short_hash(f.disk_rel, 16)}.svg"
+        self.asset_by_out = {name: rel for rel, name in self.asset_out.items()}
+
+    def figure_state(self, page_disk_rel: str, src: str) -> tuple:
+        """本文の画像の参照の状態。(状態, 行き先) を返す。状態は "ok"、"missing"、"unreadable"、"other"。
+
+        "other" は、図の svg の形でない参照（外の URL、png、assets の外など）で、今までどおり代替テキストにする。
+        """
+        target = figure_target(page_disk_rel, src)
+        if target is None:
+            return "other", None
+        return self.asset_state.get(target, "unreadable" if self.assets_unlistable else "missing"), target
+
+    def asset_bytes(self, name: str) -> "bytes | None":
+        """図の svg の出力の名前から、配るバイト列。知らない名前なら None。"""
+        rel = self.asset_by_out.get(name)
+        return None if rel is None else self.assets[rel].data
+
+    def _figure_html(self, path: str, page_disk_rel: str, image) -> "str | None":
+        """本文の画像を、図の svg として描く HTML。図の svg でないか、描けないなら None。"""
+        state, target = self.figure_state(page_disk_rel, image.attrs.get("src", ""))
+        if state != "ok":
+            return None
+        src = rel_href(path, self.asset_out[target])
+        alt = html.escape(image.content, quote=True)
+        # 大きさが分からない svg は、置き換え要素の既定の大きさ（300×150）にする。Firefox は、大きさのない svg の
+        # 画像に固有の幅を持たせず、幅を中身で決める入れ物の中で幅 0 にする
+        width, height = svg_size(self.assets[target].data) or (300, 150)
+        # 入れ物は段落の中に置くので <span> にする。data-theme="light" で、手書きの svg の地を明るい配色に保つ
+        # （図の描画の設計の 8）。リンクで包まない（静的版で svg を直接開くと、中のスクリプトが動く）。
+        # 大きさは width と height の属性で渡す（svg_size）。loading="lazy" は付けない。WebKit は、幅を中身で決める
+        # 入れ物の中の画像を、読み込む前の幅 0 のまま残す
+        return (f'<span class="wiki-fig fui-Card" data-fig="svg" data-theme="light">'
+                f'<img class="fui-Image" src="{html.escape(src)}" alt="{alt}" width="{width}" height="{height}"></span>')
 
     def page(self, pid: str) -> dict:
         return self.pages[self.drawn[pid]]
@@ -759,6 +980,11 @@ class Core:
                                 r = self.resolve(target)
                                 r["label"] = (m.group(2) or m.group(1)).strip()
                                 found.append(r)
+                        elif drawn and child.type == "image":
+                            state, target = self.figure_state(disk, child.attrs.get("src", ""))
+                            if state in ("missing", "unreadable"):
+                                self.diagnostics.append({"kind": "missing_asset" if state == "missing"
+                                                         else "asset_unreadable", "page": pid, "target": target})
             if drawn:
                 self.links[pid] = found
             else:
@@ -1151,7 +1377,7 @@ class Core:
         return sorted(self.out_name.values())
 
     def knows(self, name: str) -> bool:
-        return name in self.name_to_id or name in ("index.html", *DATA_FILES)
+        return name in self.name_to_id or name in ("index.html", *DATA_FILES) or name in self.asset_by_out
 
     def _link_html(self, path: str, r: dict) -> str:
         label = html.escape(r["label"])
@@ -1166,6 +1392,8 @@ class Core:
         return f'<span class="wl wl-unresolved" title="ページがない">{label}</span>'
 
     def _transform_inline(self, children, path: str, counter: list, file: str) -> list:
+        """本文の inline の字句を描く形に替える。path はページの出力の名前、file はページのディスク上の相対パス
+        （図の svg の参照を解く基準。図の描画の設計の 6.4）。"""
         out = []
         i = 0
         while i < len(children):
@@ -1202,7 +1430,11 @@ class Core:
                 i = j + 1
                 continue
             if c.type == "image":
-                out.append(Token("text", "", 0, content=c.content))
+                figure = self._figure_html(path, file, c)
+                if figure is None:
+                    out.append(Token("text", "", 0, content=c.content))
+                else:
+                    out.append(Token("html_inline", "", 0, content=figure))
                 i += 1
                 continue
             if c.type == "text" and "[[" in c.content and wiki_pages.WIKILINK_FULL_RE.search(c.content):
@@ -1240,7 +1472,7 @@ class Core:
                 if m:
                     tok.attrSet("class", f"ta-{m.group(1)}")
             if tok.type == "inline" and tok.children:
-                tok.children = self._transform_inline(tok.children, path, counter, path)
+                tok.children = self._transform_inline(tok.children, path, counter, self.drawn[pid])
         rendered = self.parser.renderer.render(tokens, self.parser.options, {})
         self._body_cache[pid] = rendered
         return rendered
@@ -1636,6 +1868,8 @@ class Core:
         out = {}
         for name in self.page_names():
             out[name] = self.render(name, raw_mode)
+        for name, rel in self.asset_by_out.items():
+            out[name] = self.assets[rel].data     # 図の svg は、読んだバイト列のまま書く
         out["index.html"] = self.render_index()
         for name in DATA_FILES:
             out[name] = self.render_data(name, generated_at)

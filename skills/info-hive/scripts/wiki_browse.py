@@ -389,13 +389,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if app.verbose:
             say(f"{self.command} {getattr(self, '_kind', '-')} {code}")
 
-    def _send(self, code: int, body: bytes, ctype: str = "text/plain; charset=utf-8", extra: "dict | None" = None):
+    def _send(self, code: int, body: bytes, ctype: str = "text/plain; charset=utf-8", extra: "dict | None" = None,
+              csp: "str | None" = None, cache: "str | None" = None):
+        # CSP は応答の種類ごとに選ぶ（図の描画の設計の 6.5、7.3）。CSP は重なって効くので、1 つの応答に 1 つだけ付ける
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Content-Security-Policy", core.CSP)
+        self.send_header("Content-Security-Policy", csp or core.CSP)
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache or "no-store")
         self.send_header("Referrer-Policy", "no-referrer")
         for k, v in (extra or {}).items():
             self.send_header(k, v)
@@ -493,6 +495,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     '<body><p>ページが見つからない。Wiki が更新されたかもしれない。</p>'
                     f'<p><a href="{html.escape(core.rel_href(name, index))}">Index へ</a></p></body></html>\n')
             return self._send(404, body.encode("utf-8"), "text/html; charset=utf-8")
+        svg = c.asset_bytes(name)
+        if svg is not None:
+            # 図の svg。CSP の sandbox で、直接開かれても中のスクリプトを動かさない（図の描画の設計の 6.5）
+            return self._send(200, svg, "image/svg+xml", csp=core.CSP_SVG)
         reason = None if stale is None else ("組み立てに失敗した" if stale == "failed" else "組み立てている")
         text = c.render(name, app.state.raw, generated_at=getattr(c, "generated_at", ""), stale=reason)
         ctype = "text/javascript; charset=utf-8" if name.endswith(".js") else "text/html; charset=utf-8"
