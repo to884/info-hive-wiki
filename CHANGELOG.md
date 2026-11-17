@@ -6,6 +6,18 @@
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-11-17
+
+### Added
+
+- Codex 向けのプラグイン定義を追加した。`wiki@info-hive` としてスキルとローカルの MCP サーバーを一緒に導入できる。Codex の MCP の起動は、プラグインのルートを作業ディレクトリとして、Claude Code と同じ入口を呼ぶ（ADR-0031）。
+- Codex の `$wiki:info-hive <操作> <引数>` で、初期化、取り込み、検索、lint、統計、グラフ、閲覧、経験の記録、スキルの改善、アップグレード、ヘルプを使えるようにした。`wiki_codex.py` は既存の操作手順を読み、Codex 向けの呼び出し名とパスで表示する。手順の正本は Claude Code と共用する。
+- Codex の導入方法と対応範囲を `docs/agents.md` に追記した。Web の raw は Codex 自身が作り、Claude CLI は不要である。`$wiki:info-hive ingest session` と `session:<ID>` で Codex の会話履歴を自動で取り込める。従来の保存方式とデータベースの履歴を Codex の読み取り API で取得し、依頼を含むターンより前に範囲を固定する。伏せ字、保存前の確認、承認済みハッシュ、raw の排他作成・読み取り専用化は Claude Code と共用する（ADR-0032）。
+
+### Changed
+
+- 初期化の完了後の案内を、エージェントに取り込みを頼むという表現にした。
+
 ## [0.27.0] - 2026-11-17
 
 ### Added
@@ -781,7 +793,8 @@ Web ページの取得（`wiki_fetch.py`）が、Medium の記事の図とコー
 - 移植元の調査メモ `research/` と、移植元の英語の評価セットでの測定記録（`eval/decisions/results-*.json`）は取り込んでいない。
 - Paperclip 連携は移植元の v4.0.0 で削除されており、info-hive にもない。
 
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.29.0...HEAD
+[0.29.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.29.0
 [0.7.0]: https://github.com/to884/info-hive-wiki/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/to884/info-hive-wiki/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/to884/info-hive-wiki/compare/v0.5.0...v0.6.0
