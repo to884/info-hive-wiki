@@ -819,10 +819,32 @@ def stat_signature(root: Path) -> str:
     その下のファイルはページではないので、印に入れなくてよい。最上位の index.md などのページでない Markdown は入る。
     たどる途中の権限と消失のほかの OSError は送出し、refresh() は索引の行を消さずに失敗する。
     """
+    return _signature_and_links(root)[0]
+
+
+class Unverifiable(ValueError):
+    """記事か記事までの道を、権限などで調べられなかった（ADR-0029 の I4）。「ない」とは区別する。"""
+
+    def __init__(self, path: str):
+        self.path = path
+        super().__init__(f"調べられない: {path}（権限か、属性を取れない）")
+
+
+class LinkRefused(ValueError):
+    """記事か記事までの道がリンクなので、読まなかった（info-hive-dev の ADR-0029）。「ない」とは区別する。"""
+
+    def __init__(self, path: str, kind: str):
+        self.path, self.kind = path, kind
+        super().__init__(f"リンクなので読まない: {path}（{kind}）。wiki と raw の記事にはリンクを置かない（lint の links を見る）")
+
+
+def _signature_and_links(root: Path) -> "tuple[str, list]":
+    """stat_signature の印と、走査が拒んだページのリンク（link_warnings の形）を、1 回の走査で作る。"""
+    found = wiki_pages.walk_markdown(root, skip_top=True)
     digest = hashlib.sha256()
-    for f in wiki_pages.walk_markdown(root, skip_top=True).files:
+    for f in found.files:
         digest.update(f"{f.rel}\0{f.size}\0{f.mtime_ns}\n".encode("utf-8"))
-    return digest.hexdigest()
+    return digest.hexdigest(), wiki_pages.link_warnings(found)
 
 
 class WikiIndex:
@@ -840,6 +862,7 @@ class WikiIndex:
         self.sections: list[dict] = []
         self.by_locator: dict[str, dict] = {}
         self._page_bm25 = None
+        self.link_warnings: list[dict] = []
 
     def refresh(self) -> dict:
         """wiki の変更を台帳と語彙の索引に入れる。埋め込みは embed_pending で別に行う。"""
@@ -847,7 +870,7 @@ class WikiIndex:
             if self.collection.needs_reconcile:
                 # 前の書き込みが途中で失敗した。台帳の行は残っているので、索引を台帳に合わせる。
                 self.collection.reconcile()
-            signature = stat_signature(self.root)
+            signature, self.link_warnings = _signature_and_links(self.root)
             if signature == self._signature:
                 return {"changed": False}
             pages = wiki_search.collect_pages(self.root, self.dir / "parse-cache.json")
@@ -924,7 +947,7 @@ class WikiIndex:
                 break
         stats = self.collection.stats()
         return {"query": query, "wiki": self.root.as_posix(), "granularity": "section", "mode": mode,
-                "results": results, "warning": warning,
+                "results": results, "warning": warning, "link_warnings": list(self.link_warnings),
                 "index": {"sections": stats["rows"], "embedded": stats["embedded"],
                           "state": "ready" if stats["rows"] == stats["embedded"] else "embedding"}}
 
@@ -939,11 +962,31 @@ class WikiIndex:
                                  + "、".join(p["rel_path"] for p in candidates))
             match = candidates[0] if candidates else None
         if match is None:
+            for item in self.link_warnings:
+                rel = item["path"]
+                stem = wiki_pages.posix_rel(rel)[:-3] if rel.lower().endswith(".md") else None
+                if stem is not None and (stem == wanted or rel == page or stem.rsplit("/", 1)[-1] == wanted):
+                    raise LinkRefused(rel, item["kind"])
+            # パスで引いたときは、読む口で、途中のディレクトリのリンクと、調べられないことを見分ける
+            if "/" in wanted or page.lower().endswith(".md"):
+                rel = page.replace("\\", "/") if page.lower().endswith(".md") else wanted + ".md"
+                probe = wiki_pages.article_path(self.root, rel)
+                if probe.state == "link":
+                    raise LinkRefused(*probe.link)
+                if probe.state == "denied":
+                    raise Unverifiable(rel)
             return None
-        text = (self.root / match["rel_path"]).read_text(encoding="utf-8-sig")
+        found = wiki_pages.article_path(self.root, Path(match["path"]).relative_to(self.root).as_posix(), native=True)
+        if found.state == "link":
+            raise LinkRefused(*found.link)
+        if found.state == "denied":
+            raise Unverifiable(match["rel_path"])
+        if found.state != "ok":
+            return None
+        text = found.path.read_text(encoding="utf-8-sig")
         _meta, body = wiki_search.parse_frontmatter(text)
         return {"slug": match["slug"], "rel_path": match["rel_path"], "meta": match["meta"], "body": body,
-                "links": match["links"],
+                "links": match["links"], "link_warnings": list(self.link_warnings),
                 "sections": [{"section_index": s["section_index"], "heading_path": s["heading_path"],
                               "level": s["level"]} for s in match["sections"]]}
 
@@ -952,32 +995,51 @@ class WikiIndex:
 
 
 def list_index(root: Path, name: str | None = None) -> dict:
-    """index.md と indexes/ の一覧を返す。name を渡すと indexes/ の中のそのファイルを返す。"""
+    """index.md と indexes/ の一覧を返す。name を渡すと indexes/ の中のそのファイルを返す。
+
+    どの本文も、記事を読む口（wiki_pages.article_path）を通して読む。index.md、indexes そのもの、indexes の下の
+    ファイルがリンクなら読まず（ADR-0029）、一覧では link_warnings に挙げ、名前の指定では LinkRefused を送出する。
+    """
+    walk = wiki_pages.walk_index_files(root)
+    warnings = wiki_pages.link_warnings(walk)
     if name:
-        target = (root / "indexes" / name).resolve()
+        rel = f"indexes/{name}".replace("\\", "/")
         # 拡張子の大文字と小文字は問わない（一覧は Upper.MD も返す）。拡張子が .md でなければ、.md を付けたものとみなす。
-        if target.suffix.lower() != ".md":
-            target = target.with_suffix(".md")
-        if not target.is_relative_to((root / "indexes").resolve()) or not target.is_file():
+        if not rel.lower().endswith(".md"):
+            rel += ".md"
+        if ".." in rel.split("/"):
             raise FileNotFoundError(f"indexes/ に {name} がない")
-        return {"wiki": root.as_posix(), "name": target.relative_to(root).as_posix(),
-                "content": target.read_text(encoding="utf-8-sig")}
-    index_md = root / "index.md"
+        found = wiki_pages.article_path(root, rel)
+        if found.state == "link":
+            raise LinkRefused(*found.link)
+        if found.state == "denied":
+            raise Unverifiable(rel)
+        if found.state != "ok":
+            raise FileNotFoundError(f"indexes/ に {name} がない")
+        return {"wiki": root.as_posix(), "name": rel, "content": found.path.read_text(encoding="utf-8-sig"),
+                "link_warnings": warnings}
     files = []
     folder = root / "indexes"
     # 索引のファイルは lint と同じ集め方（wiki_pages.walk_index_files）にする。ふつうのファイルだけで、.md で終わる
     # 名前のディレクトリで失敗しない。並びは今までどおり Path の順である。
-    found = [f for f in wiki_pages.walk_index_files(root).files if f.rel != "index.md"]
-    for f in sorted(found, key=lambda f: root / f.rel):
-        path = root / f.rel
-        text = path.read_text(encoding="utf-8-sig")
+    found_files = [f for f in walk.files if f.rel != "index.md"]
+    for f in sorted(found_files, key=lambda f: root / f.rel):
+        opened = wiki_pages.article_path(root, f.rel, native=True)
+        if opened.state != "ok":
+            if opened.state == "link":
+                warnings.append({"path": opened.link[0], "kind": opened.link[1]})
+            continue  # 走査と読む間に置き換えられた
+        text = opened.path.read_text(encoding="utf-8-sig")
         meta, body = wiki_search.parse_frontmatter(text)
         heading = next((line.lstrip("#").strip() for line in body.splitlines() if line.startswith("#")), None)
-        files.append({"name": path.relative_to(folder).as_posix(),
+        files.append({"name": opened.path.relative_to(folder).as_posix(),
                       "title": wiki_pages.text_value(meta.get("title")) or heading, "bytes": f.size})
+    top = wiki_pages.article_path(root, "index.md")
+    if top.state == "link" and not any(w["path"] == top.link[0] for w in warnings):
+        warnings.append({"path": top.link[0], "kind": top.link[1]})
     return {"wiki": root.as_posix(),
-            "index": index_md.read_text(encoding="utf-8-sig") if index_md.is_file() else None,
-            "indexes": files}
+            "index": top.path.read_text(encoding="utf-8-sig") if top.state == "ok" else None,
+            "indexes": files, "link_warnings": warnings}
 
 
 # ---------------------------------------------------------------------------

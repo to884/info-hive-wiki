@@ -192,7 +192,8 @@ def build(root: PurePath, out_arg: "str | None", raw: "str | None", scope: "str 
         warnings.append(f"この入力を読めない。ない Wiki と同じに描き、「読めない」と示した（{kind}: {rel}）")
 
     report = {"wiki": root.as_posix(), "out": PurePath(out).as_posix(), "generation": c.generation,
-              "pages": len(c.drawn), "raw": raw, "warnings": list(warnings), "diagnostics": len(c.diagnostics)}
+              "pages": len(c.drawn), "raw": raw, "warnings": list(warnings), "diagnostics": len(c.diagnostics),
+              "link_warnings": list(c.link_warnings)}
     fs.WARNINGS.clear()
     for message in warnings:
         fs.warn(message)

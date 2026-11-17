@@ -111,10 +111,20 @@ def copy_template(src: Path, dst: Path, substitutions: dict | None = None) -> bo
     return True
 
 
-def detect_schema_gaps(schema_path: Path) -> list[dict]:
-    """SCHEMA_SECTION_MARKERS のうち、ユーザーの SCHEMA.md にない項目を返す。"""
-    if not schema_path.exists():
+def detect_schema_gaps(schema_path: Path) -> "list[dict] | None":
+    """SCHEMA_SECTION_MARKERS のうち、ユーザーの SCHEMA.md にない項目を返す。調べられなかったら None。
+
+    SCHEMA.md は記事なので、リンクなら読まない（info-hive-dev の ADR-0029）。リンクのときと、リンクかを調べられない
+    ときは、理由を標準エラーに出して None を返す（空の並びは「不足なし」なので返さない）。
+    """
+    import wiki_links
+    state, kind = wiki_links.is_link(schema_path)
+    if state == "absent":
         return []
+    if state != "ok" or kind is not None:
+        reason = f"リンクなので読まない（{kind}）" if kind is not None else "調べられない"
+        print(f"{schema_path.name} は{reason}。スキーマの不足は調べていない", file=sys.stderr)
+        return None
     text = schema_path.read_text(encoding="utf-8-sig")
 
     def marker_present(marker: str) -> bool:
@@ -274,7 +284,10 @@ def init_wiki(project_root: Path, wiki_dir: str, raw_dir: str, upgrade: bool = F
 
     if upgrade:
         gaps = detect_schema_gaps(wiki / "SCHEMA.md")
-        if gaps:
+        if gaps is None:
+            print()
+            print("SCHEMA.md の不足は調べていない（理由は上の標準エラーにある）。")
+        elif gaps:
             print_schema_upgrade_guidance(wiki / "SCHEMA.md", gaps)
         else:
             print()
