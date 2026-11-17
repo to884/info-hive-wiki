@@ -539,7 +539,7 @@ def user_file_path(path, wiki_root=None, *, directory: bool = False) -> Path:
     path = Path(path)
     absolute_user_path(path)  # 所属を調べない場合も、検査後と読み取り時で意味が変わる名前を受け取らない
     if wiki_root is not None:
-        found = _article_rel(path, wiki_root, directory=directory)
+        found = _article_rel(path, wiki_root)
         if found is not None:
             root, rel = found
             if directory and not rel:
@@ -576,11 +576,12 @@ def read_user_bytes(path, wiki_root=None) -> bytes:
     return user_file_path(path, wiki_root).read_bytes()
 
 
-def _article_rel(path, wiki_root, *, directory: bool = False) -> "tuple[str, str] | None":
+def _article_rel(path, wiki_root) -> "tuple[str, str] | None":
     """path が wiki の中なら (比べた根, 根からの / 区切りの相対パス)。外なら None。
 
     根の別名を通る入力は、祖先を上から解決し、既知の根に届いたところで止める。根より下の要素は解決しない。
-    ファイル自身は解決しない。大小文字の比較と、相対パスの要素の切り出しを分ける。
+    外のファイルの別名も展開する。根より下のファイルのリンクは、記事を読む口で検査する。
+    大小文字の比較と、相対パスの要素の切り出しを分ける。
     """
     given = os.fspath(absolute_user_path(path))
     roots = [os.fspath(absolute_user_path(wiki_root))]
@@ -621,7 +622,7 @@ def _article_rel(path, wiki_root, *, directory: bool = False) -> "tuple[str, str
                 same_root = False
             if same_root:
                 return found(root)
-        if not pending or (not directory and len(pending) == 1):
+        if not pending:
             return None
         name = pending.pop(0)
         if name == ".":
@@ -645,7 +646,7 @@ def _article_rel(path, wiki_root, *, directory: bool = False) -> "tuple[str, str
                 raise ValueError(f"リンクが循環しているか、多すぎるので所属を決められない: {path}")
             try:
                 target = Path(os.readlink(current))
-            except OSError as exc:
+            except (OSError, ValueError) as exc:
                 raise ValueError(f"リンクの行き先を調べられない: {current}") from exc
             if target.is_absolute():
                 target_parts = list(target.parts)
@@ -659,7 +660,7 @@ def _article_rel(path, wiki_root, *, directory: bool = False) -> "tuple[str, str
 
 def source_wiki_root(path, wiki_root=None):
     """部分木は元の wiki の記事規則を引き継ぐ。wiki 外のコーパスだけを独立した根として扱う。"""
-    if wiki_root is not None and _article_rel(path, wiki_root, directory=True) is not None:
+    if wiki_root is not None and _article_rel(path, wiki_root) is not None:
         return wiki_root
     return path
 
