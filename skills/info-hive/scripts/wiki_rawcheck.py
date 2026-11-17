@@ -920,9 +920,23 @@ def names_of(text: str, title_case_ok: bool = True) -> list[str]:
 
 
 UNICODE_WORD_RE = re.compile(r"[^\W\d_]+(?:[’'][^\W\d_]+)?")
-KANA_RE = re.compile(r"[\u3040-\u30ff]")
-HAN_RE = re.compile(r"[\u3400-\u9fff\uf900-\ufaff]")
-RETENTION_KINDS = {"proper_name", "identifier", "ui_text", "error_message", "bibliography", "term", "quotation"}
+REVIEW_KINDS = {"proper_name", "identifier", "ui_text", "error_message", "bibliography", "term", "quotation", "japanese_text"}
+
+
+def is_kana(character: str) -> bool:
+    """中黒や長音符だけを、日本語の説明の証拠にしない。補助面の仮名も読む。"""
+    return unicodedata.name(character, "").startswith(
+        ("HIRAGANA LETTER", "KATAKANA LETTER", "HALFWIDTH KATAKANA LETTER", "HENTAIGANA LETTER"))
+
+
+def is_han(character: str) -> bool:
+    """基本面と拡張 B 以降を、Unicode の漢字の名前でそろえて読む。"""
+    return character == "〇" or unicodedata.name(character, "").startswith(
+        ("CJK UNIFIED IDEOGRAPH-", "CJK COMPATIBILITY IDEOGRAPH-"))
+
+
+def script_counts(text: str) -> tuple[int, int]:
+    return sum(map(is_kana, text)), sum(map(is_han, text))
 
 
 def translation_text(text: str) -> str:
@@ -935,28 +949,38 @@ def translation_block(source: str, output: str, node_type: str) -> tuple[bool, l
     src, out = translation_text(source), translation_text(output)
     if not src.strip() and not out.strip():
         return False, []
+    kana, han = script_counts(out)
+    # 漢字を共有するので、短い語や、原文と違う言い換えも確認に回す。日本語の見出しも該当し得る。
+    # 比率は候補を拾うためだけに使い、翻訳済みや中国語とは確定しない。
+    if han and kana / (kana + han) < 0.35:
+        return True, [out.strip()]
     words = UNICODE_WORD_RE.findall(out)
     letters = sum(c.isalpha() for c in out)
-    if not KANA_RE.search(out) and not HAN_RE.search(out) and (len(words) >= 2 or letters >= 20):
+    if not kana and not han and (len(words) >= 2 or letters >= 20):
         return True, [out.strip()]
-    passages = []
+    passages, runs, current = [], [], []
     # 文末、大小文字、原文との完全一致に依存せず、かな・漢字以外の文字体系を同じ条件で見る。
-    for run in re.split(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]+", out):
+    for character in out:
+        if is_kana(character) or is_han(character):
+            runs.append("".join(current))
+            current = []
+        else:
+            current.append(character)
+    runs.append("".join(current))
+    for run in runs:
         if len(UNICODE_WORD_RE.findall(run)) >= 4 or sum(c.isalpha() for c in run) >= 20:
             passages.append(run.strip())
-    # 共有する漢字は、原文に近いまとまりが残る場合を確認する。言語や意味の正しさは確定しない。
+    # 共有する漢字が原文に近い場合も確認する。原文に仮名があっても照合を省略しない。
     out_units = re.split(r"[。！？.!?;；\n]+", out)
     for unit in re.split(r"[。！？.!?;；\n]+", src):
-        if KANA_RE.search(unit):
-            continue
-        han = "".join(HAN_RE.findall(unit))
-        if len(han) < 8:
+        original = "".join(c for c in unit if is_han(c))
+        if len(original) < 8:
             continue
         for candidate in out_units:
-            target = "".join(HAN_RE.findall(candidate))
+            target = "".join(c for c in candidate if is_han(c))
             if len(target) < 8:
                 continue
-            matcher = difflib.SequenceMatcher(None, han, target, autojunk=False)
+            matcher = difflib.SequenceMatcher(None, original, target, autojunk=False)
             if matcher.find_longest_match().size >= 8 or matcher.ratio() >= 0.8:
                 text = candidate.strip()
                 if text not in passages:
@@ -969,7 +993,7 @@ def apply_translation_review(wd: Path, basis: dict, enabled: bool,
     """確認の記録を現在の原文・raw と、対象ごとの ID に結び付ける。一括受理では解除しない。"""
     pending = [e for e in errors if e["kind"] == "translation_review_required"]
     result = {"basis": basis, "reviewed_by": "", "reviewed_passages": 0,
-              "pending_reviews": len(pending), "retained": []}
+              "pending_reviews": len(pending), "decisions": []}
     if not enabled:
         return result
     try:
@@ -984,24 +1008,24 @@ def apply_translation_review(wd: Path, basis: dict, enabled: bool,
         reviewer = record.get("reviewed_by")
         if not isinstance(reviewer, str) or not reviewer.strip():
             raise ValueError("reviewed_by に実際に確認したモデル名を書く")
-        entries = record.get("retained")
+        entries = record.get("decisions")
         if not isinstance(entries, list):
-            raise ValueError("retained は対象ごとの保持の理由の配列にする")
+            raise ValueError("decisions は対象ごとの確認の判断の配列にする")
         available = {e["review_id"]: e for e in pending}
         accepted = {}
         for entry in entries:
             if not isinstance(entry, dict) or set(entry) != {"id", "text", "kind", "reason"}:
-                raise ValueError("保持の記録には id、text、kind、reason を書く")
+                raise ValueError("確認の記録には id、text、kind、reason を書く")
             key = entry["id"]
             if not isinstance(key, str) or key not in available or key in accepted:
-                raise ValueError("保持の対象の ID が現在の検査にないか重複している")
+                raise ValueError("確認の対象の ID が現在の検査にないか重複している")
             if entry["text"] != available[key]["text"]:
-                raise ValueError("保持する text が対象の文字列全体と違う")
-            if not isinstance(entry["kind"], str) or entry["kind"] not in RETENTION_KINDS:
-                raise ValueError("保持するものの kind が決まった値ではない")
+                raise ValueError("確認する text が対象の文字列全体と違う")
+            if not isinstance(entry["kind"], str) or entry["kind"] not in REVIEW_KINDS:
+                raise ValueError("確認の kind が決まった値ではない")
             if not isinstance(entry["reason"], str) or not entry["reason"].strip():
-                raise ValueError("保持の対象ごとに具体的な理由を書く")
-            if entry["kind"] in {"ui_text", "error_message", "term", "quotation"} and not available[key]["has_japanese"]:
+                raise ValueError("確認の対象ごとに具体的な理由を書く")
+            if entry["kind"] in {"ui_text", "error_message", "term", "quotation", "japanese_text"} and not available[key]["has_japanese_letters"]:
                 raise ValueError("表示文・原語・引用の保持には、同じブロックに日本語の説明や訳を添える")
             accepted[key] = entry
     except (OSError, ValueError, UnicodeDecodeError) as exc:
@@ -1012,10 +1036,10 @@ def apply_translation_review(wd: Path, basis: dict, enabled: bool,
         if item["review_id"] not in accepted:
             continue
         entry = accepted[item["review_id"]]
-        warnings.append({**item, "kind": "retained_foreign_text", "retention_kind": entry["kind"],
+        warnings.append({**item, "kind": "translation_reviewed", "review_kind": entry["kind"],
                          "reason": entry["reason"], "reviewed_by": reviewer.strip(),
-                         "message": "外国語の文字列を保持する確認の記録: " + entry["reason"]})
-        result["retained"].append({**entry, "line": item["line"]})
+                         "message": "翻訳の確認の記録: " + entry["reason"]})
+        result["decisions"].append({**entry, "line": item["line"]})
     result.update(reviewed_by=reviewer.strip(), reviewed_passages=len(accepted),
                   pending_reviews=len(pending) - len(accepted))
     return result
@@ -1069,7 +1093,7 @@ def compare(a: Node, b: Node, translate: bool, errors: list[dict], warnings: lis
                 review_id = hashlib.sha256(json.dumps([path, index, src_text, out_text, text],
                                                        ensure_ascii=False).encode("utf-8")).hexdigest()
                 errors.append({"kind": "translation_review_required", **detail, "review_id": review_id,
-                               "text": text, "has_japanese": bool(KANA_RE.search(out_text) or HAN_RE.search(out_text)),
+                               "text": text, "has_japanese_letters": any(script_counts(translation_text(out_text))),
                                "message": "外国語が残っている。文章は日本語に訳す。名前や表示文字列などを保持する場合は、"
                                "この対象の ID・text と保持の理由を translation-review.json に記録して確認する。"
                                "--accept-warnings だけでは解除できない"})
@@ -1176,7 +1200,7 @@ def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: s
                          "message": f"です・ます調（{style['desu']} 文）とである調（{style['dearu']} 文）が混ざっている"})
 
     review = apply_translation_review(wd, basis, translation_review, errors, warnings)
-    to_file_lines(errors + warnings + review["retained"], len(out_fm))
+    to_file_lines(errors + warnings + review["decisions"], len(out_fm))
     result = {"stage": "check", "ok": not errors, "needs_translation": translate,
               "language_override": {"value": override, "reason": reason} if override else None,
               "translated_by": translator, "caption_names": sorted(names),
