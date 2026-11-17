@@ -75,6 +75,20 @@
 
 - 初期化の完了後の案内を、エージェントに取り込みを頼むという表現にした。
 
+### Added
+
+- 指示を送るたびに、関係しそうな wiki のページの候補をエージェントに知らせる UserPromptSubmit のフックを足した（ADR-0032、`hooks/hooks.json`、`scripts/wiki_prompt_hook.py`、`scripts/wiki_prompt_context.py`、`references/prompt-context.md`）。既定で有効である。
+  - 候補は、直接の参照（`[[スラッグ]]`、パス）、題とスラッグと別名、識別子（`UV_SYSTEM_CERTS`、版の番号など）、索引の 1 行の要約との一致だけで選ぶ。順位の上位ではなく、絶対の基準を満たしたものだけを出す。本文の語の一致は、評価で精度を下げたので使わない。
+  - 出すのは題、パス、見出し、索引の要約だけで、本文は出さない。wiki から写す欄は無害化し、データであって指示ではないと添える。同じセッションで 40 ターン以内に出したページは出し直さない。
+  - `/` と `!` で始まる指示、サブエージェントの報告などの利用者が打たないターン、短い指示では何もしない。MCP のサーバーを起動せず、埋め込みも使わず、wiki に何も書かず、外部に何も送らない。何が起きても終了コード 0 で黙って終わる。
+  - 候補を読む段を、新しいプラグインのエージェント `wiki:wiki-reader`（読み取りだけ）に任せる。どのモデルとエフォートで読むかは、候補の数、wiki の数、一致の種類から、段の表（R0〜R3）で決めて知らせる。
+  - プラグインの設定 `prompt_context`、`prompt_context_user_wiki`（ユーザースコープの wiki も分けて探す）、`prompt_context_delegate` と、環境変数 `INFO_HIVE_PROMPT_CONTEXT*` で切り替えられる。
+- `/wiki:query` の確信度で、フックの候補として知ったページを検索の縮退（理由 0F）に数えるようにした（`references/query-confidence.md`）。
+
+### Changed
+
+- 検索のトークン化を `scripts/wiki_tokens.py` に移した。`wiki_search.tokenize` は同じ関数を指すので、検索と MCP の索引の結果は変わらない。
+
 ## [0.27.0] - 2026-11-17
 
 ### Added

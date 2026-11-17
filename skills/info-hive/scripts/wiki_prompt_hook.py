@@ -3,7 +3,7 @@
 # requires-python = ">=3.12,<3.15"
 # dependencies = []
 # ///
-"""UserPromptSubmit のフックの入口（ADR-0031）。hooks/hooks.json から uv で起動する。
+"""UserPromptSubmit のフックの入口（ADR-0032）。hooks/hooks.json から uv で起動する。
 
 標準入力のフックの入力（JSON）を読み、指示に関係しそうな wiki のページの候補を、
 hookSpecificOutput.additionalContext として標準出力に書く。足すものがなければ何も書かない。
