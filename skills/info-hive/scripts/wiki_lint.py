@@ -633,7 +633,8 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         # sources: は source ページを指す。ページがないか、source でないページを指すものを挙げる。
         # 分け方はグラフの抽出（sourced_from）と同じ wiki_pages.classify_source_ref に任せる。
         for ref in _ref_values(p["meta"].get("sources")):
-            status, _found, wrong_type = classify_source_ref(ref, src_by_path, src_by_slug, page_type)
+            status, _found, wrong_type = classify_source_ref(ref, src_by_path, src_by_slug, page_type,
+                                                           link_warnings=findings["links"])
             if status == "missing":
                 findings["unresolved_sources"].append({"path": p["rel_path"], "source": ref, "reason": "missing"})
             elif status == "not_source":

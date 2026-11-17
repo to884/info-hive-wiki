@@ -945,11 +945,11 @@ class Core:
 
     def resolve(self, target: str) -> dict:
         """wikilink の行き先を解決する（設計の 3.3）。"""
+        refused = wiki_pages.refused_link(target, self.link_warnings)
+        if refused is not None:
+            return {"state": "refused", "target": target, "path": refused["path"], "link_kind": refused["kind"]}
         disks = wiki_pages.link_candidates(target, self.pages_by_path, self.pages_by_slug)
         if not disks:
-            refused = wiki_pages.refused_link(target, self.link_warnings)
-            if refused is not None:
-                return {"state": "refused", "target": target, "path": refused["path"], "link_kind": refused["kind"]}
             return {"state": "unresolved", "target": target}
         pid = self.resolve_disks(disks)
         if pid is None:
@@ -1539,7 +1539,11 @@ class Core:
             cells = []
             for ref in sources:
                 _status, found, _t = wiki_pages.classify_source_ref(
-                    ref, self.pages_by_path, self.pages_by_slug, lambda d: self.pages[d]["meta"].get("type"))
+                    ref, self.pages_by_path, self.pages_by_slug, lambda d: self.pages[d]["meta"].get("type"),
+                    link_warnings=self.link_warnings)
+                if _status == "refused":
+                    cells.append(self._link_html(path, {"state": "refused", "label": ref}))
+                    continue
                 sp = self.resolve_disks(found)
                 if sp is not None:
                     cells.append(f'<a href="{html.escape(rel_href(path, self.out_name[sp]))}">'

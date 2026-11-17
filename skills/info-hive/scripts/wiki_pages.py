@@ -611,12 +611,16 @@ def _article_rel(path, wiki_root, *, directory: bool = False) -> "tuple[str, str
                 return root, "/".join(([rel] if rel else []) + list(parts[size:]))
             # 大小文字を区別しない POSIX の根も、綴りではなく実体で認識する。
             # 祖先を上から調べ、根に届いたところで止めるので、その下のリンクは解決しない。
-            try:
-                same_root = os.path.samefile(resolved, root)
-            except OSError:
-                same_root = False
-            if same_root:
-                return root, "/".join(parts[size:])
+            # 外の別名が根の下のディレクトリを指す場合も、その解決済みのパスの
+            # 祖先から根を探す。根の綴りや NFC/NFD の違いを、所属の違いにしない。
+            resolved_parts = Path(resolved).parts
+            for prefix_size in range(1, len(resolved_parts) + 1):
+                try:
+                    same_root = os.path.samefile(os.path.join(*resolved_parts[:prefix_size]), root)
+                except OSError:
+                    same_root = False
+                if same_root:
+                    return root, "/".join(list(resolved_parts[prefix_size:]) + list(parts[size:]))
     return None
 
 
@@ -1004,17 +1008,21 @@ def build_page_index(pages: list[dict], value=lambda p: p) -> "tuple[dict, dict]
     return pages_by_path, pages_by_slug
 
 
-def classify_source_ref(ref: str, pages_by_path: dict, pages_by_slug: dict, page_type) -> "tuple[str, list, object]":
+def classify_source_ref(ref: str, pages_by_path: dict, pages_by_slug: dict, page_type,
+                        *, link_warnings=None) -> "tuple[str, list, object]":
     """`sources:` の値 1 つを分ける。(状態, 当たるページ, source でない type) を返す。
 
     値は ref_link で外側の [[ ]] を外し、wikilink と同じ規則（link_candidates）でページを探す。状態は次のどれかである。
     - "missing": 当たるページがない。
     - "not_source": 当たるページのうち type のあるものが 1 つ以上あり、どれも source でない。3 つ目の値は最初の type。
     - "ok": それ以外。
+    - "refused": link_warnings が渡され、リンクなので読まなかった記事を指す。
     lint の unresolved_sources（missing と not_source）と、グラフの抽出の sourced_from が、この関数を共有する。
     当たるページが 2 つ以上かどうか（曖昧さ）は、状態に含めない。呼び出す側が、当たるページの数で見る。
     page_type は、ページ（pages_by_* の値）から type を返す。
     """
+    if link_warnings and refused_link(ref_link(ref), link_warnings) is not None:
+        return "refused", [], None
     found = link_candidates(ref_link(ref), pages_by_path, pages_by_slug)
     if not found:
         return "missing", [], None
@@ -1052,7 +1060,8 @@ def refused_link(link: str, warnings: list) -> "dict | None":
         return None
     kind, target = lookup
     for item in warnings:
-        rel = nfc(item["path"])
+        # OS 上の読み取りのパスは変えず、wikilink の照合だけをページの索引と同じ鍵にする。
+        rel = posix_rel(item["path"])
         if kind == "path" and target.startswith(rel + "/"):
             return item
         if rel.lower().endswith(".md") and is_page_path(rel, native=True):

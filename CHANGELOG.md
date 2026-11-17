@@ -16,6 +16,7 @@
   - 黙っては消さない。lint に新しい指摘 `links` と `links_unchecked` を足し、`summary` に `links`、`links_unchecked`、`links_raw`（raw の側はこの版では調べないので `null`）を足した。MCP の `query`、`get_page`、`list_index`、`lint`、`stats`、`graph` と、`wiki_search.py --json`、`wiki_stats.py --json` の結果に `link_warnings` を足した（CLI の検索は標準エラーにも出す）。`get_page` と、`list_index` の `name` でリンクの記事を引くと、「見つからない」ではなく「リンクなので読まない」のエラーを返す。閲覧は、診断（`WIKI_DIAGNOSTICS`）に種類 `link` で出す。
   - 読まなかったページへの wikilink は、lint のリンク切れに挙げない（`links` で挙げる）。
   - 閲覧も、拒否した記事への wikilink とリンク切れを分け、診断に場所と種類を表示する。リンクのディレクトリの下をパスで指す場合も、lint と閲覧で同じ判定を使う。静的な書き出しの JSON にも `link_warnings` を返す。
+    `sources:` の出典にも同じ拒否の判定を当てる。閲覧は、拒否した記事と同じスラッグの別のページへ黙って結び付けない。
   - 大小文字を区別しない macOS のファイルシステムで、wiki の根と異なる大小文字のパスを指定しても、根の実体を認識して記事を検査する。
   - SVG の走査も共通のリンク判定を使う。`assets/` と SVG の名前の代理のリパースポイントをたどらず、SVG のハードリンクは従来どおり許す。
   - 走査の結果を通さずに記事を読んでいたところも、記事を読む口（`wiki_pages.article_path()`）を通す。`/wiki:upgrade` のスキーマの不足の検査（`SCHEMA.md` がリンクなら読まず、標準エラーで知らせる）、`/wiki:evolve` の根拠のページ、判定のレイヤーの候補のページである。CLI の統計、グラフの問い合わせ、グラフの lint も、読まなかったものを標準エラーで知らせる。
