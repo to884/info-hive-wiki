@@ -960,13 +960,24 @@ def translation_block(source: str, output: str, node_type: str) -> tuple[bool, l
         return True, [out.strip()]
     # 段落の別の日本語の文に薄められないよう、文単位ではかなを含まない漢字の文を確認する。
     # 同一文内で混ざる語の意味や言語は、この文字の条件では確定しない。
-    out_units = re.split(r"[。！？!?;；\n]+|\.(?=\s|$)", out)
+    out_units = re.split(r"[。！？!?;；:…\n]+|(?<!\d)\.|\.(?!\d)", out)
     passages = []
     for unit in out_units:
         unit_kana, unit_han = script_counts(unit)
         if unit_han and not unit_kana:
             if unit.strip() not in passages:
                 passages.append(unit.strip())
+    # 区切り記号や別のかなの語が混ざっても、長い漢字のまとまりを薄めない。
+    # 日本語の複合語も候補になるので、意味は対象ごとの確認に委ねる。
+    han_run = []
+    for character in out + " ":
+        if is_han(character):
+            han_run.append(character)
+        else:
+            text = "".join(han_run)
+            if len(han_run) >= 8 and not any(text in passage for passage in passages):
+                passages.append(text)
+            han_run = []
     runs, current = [], []
     # 文末、大小文字、原文との完全一致に依存せず、かな・漢字以外の文字体系を同じ条件で見る。
     for character in out:
