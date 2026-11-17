@@ -809,6 +809,8 @@ class Core:
         self._render_lock = threading.Lock()
         self._build_pages()
         self._build_assets()
+        self.link_warnings = [{"path": rel, "kind": kind} for entry, rel, _size, kind in snapshot.entries
+                              if entry == "link"]
         # 走査がリンクなので読まなかった記事と記事までの道（ADR-0029）。黙って消さず、診断に出す
         for kind, rel, _size, link_kind in snapshot.entries:
             if kind == "link":
@@ -945,6 +947,9 @@ class Core:
         """wikilink の行き先を解決する（設計の 3.3）。"""
         disks = wiki_pages.link_candidates(target, self.pages_by_path, self.pages_by_slug)
         if not disks:
+            refused = wiki_pages.refused_link(target, self.link_warnings)
+            if refused is not None:
+                return {"state": "refused", "target": target, "path": refused["path"], "link_kind": refused["kind"]}
             return {"state": "unresolved", "target": target}
         pid = self.resolve_disks(disks)
         if pid is None:
@@ -1018,7 +1023,11 @@ class Core:
             for r in found:
                 where = {"page": pid} if drawn else {"page": None, "source_page": pid}
                 if r["state"] != "resolved":
-                    self.diagnostics.append({"kind": r["state"], **where, "target": r["target"]})
+                    if r["state"] == "refused":
+                        self.diagnostics.append({"kind": "link", **where, "target": r["target"],
+                                                 "path": r["path"], "link_kind": r["link_kind"]})
+                    else:
+                        self.diagnostics.append({"kind": r["state"], **where, "target": r["target"]})
                 elif r.get("missing_heading"):
                     self.diagnostics.append({"kind": "missing_heading", **where, "target": r["target"]})
 
@@ -1370,7 +1379,7 @@ class Core:
                     self.page_groups[pid].update(x["id"] for x in trail)
                     if pid not in self.index_summary and it.get("after"):
                         self.index_summary[pid] = it["after"]
-                elif it["state"] in ("unresolved", "ambiguous"):
+                elif it["state"] in ("unresolved", "ambiguous", "refused"):
                     self.index_unresolved.append(([x["title"] for x in trail if x["title"]], it))
             for ch in g["children"]:
                 rec(ch, trail)
@@ -1415,6 +1424,8 @@ class Core:
             return f'<a class="{cls}" href="{html.escape(href)}">{label}</a>'
         if r["state"] == "ambiguous":
             return f'<span class="wl wl-ambiguous" title="行き先を 1 つに決められない">{label}</span>'
+        if r["state"] == "refused":
+            return f'<span class="wl wl-unresolved" title="リンクなので読まない">{label}</span>'
         return f'<span class="wl wl-unresolved" title="ページがない">{label}</span>'
 
     def _transform_inline(self, children, path: str, counter: list, file: str) -> list:
@@ -1611,7 +1622,7 @@ class Core:
         lis = []
         for d in items:
             parts = [d["kind"]]
-            for key in ("target", "reason", "output", "node_id", "predicate", "object", "source", "source_page"):
+            for key in ("target", "path", "link_kind", "reason", "output", "node_id", "predicate", "object", "source", "source_page"):
                 if d.get(key):
                     parts.append(f"{key}: {d[key]}")
             lis.append(f"<li>{html.escape(' / '.join(map(str, parts)))}</li>")
@@ -1772,10 +1783,8 @@ class Core:
             return ""
         lis = []
         for trail, it in self.index_unresolved:
-            title = "ページがない" if it["state"] == "unresolved" else "行き先を 1 つに決められない"
             where = f'<span class="fui-Caption1 state">（{html.escape(" › ".join(trail))}）</span>' if trail else ""
-            lis.append(f'<li><span class="wl wl-{it["state"]}" title="{title}">{html.escape(it["label"])}</span>'
-                       f"{where}</li>")
+            lis.append(f'<li>{self._link_html("index.html", it)}{where}</li>')
         return ('<section id="_index_unresolved"><h2 class="fui-Subtitle2">ページに決まらない Index の行</h2>'
                 f'<ul>{"".join(lis)}</ul></section>\n')
 

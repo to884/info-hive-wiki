@@ -609,6 +609,14 @@ def _article_rel(path, wiki_root, *, directory: bool = False) -> "tuple[str, str
             rel = relative(resolved, root)
             if rel is not None:
                 return root, "/".join(([rel] if rel else []) + list(parts[size:]))
+            # 大小文字を区別しない POSIX の根も、綴りではなく実体で認識する。
+            # 祖先を上から調べ、根に届いたところで止めるので、その下のリンクは解決しない。
+            try:
+                same_root = os.path.samefile(resolved, root)
+            except OSError:
+                same_root = False
+            if same_root:
+                return root, "/".join(parts[size:])
     return None
 
 
@@ -1031,6 +1039,28 @@ def resolve_link(link: str, by_path: dict, by_slug) -> "str | None":
     if kind == "path":
         return by_path.get(target)
     return target if target in by_slug else None
+
+
+def refused_link(link: str, warnings: list) -> "dict | None":
+    """読まなかった記事か、その途中の道を指す wikilink なら、その知らせを返す。
+
+    降りなかったディレクトリの下のスラッグは推測しない。パスを指定したときだけ、
+    要素の境界で照合する。lint と閲覧が、拒否をリンク切れに読み替えないために共用する。
+    """
+    lookup = link_lookup(link)
+    if lookup is None:
+        return None
+    kind, target = lookup
+    for item in warnings:
+        rel = nfc(item["path"])
+        if kind == "path" and target.startswith(rel + "/"):
+            return item
+        if rel.lower().endswith(".md") and is_page_path(rel, native=True):
+            stem = rel[:-3]
+            expected = stem if kind == "path" else PurePosixPath(stem).name
+            if target == expected:
+                return item
+    return None
 
 
 # ---------------------------------------------------------------------------

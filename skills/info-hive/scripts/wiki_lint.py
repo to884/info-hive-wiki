@@ -92,6 +92,7 @@ from wiki_pages import (  # noqa: E402
     WIKILINK_RE,
     case_only_duplicates,
     clean_link_target,
+    refused_link,
     extract_wikilinks,
     build_page_index,
     classify_source_ref,
@@ -484,20 +485,12 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
 
     # 記事と記事までの道のリンク（ADR-0029）。走査はリンクの記事を読まないので、ページの集合に入らない。
     # そのページへの wikilink は、リンク切れではなく、ここで挙げる（拒んだことを「ない」に変えない。I4）。
-    refused_by_path, refused_slugs = {}, set()
     if wiki_root is not None:
         report = link_report(Path(wiki_root))
         findings["links"] = report["links"]
         findings["links_unchecked"] = report["unchecked"]
         # どの読む側の結果にも、同じ名前の欄で知らせる（MCP の query、get_page などと同じ形）
         findings["link_warnings"] = list(report["links"])
-        for item in report["links"]:
-            rel = item["path"]
-            if rel.lower().endswith(".md") and is_page_path(rel, native=True):
-                stem = posix_rel(rel)[:-3]
-                slug = nfc(PurePosixPath(stem).name)
-                refused_by_path[stem] = slug
-                refused_slugs.add(slug)
 
     # YouTube の字幕の訂正と留保（ADR-0027）。ページは照合のモジュールが読み直す（印の行の番号をファイルの
     # 行で示すため）。動画の raw を持たない wiki では、印のあるページだけを見る。
@@ -589,7 +582,7 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
 
         # リンク切れ。リンクなので読まなかったページを指すものは、links で挙げるので、ここでは数えない
         for link in p["links"]:
-            if resolve_link(link, by_path, by_slug) is None and resolve_link(link, refused_by_path, refused_slugs) is None:
+            if resolve_link(link, by_path, by_slug) is None and refused_link(link, findings["links"]) is None:
                 findings["broken_links"].append({
                     "from": p["slug"],
                     "from_path": p["rel_path"],
