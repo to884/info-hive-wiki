@@ -227,6 +227,7 @@ gist をめぐるコミュニティの議論で、このパターンがうまく
 - `scripts/wiki_pages.py`: lint、検索、統計、グラフが共有する、ページの集合と wikilink の抜き出しと解決の規則。コードの中の `[[...]]` はリンクとして数えない。本文は同梱した `scripts/_vendor/` の markdown-it-py で読む
 - `scripts/wiki_stats.py`: wiki の規模（ページ数、行数、文字数）、種類別のページ数、リンク密度の簡単なまとめ。インデックスを分割するタイミングを決めるのに役立つ
 - `scripts/wiki_fetch.py`: Web ページを取得し、本文を Markdown にして画像とともに `raw/` に保存する。原文の HTML の SHA-256 を記録し、同じ内容の再取得を見分ける。サイトに共通の雑音（Wikipedia の部品、Medium の表示の文言など）を消し、ブラウザで保存した HTML（`--html-file`）も変換する。翻訳と画像の説明はモデルが行う
+- `scripts/wiki_fetch_browser.py`、`scripts/wiki_browser_session.cjs`: HTTP の本文が 500 文字未満、または HTTP 401/403 のときに、Playwright で DOM を取る。既定は、OS の既定ブラウザ（Windows の Chrome または Edge）へ公式拡張で接続し、普段のログイン状態で開いた許可済みの対象タブを読む。Cookie やプロファイルは書き出さない。Node.js 20 以上、npm、公式拡張が必要である。`--browser-only` は HTTP を飛ばし、`--browser-session isolated` は独立したブラウザで取得する。変換と検査は共用する
 - `scripts/wiki_youtube.py`: YouTube の動画の字幕を、PEP 723 で版を固定した yt-dlp で取り、raw を 1 回で、重ねて書かない形で書き、読み取り専用にする（`inspect`、`write`）。用意したページの字幕の訂正と留保の印と定義、confidence を raw と照らし（`verify`）、定義の行を決まった書き方で出す（`define`）
 - `scripts/wiki_captions.py`: 動画の raw の作り方と読み方、字幕の訂正と留保の印と定義の読み取り、照合、confidence の計算。`wiki_youtube.py` と lint が共有する
 - `scripts/wiki_youtube_url.py`: URL が YouTube の動画か、動画でない YouTube の URL かを決める。`wiki_youtube.py` と `wiki_fetch.py` が共有する

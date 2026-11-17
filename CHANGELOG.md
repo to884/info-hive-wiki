@@ -6,6 +6,13 @@
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-11-18
+
+### Added
+
+- `/wiki:ingest` と Codex の `$wiki:info-hive ingest` で、HTTP の本文が空白を除いて 500 文字未満、または HTTP 401/403 のときに、Playwright で DOM を取得するようにした。翻訳、画像の保存、raw の検査は従来と共用する。Windows では OS の既定の Chrome または Edge へ公式 Playwright 拡張で接続し、利用者が開いて許可した対象タブを、普段のログイン状態で読む。Cookie やプロファイルは書き出さず、本文内の読み込み済みの同一 origin の画像は PNG として保存する。Node.js 20 以上、npm、公式拡張が必要で、接続の実装は playwright-core 1.66.0-alpha-2026-11-09 に固定した。`--browser-only` は HTTP を飛ばし、`--browser-session isolated` は独立したブラウザで取得する。独立した取得では `uv` で Playwright 1.65.2 を使い、Chromium の自動導入は明示したときだけ行う。手動の HTML の経路も引き続き使える。
+- Web の raw と取得の出力に `fetch_method` を記録する。Playwright の場合は `playwright` で、`source_sha256_of: dom` と DOM の UTF-8 のバイト列のハッシュを残す。途中の再開では、ブラウザもネットでの取得も行わない。
+
 ## [0.29.0] - 2026-11-17
 
 ### Added

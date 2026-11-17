@@ -23,6 +23,7 @@ sys.path.insert(0, str(SCRIPTS))
 def load(name):
     spec = importlib.util.spec_from_file_location(name, SCRIPTS / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
