@@ -660,7 +660,8 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
                     key = "raw_ambiguous" if item.state == "ambiguous" else "raw_unknown"
                     findings[key].append({**location, "candidates": item.candidates, "reason": item.reason})
                 elif item.state == "outside" and item.candidates:
-                    findings["raw_outside"].append({**location, "candidates": item.candidates, "reason": item.reason})
+                    findings["raw_outside"].append({**location, "candidates": item.candidates, "reason": item.reason,
+                                                    "mismatches": item.mismatches})
                 if item.version_unverified and item.state == "resolved" and not item.external:
                     findings["raw_version_unverified"].append(location)
                 for path in item.parents_unchecked:
@@ -777,6 +778,8 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         "links": len(findings["links"]) if raw_wiki_root is not None else None,
         "links_wiki": sum(f.get("scope") != "raw" for f in findings["links"]) if wiki_root is not None else None,
         "links_unchecked": len(findings["links_unchecked"]) if raw_wiki_root is not None else None,
+        "links_unchecked_wiki": sum(f.get("scope") != "raw" for f in findings["links_unchecked"]) if wiki_root is not None else None,
+        "links_unchecked_raw": sum(f.get("scope") == "raw" for f in findings["links_unchecked"]) if raw_wiki_root is not None else None,
         "links_raw": sum(f.get("scope") == "raw" for f in findings["links"]) if raw_wiki_root is not None else None,
         "raw_ambiguous": len(findings["raw_ambiguous"]) if raw_wiki_root is not None else None,
         "raw_unknown": len(findings["raw_unknown"]) if raw_wiki_root is not None else None,
@@ -854,7 +857,8 @@ def render_text(findings: dict) -> str:
          lambda f: f"  - {f['path']}  raw: {f['raw']}  候補: {', '.join(f['candidates'])}"),
         ("raw_unknown", "raw: を確かめられない", lambda f: f"  - {f['path']}  raw: {f['raw']}  {f['reason']}"),
         ("raw_outside", "raw: が記事の対象外を指す（読まずに飛ばした）",
-         lambda f: f"  - {f['path']}  raw: {f['raw']}  {f['reason']}"),
+         lambda f: f"  - {f['path']}  raw: {f['raw']}  {f['reason']}" +
+                   ("  不一致: " + "、".join(x["path"] + "（" + x["reason"] + "）" for x in f["mismatches"]) if f.get("mismatches") else "")),
         ("raw_version_unverified", "raw の版を確かめていない（raw_sha256 がないか値の数・形が合わない）",
          lambda f: f"  - {f['path']}  raw: {f['raw']}"),
         ("raw_paths_unchecked", "raw の範囲か途中の道を調べていない（--raw-root で根を指定する）",

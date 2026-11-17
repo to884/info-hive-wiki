@@ -68,6 +68,16 @@ class EvidenceUnavailable(CaptionError):
     """訂正の根拠の raw を拒んだか、照合できない。欠落と区別する。"""
 
 
+class EvidenceTexts(list):
+    """読めた本文と、読まなかった原本の理由。本文を絞るときも理由を保つ。"""
+    def __init__(self, texts, problems=()):
+        super().__init__(texts)
+        self.problems = list(problems)
+
+    def without(self, text):
+        return EvidenceTexts([t for t in self if t != text], self.problems)
+
+
 # ---------------------------------------------------------------- json3 から行へ
 
 
@@ -955,9 +965,14 @@ def check_definition(d: Definition, raw: RawDoc, other_raw_texts) -> str | None:
             texts = other_raw_texts(slug)
         except EvidenceUnavailable as exc:
             return f"{d.ident} の根拠のソース `{slug}` の raw を使えない（{exc}）"
+        problems = getattr(texts, "problems", [])
         if not texts:
+            if problems:
+                return f"{d.ident} の根拠のソース `{slug}` の raw を使えない（{'、'.join(problems)}）"
             return f"{d.ident} の根拠のソース `{slug}` の raw が見つからない（同じ raw は使えない）"
         if not any(w in t for t in texts):
+            if problems:
+                return f"{d.ident} の訂正した語 `{w}` を、ソース `{slug}` の raw で確かめられない（{'、'.join(problems)}）"
             return f"{d.ident} の訂正した語 `{w}` が、ソース `{slug}` の raw にない"
     elif basis.startswith("model:"):
         pass
@@ -1211,9 +1226,7 @@ def check_pages(pages: list[PageIn], wiki_root: Path, only_raw: str | None = Non
                         problems.append(err)
                     continue
                 texts.append(text)
-        if not texts and problems:
-            raise EvidenceUnavailable("、".join(problems))
-        return texts
+        return EvidenceTexts(texts, problems)
 
     for p in pages:
         for no, code, msg in scans[p.rel].errors:
@@ -1235,8 +1248,7 @@ def check_pages(pages: list[PageIn], wiki_root: Path, only_raw: str | None = Non
                                     f"要約ページの caption_kind（{written_kind!r}）が raw の値（{doc.caption_kind!r}）と違う"))
         defs = {}
         for d in scan.definitions:
-            problem = check_definition(d, doc, lambda s: [
-                t for t in other_raw_texts(s) if t is not doc.text and t != doc.text])
+            problem = check_definition(d, doc, lambda s: other_raw_texts(s).without(doc.text))
             if problem:
                 findings.append(Finding(p.rel, d.page_line, "bad_definition", problem))
             defs[d.ident] = d

@@ -201,12 +201,12 @@ def resolve_raw(meta, page_path, wiki_root, wiki_root_given=None, allowed_roots=
         return []
     refs = ref_values(meta.get("raw"))
     sessions, urls = ref_values(meta.get("session_id")), ref_values(meta.get("url"))
-    if len(sessions) > 1 or len(urls) > 1:
-        return [RawResolution(ref, "unknown", reason="session_id と url は値を1つだけ指定する") for ref in refs]
-    session = sessions[0] if sessions else None
-    url = urls[0] if urls else None
     hashes = ref_values(meta.get("raw_sha256"))
     aligned = len(refs) == len(hashes) and all(_SHA256.fullmatch(h) for h in hashes)
+    if not aligned and (len(sessions) > 1 or len(urls) > 1):
+        return [RawResolution(ref, "unknown", reason="版を照合できないとき、session_id と url は値を1つだけ指定する") for ref in refs]
+    session = sessions[0] if len(sessions) == 1 else None
+    url = urls[0] if len(urls) == 1 else None
     try:
         given = absolute_user_path(Path(wiki_root_given if wiki_root_given is not None else wiki_root).expanduser())
         root = absolute_user_path(Path(wiki_root).expanduser())
@@ -247,7 +247,7 @@ def resolve_raw(meta, page_path, wiki_root, wiki_root_given=None, allowed_roots=
                 bases = []
                 for w in wiki_roots:
                     bases.append(w.parent)
-                    if not session:
+                    if not sessions:
                         bases.extend((w, w / rel_page.parent if rel_page is not None else page.parent))
                 candidates = list(dict.fromkeys(Path(os.path.abspath(b / ref)) for b in bases))
         except (OSError, ValueError, RuntimeError) as exc:

@@ -23,3 +23,5 @@ argument-description: "`--suggest-pages` を付けると、独立したページ
 `overview_stale` と `overview_problems` も構造の所見として示す。古い概要は `/wiki:overview <ページ> --refresh`、元ページのある壊れた概要は作り直しか `--remove <ページ>` を案内する。元ページのない概要は、`orphan_id` を確認し、`references/lint-workflow.md` の手順で `remove --orphan` を使う。読み取りの問題と `null`（検査していない）を問題なしと扱わず、黙って修正しない。
 
 ユーザーが任意の判定レイヤーを有効にしている場合は、`wiki_graph_lint.py` に `--decide` を付ける。`wiki_decide.py contradictions` も提案する。詳しくは `skills/info-hive/references/decision-models.md` を参照。
+
+raw の診断の読み方: `mismatches` はファイルがあるが版・身元が違う候補と理由、`scope_unverified` は raw の根を省いて外の原本と扱った分類の未確認を表す。`links_wiki` / `links_raw` と `links_unchecked_wiki` / `links_unchecked_raw` は側ごとの件数で、未検査の側は null である。`links` と `links_unchecked` は報告した全件数。指定した根の外にある、記録のない過去の rag の原本は外の原本として扱う。過去の根の記録の作成と読み込みは後続段階であり、現在の根の指定だけで過去の根まで検査したことにはならない。
