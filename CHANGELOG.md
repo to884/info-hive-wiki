@@ -6,7 +6,7 @@
 
 ## [Unreleased]
 
-## [0.33.0] - 2026-11-18
+## [0.34.0] - 2026-11-18
 
 ### Added
 
@@ -880,6 +880,6 @@ Web ページの取得（`wiki_fetch.py`）が、Medium の記事の図とコー
 [0.2.0]: https://github.com/to884/info-hive-wiki/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/to884/info-hive-wiki/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.1.0
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.33.0...HEAD
-[0.33.0]: https://github.com/to884/info-hive-wiki/compare/v0.32.0...v0.33.0
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.34.0...HEAD
+[0.34.0]: https://github.com/to884/info-hive-wiki/compare/v0.32.0...v0.34.0
 [0.32.0]: https://github.com/to884/info-hive-wiki/compare/v0.31.1...v0.32.0
