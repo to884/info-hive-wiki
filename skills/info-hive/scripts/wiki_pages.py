@@ -54,10 +54,19 @@ WIKILINK_FULL_RE = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
 # ページの集合
 # ---------------------------------------------------------------------------
 
+def page_text(data: bytes) -> str:
+    """先頭の BOM 1個と改行の違いを除いたページ全文。"""
+    return io.TextIOWrapper(io.BytesIO(data), encoding="utf-8-sig", newline=None).read()
+
+
+def normalized_text_sha256(text: str) -> str:
+    """既に正規化した文字列を、そのままハッシュにする。BOM を再び除かない。"""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def page_text_sha256(data: bytes) -> str:
     """BOM と改行の違いを除いたページ全文の SHA-256。読めなければ UnicodeDecodeError。"""
-    text = io.TextIOWrapper(io.BytesIO(data), encoding="utf-8-sig", newline=None).read()
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return normalized_text_sha256(page_text(data))
 
 
 def _relative_text(rel, native: bool) -> str:

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""ページの概要を検査し、SVG を埋め込んだサイドカーに保存する（ADR-0031）。
+"""ページの概要を検査し、SVG を埋め込んだサイドカーに保存する（ADR-0033）。
 
     python wiki_overview.py begin|prepare|status|remove <wiki>
     python wiki_overview.py check|write <wiki> --work=<16桁>
     python wiki_overview.py remove <wiki> --orphan=<16桁>
 
 ページ名は begin が返す request_path に JSON で書く。利用者の文字列をシェルに渡さない。
-状態の判定と一覧は、CLI、lint、将来の browse で共有する。書き込みの同時実行は保証しない。
+状態の判定と一覧は、CLI、lint、browse で共有する。書き込みの同時実行は保証しない。
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ import shutil
 import stat
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path, PurePosixPath
 from xml.parsers import expat
@@ -79,9 +79,41 @@ class State:
     detail: str | None = None
 
 
+@dataclass(frozen=True)
+class SidecarEntry:
+    """中身を読まずに得た概要の名前と属性。"""
+
+    key: str | None
+    disk_rel: str
+    size: int | None
+    mtime_ns: int | None
+    unsafe: bool = False
+
+
+@dataclass
+class SidecarWalk:
+    """概要の候補、規定外の項目、一覧を最後まで確かめられたか。"""
+
+    files: list = field(default_factory=list)
+    unexpected: list = field(default_factory=list)
+    directory_state: str = "ok"
+
+
+@dataclass(frozen=True)
+class OverviewView:
+    """同じバイト列の検査を通った概要だけを、表示側へ返す。"""
+
+    state: str
+    detail: str | None = None
+    body: str = ""
+    figures: dict = field(default_factory=dict)
+    generated: str | None = None
+    generator: str | None = None
+
+
 def page_id(rel: str) -> str:
     """ディスク上の相対パスから、末尾の .md を除いた NFC の識別子を作る。"""
-    return wiki_text.nfc(rel.replace("\\", "/")[:-3])
+    return wiki_text.nfc(rel[:-3])
 
 
 def page_key(identifier: str) -> str:
@@ -246,6 +278,7 @@ class PageIndex:
     records: list
     by_key: dict
     complete: bool
+    links: list = field(default_factory=list)
 
 
 def _index(root: Path) -> PageIndex:
@@ -258,7 +291,7 @@ def _index(root: Path) -> PageIndex:
     by_key: dict = {}
     for record in records:
         by_key.setdefault(page_key(record["id"]), []).append(record)
-    return PageIndex(records, by_key, not walked.unlistable and not walked.unknown)
+    return PageIndex(records, by_key, not walked.unlistable and not walked.unknown, list(walked.links))
 
 
 def _complete(index: PageIndex) -> None:
@@ -287,7 +320,11 @@ def _resolve(req: dict, index: PageIndex) -> dict:
     return found[0]
 
 
-def _sidecar(root: Path, key: str) -> Sidecar:
+def read_sidecar(root: Path, key: str) -> Sidecar:
+    """道を検査してから、上限を読む口で強制する。何も書かない。"""
+    root = Path(root)
+    if not HEX_ID.fullmatch(key):
+        return Sidecar("unreadable", reason="invalid_name")
     try:
         parent = _dirs(root, ASSETS)
         if parent is None:
@@ -296,18 +333,45 @@ def _sidecar(root: Path, key: str) -> Sidecar:
         if _file(path, missing=True) is None:
             return Sidecar("absent")
         return Sidecar("ok", _read(path, MAX_SIDECAR))
-    except (OSError, OverviewError):
+    except OverviewError as exc:
+        return Sidecar("unreadable", reason=exc.payload["code"])
+    except OSError:
         return Sidecar("unreadable", reason="os_error")
 
 
-def _page_state(root: Path, index: PageIndex, key: str) -> PageState:
+_sidecar = read_sidecar  # 既存の呼び出し元も、同じ読み取りを使う。
+
+
+def missing_page_state(key: str, sidecar: Sidecar, links: list, *, complete: bool = True) -> PageState:
+    """見えないページを不在にする前に、読まなかった道と照合する。I/O は行わない。"""
+    if not complete:
+        return PageState("unknown")
+    if links:
+        try:
+            identifier = _metadata(sidecar.data)[0].get("page")
+            if not isinstance(identifier, str) or page_key(identifier) != key:
+                return PageState("unknown")
+        except (OverviewError, UnicodeError):
+            return PageState("unknown")
+        identifier = wiki_text.nfc(identifier)
+        for rel, _kind in links:
+            rel = wiki_text.nfc(rel)
+            if identifier.startswith(rel + "/") or (rel.lower().endswith(".md") and identifier == rel[:-3]):
+                return PageState("unreadable")
+    return PageState("absent")
+
+
+def _page_state(root: Path, index: PageIndex, key: str, sidecar: Sidecar | None = None) -> PageState:
     found = index.by_key.get(key, [])
     if not found:
-        return PageState("absent" if index.complete else "unknown")
+        return missing_page_state(key, sidecar or Sidecar("absent"), index.links, complete=index.complete)
     if len(found) != 1:
         return PageState("unknown")
     try:
-        return PageState("ok", wiki_pages.page_text_sha256((root / found[0]["disk_rel"]).read_bytes()))
+        opened = wiki_pages.article_path(root, found[0]["disk_rel"], native=True)
+        if opened.state != "ok":
+            return PageState("unreadable")
+        return PageState("ok", wiki_pages.page_text_sha256(opened.path.read_bytes()))
     except (OSError, UnicodeDecodeError):
         return PageState("unreadable")
 
@@ -381,15 +445,17 @@ def _figure_problems(body: str, figures: dict[str, bytes]) -> tuple[list, list[s
 
 
 def _metadata(data: bytes) -> tuple[dict, str]:
-    from wiki_lint import parse_frontmatter_raw
     text = _text(data)
-    meta, frontmatter, body, malformed = parse_frontmatter_raw(text)
-    if malformed or frontmatter is None:
+    match = re.match(r"\A---[ \t]*\n(.*?)\n---[ \t]*\n", text, re.S)
+    if match is None:
         raise OverviewError("unreadable", "frontmatter を読めない。")
-    return meta, body
+    return wiki_text.parse_frontmatter_text(match[1]), text[match.end():]
 
 
 def _split_figures(body: str) -> tuple[str, dict[str, bytes]]:
+    if not body.startswith("\n"):
+        raise OverviewError("figures", "ヘッダーと本文の区切りがない。")
+    body = body[1:]  # 書き手がヘッダーの後ろに加えた1 LFだけを外す。
     tokens = wiki_pages.new_parser().parse(body)
     start = None
     figures: dict[str, bytes] = {}
@@ -403,7 +469,9 @@ def _split_figures(body: str) -> tuple[str, dict[str, bytes]]:
             figures[info[1]] = token.content.encode("utf-8")
         elif start is not None:
             raise OverviewError("figures", "図のフェンスは本文のあとにまとめて置く。")
-    prose = body if start is None else "\n".join(body.split("\n")[:start])
+    prose = body if start is None else "\n".join(body.split("\n")[:start]) + ("\n" if start else "")
+    if prose.endswith("\n\n"):
+        prose = prose[:-2]  # 書き手の区切りだけを外し、下書きの末尾の空白は保つ。
     return prose, figures
 
 
@@ -448,7 +516,7 @@ def classify(name: str, sidecar: Sidecar, page: PageState) -> State:
     except OverviewError:
         return State("broken", "figures")
     problems, refs = _figure_problems(body, figures)
-    if len(sidecar.data) > MAX_SIDECAR or problems or names != refs or list(figures) != refs:
+    if len(sidecar.data) > MAX_SIDECAR or _body_problems(body) or problems or names != refs or list(figures) != refs:
         return State("broken", "figures")
     if page.kind == "unknown":
         return State("page_unknown")
@@ -461,9 +529,25 @@ def classify(name: str, sidecar: Sidecar, page: PageState) -> State:
     return State("fresh")
 
 
+def view(name: str, sidecar: Sidecar, page: PageState) -> OverviewView:
+    """ディスクを読み直さず、状態と表示用の中身を1つの入力から作る。"""
+    state = classify(name, sidecar, page)
+    if state.state not in ("fresh", "stale"):
+        return OverviewView(state.state, state.detail)
+    meta, body, figures = _parse_sidecar(sidecar.data)
+    return OverviewView(state.state, state.detail, body, figures,
+                        meta.get("generated") if isinstance(meta.get("generated"), str) else None,
+                        meta.get("generator") if isinstance(meta.get("generator"), str) else None)
+
+
 def _source(root: Path, rel: str) -> bytes:
     try:
-        data = (root / rel).read_bytes()
+        opened = wiki_pages.article_path(root, rel, native=True)
+        if opened.state == "absent":
+            raise FileNotFoundError(rel)
+        if opened.state != "ok":
+            raise OverviewError("page_unreadable", "元のページがリンクか、読み取りを確認できない。保存せず、下書きを残す。")
+        data = opened.path.read_bytes()
         wiki_pages.page_text_sha256(data)
         return data
     except (FileNotFoundError, NotADirectoryError):
@@ -533,6 +617,26 @@ def _copy_sha256(path: Path) -> str:
     return wiki_pages.page_text_sha256(path.read_bytes())
 
 
+def _body_problems(body: str) -> list:
+    """下書きと保存済みの概要で共用する、正規化済み本文の検査。"""
+    problems = []
+    if len(body.encode("utf-8")) > MAX_BODY:
+        problems.append(_problem("too_large", "overview.md", "本文は 64 KiB 以下にする。"))
+    if not body.strip():
+        problems.append(_problem("empty", "overview.md", "本文が空白だけになっている。"))
+    if body.split("\n", 1)[0] == "---":
+        problems.append(_problem("frontmatter", "overview.md", "下書きには frontmatter を書かない。"))
+    tokens, _refs, _problems = _tokens_and_refs(body)
+    for token in tokens:
+        if token.type == "heading_open" and token.tag in ("h1", "h2"):
+            problems.append(_problem("heading_level", "overview.md", "見出しは ### 以下にする。", token.map[0] + 1))
+        if token.type == "fence" and token.info.split()[:1] == ["svg-figure"]:
+            problems.append(_problem("figure_fence", "overview.md", "図のフェンスはスクリプトが組み立てる。"))
+    if wiki_pages.extract_wikilinks(body):
+        problems.append(_problem("wikilink", "overview.md", "概要には wikilink を書かない。"))
+    return problems
+
+
 def _draft(root: Path, work_id: str) -> tuple[str, dict, list]:
     draft = _dirs(root, (*CACHE, "work", work_id, "draft"))
     problems = []
@@ -564,18 +668,9 @@ def _draft(root: Path, work_id: str) -> tuple[str, dict, list]:
             problems.append(_problem("extra_file", name, "本文と、規定の名前の SVG だけを置く。"))
     if "overview.md" not in names:
         problems.append(_problem("draft_missing", "overview.md", "下書きの本文がない。"))
-    if not body.strip():
-        problems.append(_problem("empty", "overview.md", "本文が空白だけになっている。"))
-    if body.split("\n", 1)[0] == "---":
-        problems.append(_problem("frontmatter", "overview.md", "下書きには frontmatter を書かない。"))
-    tokens, _refs, _problems = _tokens_and_refs(body)
-    for token in tokens:
-        if token.type == "heading_open" and token.tag in ("h1", "h2"):
-            problems.append(_problem("heading_level", "overview.md", "見出しは ### 以下にする。", token.map[0] + 1))
-        if token.type == "fence" and token.info.split()[:1] == ["svg-figure"]:
-            problems.append(_problem("figure_fence", "overview.md", "図のフェンスはスクリプトが組み立てる。"))
-    if wiki_pages.extract_wikilinks(body):
-        problems.append(_problem("wikilink", "overview.md", "概要には wikilink を書かない。"))
+    for problem in _body_problems(body):
+        if problem not in problems:
+            problems.append(problem)
     figure_problems, _refs = _figure_problems(body, figures)
     problems.extend(figure_problems)
     return body, figures, problems
@@ -668,6 +763,10 @@ def remove(root: Path, orphan: str | None = None) -> dict:
         _complete(index)
         if index.by_key.get(orphan):
             raise OverviewError("not_orphan", "元のページがある概要は --orphan で消さない。")
+        if index.links:
+            sidecar = read_sidecar(root, orphan)
+            if sidecar.kind != "absent" and missing_page_state(orphan, sidecar, index.links).kind != "absent":
+                raise OverviewError("not_orphan", "元のページがないと確かめられない概要は --orphan で消さない。")
         key = orphan
     else:
         req = _request(root, "remove")
@@ -682,46 +781,66 @@ def remove(root: Path, orphan: str | None = None) -> dict:
     return {"status": "removed", "sidecar": rel}
 
 
-def _scan_sidecars(root: Path) -> tuple[list, list | None]:
-    """専用の名前空間の直下だけを調べる。通常のページ走査には混ぜない。"""
+def walk_sidecars(root: Path) -> SidecarWalk:
+    """専用の名前空間の名前と属性だけを調べる。中身を読まない。"""
+    root = Path(root)
     try:
         parent = _dirs(root, ASSETS)
     except OverviewError:
-        return [], [{"path": "assets/overview", "code": "unknown_entry", "message": "概要の置き場所が安全なディレクトリではない。"}]
+        return SidecarWalk(directory_state="unsafe")
     except OSError:
-        return [], None
+        return SidecarWalk(directory_state="unreadable")
     if parent is None:
-        return [], []
-    found = []
-    problems = []
-    state, iterator = wiki_pages.read_os(os.scandir, parent)
-    if state != "ok":
-        return [], None
+        return SidecarWalk(directory_state="absent")
+    found = SidecarWalk()
+    iterator = None
     try:
+        state, iterator = wiki_pages.read_os(os.scandir, parent)
+        if state != "ok":
+            return SidecarWalk(directory_state="unreadable")
         while True:
             try:
                 state, entry = wiki_pages.read_os(next, iterator)
             except StopIteration:
                 break
             if state != "ok":
-                return [], None
+                return SidecarWalk(directory_state="unreadable")
             state, st = wiki_pages.read_os(os.lstat, entry.path)
             rel = f"assets/overview/{entry.name}"
             match = SIDECAR.fullmatch(entry.name)
             if state == "absent":
                 continue
-            if state != "ok":
-                if match:
-                    found.append((match.group(1), Sidecar("unreadable", reason="os_error")))
-                else:
-                    problems.append({"path": rel, "code": "unknown_entry", "message": "項目の種類を確かめられない。"})
-            elif match and not _link(st) and stat.S_ISREG(st.st_mode):
-                found.append((match.group(1), _sidecar(root, match.group(1))))
+            item = SidecarEntry(match.group(1) if match else None, rel,
+                                st.st_size if state == "ok" else None,
+                                st.st_mtime_ns if state == "ok" else None,
+                                state == "ok" and st.st_nlink != 1)
+            if match and (state != "ok" or (not _link(st) and stat.S_ISREG(st.st_mode))):
+                found.files.append(item)
             else:
-                problems.append({"path": rel, "code": "unknown_entry", "message": "概要の置き場所に、規定外の項目がある。"})
+                found.unexpected.append(item)
+    except OSError:
+        return SidecarWalk(directory_state="unreadable")
     finally:
-        iterator.close()
-    return sorted(found, key=lambda item: item[0]), problems
+        if iterator is not None:
+            iterator.close()
+    found.files.sort(key=lambda item: item.disk_rel)
+    found.unexpected.sort(key=lambda item: item.disk_rel)
+    return found
+
+
+def _scan_sidecars(root: Path) -> tuple[list, list | None]:
+    walk = walk_sidecars(root)
+    if walk.directory_state == "unreadable":
+        return [], None
+    if walk.directory_state == "unsafe":
+        return [], [{"path": "assets/overview", "code": "unknown_entry", "message": "概要の置き場所が安全なディレクトリではない。"}]
+    found = [(item.key, Sidecar("unreadable", reason="unsafe_path") if item.unsafe else
+              read_sidecar(root, item.key) if item.size is not None else Sidecar("unreadable", reason="os_error"))
+             for item in walk.files]
+    problems = [{"path": item.disk_rel, "code": "unknown_entry",
+                 "message": "項目の種類を確かめられない。" if item.size is None else "概要の置き場所に、規定外の項目がある。"}
+                for item in walk.unexpected]
+    return found, problems
 
 
 def inspect_wiki(root: Path) -> dict:
@@ -734,7 +853,7 @@ def inspect_wiki(root: Path) -> dict:
     overviews = []
     stale = []
     for key, sidecar in found:
-        page = _page_state(root, index, key)
+        page = _page_state(root, index, key, sidecar)
         state = classify(key, sidecar, page)
         meta = {}
         if sidecar.kind == "ok":
@@ -751,7 +870,7 @@ def inspect_wiki(root: Path) -> dict:
             stale.append({"page": identifier, "sidecar": rel})
         elif state.state not in ("fresh", "none") and problems is not None:
             finding = {"path": rel, "code": state.state, "message": {
-                "broken": "概要を読めない。元のページがあれば作り直すか削除する。",
+                "broken": "概要を読めない。元のページがあれば作り直すか削除する。拒否された場合は /wiki:help overview の復旧手順を確認する。",
                 "orphan": "元のページがない。remove --orphan で削除できる。",
                 "page_unknown": "走査が不完全なので、元のページの有無を決められない。",
                 "page_unreadable": "元のページを読めない。",
@@ -763,7 +882,7 @@ def inspect_wiki(root: Path) -> dict:
             if orphan_id is not None:
                 finding.update(orphan_id=orphan_id, page_absent=True)
                 if state.state == "broken":
-                    finding["message"] = "概要は壊れており、元のページもない。remove --orphan で削除できる。"
+                    finding["message"] = "概要は壊れており、元のページもない。安全な通常ファイルなら remove --orphan で削除できる。拒否された場合は /wiki:help overview の復旧手順を確認する。"
                 if state.state == "orphan":
                     candidates = [p["id"] for p in index.records
                                   if _page_state(root, index, page_key(p["id"])).sha256 == meta.get("page_sha256")]

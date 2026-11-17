@@ -143,6 +143,8 @@ def _machine_needles(root: PurePath, snap) -> "tuple[list, int]":
         return needles, len(snap.entries)
     unknown = 0
     for _kind, rel, _size, _mtime in snap.entries:
+        if _kind in ("overview_entry", "overview_dir"):
+            continue  # 中身を読まず、出力にも写さない項目の実体は解決しない。
         try:
             real = fs.resolve(os.path.join(str(root), *rel.split("/")))
         except (fs.Unknown, fs.Absent):

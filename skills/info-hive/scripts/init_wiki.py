@@ -97,7 +97,7 @@ SCHEMA_SECTION_MARKERS = [
     },
     {
         "marker": "## Page overviews",
-        "version": "開発中",
+        "version": "0.32.0",
         "anchor": "## Page overviews",
         "label": "ページの概要（検索とグラフに含めないサイドカー）",
     },
