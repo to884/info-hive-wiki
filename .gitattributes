@@ -17,3 +17,6 @@
 
 # 知識ページの図（wiki/assets/*.svg）は文字のファイルとして差分を取る。* の行と同じく LF にそろえる。
 *.svg text eol=lf
+
+# 閲覧（browse）に同梱した Mermaid の束。npm の tarball のバイト列のまま持つ（README の SHA-256 と照らす）
+skills/info-hive/scripts/browse_assets/mermaid.tiny.js -text -diff
