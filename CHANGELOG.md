@@ -6,13 +6,20 @@
 
 ## [Unreleased]
 
-## [0.29.1] - 2026-11-18
+## [0.30.1] - 2026-11-18
 
 ### Fixed
 
 - Web の取り込みで、翻訳必須の raw を `--language-override keep` で翻訳不要として完了にできる問題を修正した。未解決の外国語は比較元を残して停止し、`--accept-warnings` だけでは完了できない。
 - 名前・表示文・文献名などを保持する確認を、対象の ID・text の全文・種類・具体的な理由と、現在の原文・raw の SHA-256 に結び付けた `translation-review.json` に記録するようにした。`--translation-review` で照合し、有効な記録も親が警告として確認する。文末や大小文字、原文との完全一致だけで未翻訳と保持すべき文字列を分類しない。
 - JSON に `translation` と `completed` を追加し、検査の成功と raw の段の完了を区別した。未解決の対象がなく、必要な警告を確認し、終了処理が成功した場合だけ完了にする。Claude Code と Codex の手順とログの順序をそろえた。検査は確認記録の形式と本文への結び付きを調べるもので、訳の意味や完全性は保証しない。
+
+## [0.30.0] - 2026-11-18
+
+### Added
+
+- `/wiki:ingest` と Codex の `$wiki:info-hive ingest` で、HTTP の本文が空白を除いて 500 文字未満、または HTTP 401/403 のときに、Playwright で DOM を取得するようにした。翻訳、画像の保存、raw の検査は従来と共用する。Windows では OS の既定の Chrome または Edge へ公式 Playwright 拡張で接続し、利用者が開いて許可した対象タブを、普段のログイン状態で読む。Cookie やプロファイルは書き出さず、本文内の読み込み済みの同一 origin の画像は PNG として保存する。Node.js 20 以上、npm、公式拡張が必要で、接続の実装は playwright-core 1.66.0-alpha-2026-11-09 に固定した。`--browser-only` は HTTP を飛ばし、`--browser-session isolated` は独立したブラウザで取得する。独立した取得では `uv` で Playwright 1.65.2 を使い、Chromium の自動導入は明示したときだけ行う。手動の HTML の経路も引き続き使える。
+- Web の raw と取得の出力に `fetch_method` を記録する。Playwright の場合は `playwright` で、`source_sha256_of: dom` と DOM の UTF-8 のバイト列のハッシュを残す。途中の再開では、ブラウザもネットでの取得も行わない。
 
 ## [0.29.0] - 2026-11-17
 

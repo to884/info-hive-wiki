@@ -197,6 +197,7 @@ Web ページから取り込んだソースは、`raw/` に置いた訳文から
 | `fetched_at` | 取得した日時。タイムゾーンつきの ISO 8601 を文字列として引用符で囲む |
 | `source_sha256` | 原文の SHA-256 |
 | `source_sha256_of` | ハッシュを何に対して取ったか。スクリプトが取った HTML なら `"html"`、ブラウザで取った本文なら `"dom"` |
+| `fetch_method` | `"http"`、Playwright で自動取得した `"playwright"`、保存済み HTML の `"html_file"`。古い raw にはない |
 | `source_lang` | 原文の言語（`<html lang>`）。なければ `""` |
 | `translated_by` | 訳したモデルの表示名。訳していなければ `""` |
 | `fetched_by` | 取得に使ったスクリプトと版 |

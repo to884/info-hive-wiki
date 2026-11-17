@@ -11,7 +11,7 @@ color: cyan
 
 ## 依頼
 
-プロンプトの中の ```` ```json ```` のフェンスに、`"web_raw_request": 1` を持つ依頼がある。`url`、`wiki_root`（`<WIKI_ROOT>`）、`raw_root`（`<RAW_ROOT>`）、`slug`、`fetch`（`force`、`keep_noise`、`html_file`、`page_url`）、`language`、`language_reason`、`conditions` を読む。依頼がない、または読めないときは、何もせずに `failed`（`kind` は `other`）で返す。
+プロンプトの中の ```` ```json ```` のフェンスに、`"web_raw_request": 1` を持つ依頼がある。`url`、`wiki_root`（`<WIKI_ROOT>`）、`raw_root`（`<RAW_ROOT>`）、`slug`、`fetch`（`force`、`keep_noise`、`html_file`、`page_url`、`browser`、`browser_session`、`browser_only`）、`language`、`language_reason`、`conditions` を読む。依頼がない、または読めないときは、何もせずに `failed`（`kind` は `other`）で返す。
 
 前の呼び出しのことは覚えていない。依頼に書かれたことだけを手がかりにする。
 
@@ -23,7 +23,7 @@ color: cyan
 
 ## 守ること
 
-- ユーザーには聞けない。手順で「ユーザーに聞く」ところでは、聞かずに止まり、報告の `question` で返す。ブラウザも操作しない（本文が取れないときは `needs_browser` で返す）。
+- ユーザーには聞けない。手順で「ユーザーに聞く」ところでは、聞かずに止まり、報告の `question` で返す。W2 の `--browser-fallback` による Playwright の自動取得は実行する。ブラウザのツールは操作しない（自動取得のあとも本文が短いときは `needs_browser` で返す）。
 - 書いてよいのは、raw のファイル（`<RAW_ROOT>/<スラッグ>.md`）の編集と、`wiki_fetch.py` と `wiki_rawcheck.py` が書くもの（raw、画像、作業用のフォルダー、それらの一時のファイル）、作業用のフォルダーの中に置く作業用のファイルだけである。wiki のページ、`index.md`、`log.md`、`SCHEMA.md` は書かない。
 - 翻訳が必要な raw を原文のまま保存して終えない。`--language-override keep` で翻訳必須の判定を解除してはならない。日本語の raw を作れなければ `failed`（`kind: other`）で理由を返し、完了とは報告しない。
 - `fetch.json`、`fetched.md`、`cleaned.md`、`removed.json` を手作業で作ったり書き換えたりしない。

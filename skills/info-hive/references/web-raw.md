@@ -54,7 +54,7 @@ W8 に `translation_review_required` が出たら、`source`、`raw`、`line` �
      "wiki_root": "<WIKI_ROOT の絶対パス>",
      "raw_root": "<RAW_ROOT の絶対パス>",
      "slug": null,
-     "fetch": {"force": false, "keep_noise": false, "html_file": null, "page_url": null},
+     "fetch": {"force": false, "keep_noise": false, "html_file": null, "page_url": null, "browser": "system", "browser_session": "existing", "browser_only": false},
      "language": null,
      "language_reason": null,
      "conditions": []
@@ -62,6 +62,8 @@ W8 に `translation_review_required` が出たら、`source`、`raw`、`line` �
    ```
 
    `slug` は、決まっていれば書く（いくつもの URL を同時に取り込むときは、ぶつからないように先に決める）。`null` なら、エージェントが W1 で決める。`language` は、ユーザーが翻訳を指定したときの `"translate"`、または翻訳不要と判定された入力をそのまま保つ `"keep"` で、理由を `language_reason` に書く。翻訳が必要な入力を `keep` で完了にはできない。
+
+   `fetch.browser_only` は 1 回の取得への指示である。手順 4 で呼び直しの依頼を作るときは `false` に戻し、その呼び直しで取り直すと決めたときだけ `true` にする。`browser` と `browser_session` は利用者の指定として保つ。
 
 3. Agent ツールで `wiki:web-raw` を呼ぶ。`model` の引数は渡さない（渡すと、エージェントの定義の `model: sonnet` より優先される）。プロンプトには、「この依頼の raw を作る」という 1 行と、依頼の JSON を ```` ```json ```` のフェンスで書く。同時に呼ぶのは 3 つまでにする。
 4. エージェントの応答の中の、`"web_raw": 1` を持つ最後の ```` ```json ```` のフェンスを、報告として読む（下の「報告の形」）。フェンスがない、`status` が決まった値でない、`status` に要る欄がない、渡した依頼と `url`・`wiki_root`・`raw_root` が違う、のどれかなら、エージェントの応答をユーザーに見せて止まる（推し量って続けない）。エージェントが決めたことを、依頼に写す（エージェントは前の呼び出しを覚えていないので、呼び直すときに渡すため）。報告の `slug` を依頼の `slug` にし、報告の `language_override` があれば、その `value` と `reason` を依頼の `language` と `language_reason` にする。呼び直すときは、`fetch.force` を `false`、`fetch.html_file` と `fetch.page_url` を `null` に戻してから、下の表や手順がその呼び直しで指示したときだけ設定する。これらは 1 回の取得への指示で、残すと、続けるだけの呼び直しでも取り直し、途中の削除や訳を消す（`--force` も `--html-file` もなければ、`wiki_fetch.py` は途中の写しから続け、raw を上書きしない）。
@@ -76,6 +78,8 @@ W8 に `translation_review_required` が出たら、`source`、`raw`、`line` �
      | `already_ingested` | 同じ内容の raw があるが、作業用の写しがない（取り込み済みか、途中で写しを失った） | 取り込み直すなら `fetch.force` を `true` にする |
      | `old_work_dir` | 0.14.1 までの版で始めた取り込みの途中の作業用の写しがあり、この版では続けられない | 取り直すなら `fetch.force` を `true` にする（写しと raw を作り直し、途中の削除や訳は消える） |
      | `needs_browser` | 本文が空か短すぎる（JavaScript で描くページ、ログインが要るページ） | ユーザーがふだん使っているブラウザで本文を表示し、ページの HTML を UTF-8 のファイルに保存する。`fetch.html_file` にそのファイルの絶対パス、`fetch.page_url` に本文を表示したときのアドレス欄の URL を入れ、`fetch.force` を `true` にする（この取り込みで書いた、本文の足りない raw を置き換える）。`question.message` に、本文がもうブラウザで保存した HTML から取ってある（`source_sha256_of` が `dom`）と書いてあれば、取り直すかをユーザーに先に聞く（`fetch.force` で取り直すと、途中の作業は消える）。取り直さずに今の本文で続けるなら（ページの本文がもともと短い、など）、`fetch` は 4 のとおりに戻したまま（取り直さない）、`conditions` に「本文が短いまま続ける（fetched_sha256: <`question.fetched_sha256` の値>）」を足す。承認は、この値の本文にだけ効く（エージェントが取り直して本文が変われば、また問いが返る）。ログインが要るページは、wiki に入れてよいかをユーザーに先に確かめる |
+
+   既存タブから取り直す場合は、利用者が本文を読み込み終えた対象タブを選び、`fetch.html_file` と `fetch.page_url` は `null`、`fetch.browser_session` は `existing`、`fetch.browser_only` と `fetch.force` は `true` にして、3 で呼び直す。これは前の raw と作業用の写しを作り直すので、取り直すという利用者の指定があるときだけ行う。
 
    - `failed`: `error.message` をそのまま伝えて止まる。`error.kind` が `youtube` なら、Web ページとしては取らず、`commands/ingest.md` の「YouTube の動画の取り込み」（V1〜V10）で取り込み直す。
 6. `done` か `warnings` なら、W9 に進む前に、raw の `translated_by` と補足の表示名を見る。どちらかが空でなく、`Sonnet` が入っていなければ（前の取り込みの途中で、別のモデルが訳した raw を続けて検査した、など）、ユーザーに伝え、作り直すかを聞く。作り直すなら、`fetch.force` を `true` にして 3 から行う。訳さないページの空の `translated_by` と、画像がないときの補足のなさは、そのままでよい。
@@ -145,7 +149,12 @@ W8 に `translation_review_required` が出たら、`source`、`raw`、`line` �
 **取り直したら、W2 の出力の扱いと W3 に戻る。** どの段で `wiki_fetch.py` を実行したときも（W1 でスラッグを変えたとき、W3 の `--keep-noise --force`、W5 で消しすぎたときの `--force` などの取り直しを含む）、その出力を W2 の終了コードごとの扱いで読む。ページを取り直して写しを作り直したとき（出力が `"unchanged": false`）は、W3 で本文を取れたかを確かめてから、W4 に進む。途中の写しから続けるとき（`"work_dir": true`）は、W2 に書いた段（`work_stage`）ごとの続け方に従う（写しは前の取得のままなので、取り直しではない）。取り直すと本文と `fetched_sha256` が変わるので、前の取得について確かめたこと（W3 の判断、W5 の確かめ、「本文が短いまま続ける」の承認が効いたこと）は、新しい本文には使わない。
 
 - **W1.** スラッグを決める。依頼に `slug` があれば、それを使う。なければ、ページの題名から作る（ソースの要約ページのスラッグとそろえる）。題名が分からなければ URL から仮に決め、取得したあとに題名を見て直してよい（まだ何も書いていなければ `--slug` を変えて取り直す）。
-- **W2.** `python "<skill-root>/scripts/wiki_fetch.py" "<URL>" --wiki "<WIKI_ROOT>" --raw-root "<RAW_ROOT>" --slug "<スラッグ>" --json` を実行する。依頼の `fetch` に従い、`--force`、`--keep-noise`、`--html-file <ファイル> --page-url <URL>` を付ける。raw を書く前に、検査の基準になる作業用の写しを `<WIKI_ROOT>/.wiki-cache/ingest/<スラッグ>/` に書く。
+- **W2.** `python "<skill-root>/scripts/wiki_fetch.py" "<URL>" --wiki "<WIKI_ROOT>" --raw-root "<RAW_ROOT>" --slug "<スラッグ>" --browser-fallback --json` を実行する。依頼の `fetch` に従い、`--force`、`--keep-noise`、`--html-file <ファイル> --page-url <URL>`、`--browser <browser>`、`--browser-session <browser_session>`、`--browser-only` を付ける。`browser` と `browser_session` を省いた古い依頼は、それぞれ `system` と `existing` とする。raw を書く前に、検査の基準になる作業用の写しを `<WIKI_ROOT>/.wiki-cache/ingest/<スラッグ>/` に書く。
+  - HTTP で変換した本文が空白を除いて 500 文字未満、または HTTP 401/403 なら、保存する前に Playwright で一度だけ取得する。ログインが必要と分かっている URL や、HTTP でログインの案内が返るページでは、依頼の `fetch.browser_only` を `true` にして `--browser-only` を付ける。この指定は HTTP と途中の写しからの再開を飛ばしてブラウザを読むが、既存の raw は `--force` がない限り上書きしない。通常の HTTP の本文で足りるとき、`--html-file` のとき、またはふつうの途中再開では、ブラウザに接続しない。
+  - ブラウザは既定で `--browser system --browser-session existing` である。Windows の API が返す OS の既定ブラウザ（Chrome または Edge）へ公式 Playwright 拡張で接続し、利用者が開いて許可した対象タブを読む。呼び出す前に、対象 URL を普段のブラウザで表示し、拡張の接続画面でそのタブを 1 つだけ選ぶように伝える。要求した URL と一致する許可済みのタブがない、複数ある、読み取り中に URL が変わった場合は止まる。リダイレクト後の URL を表示しているなら、そのアドレス欄の URL をソースとして依頼し直す。ページの移動、Cookie や storageState の書き出し、プロファイルの複製、既存タブを閉じる操作はしない。Node.js 20 以上、npm、公式 Playwright 拡張が必要で、接続の実装は初めて必要になったときに固定した版を導入する。拡張の接続確認は利用者自身が行う。
+  - `existing` では、読み込み済みで同じ origin の画像を PNG としてメモリで受け渡して保存する。読み取れない画像、大きすぎる画像、別 origin の画像、表示に選ばれなかった srcset の候補は未取得になる。これらを認証なしで取り直したり、補足を創作したりしない。PNG はブラウザが表示している画素から作るため、元の画像のバイト列やアニメーションは保たない。画像の未取得は取り込みの報告に含める。
+  - 独立したブラウザでページを自動取得する場合は、依頼の `fetch.browser_session` を `isolated` とし、`--browser-session isolated` を付ける。普段のログイン状態は使わない。必要なら `fetch.browser` で `chrome`、`msedge`、`chromium` を指定する。Chromium の自動導入は `isolated` で `chromium` を明示したときだけ行う。非 Windows の OS の既定ブラウザの検出は未対応なので、ブラウザを明示する。未対応のブラウザや接続失敗で黙って別のモードへ切り替えない。
+  - 出力の `fetch_method` は `http`、`playwright`、`html_file` のどれかで、raw の frontmatter にも残る。Playwright では `source_sha256_of` は `dom` で、ハッシュは取得した DOM の UTF-8 のバイト列から計算する。`browser_session` は `existing` か `isolated`、`browser_fallback_reason` は `short_body`、`http_401`、`http_403`、`explicit` のどれかである。DOM でも本文が短ければ W3 で扱う。接続や取得に失敗したときは raw と作業用の写しを作らず終了コード 2 と理由を返す（エージェントなら `failed`、`fetch_failed`）。手動で保存した HTML を `--html-file` と `--page-url` で渡す方法も使える。
   - 終了コード 1 で「初期化された wiki ではない」と出たら、止まる（エージェントなら `failed`、`not_initialized`）。「raw のルートがない」と出たら、`<RAW_ROOT>` が正しいかを確かめる（エージェントなら `failed`、`no_raw_root`）。初期化した wiki の raw をなくしたときは `/wiki:upgrade` を提案し、raw のディレクトリを自分で作らない。スクリプトは、どちらのときもネットにつながず、何も書かない。
   - 終了コード 0 で `"unchanged": true` なら、raw がすでにあり、何も書かなかった。`"work_dir": true` なら前の取り込みの途中である。URL だけで呼んだときに途中の取り込みがあれば、スクリプトはページを取得せずに返す（`"fetch_skipped": true`。ネットにつながらなくても続けられる。ページが更新されたかは見ていない）。`"work_stage": "fetched"` なら W3 から（出力の `warnings` と `removed_by_rule` は前の取得のもの）、`"work_stage": "frozen"` なら削除はもう固定してあるので、出力の `freeze`（W5 の `freeze` の出力の、消した行、一部を消した行、警告）を読んで W5 の確かめ（本文を消していないか）をしてから、W6（訳と補足）から続ける（raw が訳したあとなら、W8 の `check` から）。出力には、前の取得の `needs_translation` と `images`（`frozen` なら、削除のあとに残った画像だけ）も入っている。`"work_dir": false` なら、すでに取り込んだものか、途中で作業用の写しを失ったもの（raw と別の取得の写しや、0.14.1 までの版が書いた写しも含む）である。取り込み直すかをユーザーに聞く（`already_ingested`）。取り込み直すなら `--force` で取り直す（写しと raw の両方を作り直す）。
   - 終了コード 3 は、同じスラッグのファイルがあり、原文の内容が違うことを示す。ページが更新されたので、別版として `--slug <提案されたスラッグ>` で取り直すか、`--force` で上書きするかをユーザーに聞く（`existing_differs`）。

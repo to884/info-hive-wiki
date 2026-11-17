@@ -36,14 +36,17 @@ Markdown への変換、画像のダウンロード、frontmatter の出力を�
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import http.client
 import ipaddress
 import json
 import os
 import re
+import shutil
 import socket
 import struct
+import subprocess
 import sys
 import tempfile
 import time
@@ -52,6 +55,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime
+from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -71,6 +75,10 @@ FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
 class FetchError(Exception):
     """取得に失敗した。終了コード 2 になる。"""
+
+    def __init__(self, message: str, *, http_status: int | None = None):
+        super().__init__(message)
+        self.http_status = http_status
 
 
 class YouTubeRefused(Exception):
@@ -199,7 +207,7 @@ def fetch(url: str, timeout: float, max_bytes: int, accept: str = "text/html,app
                 chunks.append(chunk)
             return b"".join(chunks), resp.geturl(), resp.headers.get("Content-Type", "")
     except urllib.error.HTTPError as exc:
-        raise FetchError(f"HTTP {exc.code}: {url}") from None
+        raise FetchError(f"HTTP {exc.code}: {url}", http_status=exc.code) from None
     except http.client.HTTPException as exc:
         raise FetchError(f"応答が壊れている: {url}（{exc!r}）") from None
     except (TimeoutError, OSError) as exc:
@@ -1315,6 +1323,139 @@ def has_old_work_dir(args, target: Path) -> bool:
         return False
 
 
+@dataclass
+class PageContent:
+    """HTTP とブラウザで共有する、画像を保存する前の変換結果。"""
+
+    encoding: str
+    lang: str
+    how: str
+    title: str
+    blocks: list[str]
+    images: list[dict]
+    removed: list[dict]
+    warnings: list[str]
+
+    def is_short(self, keep_noise: bool = False) -> bool:
+        blocks = self.blocks if keep_noise else apply_block_rules(self.blocks, self.title)[0]
+        body = IMG_MARK_RE.sub("", "\n\n".join(blocks))
+        return len(re.sub(r"\s+", "", body)) < 500
+
+
+def check_html_type(content_type: str) -> None:
+    ctype = content_type.split(";")[0].strip().lower()
+    if ctype and ctype not in ("text/html", "application/xhtml+xml", "text/plain", "application/xml", "text/xml"):
+        raise FetchError(f"HTML のページではない（Content-Type: {ctype}）。PDF などは保存してから通常の手順で取り込む")
+
+
+def prepare_page(data: bytes, content_type: str, final_url: str, keep_noise: bool) -> PageContent:
+    """本文の推定と変換を行う。まだファイルも画像も保存しない。"""
+    check_html_type(content_type)
+    html_text, encoding = decode_html(data, content_type)
+    doc = parse_html(html_text)
+    removed = [] if keep_noise else drop_mediawiki_parts(doc)
+    html_node = next((n for n in doc.iter() if n.tag == "html"), None)
+    lang = (html_node.attrs.get("lang") or html_node.attrs.get("xml:lang") or "").strip().lower() if html_node else ""
+    root, how = choose_root(doc)
+    warnings = []
+    if how == "guess":
+        warnings.append("article と main がないので、段落の多い要素を本文と推定した。雑音が残っていれば削る")
+    base_tag = next((n for n in doc.iter() if n.tag == "base" and n.attrs.get("href")), None)
+    base_url = urllib.parse.urljoin(final_url, base_tag.attrs["href"]) if base_tag else final_url
+    conv = Converter(base_url)
+    title_tag = next((n for n in doc.iter() if n.tag == "title"), None)
+    page_title = _clean_inline(text_of(title_tag, skip_dropped=False)) if title_tag else ""
+    conv.title_node = choose_title(root, doc, page_title)
+    if any(n.tag == "h1" and n is not conv.title_node and not is_dropped(n) and not _link_only(n)
+           for n in root.iter()):
+        conv.heading_shift = 1
+    blocks = conv.blocks(root)
+    title = _clean_inline(text_of(conv.title_node)) if conv.title_node is not None else ""
+    title = _SECTION_NUMBER_RE.sub("", title) or page_title
+    if not title:
+        og = next((n for n in doc.iter() if n.tag == "meta" and n.attrs.get("property") == "og:title"), None)
+        title = _clean_inline(og.attrs.get("content", "")) if og else ""
+    if not title:
+        warnings.append("題名が見つからない。frontmatter の title を埋める")
+    return PageContent(encoding, lang, how, title, blocks, conv.images, removed, warnings)
+
+
+def browser_environment() -> dict[str, str]:
+    """ブラウザの診断ログへ本文や認証値を書き出す環境を子に渡さない。"""
+    return {key: value for key, value in os.environ.items()
+            if key.upper() not in ("DEBUG", "DEBUG_FILE", "NODE_OPTIONS", "PWDEBUG")
+            and not key.upper().startswith(("PWTEST_", "PW_LOG", "PW_TRACE", "PW_PROFILE", "PW_INSTRUMENT"))}
+
+
+def fetch_browser(url: str, timeout: float, max_bytes: int, block_private: bool, *, browser: str = "system",
+                  browser_session: str = "existing", capture_images: dict | None = None,
+                  max_images: int = 50) -> tuple[bytes, str, str]:
+    """固定した Playwright を別の環境で動かし、DOM をメモリで受け取る。"""
+    uv = shutil.which("uv")
+    if uv is None:
+        raise FetchError("Playwright の自動取得には uv が必要である。uv を導入するか、--html-file と --page-url で HTML を渡す")
+    command = [uv, "run", "--script", str(Path(__file__).with_name("wiki_fetch_browser.py")),
+               url, "--timeout", str(timeout), "--max-bytes", str(max_bytes),
+               "--browser-session", browser_session, "--max-images", str(max_images), "--browser", browser]
+    if block_private:
+        command.append("--block-private")
+    env = {**browser_environment(), "PYTHONIOENCODING": "utf-8"}
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", env=env,
+                              timeout=timeout + 360, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise FetchError(f"Playwright を実行できない: {exc}。--html-file と --page-url で HTML を渡せる") from None
+    try:
+        result = json.loads(done.stdout)
+        if not isinstance(result, dict):
+            raise ValueError("結果が JSON のオブジェクトでない")
+        if done.returncode != 0:
+            if result.get("kind") == "youtube":
+                raise YouTubeRefused(result["url"], "ブラウザの移動先 ")
+            raise ValueError(result.get("error", "ブラウザが失敗した"))
+        html, final_url = result["html"], result["final_url"]
+        if not isinstance(html, str) or not isinstance(final_url, str):
+            raise ValueError("DOM または URL が文字列でない")
+        check_url(final_url)
+        refuse_youtube(final_url, "ブラウザの最後の URL ")
+        if block_private and is_private_host(urllib.parse.urlsplit(final_url).hostname or ""):
+            raise ValueError("ブラウザの最後の URL が内部のアドレスである")
+        data = html.encode("utf-8")
+        if len(data) > max_bytes:
+            raise ValueError(f"DOM が {max_bytes:,} バイトを超えた")
+        if browser_session == "existing":
+            # ブラウザと同じ WHATWG URL の正規化を Node 側で行う。Python で異なる規則を重ねない。
+            if result.get("request_url") != url or result.get("matched_url") != final_url:
+                raise ValueError("要求した URL と既存タブの URL が一致しない")
+            images = result.get("images", [])
+            if not isinstance(images, list) or len(images) > max_images:
+                raise ValueError("既存タブの画像の結果が不正である")
+            total = 0
+            accepted = {}
+            origin = urllib.parse.urlsplit(final_url)
+            for img in images:
+                if not isinstance(img, dict) or not isinstance(img.get("url"), str):
+                    raise ValueError("既存タブの画像の形式が不正である")
+                image_url = img["url"]
+                image_origin = urllib.parse.urlsplit(image_url)
+                if (image_origin.scheme, image_origin.netloc) != (origin.scheme, origin.netloc):
+                    raise ValueError("既存タブの画像が別の origin を指している")
+                encoded = img["base64"]
+                if not isinstance(encoded, str) or len(encoded) > (max_bytes + 2) // 3 * 4:
+                    raise ValueError("既存タブの画像が大きすぎる")
+                payload = base64.b64decode(encoded, validate=True)
+                total += len(payload)
+                if total > max_bytes or not payload.startswith(b"\x89PNG\r\n\x1a\n"):
+                    raise ValueError("既存タブの画像が PNG ではない、または大きすぎる")
+                accepted[image_url] = payload
+            if capture_images is not None:
+                capture_images.update(accepted)
+    except (KeyError, ValueError) as exc:
+        detail = str(exc) if done.stdout.strip() else done.stderr.strip()[-1500:]
+        raise FetchError(f"Playwright で本文を取得できない: {detail}。--html-file と --page-url で HTML を渡せる") from None
+    return data, final_url, "text/html; charset=utf-8"
+
+
 def build(args) -> tuple[int, dict]:
     raw_root: Path = args.raw_root
     check_slug(args.slug)
@@ -1334,7 +1475,7 @@ def build(args) -> tuple[int, dict]:
     # 写しがそろっていても内容が違うとして止まり、ネットにつながらなければ取得の失敗で止まる。
     # --html-file は、渡した内容で取るという入力なので、ここでは続けずに、読んで比べる（下の枝）。
     # 0.14.1 までの版が書いた写しは、resumable_fetch が続けられないものとする（どちらの枝でも続けない）。
-    if wiki is not None and not html_file and not args.force and target.exists():
+    if wiki is not None and not html_file and not getattr(args, "browser_only", False) and not args.force and target.exists():
         saved = wiki_rawcheck.resumable_fetch(wiki, args.slug, target)
         if saved is not None and saved["url"] == args.url:
             # 前の版で始めた取り込みの転送先が YouTube なら、続けずに止まる（ADR-0027）。
@@ -1349,6 +1490,16 @@ def build(args) -> tuple[int, dict]:
     # 内部のアドレスを取るかは、ユーザーが渡した URL で決める。公開のページが内部のアドレスへ
     # リダイレクトしても、その先は取らない。ユーザーが内部のページを直接渡したときだけ許す。
     block_private = not is_private_host(urllib.parse.urlsplit(args.url).hostname or "")
+    keep_noise = getattr(args, "keep_noise", False)
+    method = "html_file" if html_file else "http"
+    fallback_reason = None
+    captured_images: dict[str, bytes] = {}
+    browser_session = getattr(args, "browser_session", "existing")
+
+    def from_browser():
+        return fetch_browser(args.url, args.timeout, args.max_bytes, block_private,
+                             browser=getattr(args, "browser", "system"), browser_session=browser_session,
+                             capture_images=captured_images, max_images=0 if args.no_images else args.max_images)
     if html_file:
         # ブラウザで保存した HTML。基準の URL は、本文を取ったときのアドレス欄の URL にする。
         check_url(args.page_url)
@@ -1360,18 +1511,40 @@ def build(args) -> tuple[int, dict]:
         except UnicodeDecodeError as exc:
             raise ValueError(f"--html-file は UTF-8 で保存した HTML にする（{exc.reason}、{exc.start} バイト目）") from None
         final_url, content_type = args.page_url, "text/html; charset=utf-8"
+    elif getattr(args, "browser_only", False):
+        data, final_url, content_type = from_browser()
+        method, fallback_reason = "playwright", "explicit"
     else:
-        data, final_url, content_type = fetch(args.url, args.timeout, args.max_bytes, block_private=block_private,
-                                              refuse_youtube_redirect=True)
+        try:
+            data, final_url, content_type = fetch(args.url, args.timeout, args.max_bytes, block_private=block_private,
+                                                  refuse_youtube_redirect=True)
+        except FetchError as exc:
+            if not getattr(args, "browser_fallback", False) or exc.http_status not in (401, 403):
+                raise
+            fallback_reason = f"http_{exc.http_status}"
+            data, final_url, content_type = from_browser()
+            method = "playwright"
         refuse_youtube(final_url, "最後の URL ")
-    ctype = content_type.split(";")[0].strip().lower()
-    if ctype and ctype not in ("text/html", "application/xhtml+xml", "text/plain", "application/xml", "text/xml"):
-        raise FetchError(f"HTML のページではない（Content-Type: {ctype}）。PDF などは保存してから通常の手順で取り込む")
+    check_html_type(content_type)
+    page = None
+    if not html_file and method == "http" and getattr(args, "browser_fallback", False):
+        page = prepare_page(data, content_type, final_url, keep_noise)
+        if page.is_short(keep_noise):
+            fallback_reason = "short_body"
+            data, final_url, content_type = from_browser()
+            method = "playwright"
+            page = prepare_page(data, content_type, final_url, keep_noise)
+    source_kind = "dom" if method in ("html_file", "playwright") else "html"
     sha = hashlib.sha256(data).hexdigest()
     # source_sha256_of は、どの取得か（dom はブラウザで保存した HTML）を示す。続きの手順は、本文が短いときに
     # ブラウザで取り直すかを、これで決める（dom なら、もうブラウザで取ってある）。
     result: dict = {"path": target.as_posix(), "url": args.url, "final_url": final_url, "source_sha256": sha,
-                    "source_sha256_of": "dom" if html_file else "html", "unchanged": False, "warnings": []}
+                    "source_sha256_of": source_kind, "fetch_method": method, "unchanged": False,
+                    "warnings": []}
+    if fallback_reason:
+        result["browser_fallback_reason"] = fallback_reason
+    if method == "playwright":
+        result["browser_session"] = browser_session
     if has_old_work_dir(args, target):
         # 原文が同じでも違っても（終了コード 3）、続けられない旧版の写しがあることを知らせる。
         result["old_work_dir"] = True
@@ -1393,36 +1566,10 @@ def build(args) -> tuple[int, dict]:
         result["error"] = "existing_differs"
         return 3, result
 
-    html_text, encoding = decode_html(data, content_type)
-    doc = parse_html(html_text)
-    keep_noise = getattr(args, "keep_noise", False)
-    removed_by_rule: list[dict] = [] if keep_noise else drop_mediawiki_parts(doc)
-    html_node = next((n for n in doc.iter() if n.tag == "html"), None)
-    lang = (html_node.attrs.get("lang") or html_node.attrs.get("xml:lang") or "").strip().lower() if html_node else ""
-    root, how = choose_root(doc)
-    if how == "guess":
-        result["warnings"].append("article と main がないので、段落の多い要素を本文と推定した。雑音が残っていれば削る")
-
-    base_tag = next((n for n in doc.iter() if n.tag == "base" and n.attrs.get("href")), None)
-    base_url = urllib.parse.urljoin(final_url, base_tag.attrs["href"]) if base_tag else final_url
-    conv = Converter(base_url)
-    title_tag = next((n for n in doc.iter() if n.tag == "title"), None)
-    page_title = _clean_inline(text_of(title_tag, skip_dropped=False)) if title_tag else ""
-    conv.title_node = choose_title(root, doc, page_title)
-    if any(n.tag == "h1" and n is not conv.title_node and not is_dropped(n) and not _link_only(n)
-           for n in root.iter()):
-        conv.heading_shift = 1
-    blocks = conv.blocks(root)
-    title = _clean_inline(text_of(conv.title_node)) if conv.title_node is not None else ""
-    # 「1. Datatypes In SQLite」のような節の番号は題名に含めない。
-    title = _SECTION_NUMBER_RE.sub("", title)
-    if not title:
-        title = page_title
-    if not title:
-        og = next((n for n in doc.iter() if n.tag == "meta" and n.attrs.get("property") == "og:title"), None)
-        title = _clean_inline(og.attrs.get("content", "")) if og else ""
-    if not title:
-        result["warnings"].append("題名が見つからない。frontmatter の title を埋める")
+    page = page or prepare_page(data, content_type, final_url, keep_noise)
+    result["warnings"].extend(page.warnings)
+    encoding, lang, how, title = page.encoding, page.lang, page.how, page.title
+    blocks, removed_by_rule = page.blocks, page.removed
 
     # 画像を保存する。
     # 画像も同じ方針で取る。ユーザーが内部のページを渡したときだけ、内部のアドレスの画像も取る。
@@ -1433,7 +1580,7 @@ def build(args) -> tuple[int, dict]:
     pending: list[tuple[str, bytes]] = []   # (ファイル名, 中身)。本文を書く直前にまとめて書く。
     number = 0
     attempts = 0
-    for index, img in enumerate(conv.images):
+    for index, img in enumerate(page.images):
         url, alt = img["url"], img["alt"]
         if not url or url.startswith("data:"):
             dropped.append({"url": url[:60], "alt": alt, "reason": "data_uri" if url else "no_src"})
@@ -1454,10 +1601,16 @@ def build(args) -> tuple[int, dict]:
             images_out.append({"path": "", "url": url, "alt": alt,
                                "status": "not_downloaded" if args.no_images else "over_max_images"})
             continue
-        attempts += 1
         try:
-            img_data, img_final, img_type = fetch(url, args.timeout, args.max_bytes, accept="image/*,*/*;q=0.5",
-                                                  block_private=block_private)
+            if method == "playwright" and browser_session == "existing":
+                if url not in captured_images:
+                    raise FetchError("普段のブラウザの読み込み済み画像を取得できなかった。認証なしの再取得はしない")
+                attempts += 1
+                img_data, img_final, img_type = captured_images[url], url, "image/png"
+            else:
+                attempts += 1
+                img_data, img_final, img_type = fetch(url, args.timeout, args.max_bytes, accept="image/*,*/*;q=0.5",
+                                                      block_private=block_private)
         except (FetchError, ValueError) as exc:
             replacements[index] = f"![{_alt_text(alt)}]({_md_url(url)})（未取得）"
             images_out.append({"path": "", "url": url, "alt": alt, "status": "failed", "error": str(exc)})
@@ -1496,13 +1649,16 @@ def build(args) -> tuple[int, dict]:
         "title": title,
         "fetched_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "source_sha256": sha,
-        "source_sha256_of": "dom" if html_file else "html",
+        "source_sha256_of": source_kind,
+        "fetch_method": method,
         "source_lang": lang,
         "translated_by": "",
         "fetched_by": FETCHED_BY,
     }
     if final_url != args.url:
         meta["final_url"] = final_url
+    if method == "playwright":
+        meta["browser_session"] = browser_session
     fm = "---\n" + "".join(f"{k}: {format_fm_value(v)}\n" for k, v in meta.items()) + "---\n"
     text = fm + "\n" + (f"# {title}\n\n" if title else "") + body + "\n"
 
@@ -1643,11 +1799,21 @@ def main(argv: list[str] | None = None) -> int:
                         help="URL を取得する代わりに、ブラウザで保存した HTML（UTF-8）を読む。--page-url と一緒に使う")
     parser.add_argument("--page-url",
                         help="--html-file の本文を取ったときのブラウザのアドレス欄の URL。相対リンクと画像の基準にする")
+    parser.add_argument("--browser-fallback", action="store_true",
+                        help="本文が 500 文字未満、または HTTP 401/403 のとき、Playwright で一度だけ取得する（uv が必要）")
+    parser.add_argument("--browser", choices=("system", "chromium", "chrome", "msedge"), default="system",
+                        help="Playwright で使うブラウザ（既定: system。Windows の URL の既定アプリを使う）")
+    parser.add_argument("--browser-session", choices=("existing", "isolated"), default="existing",
+                        help="既定は普段のブラウザの許可済みタブを読む。isolated は独立したブラウザで取得する")
+    parser.add_argument("--browser-only", action="store_true",
+                        help="HTTP では取得せず、ブラウザの本文を使う（ログインが必要と分かっているページ向け）")
     args = parser.parse_args(argv)
     if args.html_file and not args.page_url:
         parser.error("--html-file には --page-url を付ける")
     if args.page_url and not args.html_file:
         parser.error("--page-url は --html-file と一緒に使う")
+    if args.browser_only and args.html_file:
+        parser.error("--browser-only と --html-file は同時に使わない")
 
     # ネットにつなぐ前に、取り込み先の wiki と raw のルートを確かめる（ADR-0019）。
     found = wiki_initialized.problem(args.wiki)
