@@ -326,6 +326,77 @@ def walk_index_files(wiki_root) -> Walk:
     return Walk(files + below.files, below.unlistable, unknown + below.unknown)
 
 
+ASSETS_DIR = "assets"
+
+
+def _is_figure_name(name: str) -> bool:
+    """閲覧が図として読む svg の名前か（ADR-0030）。"""
+    return name.lower().endswith(".svg") and not name.startswith(".")
+
+
+def walk_assets(wiki_root) -> Walk:
+    """wiki/assets/ の直下の svg（閲覧が図として出すもの。ADR-0030）と、知らせ。
+
+    - assets そのものがシンボリックリンクかジャンクションなら、たどらない（何も返さない）。wiki の外の実体を、
+      閲覧の出力に写さないためである。ファイルのシンボリックリンクも返さない。ハードリンクは見分けない。
+    - 名前の末尾が .svg（大文字と小文字を区別しない）で、. で始まらない、ふつうのファイルだけを返す。
+      下位のディレクトリには降りない。
+    - 守るのは、走査の時点で木に置かれたリンクである。読む間だけリンクに替えて戻す同時の書き手は対象にしない
+      （図の描画の設計の 6.1）。
+    OS の呼び出しは、walk_markdown と同じ口（_list_dir、DirEntry の is_symlink と is_dir、_is_junction、
+    _stat_entry）だけを使う。
+    """
+    root = os.fspath(wiki_root)
+    files, unlistable, unknown = [], [], []
+    state, entries = read_os(_list_dir, root)
+    if state == "denied":
+        return Walk([], ["."], [])
+    top = next((e for e in entries or [] if e.name == ASSETS_DIR), None)
+    if top is None:
+        return Walk([], [], [])
+    state, is_link = read_os(top.is_symlink)
+    if state == "ok" and not is_link:
+        state, is_dir = read_os(top.is_dir)
+        if state == "ok" and is_dir:
+            state, is_link = _is_junction(top)
+        elif state == "ok":
+            return Walk([], [], [])        # assets がディレクトリでない
+    if state == "absent":
+        return Walk([], [], [])
+    if state == "denied":
+        return Walk([], [], [ASSETS_DIR])
+    if is_link:
+        return Walk([], [], [])            # assets がリンクかジャンクション。たどらない
+    state, children = read_os(_list_dir, top.path)
+    if state == "absent":
+        return Walk([], [], [])
+    if state == "denied":
+        return Walk([], [ASSETS_DIR], [])
+    for entry in children:
+        name = entry.name
+        if not _is_figure_name(name):
+            continue
+        rel = f"{ASSETS_DIR}/{name}"
+        state, link = read_os(entry.is_symlink)
+        if state == "absent":
+            continue
+        if state == "denied":
+            unknown.append(rel)
+            continue
+        if link:
+            continue                       # ファイルのシンボリックリンク。読まない
+        state, st = _stat_entry(entry.path)
+        if state == "absent":
+            continue
+        if state == "denied":
+            unknown.append(rel)
+            continue
+        if stat.S_ISREG(st.st_mode):
+            files.append(MdFile(rel, st.st_size, st.st_mtime_ns))
+    files.sort(key=lambda f: _sort_key(f.rel))
+    return Walk(files, unlistable, sorted(unknown, key=_sort_key))
+
+
 def iter_page_files(wiki_root: Path) -> list[Path]:
     """ページのファイルを、NFC の / 区切りの相対パスの順に返す（知らせは捨てる。知らせを見るなら walk_pages）。"""
     wiki_root = Path(wiki_root)
@@ -391,6 +462,23 @@ def _load_vendored():
 
 
 markdown_it = _load_vendored()
+import markdown_it.common.utils as _md_utils  # noqa: E402  （同梱のものを読み込んだあと）
+
+
+_SRC_PARSER = None
+
+
+def destination_src(raw: str) -> str:
+    """本文に書いた画像とリンクの参照先から、markdown-it がトークンの src（href）に入れる文字を作る。
+
+    markdown-it と同じ手順（Markdown のエスケープと文字参照を解く unescapeAll のあと、normalizeLink で前後の
+    空白を落としてパーセントエンコードする）を、同じ関数で通す。lint の画像の参照先の検査と閲覧が、作りの上で
+    同じ参照先を見るために使う（図の描画の設計の 6.4）。呼ぶ側は、このあとで # と ? から後を落とし、unquote する。
+    """
+    global _SRC_PARSER
+    if _SRC_PARSER is None:
+        _SRC_PARSER = new_parser()
+    return _SRC_PARSER.normalizeLink(_md_utils.unescapeAll(raw))
 
 
 def new_parser():

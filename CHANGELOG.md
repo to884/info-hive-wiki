@@ -6,6 +6,20 @@
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-11-17
+
+### Added
+
+- `/wiki:browse` が、本文の `![説明](../assets/<名前>.svg)` を図として表示するようになった（ADR-0030、info-hive-dev の `docs/plans/wiki-browse-figures-2026-11-17.md`）。今までは説明の文字だけを出していた。
+  - 表示するのは、`wiki/assets/` の直下の、UTF-8 の XML で書かれた 2 MiB までの、リンクでない svg である。下位のディレクトリの svg、ほかの符号化の svg、png などは、今までどおり説明の文字だけを出す。
+  - 図は Fluent 2 の Card と Image の入れ物に `<img>` で出す。svg の中のスクリプトは動かない。手書きの svg は色を決め打ちしていることが多いので、暗い配色でも図の地は明るいままにする。
+  - サーバーは svg を `image/svg+xml` と、CSP の `sandbox` を付けて返す。svg を直接開いても、中のスクリプトは動かない。静的の書き出しは、svg を `assets/wiki/<16 桁>.svg` に書く。ページから svg へのリンクは作らない。
+  - 参照先がない svg と、表示できない svg は、ページの「診断」に載せる（`missing_asset`、`asset_unreadable`）。`wiki/assets/` の一覧を作れなくても、閲覧は止めずに `assets_unlistable` を載せる。
+
+### Fixed
+
+- lint の `missing_assets` が、画像の参照先の文字参照（`&amp;`、`&#38;` など）と、前後の空白を解かずに探していた。参照先は Markdown の決まりどおりに、markdown-it が画像の `src` を作るのと同じ手順で解くようにした。今までは、`![図](../assets/a&amp;b.svg)` の `assets/a&b.svg` があっても、ないと報告していた。
+
 ## [0.25.2] - 2026-11-17
 
 ### Fixed

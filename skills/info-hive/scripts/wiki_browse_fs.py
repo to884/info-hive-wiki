@@ -51,6 +51,10 @@ class Absent(Exception):
     """ない。"""
 
 
+class TooLarge(Exception):
+    """読む上限を超えた（図の svg。図の描画の設計の 6.2）。"""
+
+
 class Stop(Exception):
     """何も変えずに止まり、利用者に知らせる。"""
 
@@ -501,6 +505,24 @@ def read_file(path) -> bytes:
             if not chunk:
                 return b"".join(chunks)
             chunks.append(chunk)
+    finally:
+        _close(fd)
+
+
+def read_file_capped(path, limit: int) -> bytes:
+    """ファイルの中身を limit バイトまで読む。超えれば TooLarge、ないなら Absent、読めなければ Unknown。"""
+    fd = x("open_read", path)
+    try:
+        chunks = []
+        total = 0
+        while True:
+            chunk = x("read", fd, min(1 << 20, limit + 1 - total))
+            if not chunk:
+                return b"".join(chunks)
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > limit:
+                raise TooLarge(f"{limit} バイトを超えた")
     finally:
         _close(fd)
 
@@ -1423,10 +1445,12 @@ def walk_inputs(root):
     try:
         pages = wiki_pages.walk_pages(root)
         indexes = wiki_pages.walk_index_files(root)
+        assets = wiki_pages.walk_assets(root)
     except OSError as e:
         return [], f"Wiki をたどれない（{type(e).__name__}）"
     if "drop_unlistable" not in MUTANTS:
-        if pages.unlistable or indexes.unlistable:
+        # walk_assets の "." は、ルートの一覧を作れなかったこと。ページの集合も分からないので、全体を採らない
+        if pages.unlistable or indexes.unlistable or "." in assets.unlistable:
             return [], "一覧を作れないディレクトリがある"
         if pages.unknown or indexes.unknown:
             return [], "種類を調べられない項目がある"
@@ -1447,12 +1471,31 @@ def walk_inputs(root):
                 st = None
         if st is not None and stat.S_ISREG(st.st_mode):
             entries.append(("ontology", onto, st.st_size, st.st_mtime_ns))
+    # 図の svg（ADR-0030）は最後に足す。svg のない Wiki の一覧と印は、今までと同じになる。
+    # svg は飾りなので、assets/ の一覧を作れなくても閲覧は止めない（入力でない最上位のディレクトリと同じ）。
+    # 一覧を作れないことは、大きさのない "asset_dir" の項目で表す。写しはそれを読めない入力にし、一覧を
+    # 作れるようになれば印が変わって作り直す。種類を調べられない svg は、大きさのない "asset" の項目にする
+    # （オントロジーと同じ扱い。図の描画の設計の 6.1）。
+    if wiki_pages.ASSETS_DIR in assets.unlistable or wiki_pages.ASSETS_DIR in assets.unknown:
+        entries.append(("asset_dir", wiki_pages.ASSETS_DIR, None, None))
+    found = [("asset", f.rel, f.size, f.mtime_ns) for f in assets.files]
+    found += [("asset", rel, None, None) for rel in assets.unknown if rel != wiki_pages.ASSETS_DIR]
+    entries += sorted(found, key=lambda e: wiki_pages._sort_key(e[1]))
     return entries, None
 
 
 def read_input(root, rel) -> bytes:
     """入力の実体の中身を読む。実体がどこにあっても、Wiki の内容として読む（設計の 5）。"""
     return read_file(os.path.join(os.fspath(root), *rel.split("/")))
+
+
+def read_input_capped(root, rel, limit: int) -> bytes:
+    """入力の中身を、limit バイトまで読む。超えれば TooLarge（図の描画の設計の 6.2）。
+
+    走査で見た大きさではなく、読む口が上限を強制する。走査と読み取りのあいだに大きくなっても、limit + 1 バイトより
+    先は読まない。
+    """
+    return read_file_capped(os.path.join(os.fspath(root), *rel.split("/")), limit)
 
 
 def resolve(path) -> str:
