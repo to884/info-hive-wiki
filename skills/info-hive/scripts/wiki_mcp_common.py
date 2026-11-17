@@ -40,7 +40,7 @@ SCRIPTS = Path(__file__).resolve().parent
 SERVER_FILES = ("wiki_mcp_common.py", "wiki_mcp_server.py", "wiki_index.py", "wiki_search.py", "wiki_text.py",
                 "wiki_pages.py", "wiki_lint.py", "wiki_stats.py", "wiki_workspace.py", "wiki_initialized.py",
                 "wiki_graph_common.py", "wiki_graph_query.py",
-                "wiki_graph_lint.py", "wiki_graph_extract.py")
+                "wiki_graph_lint.py", "wiki_graph_extract.py", "wiki_overview.py", "wiki_browse_core.py")
 COLLECTION_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 

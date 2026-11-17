@@ -446,6 +446,8 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         "missing_raw": [],
         "unknown_tags": [],
         "caption_corrections": [],
+        "overview_stale": None,
+        "overview_problems": None,
         "suggested_pages": [],
         "summary": {},
     }
@@ -456,6 +458,10 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         import wiki_captions
         result = wiki_captions.check_wiki(Path(wiki_root))
         findings["caption_corrections"] = [f.as_dict() for f in result.findings]
+        import wiki_overview
+        overviews = wiki_overview.inspect_wiki(Path(wiki_root))
+        findings["overview_stale"] = overviews["overview_stale"]
+        findings["overview_problems"] = overviews["overview_problems"]
 
     # 読み込みのエラー
     for p in pages:
@@ -695,6 +701,8 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         # タグの体系を渡さなかったときは、検査していないことを 0 と区別できるよう None にする。
         "unknown_tags": len(findings["unknown_tags"]) if allowed is not None else None,
         "caption_corrections": len(findings["caption_corrections"]) if wiki_root is not None else None,
+        "overview_stale": len(findings["overview_stale"]) if findings["overview_stale"] is not None else None,
+        "overview_problems": len(findings["overview_problems"]) if findings["overview_problems"] is not None else None,
         "suggested_pages": len(findings["suggested_pages"]),
     }
     return findings
@@ -749,6 +757,10 @@ def render_text(findings: dict) -> str:
         ("unknown_tags", "タグの体系にないタグ", lambda f: f"  - {f['path']}  {', '.join(f['tags'])}"),
         ("caption_corrections", "YouTube の字幕の訂正と留保の印、定義、confidence の食い違い",
          lambda f: f"  - {f['path']}:{f['line']}  {f['message']}"),
+        ("overview_stale", "元のページが変わった概要（/wiki:overview <ページ> --refresh で作り直す）",
+         lambda f: f"  - {f['page']}  （{f['sidecar']}）"),
+        ("overview_problems", "概要の破損、元のページの不在、読み取りの問題",
+         lambda f: f"  - {f['path']}  {f['message']}"),
     ]
 
     for key, label, formatter in sections:
@@ -771,6 +783,10 @@ def render_text(findings: dict) -> str:
 
     if s.get("unknown_tags") is None:
         out.append("タグの検査はしていない（--allowed-tags にタグの体系を渡すと、体系にないタグを報告する）。")
+        out.append("")
+
+    if findings["overview_problems"] is None:
+        out.append("概要の検査は完了していない（wiki のルートが渡されていないか、概要の一覧を作れない）。")
         out.append("")
 
     # None は検査していない項目なので、問題がないものとして扱う。

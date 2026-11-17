@@ -8,8 +8,17 @@
 
 - Wiki のルート: `wiki/`
 - 知識ページの図（svg）: `wiki/assets/`。ページからは `../assets/<ページのスラッグ>-NN.svg` で参照する
+- ページの概要: `wiki/assets/overview/`。本文と図をまとめたサイドカーを git で管理する
 - raw ソース: `raw/`
 - アセットと画像の保存先: `raw/assets/`（Web ページの画像は `raw/assets/<ソースのスラッグ>/`）
+
+## Page overviews
+
+ページの概要は `/wiki:overview <ページ>` で、求めたページだけ作る。
+`assets/overview/<ページの識別子のハッシュ>.overview.md` は、本文と SVG をまとめた表示用の派生物で、`wiki_overview.py` だけが書く。手で編集しない。
+ページ数、大きさの検査、検索、グラフ、統計に含めず、`log.md` に記録しない。wiki と一緒に git で管理する。
+元のページのハッシュが変わると古い概要になる。`/wiki:overview <ページ> --refresh` で作り直し、`--status` で状態を確認する。
+電源断後の存続と完全性は保証しない。欠落や破損があれば元のページから作り直す。
 
 ## ページの種類
 

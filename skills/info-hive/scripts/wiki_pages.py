@@ -22,6 +22,7 @@ from __future__ import annotations
 import errno
 import functools
 import hashlib
+import io
 import os
 import re
 import stat
@@ -45,6 +46,12 @@ WIKILINK_FULL_RE = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
 # ---------------------------------------------------------------------------
 # ページの集合
 # ---------------------------------------------------------------------------
+
+def page_text_sha256(data: bytes) -> str:
+    """BOM と改行の違いを除いたページ全文の SHA-256。読めなければ UnicodeDecodeError。"""
+    text = io.TextIOWrapper(io.BytesIO(data), encoding="utf-8-sig", newline=None).read()
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
 
 def is_page_path(rel: "str | PurePosixPath") -> bool:
     """wiki のルートからの相対パス（/ 区切り）がページかを返す。"""
