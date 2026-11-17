@@ -1,6 +1,6 @@
 ---
 name: wiki-reader
-description: プロンプトのフック（ADR-0032）が挙げた wiki のページの候補を読み、渡された問いに wiki の中身だけで答える。読み取りだけを行い、何も書かない。呼び出す側は、フックの「読み方」の行のとおりに model と effort を渡す。
+description: プロンプトのフック（ADR-0034）が挙げた wiki のページの候補を読み、渡された問いに wiki の中身だけで答える。読み取りだけを行い、何も書かない。呼び出す側は、フックの「読み方」の行のとおりに model と effort を渡す。
 model: sonnet
 effort: low
 tools: Read, Glob, Grep, mcp__plugin_wiki_wiki__get_page, mcp__plugin_wiki_wiki__list_index, mcp__plugin_wiki_wiki__graph
