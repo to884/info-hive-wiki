@@ -1098,7 +1098,8 @@ def refused_link(link: str, warnings: list) -> "dict | None":
         rel = posix_rel(item["path"])
         if kind == "path" and target.startswith(rel + "/"):
             return item
-        if rel.lower().endswith(".md") and is_page_path(rel, native=True):
+        if rel.lower().endswith(".md") and (is_article_path(rel, native=True) if kind == "path"
+                                              else is_page_path(rel, native=True)):
             stem = rel[:-3]
             expected = stem if kind == "path" else PurePosixPath(stem).name
             if target == expected:
