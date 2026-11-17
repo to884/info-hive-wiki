@@ -1083,23 +1083,24 @@ def resolve_link(link: str, by_path: dict, by_slug) -> "str | None":
     return target if target in by_slug else None
 
 
-def refused_link(link: str, warnings: list) -> "dict | None":
+def refused_link(link: str, warnings: list, *, articles: bool = False) -> "dict | None":
     """読まなかった記事か、その途中の道を指す wikilink なら、その知らせを返す。
 
     降りなかったディレクトリの下のスラッグは推測しない。パスを指定したときだけ、
     要素の境界で照合する。lint と閲覧が、拒否をリンク切れに読み替えないために共用する。
+    articles は Index の行用で、パスで指す索引の記事も含める。本文と sources はページだけを照合する。
     """
     lookup = link_lookup(link)
     if lookup is None:
         return None
     kind, target = lookup
+    accepts = is_article_path if articles and kind == "path" else is_page_path
     for item in warnings:
         # OS 上の読み取りのパスは変えず、wikilink の照合だけをページの索引と同じ鍵にする。
         rel = posix_rel(item["path"])
-        if kind == "path" and target.startswith(rel + "/"):
+        if kind == "path" and accepts(target + ".md", native=True) and target.startswith(rel + "/"):
             return item
-        if rel.lower().endswith(".md") and (is_article_path(rel, native=True) if kind == "path"
-                                              else is_page_path(rel, native=True)):
+        if rel.lower().endswith(".md") and accepts(rel, native=True):
             stem = rel[:-3]
             expected = stem if kind == "path" else PurePosixPath(stem).name
             if target == expected:

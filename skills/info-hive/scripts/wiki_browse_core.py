@@ -943,9 +943,9 @@ class Core:
         pid = self.pages[disks[0]]["id"]
         return pid if self.drawn.get(pid) == disks[0] else None
 
-    def resolve(self, target: str) -> dict:
+    def resolve(self, target: str, *, articles: bool = False) -> dict:
         """wikilink の行き先を解決する（設計の 3.3）。"""
-        refused = wiki_pages.refused_link(target, self.link_warnings)
+        refused = wiki_pages.refused_link(target, self.link_warnings, articles=articles)
         if refused is not None:
             return {"state": "refused", "target": target, "path": refused["path"], "link_kind": refused["kind"]}
         disks = wiki_pages.link_candidates(target, self.pages_by_path, self.pages_by_slug)
@@ -1399,7 +1399,7 @@ class Core:
                 after = _after_first_link(inline_tok)
                 if clean in group_of_file and clean.startswith("indexes/"):
                     return {"state": "group", "group": group_of_file[clean], "label": label, "after": after}
-                r = self.resolve(target)
+                r = self.resolve(target, articles=True)
                 if r["state"] == "resolved":
                     return {"state": "resolved", "id": r["id"], "label": self.title(r["id"]),
                             "anchor": r.get("anchor"), "after": after}
