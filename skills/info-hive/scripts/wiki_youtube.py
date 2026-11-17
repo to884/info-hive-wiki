@@ -616,14 +616,21 @@ def cmd_verify(args) -> int:
     check_slug(args.slug)
     raw_path = raw_root / f"{args.slug}.md"
     try:
+        from wiki_pages import resolve_raw
+        checked = resolve_raw({"type": "source", "raw": str(raw_path.absolute())},
+                              wiki / "sources" / f"{args.slug}.md", wiki, raw_roots=[raw_root])[0]
+        if checked.state != "resolved":
+            raise ValueError(f"{checked.state}: {checked.reason} {checked.links or checked.unchecked}")
+        raw_path = checked.path
         doc = wc.parse_raw(raw_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, wc.CaptionError) as exc:
+    except (OSError, UnicodeDecodeError, ValueError, wc.CaptionError) as exc:
         raise Fail(f"動画の raw を読めない（{exc}）: {raw_path}")
     overlay = parse_page_args(args.page, wiki)
     label = wc.raw_label(raw_path, wiki)
     # 指摘は wiki 全体のものを返す（この raw に関わるかで絞らない）。結果と「raw にない語」だけをこの raw に絞る。
     try:
-        result = wc.check_wiki(wiki, overlay, only_raw=str(Path(os.path.abspath(raw_path))), unknown_for=set(overlay))
+        result = wc.check_wiki(wiki, overlay, only_raw=str(Path(os.path.abspath(raw_path))), unknown_for=set(overlay),
+                               raw_roots=[raw_root], wiki_root_given=wiki)
     except ValueError as exc:
         raise Fail(str(exc))
     raws = [r.as_dict() for r in result.raws]
@@ -632,6 +639,7 @@ def cmd_verify(args) -> int:
         "raw": label, "video_id": doc.video_id, "caption_kind": doc.caption_kind, "lines": doc.count,
         "read_only": not (os.stat(raw_path).st_mode & 0o222),
         "findings": findings, "result": raws[0] if raws else None, "unknown_words": result.unknown_words,
+        "raw_warnings": result.raw_warnings,
     }
     if not raws or not raws[0]["summaries"]:
         if not any(f["code"] == "no_summary" for f in obj["findings"]):

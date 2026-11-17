@@ -992,10 +992,11 @@ class CheckResult:
     findings: list
     raws: list
     unknown_words: dict
+    raw_warnings: list = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {"findings": [f.as_dict() for f in self.findings], "raws": [r.as_dict() for r in self.raws],
-                "unknown_words": self.unknown_words}
+                "unknown_words": self.unknown_words, "raw_warnings": self.raw_warnings}
 
 
 def _type(meta: dict) -> str:
@@ -1013,23 +1014,10 @@ def _refs(value) -> list[str]:
 
 
 def resolve_raw_path(ref: str, page_path: Path, wiki_root: Path) -> Path | None:
-    """`raw:` の値 1 つを、ファイルのパスに解決する（wiki_lint.missing_raw と同じ 3 つの基準と絶対パス）。"""
-    if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", ref) or ref.startswith(("http:", "https:", "file:")):
-        return None
-    if re.match(r"^[A-Za-z]:[\\/]", ref) or ref.startswith(("/", "\\", "~")):
-        try:
-            candidates = [Path(ref).expanduser()]
-        except RuntimeError:
-            return None
-    else:
-        candidates = [wiki_root / ref, wiki_root.parent / ref, page_path.parent / ref]
-    for c in candidates:
-        try:
-            if c.is_file():
-                return c
-        except (OSError, ValueError):
-            continue
-    return None
+    """単独の参照用の互換口。共通の raw 解決で 1 つに決まった通常のファイルだけを返す。"""
+    from wiki_pages import resolve_raw
+    result = resolve_raw({"type": "source", "raw": ref}, page_path, wiki_root)[0]
+    return result.path if result.state == "resolved" and result.path.is_file() else None
 
 
 def raw_key(path: Path) -> str:
@@ -1092,7 +1080,7 @@ def unknown_words(prose: list[str], raw: RawDoc, corrected: list[str]) -> list[s
 
 
 def check_pages(pages: list[PageIn], wiki_root: Path, only_raw: str | None = None,
-                unknown_for: set | None = None) -> CheckResult:
+                unknown_for: set | None = None, *, raw_roots=(), wiki_root_given=None) -> CheckResult:
     """wiki のページの集合を照らす（ADR-0027 の (1)〜(5)）。
 
     指摘は、いつも wiki 全体のものを返す。1 つの raw に関わる指摘だけに絞ると、「関わる」の決め方の漏れ（分類から
@@ -1133,6 +1121,37 @@ def check_pages(pages: list[PageIn], wiki_root: Path, only_raw: str | None = Non
                         raw_cache[key] = (None, f"動画の raw を読めない（{exc}）", text)
         return raw_cache[key]
 
+    # 拒否はすべて知らせる。ただし字幕の欠陥として止めるのは、動画と結び付く参照だけである。
+    # 訂正の根拠に使う他の source は、other_raw_texts と check_definition が依存する時点で検査する。
+    from wiki_pages import resolve_raw
+    paths_by_page = {}
+    raw_warnings = []
+    scans = {p.rel: scan_page(p.rel, p.text) for p in pages}
+    relevant = {}
+    selected_path = None
+    if only_raw:
+        selected_path = Path(os.path.abspath(only_raw if os.path.isabs(only_raw) else wiki_root.parent / only_raw))
+    for p in pages:
+        paths_by_page[p.rel] = []
+        is_video = bool(p.meta.get("video_id") or p.meta.get("caption_kind") or scans[p.rel].definitions)
+        relevant[p.rel] = is_video
+        for resolved in resolve_raw(p.meta, wiki_root / p.rel, wiki_root, wiki_root_given, raw_roots=raw_roots):
+            selected = selected_path is not None and any(Path(c) == selected_path for c in resolved.candidates)
+            relevant[p.rel] = relevant[p.rel] or selected
+            if resolved.state in ("link", "unknown", "ambiguous") or (resolved.state == "outside" and resolved.candidates):
+                raw_warnings.append({"source": p.rel, "raw": resolved.raw, "state": resolved.state,
+                                     "reason": resolved.reason, "candidates": resolved.candidates,
+                                     "links": resolved.links, "unchecked": resolved.unchecked})
+                if is_video or selected:
+                    findings.append(Finding(p.rel, 1, "unreadable_raw", f"{resolved.raw}: {resolved.reason}"))
+            elif resolved.state == "resolved" and resolved.path.is_file():
+                paths_by_page[p.rel].append(resolved.path)
+            if resolved.parents_unchecked:
+                raw_warnings.append({"source": p.rel, "raw": resolved.raw, "state": "parents_unchecked",
+                                     "candidates": resolved.parents_unchecked})
+            if resolved.state == "resolved" and resolved.version_unverified and not resolved.external:
+                raw_warnings.append({"source": p.rel, "raw": resolved.raw, "state": "version_unverified"})
+
     # 要約ページ（type が source で、raw が動画の raw のもの）を集める。
     summaries: dict = {}        # rel -> (raw の鍵, RawDoc)
     raw_docs: dict = {}         # 鍵 -> (RawDoc, raw の実体のファイル名の stem, label)
@@ -1140,16 +1159,16 @@ def check_pages(pages: list[PageIn], wiki_root: Path, only_raw: str | None = Non
         if _type(p.meta) != "source":
             continue
         videos = []
-        for ref in _refs(p.meta.get("raw")):
-            path = resolve_raw_path(ref, wiki_root / p.rel, wiki_root)
-            if path is None:
-                continue
+        for path in paths_by_page[p.rel]:
             doc, err, _text = load(path)
             key = raw_key(path)
             real = Path(os.path.realpath(path))
             label = raw_label(real, wiki_root)
             if err:
-                findings.append(Finding(p.rel, 1, "unreadable_raw", f"{label}: {err}"))
+                if relevant[p.rel]:
+                    findings.append(Finding(p.rel, 1, "unreadable_raw", f"{label}: {err}"))
+                else:
+                    raw_warnings.append({"source": p.rel, "raw": label, "state": "unknown", "reason": err})
                 continue
             if doc is None:
                 continue
@@ -1169,17 +1188,13 @@ def check_pages(pages: list[PageIn], wiki_root: Path, only_raw: str | None = Non
         for sp in by_slug.get(nfc(slug), []):
             if _type(sp.meta) != "source":
                 continue
-            for ref in _refs(sp.meta.get("raw")):
-                path = resolve_raw_path(ref, wiki_root / sp.rel, wiki_root)
-                if path is None:
-                    continue
+            for path in paths_by_page[sp.rel]:
                 _doc, err, text = load(path)
                 if err or text is None:
                     continue
                 texts.append(text)
         return texts
 
-    scans = {p.rel: scan_page(p.rel, p.text) for p in pages}
     for p in pages:
         for no, code, msg in scans[p.rel].errors:
             findings.append(Finding(p.rel, no, code, msg))
@@ -1345,7 +1360,7 @@ def check_pages(pages: list[PageIn], wiki_root: Path, only_raw: str | None = Non
 
     if only_key is not None:
         results = [r for r, k in zip(results, result_keys) if k == only_key]
-    return CheckResult(findings, results, unknown)
+    return CheckResult(findings, results, unknown, raw_warnings)
 
 
 def _prose_of(text: str) -> list[str]:
@@ -1542,13 +1557,13 @@ def load_pages(wiki_root: Path, overlay: dict | None = None) -> tuple[list[PageI
 
 
 def check_wiki(wiki_root: Path, overlay: dict | None = None, only_raw: str | None = None,
-               unknown_for: set | None = None) -> CheckResult:
+               unknown_for: set | None = None, *, raw_roots=(), wiki_root_given=None) -> CheckResult:
     """wiki のページ（overlay を重ねたもの）を照らす。読めないページは、only_raw によらず指摘に入れる
     （そのページがこの raw に関わるかを確かめられないため）。"""
     pages, unreadable, renamed = load_pages(wiki_root, overlay)
     # 「raw にない語」を探すページも、ディスクの綴りに直した名前で指す（実装のレビューの 8 回目）。
     if unknown_for:
         unknown_for = {renamed.get(r.replace("\\", "/"), nfc(r)) for r in unknown_for}
-    result = check_pages(pages, wiki_root, only_raw, unknown_for)
+    result = check_pages(pages, wiki_root, only_raw, unknown_for, raw_roots=raw_roots, wiki_root_given=wiki_root_given)
     result.findings = unreadable + result.findings
     return result
