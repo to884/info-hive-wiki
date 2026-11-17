@@ -131,9 +131,14 @@
       it.figure = document.createElement("figure");
       it.figure.className = "wiki-fig fui-Card";
       it.figure.setAttribute("data-fig", "mermaid");
-      it.img = document.createElement("img");
-      it.img.className = "fui-Image";
-      it.figure.appendChild(it.img);
+      var img = document.createElement("img");
+      img.className = "fui-Image";
+      // 画像として読めない SVG（XML として壊れたものなど）は、警告に替える
+      img.addEventListener("error", function () {
+        if (it.img === img && it.view === "image") showWarning(it);
+      });
+      it.img = img;
+      it.figure.appendChild(img);
       it.details = document.createElement("details");
       it.details.className = "fui-AccordionItem wiki-fig-source";
       var summary = document.createElement("summary");
