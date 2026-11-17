@@ -208,14 +208,14 @@ Web ページから取り込んだソースは、`raw/` に置いた訳文から
 | キー | 内容 |
 | --- | --- |
 | `title` | 取り込みの題名（ユーザーと決めたもの） |
-| `source_kind` | `"claude-code-session"` |
+| `source_kind` | Claude Code は `"claude-code-session"`、Codex は `"codex-session"` |
 | `session_id` | セッションの ID |
 | `cwd`、`git_branch` | セッションの作業ディレクトリとブランチ（伏せ字をかけたもの） |
 | `started_at`、`ended_at` | 範囲の最初と最後の記録の時刻。`utc_offset` の時差つきの ISO 8601 |
-| `claude_code_versions` | 範囲に現れた Claude Code の版 |
+| `claude_code_versions` または `codex_versions` | 記録元のホストの版。ホストに対応するキーだけを書く |
 | `source_sha256`、`source_bytes` | 記録の範囲のバイト列の SHA-256 と大きさ |
-| `source_sha256_of` | `"jsonl-range"` |
-| `cut_before` | 範囲の終わりの記録の `uuid`（`--before`）。なければ `""` |
+| `source_sha256_of` | Claude Code は `"jsonl-range"`、Codex は `"codex-thread-range-v1"`（選んだ範囲の安定した情報を決定的に直列化したもの） |
+| `cut_before` | 範囲の終わりの記録の ID（`--before`）。Claude Code は `uuid`、Codex は item ID または turn ID。なければ `""` |
 | `extracted_by` | 抜き出したスクリプトと版 |
 | `tools`、`keep_reminders`、`utc_offset` | 抜き出しの引数 |
 | `turns` | ターンの数 |

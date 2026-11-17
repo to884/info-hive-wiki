@@ -167,9 +167,11 @@ python "<skill-root>/scripts/wiki_fetch.py" "<URL>" --wiki wiki --raw-root raw -
 - 取得できなかった画像（`（未取得）` の付いた行）は、見られないので補足を書かない。
 - svg の画像は `raw/assets/` に保存するだけで、`wiki/` に写さない。信頼しない入力として扱う。
 
-### Claude Code のセッション
+### セッションの会話
 
-`/wiki:ingest session`（実行中のセッション）、`session:<ID>`、`session:<パス>`、`<パス>.jsonl` は、Claude Code のセッションの記録（JSONL）を原本にする取り込みである。手順は `commands/ingest.md` の S1〜S10 にあり、スクリプトとモデルが次のように分担する（info-hive-dev の ADR-0020）。
+Codex の対象の決め方、範囲の固定、読み取り API の対応範囲は `codex.md` の「会話履歴の取り込み」にある。取り込みを依頼した発言より後を含めず、未加工の履歴を書き出さない。
+
+`/wiki:ingest session` または Codex の `$wiki:info-hive ingest session`（実行中の会話）、`session:<ID>`、`session:<パス>`、`codex:<ID>`、`<パス>.jsonl` は、会話の記録を原本にする取り込みである。Claude Code は JSONL、Codex は自身の読み取り API を使い、古い保存方式とデータベースの履歴の両方を読む。手順は `commands/ingest.md` の S1〜S10 にあり、スクリプトとモデルが次のように分担する（info-hive-dev の ADR-0020）。
 
 | 担当 | 受け持ち |
 | --- | --- |
@@ -179,7 +181,7 @@ python "<skill-root>/scripts/wiki_fetch.py" "<URL>" --wiki wiki --raw-root raw -
 
 抜き出すのは、人の発言（`origin.kind` が `human` のもの）、アシスタントの本文、ツールの呼び出しの 1 行の要約（`--tools none` で残さない）だけである。モデルの思考、ツールの結果、作業の通知、ほかのセッションからの伝言、スキルの本文などの差し込みは、中身を除き、返答の宛先になるときだけ「印」のターンにする。メールアドレス、ホームのディレクトリの名前、既知の形の秘密の値は自動で伏せる。人の発言の先頭の `<system-reminder>` は既定で除く（`--keep-reminders` で残す）。サブエージェントの記録は取り込まず、数だけを報告する。`claude -p` のセッションは人の発言が記録されないので、取り込めない。
 
-raw（`raw/<スラッグ>.md`）は、frontmatter（`page-conventions.md` の「セッションの raw の frontmatter」）と、ターンの並びからなる。各ターンは `## T<n> ユーザー（<時刻>）`、`## T<n> Claude（<モデル>、<時刻>、T<m> への返答）`、`## T<n> 印（<時刻>）` の見出しと、フェンス（`text`）で囲んだ本文か、印の文である。raw は読み取り専用で、書き換えない。範囲や伏せ字を変えたら、別版のスラッグで取り込み直す。
+raw（`raw/<スラッグ>.md`）は、frontmatter（`page-conventions.md` の「セッションの raw の frontmatter」）と、ターンの並びからなる。各ターンは `## T<n> ユーザー（<時刻>）`、`## T<n> Claude（<モデル>、<時刻>、T<m> への返答）`（Codex の会話では `Claude` が `Codex`）、`## T<n> 印（<時刻>）` の見出しと、フェンス（`text`）で囲んだ本文か、印の文である。raw は読み取り専用で、書き換えない。範囲や伏せ字を変えたら、別版のスラッグで取り込み直す。
 
 確認の前の会話の文は、ディスクに書かない。`show` の出力を写したファイル、伏せる候補の一覧のファイルを作らない。`show`、`decide mark --text`、`scan` に渡した文は、いま動いているセッションの記録には残る。
 

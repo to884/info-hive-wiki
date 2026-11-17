@@ -9,7 +9,7 @@
 | エージェント | `--agent` の値 | 呼び出し方 | スクリプトの実行 |
 | --- | --- | --- | :---: |
 | Claude Code | `claude-code` | `/wiki:*` スラッシュコマンド（同梱）または自然言語 | ✅ |
-| Codex (OpenAI) | `codex` | `/skills` または `$info-hive` / 自然言語 | ✅ |
+| Codex (OpenAI) | `codex`（スキルだけの場合） | プラグインは `$wiki:info-hive`、スキルだけなら `$info-hive` / 自然言語 | ✅ |
 | Cursor | `cursor` | `/info-hive` または自然言語 | ✅ |
 | Gemini CLI | `gemini-cli` | `/skills` の管理コマンド / 自然言語 | ✅ |
 | OpenCode | `opencode` | 自然言語（エージェントがネイティブの `skill` ツールを呼び出す） | ✅ |
@@ -31,7 +31,25 @@ OpenCode は `.claude/skills/` と `~/.claude/skills/` も読むので、Claude 
 /plugin install wiki@info-hive
 ```
 
-**Codex、Cursor、Gemini CLI、OpenCode、OpenClaw、Pi** では、`skills` CLI でスキルをインストールする。対応表の `--agent` の値に置き換えて使う。
+**Codex** には、スキルと MCP をまとめたプラグインを導入できる（Codex CLI 0.166.0 で確認）。
+
+```bash
+codex plugin marketplace add to884/info-hive-marketplace
+codex plugin add wiki@info-hive
+```
+
+導入後は新しいチャットで `$wiki:info-hive init`、`$wiki:info-hive ingest <ソース>`、`$wiki:info-hive query <質問>` の形で使う。`$wiki:info-hive help` で 11 種類の操作を表示し、`$wiki:info-hive help query` で個別のヘルプを表示する。MCP は自動登録される。初回の依存とモデルの取得には数分かかることがある。社内ネットワークの証明書の設定は [MCP サーバー](../skills/info-hive/references/mcp-server.md)を参照。
+
+Claude Code の `/wiki:*` は Codex のスラッシュコマンドにはならない。Web の raw は Codex 自身が作り、Claude CLI は不要である。`$wiki:info-hive ingest session` で実行中の Codex の会話を、`$wiki:info-hive ingest session:<ID>` で指定した会話を取り込める。従来の JSONL とデータベースの履歴の両方を、Codex の読み取り API で取得する。取り込みを依頼したターンを除外し、伏せ字と保存前の確認を行う。rag の Codex 対応は含まない。
+
+開発用の `info-hive-dev` のチェックアウトを試すときは、親リポジトリのルートで次を実行する。ローカルのカタログは、チェックアウトした `info-hive-wiki` を指す。
+
+```bash
+codex plugin marketplace add .
+codex plugin add wiki@info-hive-dev
+```
+
+**Codex のスキルだけを使う場合、および Cursor、Gemini CLI、OpenCode、OpenClaw、Pi** では、`skills` CLI でスキルをインストールする。対応表の `--agent` の値に置き換えて使う。スキルだけの場合は、MCP の自動登録とプラグインの `commands/` は含まれない。同梱の CLI とリファレンスを使い、Codex の呼び出し名は `$info-hive` になる。
 
 ```bash
 npx skills add to884/info-hive-wiki -a codex -g
