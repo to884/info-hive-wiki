@@ -919,6 +919,7 @@ def names_of(text: str, title_case_ok: bool = True) -> list[str]:
 
 
 LATIN_WORD_RE = re.compile(r"[A-Za-z\u00c0-\u024f]+(?:[’'][A-Za-z\u00c0-\u024f]+)?")
+UNICODE_WORD_RE = re.compile(r"[^\W\d_]+(?:[’'][^\W\d_]+)?")
 KANA_RE = re.compile(r"[\u3040-\u30ff]")
 HAN_RE = re.compile(r"[\u3400-\u9fff\uf900-\ufaff]")
 GRAMMAR_WORDS = {word.casefold() for word in FUNCTION_WORDS} | {"how", "what", "which", "because", "than"}
@@ -945,7 +946,9 @@ def plain_latin_prose(text: str) -> bool:
 
 def prose_units(text: str) -> list[str]:
     """段落の途中を残す場合も見る。小数点では分けず、文末と節の区切りで分ける。"""
-    return [s.strip() for s in re.split(r"(?<![0-9])[.!?。！？;；]+|[.!?。！？;；]+(?![0-9])", text) if s.strip()]
+    parts = re.split(r"((?<![0-9])[.!?。！？;；]+|[.!?。！？;；]+(?![0-9]))", text)
+    return [(parts[i] + (parts[i + 1] if i + 1 < len(parts) else "")).strip()
+            for i in range(0, len(parts), 2) if parts[i].strip()]
 
 
 def translation_block(source: str, output: str, node_type: str) -> tuple[bool, str | None]:
@@ -964,19 +967,31 @@ def translation_block(source: str, output: str, node_type: str) -> tuple[bool, s
         return bool(content) and all(w[:1].isupper() for w in content)
 
     named_phrase = possible_name(out) and not re.search(r"[!?]|\.(?:\s|$)", out)
-    # 短い説明を含むリストや、単語を大文字で始めた文章も、丸残しを許さない。
-    if (src_norm and src_norm == out_norm and plain_latin_prose(src) and not named_phrase
-            or plain_latin_prose(out) and not KANA_RE.search(out) and not HAN_RE.search(out) and not named_phrase):
-        return True, "untranslated"
-    # 一段落の一部だけを訳したときは、残った外国語の節を個別に調べる。
+    uncertain = False
+    # 出力全体が外国語の文なら止める。句や値だけでは、表示名・識別子との区別は付かない。
+    if plain_latin_prose(out) and not KANA_RE.search(out) and not HAN_RE.search(out) and not named_phrase:
+        if len(UNICODE_WORD_RE.findall(out)) >= 4 and re.search(r"[.!?;]\s*$", out):
+            return True, "untranslated"
+        uncertain = True
+    # 日本語の中の外国語の句は、原語の併記や表示文字列でもある。文の残存とは別に確認する。
     for run in re.split(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]+", out):
         if (len(LATIN_WORD_RE.findall(run)) >= 4 and len(re.findall(r"[A-Za-z]", run)) >= 20
                 and plain_latin_prose(run) and not (named_phrase and possible_name(run))):
-            return True, "untranslated"
-    uncertain = False
-    # 漢字を日本語の証拠にしない。中国語の文の丸残しと、かなを少しだけ入れた近似コピーを見る。
+            uncertain = True
     out_units = prose_units(out)
     source_units = prose_units(src)
+    # ラテン文字以外も、原文の文が残っていれば調べる。名前らしい句は確認の警告にする。
+    for unit in source_units:
+        words = UNICODE_WORD_RE.findall(unit)
+        if (KANA_RE.search(unit) or HAN_RE.search(unit) or len(words) < 4
+                or sum(c.isalpha() for c in unit) < 20):
+            continue
+        if normalized_prose(unit) in out_norm:
+            if not re.search(r"[.!?。！？;；]\s*$", unit):
+                uncertain = True
+            else:
+                return True, "untranslated"
+    # 漢字を日本語の証拠にしない。中国語の文の丸残しと、かなを少しだけ入れた近似コピーを見る。
     for unit in source_units:
         han = len(HAN_RE.findall(unit))
         if han < 8 or KANA_RE.search(unit):
@@ -993,8 +1008,9 @@ def translation_block(source: str, output: str, node_type: str) -> tuple[bool, s
                 return True, "untranslated"
     # 製品名・論文名か、訳し忘れた短い句かは、見出しの大文字や文字数だけでは確定しない。
     if src_norm and src_norm == out_norm and not KANA_RE.search(src):
-        words = LATIN_WORD_RE.findall(src)
-        identifier = len(words) <= 1 or (len(words) == 2 and all(w[:1].isupper() for w in words))
+        words = UNICODE_WORD_RE.findall(src)
+        identifier = ((len(words) <= 1 and sum(c.isalpha() for c in src) < 20)
+                      or (len(words) == 2 and all(w[:1].isupper() for w in words)))
         if not identifier and (words or HAN_RE.search(src)):
             uncertain = True
     return True, "translation_uncertain" if uncertain else None
