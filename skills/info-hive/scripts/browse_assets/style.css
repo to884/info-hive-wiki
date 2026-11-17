@@ -287,6 +287,13 @@ pre code { background: none; padding: 0; font-size: var(--fontSizeBase300); over
 /* Mermaid の図のコード（Accordion）と、描けなかったときの警告（MessageBar）。figures.js が作る */
 #_body .wiki-fig-source { margin-block-end: var(--spacingVerticalL); }
 #_body .wiki-fig-error { margin-block: var(--spacingVerticalS); }
+/* 概要（ADR-0033）。色と部品は同梱の Fluent 2 を使う。 */
+#_body .wiki-overview { margin-block: var(--spacingVerticalL); }
+#_body .wiki-overview > summary { flex-wrap: wrap; gap: var(--spacingHorizontalM); }
+#_body .wiki-overview-content { padding-block: var(--spacingVerticalM); }
+#_body .wiki-overview-status { font-size: var(--fontSizeBase200); color: var(--colorNeutralForeground2); }
+#_body .wiki-overview-meta { color: var(--colorNeutralForeground2); font-size: var(--fontSizeBase200); }
+#_body .wiki-overview-notice { margin-block: var(--spacingVerticalM); }
 /* Mermaid を描く見えない枠。幅と高さは属性で決め、画面の外に置く（display: none では文字の幅を測れない） */
 .fig-frame { position: absolute; inset-block-start: 0; inset-inline-start: -200vw; border: 0; }
 /* 本文の表は、今と同じく display: block で横に送る */

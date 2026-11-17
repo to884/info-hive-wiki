@@ -18,4 +18,6 @@ argument-description: "`--suggest-pages` を付けると、独立したページ
 6. 承認された修正を適用したら、変わったインデックスの項目を更新し、lint の結果をまとめた行を `log.md` に `## [YYYY-MM-DD] lint | 構造の修正 N 件、内容の修正 M 件、不足の提案 K 件` の形で1行追記する。
 7. lint のレポートが長すぎて、ユーザーが無理なく仕分けられない場合は、lint の頻度が合っていない（もっと頻繁にかけるべき）か、スキーマを見直す必要があるという兆候である。そのことをユーザーに指摘する。
 
+`overview_stale` と `overview_problems` も構造の所見として示す。古い概要は `/wiki:overview <ページ> --refresh`、元ページのある壊れた概要は作り直しか `--remove <ページ>` を案内する。元ページのない概要は、`orphan_id` を確認し、`references/lint-workflow.md` の手順で `remove --orphan` を使う。読み取りの問題と `null`（検査していない）を問題なしと扱わず、黙って修正しない。
+
 ユーザーが任意の判定レイヤーを有効にしている場合は、`wiki_graph_lint.py` に `--decide` を付ける。`wiki_decide.py contradictions` も提案する。詳しくは `skills/info-hive/references/decision-models.md` を参照。

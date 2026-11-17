@@ -43,7 +43,8 @@ SERVER_FILES = ("wiki_mcp_common.py", "wiki_mcp_server.py", "wiki_index.py", "wi
                 "wiki_graph_lint.py", "wiki_graph_extract.py",
                 # ADR-0029 の実装で足した。サーバーが関数の中で遅れて読み込むものも入れる（MCP の lint が wiki_captions を、
                 # それが閲覧の中核を、検索が判定のレイヤーを読み込む）。足りているかは tests/wiki/test_wiki_links.py が確かめる
-                "wiki_links.py", "wiki_decide.py", "wiki_captions.py", "wiki_browse_core.py", "wiki_browse_fs.py")
+                "wiki_overview.py", "wiki_links.py", "wiki_decide.py", "wiki_captions.py", "wiki_browse_core.py", "wiki_browse_fs.py",
+                "wiki_fetch.py", "wiki_rawcheck.py", "wiki_youtube_url.py")
 COLLECTION_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 

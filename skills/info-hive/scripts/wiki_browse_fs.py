@@ -26,6 +26,7 @@ import sys
 import time
 
 import wiki_pages
+import wiki_overview
 
 WORK_MARKER = ".browse-work"
 SERVER_MARKER = ".browse-server"
@@ -1484,7 +1485,22 @@ def walk_inputs(root):
     found = [("asset", f.rel, f.size, f.mtime_ns) for f in assets.files]
     found += [("asset", rel, None, None) for rel in assets.unknown if rel != wiki_pages.ASSETS_DIR]
     entries += sorted(found, key=lambda e: wiki_pages._sort_key(e[1]))
+    overviews = wiki_overview.walk_sidecars(root)
+    if overviews.directory_state in ("unreadable", "unsafe"):
+        entries.append(("overview_dir", "assets/overview", None, overviews.directory_state))
+    entries += [("overview", item.disk_rel, item.size, f"unsafe:{item.mtime_ns}" if item.unsafe else item.mtime_ns)
+                for item in overviews.files]
+    entries += [("overview_entry", item.disk_rel, item.size, item.mtime_ns) for item in overviews.unexpected]
     return entries, None
+
+
+def read_overview(root, rel):
+    """概要の読み取りも、生成側と同じ道の検査と上限を通す。"""
+    name = rel.rsplit("/", 1)[-1]
+    match = wiki_overview.SIDECAR.fullmatch(name)
+    if match is None or rel != f"assets/overview/{name}":
+        return wiki_overview.Sidecar("unreadable", reason="invalid_name")
+    return wiki_overview.read_sidecar(root, match[1])
 
 
 def read_input(root, rel) -> bytes:

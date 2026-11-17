@@ -95,6 +95,12 @@ SCHEMA_SECTION_MARKERS = [
         "anchor": "- Semantic backend: local FastEmbed + sqlite-vec",
         "label": "ローカルの埋め込み検索（FastEmbed と sqlite-vec）",
     },
+    {
+        "marker": "## Page overviews",
+        "version": "0.32.0",
+        "anchor": "## Page overviews",
+        "label": "ページの概要（検索とグラフに含めないサイドカー）",
+    },
 ]
 
 

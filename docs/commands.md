@@ -2,7 +2,7 @@
 
 # コマンド
 
-Claude Code のプラグインには、11個の `/wiki:*` スラッシュコマンドが付属する。ほかのエージェントでは、同じ依頼を自然言語で伝える。どちらの方法でも、裏で同じスキルが呼び出される。
+Claude Code のプラグインには、12個の `/wiki:*` スラッシュコマンドが付属する。ほかのエージェントでは、同じ依頼を自然言語で伝える。どちらの方法でも、裏で同じスキルが呼び出される。
 
 `/wiki:init` と `/wiki:help` 以外のコマンドは、初期化された wiki（ルートに `SCHEMA.md` がある）だけを扱う。wiki の場所に `SCHEMA.md` がなければ（まだ初期化していないか、GitHub の wiki の写しのような、ほかの用途の `wiki/` のとき）、何も書かずに止まり、`/wiki:init` を案内する。同梱のスクリプトと MCP のツールも同じ判定で止まる。
 
@@ -15,6 +15,7 @@ Claude Code のプラグインには、11個の `/wiki:*` スラッシュコマ�
 | [`/wiki:stats`](#wikistats) | 規模、リンク密度と、スケーリングのどの閾値に達しているかを表示する。 |
 | [`/wiki:graph <action>`](#wikigraph-action) | 型付きグラフ層をコンパイル、lint、またはクエリする。 |
 | [`/wiki:browse [slug]`](#wikibrowse-slug) | wiki をブラウザで閲覧する。 |
+| [`/wiki:overview <page>`](#wikioverview-page) | 指定したページから図を中心にした概要を作り、別のサイドカーに保存する。 |
 | [`/wiki:learn <task artifacts>`](#wikilearn-task-artifacts) | 検証済みの経験を記録し、再利用できるパターンにまとめる。 |
 | [`/wiki:evolve <goal or action>`](#wikievolve-goal-or-action) | スキルの改善案をステージング、評価、確認、適用、またはロールバックする。 |
 | [`/wiki:upgrade`](#wikiupgrade) | 既存の wiki を、現在のプラグインのバージョンにアップグレードする。 |
@@ -137,6 +138,22 @@ wiki を、Fluent 2 のデザインの HTML で閲覧する。左の木（索引
 slug を付けると、`[[slug]]` と同じ規則でページを探して開く。リンクの判定は lint と同じで、未解決リンクの一覧は lint の「リンク切れの wikilink」と一致する。ページを開いたときに Markdown を HTML に変換するので、ページを編集して再読み込みすれば、新しい内容が出る。URL には起動ごとのトークンが入り、ほかのページや、同じ PC のほかの利用者からは開けない。
 
 持ち出せる静的の HTML は、`wiki_browse.py build <WIKI_ROOT> --out <書き出し先>` で書き出せる。書き出し先は wiki の外の空のディレクトリにする。
+
+## `/wiki:overview <page>`
+
+指定したページだけから、図を中心にした初心者向けの概要を作る。元のページの本文は変えず、本文と SVG をまとめたサイドカーを `wiki/assets/overview/` に保存する。取り込みのたびには作らない。
+
+```text
+/wiki:overview エージェントのメモリの階層
+/wiki:overview エージェントのメモリの階層 --refresh
+/wiki:overview --status
+/wiki:overview --remove エージェントのメモリの階層
+```
+
+同じページの新しい概要があれば、そのまま使う。元のページが変わったら `--refresh` で作り直す。`--status` は新しさ、破損、元ページの不在を一覧にし、`--remove` は指定したページの概要だけを削除する。
+
+概要はページ数、検索、グラフ、統計に含めず、`log.md` に記録しない。電源断後の存続と完全性は保証せず、欠落や破損があれば元ページから再生成する。
+`/wiki:browse` は概要を最初の h1 の直後に表示し、h1 がなければ本文の先頭に置く。元ページが変わった概要は警告付きで折りたたむ。SVG は画像として表示し、Mermaid はサーバーで図、静的版でコードを表示する。閲覧時に概要を作り直すことはない。
 
 ## `/wiki:upgrade`
 

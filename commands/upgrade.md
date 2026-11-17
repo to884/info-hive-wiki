@@ -17,6 +17,7 @@ argument-description: "`--user` を付けるとユーザースコープの wiki 
    - そのセクションの内容をユーザーに示し、`str_replace` でユーザーの SCHEMA.md に追記することを提案する。セクションごとに承認を待つ。SCHEMA.md はユーザーと一緒に改訂してきたものなので、黙って変更してはならない。
    - ユーザーの SCHEMA.md が、追記すると衝突するような形でカスタマイズされている場合は、衝突をユーザーに示し、どう解決するか（見送る、末尾に追記する、手作業でマージする）を聞く。
 4. すべてのセクションをマージするか見送ったら、次の点を伝える。
+   - `/wiki:overview` は求めたページだけに概要を作り、`assets/overview/` のサイドカーを git で管理する。`## Page overviews` の規約を提案し、取り込みのたびには生成しない。作業用の `.wiki-cache/` は無視する。古い wiki にひな形の `.gitignore` がない場合は、`.wiki-cache/` を無視する設定の追加を提案する。
    - グラフ層はオプトイン方式である。`graph:` の frontmatter がない既存のページもそのまま有効で、何も壊れない。
    - ページでグラフ層を使い始めるときは、明示的なソースが裏づけている場合に限って、型付きの `graph.relationships[]` を追加する。詳しくは `skills/info-hive/references/graph-workflow.md` を参照。
    - グラフの lint と抽出は、PyYAML のバージョンを固定したメタデータを持ち、`uv run --script` で実行される。手作業での `pip install` は不要である。
