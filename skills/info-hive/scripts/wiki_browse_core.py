@@ -1089,7 +1089,7 @@ class Core:
                            "links": links, "fm_problems": problems})
         try:
             _nodes, page_node_ids, _aliases = wiki_graph_extract.build_nodes(gpages, ontology, diag)
-            edges = wiki_graph_extract.build_edges(gpages, page_node_ids, diag)
+            edges = wiki_graph_extract.build_edges(gpages, page_node_ids, diag, link_warnings=self.link_warnings)
         except Exception:  # noqa: BLE001  オントロジーの中の形が誤っている（node_types が配列など）
             self.relations_state = "error"
             self.diagnostics.append({"kind": "relations_error", "reason": "invalid"})

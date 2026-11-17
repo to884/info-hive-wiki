@@ -599,29 +599,62 @@ def _article_rel(path, wiki_root, *, directory: bool = False) -> "tuple[str, str
         rel = relative(given, root)
         if rel is not None:
             return root, rel
-    parts = Path(given).parts
-    for size in range(1, len(parts) + (1 if directory else 0)):
-        try:
-            resolved = os.path.realpath(os.path.join(*parts[:size]))
-        except OSError:
-            continue
+    # 外の別名は、リンクの行き先を 1 つずつ開く。realpath で連鎖をまとめて
+    # 解くと、wiki の中から外へ出るリンクまで解き、wiki の所属を失ってしまう。
+    pending = list(Path(given).parts)
+    current = Path(pending.pop(0))
+    followed = 0
+
+    def found(root):
+        if ".." in pending:
+            raise ValueError("リンクの行き先に wiki 内の .. があるので、所属を決められない")
+        return root, "/".join(pending)
+
+    while True:
         for root in roots:
-            rel = relative(resolved, root)
-            if rel is not None:
-                return root, "/".join(([rel] if rel else []) + list(parts[size:]))
-            # 大小文字を区別しない POSIX の根も、綴りではなく実体で認識する。
-            # 祖先を上から調べ、根に届いたところで止めるので、その下のリンクは解決しない。
-            # 外の別名が根の下のディレクトリを指す場合も、その解決済みのパスの
-            # 祖先から根を探す。根の綴りや NFC/NFD の違いを、所属の違いにしない。
-            resolved_parts = Path(resolved).parts
-            for prefix_size in range(1, len(resolved_parts) + 1):
-                try:
-                    same_root = os.path.samefile(os.path.join(*resolved_parts[:prefix_size]), root)
-                except OSError:
-                    same_root = False
-                if same_root:
-                    return root, "/".join(list(resolved_parts[prefix_size:]) + list(parts[size:]))
-    return None
+            if relative(str(current), root) == "":
+                return found(root)
+            # current は、起点か、リンクを展開し終えた通常の祖先である。
+            try:
+                same_root = os.path.samefile(current, root)
+            except OSError:
+                same_root = False
+            if same_root:
+                return found(root)
+        if not pending or (not directory and len(pending) == 1):
+            return None
+        name = pending.pop(0)
+        if name == ".":
+            continue
+        if name == "..":
+            current = current.parent
+            continue
+        current = current / name
+        # 明示された根そのもののリンクは許す。根より下には進まない。
+        for root in roots:
+            if relative(str(current), root) == "":
+                return found(root)
+        state, st = _stat_entry(os.fspath(current))
+        if state == "absent":
+            return None
+        if state == "denied":
+            raise ValueError(f"パスの所属を調べられない: {current}")
+        if link_kind(st, nlink_known=False) is not None:
+            followed += 1
+            if followed > 64:
+                raise ValueError(f"リンクが循環しているか、多すぎるので所属を決められない: {path}")
+            try:
+                target = Path(os.readlink(current))
+            except OSError as exc:
+                raise ValueError(f"リンクの行き先を調べられない: {current}") from exc
+            if target.is_absolute():
+                target_parts = list(target.parts)
+                current = Path(target_parts.pop(0))
+            else:
+                target_parts = list(target.parts)
+                current = current.parent
+            pending = target_parts + pending
+            continue
 
 
 def source_wiki_root(path, wiki_root=None):

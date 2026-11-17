@@ -531,6 +531,11 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
     # 解決用のインデックス。パスを付けたリンクには wiki からの完全な相対パス（.md なし）を、
     # パスのないリンクにはステムだけを使う。
     by_slug = all_slugs
+    def resolve_available(link):
+        if refused_link(link, findings["links"]) is not None:
+            return None
+        return resolve_link(link, by_path, by_slug)
+
     by_path = {}
     for p in pages:
         rel = p["rel_path"].replace("\\", "/")
@@ -540,7 +545,7 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
 
     for p in pages:
         for link in p["links"]:
-            resolved = resolve_link(link, by_path, by_slug)
+            resolved = resolve_available(link)
             if resolved:
                 inbound[resolved].add(p["slug"])
 
@@ -558,7 +563,7 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
     # 索引の見出しとページの type の食い違い。リンク切れの項目と type のないページは見ない
     # （分割した索引の index.md は indexes/ のファイルを指し、type の欠落は missing_frontmatter で挙がる）。
     for entry in index_entries or []:
-        resolved = resolve_link(entry["link"], by_path, by_slug)
+        resolved = resolve_available(entry["link"])
         if resolved is None:
             continue
         types = types_of(resolved)
@@ -582,7 +587,7 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
 
         # リンク切れ。リンクなので読まなかったページを指すものは、links で挙げるので、ここでは数えない
         for link in p["links"]:
-            if resolve_link(link, by_path, by_slug) is None and refused_link(link, findings["links"]) is None:
+            if refused_link(link, findings["links"]) is None and resolve_available(link) is None:
                 findings["broken_links"].append({
                     "from": p["slug"],
                     "from_path": p["rel_path"],
