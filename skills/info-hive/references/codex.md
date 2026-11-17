@@ -28,7 +28,7 @@ Codex のプラグインは `.codex-plugin/plugin.json` からスキルと MCP �
 
 - MCP のツール名は接続に表示された名前を使う。`wiki` には対象の wiki の絶対パスを渡す。結果が 0 件でも同じ検索を CLI でやり直さない。接続できない場合の CLI への戻り方は `SKILL.md` と共通の手順に従う。
 - Read / Write / Edit / `str_replace` の指定は、Codex の読み取りと差分編集で行う。既存のページ全体を書き直さない。承認を得る指定や原本を保つ規則も同じである。
-- Web の raw は `references/web-raw.md` の W1〜W8 を自分で行う。翻訳が必要なら日本語の raw を作り、W8 の JSON の `completed: true` を確認してから後段へ進む。原文の保存と日本語要約で代替せず、進められない場合は理由と未完了の状態を伝える。Claude CLI や Sonnet のエージェントを呼ばない。翻訳者と補足には、自分に示された実際のモデル名を書く。分からなければ推測しない。
+- Web の raw は `references/web-raw.md` の W1〜W8 を自分で行う。翻訳が必要なら日本語の raw を作り、W8 の JSON の `completed: true` と `translation.pending_reviews: 0` を確認してから後段へ進む。原文の保存と日本語要約で代替せず、進められない場合は理由と未完了の状態を伝える。Claude CLI や Sonnet のエージェントを呼ばない。翻訳者と補足には、自分に示された実際のモデル名を書く。分からなければ推測しない。
 - `ingest session` は、実行中の Codex の会話を自動で取り込む。対象の ID と範囲は下の「会話履歴の取り込み」のとおりに決める。利用者が明示した Claude Code の JSONL も、既存の確認と伏せ字の手順で扱える。
 - メモリとの連携先は、プロジェクトなら `AGENTS.md`、ユーザー共通なら Codex のホームの `AGENTS.md`（既定は `~/.codex/AGENTS.md`）である。wiki の保存先と、プラグインの導入先は別である。
 - `browse` は Codex のデスクトップアプリでブラウザのペインが使える場合は `--no-open` で起動して URL を開く。CLI では既定のブラウザを使う。終了するときは `browse --stop` を使い、ホストの終了に伴う停止だけを当てにしない。
