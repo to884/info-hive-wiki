@@ -7,6 +7,9 @@
 | `style.css` | 閲覧の画面の独自の CSS |
 | `app.js` | ナビゲーションを組み立て、データの世代を確かめるスクリプト |
 | `fluent2.css` | Fluent 2 の Web 版のデザインを、React を使わない CSS で再現したもの（非公式）。下の「同梱した Fluent 2 の CSS」を参照 |
+| `figures.js` | 本文の Mermaid のフェンスを図として描くスクリプト（親の側）。サーバーの方式でだけ動く（ADR-0030） |
+| `mermaid-frame.html`、`mermaid-frame.js` | Mermaid を動かす sandbox の枠の文書と、その中のスクリプト。サーバーがトークンのない `/_frame/<版>/` から配り、静的の書き出しには入れない |
+| `mermaid.tiny.js` | Mermaid の束。下の「同梱した Mermaid」を参照 |
 | `licenses/` | 同梱したファイルのライセンスの文書。閲覧の出力には含めない |
 
 ## 同梱した Fluent 2 の CSS
@@ -33,3 +36,26 @@
 2. スキルの `assets/fluent2.css` を、このディレクトリの `fluent2.css` に写す。`LICENSE` と `THIRD-PARTY-NOTICES.txt` も、`licenses/` の同じ名前のファイルに写す。
 3. 上の表の基準の版、大きさ、SHA-256、写した日を書き換える。
 4. 開発リポジトリの閲覧の試験（`tests/wiki/test_browse*.py` と `tests/wiki/browse/`）を流し、明るい配色と暗い配色の画面を確かめる。
+
+## 同梱した Mermaid
+
+`mermaid.tiny.js` は、npm の `@mermaid-js/tiny` 12.3.0 の `dist/mermaid.tiny.js` を、中身を書き換えずに写したものである。Mermaid の全部入りの束（`mermaid.min.js`）は、elkjs（EPL-2.0 OR GPL-3.0-or-later）を含むので使わない。tiny は、マインドマップ、アーキテクチャ図、KaTeX の数式、`layout: elk` を含まず、それらの図は描けずにコードのまま出る。
+
+| 項目 | 値 |
+| --- | --- |
+| 写した元 | `https://registry.npmjs.org/@mermaid-js/tiny/-/tiny-12.3.0.tgz` の `package/dist/mermaid.tiny.js`（tarball の integrity は `sha512-90BO2kQvmQWj9YjBX2IsLHCw61rN69dPTn5wFfDu+b9aT7qtzfzTA3wpKWeaRAKK85refSo9How5EOeY39DWfA==`。レジストリの公表値と一致した） |
+| 大きさ | 2,852,578 バイト |
+| SHA-256 | `c41f5236091b83f524c4940f97a16b2b14a76f21ff84aea4fd6b66421d8a2a9a` |
+| 枠の版（`FRAME_VERSION`） | `mermaid-12.3.0-1` |
+| 写した日 | 2026年11月17日 |
+| ライセンス | MIT（[licenses/mermaid.LICENSE](licenses/mermaid.LICENSE)）。束に含まれる依存の表示は [licenses/mermaid.THIRD-PARTY-NOTICES.txt](licenses/mermaid.THIRD-PARTY-NOTICES.txt) にある。Mermaid の MIT の表示は、閲覧の出力に必ず入る `mermaid-frame.js` の先頭のコメントにもある |
+
+- `.gitattributes` で、`mermaid.tiny.js` を `-text` にしている。改行の変換を受けず、上の SHA-256 のまま持つ。
+- 枠の 3 つのファイル（`mermaid-frame.html`、`mermaid-frame.js`、`mermaid.tiny.js`）は、サーバーが `/_frame/<枠の版>/` から、キャッシュを許して配る。どれかを変えたら、枠の版を上げる。枠の版は、`wiki_browse_core.py` の `FRAME_VERSION`、`figures.js` の `FRAME_VERSION`、この表の 3 か所にあり、試験が一致を確かめる。
+
+### Mermaid を写し直すとき
+
+1. `npm pack @mermaid-js/tiny@<版>` で tarball を取り、integrity をレジストリの公表値と照らす。全部入りの束に替えるときは、束の中の依存のライセンス（とくに elkjs）を確かめる。
+2. `package/dist/mermaid.tiny.js` を `mermaid.tiny.js` に、`package/LICENSE` を `licenses/mermaid.LICENSE` に写す。`licenses/mermaid.THIRD-PARTY-NOTICES.txt` は、その版の package.json の依存のライセンスの文書から作り直す。
+3. 上の表の版、integrity、大きさ、SHA-256、写した日を書き換え、枠の版を上げる（3 か所）。
+4. 開発リポジトリの閲覧の試験（`tests/wiki/test_browse*.py` と `tests/wiki/browse/figures.test.mjs`）を、5 つのブラウザで流す。
