@@ -12,6 +12,8 @@ wiki_rawcheck.py — Web ページの raw を、取得した直後の内容と�
             画像、リンク先、インラインのコード、改行の数が一致しなければ誤りにする。訳さないページでは、
             本文は 1 文字も変えてはならない。原文にない英字や記号、消えた固有の名前、文体の混在、
             極端に短い訳は警告にとどめる。
+            翻訳が必要な入力を keep で完了にはできない。長い未翻訳の文章はエラーとする。
+            JSON の completed が真になるのは、検査を通して --finish が成功したときだけである。
 
 本文は、lint や閲覧と同じ設定のパーサー（同梱の markdown-it-py。wiki_pages.new_parser()）で読み、
 トークンで照らす。行の接頭辞や正規表現で、入れ物や構造を推し量らない。
@@ -40,6 +42,7 @@ import os
 import re
 import shutil
 import sys
+import unicodedata
 from collections import Counter
 from pathlib import Path
 
@@ -915,8 +918,53 @@ def names_of(text: str, title_case_ok: bool = True) -> list[str]:
     return out
 
 
+def translation_prose(text: str, protected: list[str]) -> str:
+    """言語の簡易検査から、保持すべき固有名詞と URL を除く。構造はパーサーで別に検査する。"""
+    text = re.sub(r"https?://\S+", " ", text)
+    for word in sorted(set(protected), key=len, reverse=True):
+        text = re.sub(r"(?<!\w)" + re.escape(word) + r"(?!\w)", " ", text)
+    return text
+
+
+def translation_block(source: str, output: str, title_case_ok: bool) -> tuple[bool, bool]:
+    """（検査対象か、未翻訳の疑いがあるか）。短い名前やコードだけのブロックは対象外。
+
+    20 文字以上の英字か、かなを含まない 20 文字以上の文章を調べる。英語は 4 語以上を要する。
+    日本語の文字が文章の文字の 2 割に届かない出力と、変化のない外国語の文章を止める。
+    訳の意味や完全性を保証する検査ではない。元から日本語の文章と保持する名前は残してよい。
+    """
+    # 長い全大文字の文章を、すべて略語とみなして検査対象から消してはならない。
+    protected = [word for word in names_of(source, title_case_ok)
+                 if not word.isupper() or len(word) < 6 or word in JAPANESE_ABBREVIATIONS]
+    src = translation_prose(source, protected)
+    out = translation_prose(output, protected)
+    same = lambda text: re.sub(r"\s+", "", unicodedata.normalize("NFKC", text)).casefold()
+    # 日本語と英語が同じ段落にある場合も、長い英語部分の丸残しを全体の割合で隠さない。
+    foreign_runs = re.split(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]+", src)
+    if any(len(re.findall(r"[A-Za-z]", run)) >= 20 and len(re.findall(r"[A-Za-z]+", run)) >= 4
+           and same(run) in same(out) for run in foreign_runs):
+        return True, True
+
+    def counts(text: str) -> tuple[int, int, int]:
+        letters = [c for c in text if c.isalpha()]
+        japanese = sum(bool(re.fullmatch(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]", c)) for c in letters)
+        latin = sum(c.isascii() for c in letters)
+        return len(letters), japanese, latin
+
+    total, japanese, latin = counts(src)
+    kana = bool(re.search(r"[\u3040-\u30ff]", src))
+    if total < 20 or (kana and japanese / total >= 0.2):
+        return False, False
+    if latin >= total / 2 and len(re.findall(r"[A-Za-z]+", src)) < 4:
+        return False, False
+    if kana and latin < total / 2:
+        return False, False
+    out_total, out_japanese, _ = counts(out)
+    return True, same(src) in same(out) or not out_total or out_japanese / out_total < 0.2
+
+
 def compare(a: Node, b: Node, translate: bool, errors: list[dict], warnings: list[dict], style: Counter,
-            path: str = "") -> None:
+            path: str = "", translation: Counter | None = None) -> None:
     """2 つの木を照らす。a は取得した内容（削除のあと）、b は補足を除いた raw。"""
     where = {"line": b.line or a.line}
     if a.signature() != b.signature():
@@ -956,6 +1004,13 @@ def compare(a: Node, b: Node, translate: bool, errors: list[dict], warnings: lis
                     [(c.type, c.content, tuple(sorted((c.attrs or {}).items()))) for c in ib]:
                 errors.append({"kind": "text", **detail, "message": "訳さないページで本文が変わった"})
         else:
+            checked, untranslated = translation_block(src_text, out_text, a.type not in ("heading", "th", "td"))
+            if checked and translation is not None:
+                translation["checked_blocks"] += 1
+            if untranslated:
+                errors.append({"kind": "untranslated", **detail,
+                               "message": "文章が未翻訳か、訳文の大半が外国語のまま。"
+                               "本文を日本語に訳す。翻訳者名や図の補足だけでは完了にできない"})
             src_tokens = [x.lower() for x in TOKEN_RE.findall(src_text)]
             # 同じ語のくり返し、大文字と小文字の違い、原文の語の頭に当たる語（BLOBs → BLOB）、日本語の文で
             # ふつうに使う略語（JAPANESE_ABBREVIATIONS）は数えない。
@@ -974,7 +1029,7 @@ def compare(a: Node, b: Node, translate: bool, errors: list[dict], warnings: lis
                 warnings.append({"kind": "short", **detail, "message": "訳文が原文に比べて極端に短い"})
             style.update(sentence_styles(out_text))
     for ca, cb in zip(a.children, b.children):
-        compare(ca, cb, translate, errors, warnings, style)
+        compare(ca, cb, translate, errors, warnings, style, translation=translation)
 
 
 def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: str | None) -> tuple[int, dict]:
@@ -988,16 +1043,21 @@ def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: s
     if not raw_path.is_file():
         raise FileNotFoundError(f"raw がない: {raw_path}")
     fetch = load_fetch(wd)
-    translate = bool(fetch.get("needs_translation"))
+    required = fetch.get("needs_translation")
+    if not isinstance(required, bool):
+        raise ValueError("fetch.json の needs_translation が真偽値ではない。翻訳不要とみなして続けない")
+    translate = required
     if override == "translate":
         translate = True
-    elif override == "keep":
-        translate = False
 
     src_fm, src_body = split_frontmatter(read_text(cleaned_path))
     out_fm, out_body = split_frontmatter(read_text(raw_path))
     errors: list[dict] = []
     warnings: list[dict] = []
+    if override == "keep" and required:
+        errors.append({"kind": "translation_required",
+                       "message": "翻訳が必要な入力を --language-override keep で完了にできない。"
+                       "日本語の raw を作れなければ未完了として止まり、比較用の写しを残す"})
 
     def without_translator(fm):
         return [line for line in fm if not line.startswith("translated_by:")]
@@ -1038,7 +1098,8 @@ def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: s
         errors.append({"kind": "caption", "message": f"補足の表示名が translated_by と違う: {sorted(names)}"})
 
     style: Counter = Counter()
-    compare(src_tree, out_tree, translate, errors, warnings, style)
+    translation: Counter = Counter()
+    compare(src_tree, out_tree, translate, errors, warnings, style, translation=translation)
     total = style["desu"] + style["dearu"]
     if total and min(style["desu"], style["dearu"]) > total * 0.1:
         warnings.append({"kind": "style",
@@ -1048,6 +1109,9 @@ def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: s
     result = {"stage": "check", "ok": not errors, "needs_translation": translate,
               "language_override": {"value": override, "reason": reason} if override else None,
               "translated_by": translator, "caption_names": sorted(names),
+              "translation": {"state": "incomplete" if errors else "checked" if translate else "not_required",
+                              "checked_blocks": translation["checked_blocks"]},
+              "completed": False,
               "errors": errors, "warnings": warnings}
     return (0 if not errors else 1), result
 
@@ -1109,7 +1173,7 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--json", action="store_true", help="結果を JSON で出力する。キーは英語のまま")
         if name == "check":
             p.add_argument("--language-override", choices=("translate", "keep"),
-                           help="訳すかどうかの判定（fetch.json の needs_translation）を覆す")
+                           help="translate は翻訳を追加する。keep で翻訳必須の判定を解除することはできない")
             p.add_argument("--reason", help="--language-override の理由")
             p.add_argument("--finish", action="store_true",
                            help="誤りも警告もなければ、作業用のフォルダーを消す（検査の基準も消えるので、再検査はできなくなる）")
@@ -1142,6 +1206,7 @@ def main(argv: list[str] | None = None) -> int:
                     result["work_dir_kept"] = "warnings"
                 else:
                     result["work_dir_removed"] = remove_work_dir(args.wiki, args.slug)
+                    result["completed"] = result["work_dir_removed"]
     except (FileNotFoundError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         print(str(exc), file=sys.stderr)
         return 1

@@ -8,6 +8,16 @@
 
 コマンドの `<skill-root>` は、このスキルのディレクトリ（`SKILL.md` のあるディレクトリ）の実際のパスに置き換える。書き方は `SKILL.md` の「スクリプトのパス」にある。
 
+## 翻訳と完了の条件
+
+取得の `needs_translation: true` は、日本語の raw を作る必要があるという意味である。原文の再現性、費用、時間、エージェント自身が判断した制約を理由に、原文保存と日本語の要約へ置き換えて完了としてはならない。翻訳できなければ未完了で止まり、自分で実行している場合は理由を伝える。エージェントとして動いている場合は `failed`（`error.kind: other`）で返す。
+
+W8 の `ok: true` は検査でエラーがなかったという意味で、raw の段の完了とは異なる。`completed: true` は、必要な検査と警告の受理を終え、`--finish` が成功した場合だけ返る。`translation.state` は、翻訳の検査を通した `checked`、もともと翻訳不要の `not_required`、検査で誤りがある `incomplete` のいずれかである。`completed` と `translation` のない旧形式の結果を、完了と読み替えない。
+
+翻訳の検査は、コード・画像・インラインのコードを除く文章をブロックごとに対応付ける。20 文字以上・4 語以上の英語の丸残し、長い外国語の文章の未変更、訳文の大半が外国語のままのものをエラーにする。保持する名前を除いた文章で判定し、図の補足は本文に数えない。短い語や名前は対象外であり、訳の意味や完全性を保証しない。訳文は読み直し、要約してしまった箇所や訳し落としがあれば直す。
+
+比較用の `fetch.json`、`fetched.md`、`cleaned.md`、`removed.json` は、取得器と検査器が管理する。手作業で作ったり、翻訳必須の判定を変えるために書き換えたりしない。比較元がない既存の raw から、検査済みという記録を作ってはならない。
+
 ## 呼び出す側の手順
 
 1. 使えるエージェントの種類に `wiki:web-raw` があるかを見る。なければ（プラグインの外でスキルを使っている、Claude Code ではないエージェントで使っている）、下の W1〜W8 を自分で行う。そのときは、ユーザーへの報告で、raw を自分のモデルで作ったことを伝える。
@@ -27,13 +37,13 @@
    }
    ```
 
-   `slug` は、決まっていれば書く（いくつもの URL を同時に取り込むときは、ぶつからないように先に決める）。`null` なら、エージェントが W1 で決める。`language` は、ユーザーが訳す・訳さないを指定したときの `"translate"` か `"keep"` で、理由を `language_reason` に書く。
+   `slug` は、決まっていれば書く（いくつもの URL を同時に取り込むときは、ぶつからないように先に決める）。`null` なら、エージェントが W1 で決める。`language` は、ユーザーが翻訳を指定したときの `"translate"`、または翻訳不要と判定された入力をそのまま保つ `"keep"` で、理由を `language_reason` に書く。翻訳が必要な入力を `keep` で完了にはできない。
 
 3. Agent ツールで `wiki:web-raw` を呼ぶ。`model` の引数は渡さない（渡すと、エージェントの定義の `model: sonnet` より優先される）。プロンプトには、「この依頼の raw を作る」という 1 行と、依頼の JSON を ```` ```json ```` のフェンスで書く。同時に呼ぶのは 3 つまでにする。
 4. エージェントの応答の中の、`"web_raw": 1` を持つ最後の ```` ```json ```` のフェンスを、報告として読む（下の「報告の形」）。フェンスがない、`status` が決まった値でない、`status` に要る欄がない、渡した依頼と `url`・`wiki_root`・`raw_root` が違う、のどれかなら、エージェントの応答をユーザーに見せて止まる（推し量って続けない）。エージェントが決めたことを、依頼に写す（エージェントは前の呼び出しを覚えていないので、呼び直すときに渡すため）。報告の `slug` を依頼の `slug` にし、報告の `language_override` があれば、その `value` と `reason` を依頼の `language` と `language_reason` にする。呼び直すときは、`fetch.force` を `false`、`fetch.html_file` と `fetch.page_url` を `null` に戻してから、下の表や手順がその呼び直しで指示したときだけ設定する。これらは 1 回の取得への指示で、残すと、続けるだけの呼び直しでも取り直し、途中の削除や訳を消す（`--force` も `--html-file` もなければ、`wiki_fetch.py` は途中の写しから続け、raw を上書きしない）。
 5. `status` ごとに次のようにする。
-   - `done`: raw ができ、`check --finish` で作業用の写しが消えている。`raw` のファイルがあり、frontmatter の `url` が依頼の `url` と同じで、作業用のフォルダー `<WIKI_ROOT>/.wiki-cache/ingest/<スラッグ>/` がないことを確かめる。合わなければ、報告をユーザーに見せて止まる。合えば 6 に進む。
-   - `warnings`: raw はできたが、エージェントが直さなかった警告が残っていて、作業用の写しがある。`python "<skill-root>/scripts/wiki_rawcheck.py" check --wiki "<WIKI_ROOT>" --raw-root "<RAW_ROOT>" --slug "<スラッグ>" --json` を、報告の `language_override` があればその `--language-override` と `--reason` を付けて実行し、誤りがなく、警告の `kind`・`line`・`message` の並びが報告の `warnings` と同じであることを確かめる。理由の案（`proposed_reason`）を読み、受け入れられないもの（人名をカタカナにした、など）があれば、`conditions` にその直し方を足して、3 に戻る。受け入れるなら 6 に進み、log の段で、取り込みの行のサブ行に警告ごとの理由を書いてから、同じ引数に `--finish --accept-warnings` を足して実行し、作業用の写しが消えたことを確かめる。
+   - `done`: 報告の `check` が実行した W8 の JSON で、`completed: true`、`ok: true`、`translation.state` が `checked`（翻訳した場合）か `not_required`（もともと翻訳不要の場合）であることを確かめる。`needs_translation: true` なのに翻訳がない、必須の翻訳を `keep` で外した、`check` がない、`completed` が false のどれかなら、完了と扱わず止まる。フォルダーの消失や `ok` だけを根拠にしてはならない。raw ができ、`check --finish` で作業用の写しが消えている。`raw` のファイルがあり、frontmatter の `url` が依頼の `url` と同じで、作業用のフォルダー `<WIKI_ROOT>/.wiki-cache/ingest/<スラッグ>/` がないことを確かめる。合わなければ、報告をユーザーに見せて止まる。合えば 6 に進む。
+   - `warnings`: 報告の `check` は実行した検査の JSON で、`completed: false`、`ok: true`、`translation.state` は `checked` か `not_required` でなければならない。raw はできたが、エージェントが直さなかった警告が残っていて、作業用の写しがある。`python "<skill-root>/scripts/wiki_rawcheck.py" check --wiki "<WIKI_ROOT>" --raw-root "<RAW_ROOT>" --slug "<スラッグ>" --json` を、報告の `language_override` があればその `--language-override` と `--reason` を付けて実行し、誤りがなく、警告の `kind`・`line`・`message` の並びが報告の `warnings` と同じであることを確かめる。理由の案（`proposed_reason`）を読み、受け入れられないもの（人名をカタカナにした、など）があれば、`conditions` にその直し方を足して、3 に戻る。受け入れるなら 6 に進み、log の段で、取り込みの行のサブ行に警告ごとの理由を書いてから、同じ引数に `--finish --accept-warnings` を足して実行し、作業用の写しが消えたことを確かめる。
    - `needs_user`: `question.message` をユーザーに聞き、次の表のとおりに依頼を変えて、3 に戻る（依頼の全体を渡す）。「やめる」なら止まる。ユーザーに聞けないとき（自分がサブエージェントとして動いている、など）は、問いを報告して止まる。
 
      | question.kind | 起きるとき | 依頼の変え方 |
@@ -66,6 +76,7 @@
   "translated_by": "Claude Sonnet 5.5",
   "caption_names": ["Claude Sonnet 5.5"],
   "language_override": null,
+  "check": {"stage": "check", "ok": true, "needs_translation": true, "translated_by": "Claude Sonnet 5.5", "language_override": null, "translation": {"state": "checked", "checked_blocks": 12}, "completed": true, "errors": [], "warnings": [], "work_dir_removed": true},
   "warnings": [],
   "question": null,
   "error": null,
@@ -75,30 +86,31 @@
 
 | status | 意味 | 要る欄 |
 | --- | --- | --- |
-| `done` | raw ができ、`check --finish` で作業用の写しを消した | `warnings` は空。`question` と `error` は `null` |
-| `warnings` | raw はできたが、直さなかった警告が残っている。作業用の写しは残してある | `warnings` に、`check` が出した警告の `kind`、`line`、`message` と、受け入れる理由の案 `proposed_reason` を、出た順に並べる |
+| `done` | W8 の `check.completed: true` を確かめ、raw ができ、作業用の写しを消した | `warnings` は空。`question` と `error` は `null` |
+| `warnings` | `check.completed: false`。raw はできたが、直さなかった警告が残っている。作業用の写しは残してある | `warnings` に、`check` が出した警告の `kind`、`line`、`message` と、受け入れる理由の案 `proposed_reason` を、出た順に並べる |
 | `needs_user` | ユーザーの判断が要る | `question` に `kind`（上の表の 4 つのどれか）と `message`。`existing_differs` なら `suggested_slug` も、`needs_browser` なら、その本文の `fetched_sha256`（最後に実行した `wiki_fetch.py` の出力の値）も |
 | `failed` | 続けられない（取得の失敗、YouTube の URL、初期化されていない wiki、raw のルートがない、自分のモデル名が分からない） | `error` に `kind`（`fetch_failed`、`youtube`、`not_initialized`、`no_raw_root`、`model_unknown`、`other`）と `message` |
 
 - `warnings` の各項目の `line` は、`check` の出力の `line` をそのまま書く。行のない警告（文体の混在）は `null` にする。
+- `check` は実行した W8 の JSON をそのまま写す。値を推測して作らない。`done` 以外でまだ検査を実行できていない場合は `null` にする。
 - `language_override` は、`check` に `--language-override` を付けたときの `{"value": "translate" か "keep", "reason": "…"}`。付けなければ `null`。
 
 `done` のほかの報告の例（同じ欄のうち、変わるところだけを示す）:
 
 ```json
-{"web_raw": 1, "status": "warnings", "language_override": null, "warnings": [{"kind": "style", "line": null, "message": "です・ます調（3 文）とである調（12 文）が混ざっている", "proposed_reason": "原文の引用の部分だけがです・ます調で、訳し分けた"}], "question": null, "error": null}
+{"web_raw": 1, "status": "warnings", "language_override": null, "check": {"stage": "check", "ok": true, "needs_translation": true, "translated_by": "Claude Sonnet 5.5", "language_override": null, "translation": {"state": "checked", "checked_blocks": 12}, "completed": false, "errors": [], "warnings": [{"kind": "style", "line": null, "message": "です・ます調（3 文）とである調（12 文）が混ざっている"}], "work_dir_kept": "warnings"}, "warnings": [{"kind": "style", "line": null, "message": "です・ます調（3 文）とである調（12 文）が混ざっている", "proposed_reason": "原文の引用の部分だけがです・ます調で、訳し分けた"}], "question": null, "error": null}
 ```
 
 ```json
-{"web_raw": 1, "status": "needs_user", "warnings": [], "question": {"kind": "existing_differs", "message": "同じスラッグ cqrs の raw があり、原文が違う", "suggested_slug": "cqrs-20261114"}, "error": null}
+{"web_raw": 1, "status": "needs_user", "check": null, "warnings": [], "question": {"kind": "existing_differs", "message": "同じスラッグ cqrs の raw があり、原文が違う", "suggested_slug": "cqrs-20261114"}, "error": null}
 ```
 
 ```json
-{"web_raw": 1, "status": "needs_user", "warnings": [], "question": {"kind": "needs_browser", "message": "本文が 11 文字しか取れなかった（source_sha256_of は html。ブラウザではまだ取っていない）", "fetched_sha256": "3f5a…（wiki_fetch.py の出力の値）"}, "error": null}
+{"web_raw": 1, "status": "needs_user", "check": null, "warnings": [], "question": {"kind": "needs_browser", "message": "本文が 11 文字しか取れなかった（source_sha256_of は html。ブラウザではまだ取っていない）", "fetched_sha256": "3f5a…（wiki_fetch.py の出力の値）"}, "error": null}
 ```
 
 ```json
-{"web_raw": 1, "status": "failed", "warnings": [], "question": null, "error": {"kind": "fetch_failed", "message": "HTTP 404"}}
+{"web_raw": 1, "status": "failed", "check": null, "warnings": [], "question": null, "error": {"kind": "fetch_failed", "message": "HTTP 404"}}
 ```
 - `notes` は、呼び出す側に伝えたいことを、短い文で 5 つまで書く（ページの欠け、規則で消したもの、など）。要約や訳文は書かない。
 
@@ -121,9 +133,9 @@
   - `removed_by_rule` は、サイトに共通の雑音の規則で消したもの（Wikipedia の部品、本文の前のタグのリンクや会員向けの表示、Medium の画像の操作の文言、重複した題名）である。本文を消していれば、`--keep-noise --force` を付けて取り直し、その出力の W2 の扱いと W3 をやり直す。
 - **W4.** 保存したファイルを読み、本文に残った雑音（目次、著者の紹介の欄、関連記事や前後の記事へのリンク、広告の文言、共有のボタンの文言、Wikipedia の他言語版へのリンクやカテゴリ）を削る。**この段では、文字列を消すことだけをする。** 書き足しも書き換えもしない。行ごと消すか、行の中の雑音の部分だけを消す。コードブロックの中は変えない（消すならフェンスを含めて全体を消す）。表のセル（列）は消せない（表の雑音は行ごとか表ごと消す）。セルの区切りの `|` と、セルの中の `\|` の `\` は消さない（行のセルの数が変わるので、`freeze` が止める）。行ごと消すときも、前後のブロックとの間の空の行は残す（同じ記号のリストの間の段落を消すと、前後のリストは 1 つにつながるが、それは通る）。画像、リンク、インラインのコードは、丸ごと残すか丸ごと消す。題名の見出しは消さない。本文の内容は削らない。本文の先頭の著者名と日付の行は、ページの一部なので残す。飾りだけの画像（アイコン、著者の顔写真など）は、画像の行と保存したファイルを消す（同じファイルを別の画像の行が使っていれば、ファイルは残す）。残った雑音がなければ、何も消さずに W5 に進む。
 - **W5.** `python "<skill-root>/scripts/wiki_rawcheck.py" freeze --wiki "<WIKI_ROOT>" --raw-root "<RAW_ROOT>" --slug "<スラッグ>"` を実行する。W4 で消すことだけをしたかを調べ、通れば削除のあとの内容を固定する。W4 で何も消さなかったときも実行する（固定した内容が、W8 の検査の基準になる）。誤りがあれば直して、もう一度実行する。出力に並ぶ「消した」ものを読み、本文を消していないかを確かめる。消しすぎていれば、`--force` で取り直し、上の決まりのとおり、その出力の W2 の扱いと W3 からやり直す。出力の `images`（「補足を書く画像」）は、削除のあとに残った画像で、W7 で補足を書く対象である。
-- **W6.** W2 の出力の `needs_translation` が `true` なら、本文を段落ごとに日本語に訳し、ファイルの本文を訳文で置き換える。判定は、`source_lang`（`<html lang>`）を優先し、空か本文と食い違うときは `ja_ratio`（かなと漢字の割合）で決めたものである。依頼に `language` があれば、それに従う（W8 で `--language-override` と `--reason` を付ける）。見出しの文言は訳し、段落の数と並び、見出しの階層、コードブロック、インラインのコード、リンク先、画像の行、表とリストの形、識別子、固有名詞（人名、製品名、地名、手法や検定の名前）の英語表記は変えない（カタカナにしない）。日本語に訳すのがふつうの一般の語（`Domain Model`、`Boolean` など）を訳すときは、原語を括弧で添える（`ドメインモデル（Domain Model）`）。表のセルの訳文の中の `|` は `\|` と書く。原文にない内容を、自分の知識で補わない。長いページは、`references/ingest-workflow.md` の「長いページの訳し方」に従い、ブロック（段落、見出し、リストの項目、表のセル）ごとに訳し、コードブロックと画像の行には手を付けずに残して、組み立てた訳文で raw を置き換える。作業用のファイル（訳文の断片、書き戻すスクリプトなど）を作るなら、作業用のフォルダー `<WIKI_ROOT>/.wiki-cache/ingest/<スラッグ>/` の中に置く（W8 の `--finish` で消える）。そのフォルダーの `fetched.md`、`fetch.json`、`cleaned.md`、`removed.json` は書き換えない。訳し終えたら、frontmatter の `translated_by: ""` に自分の表示名を `str_replace` で入れる。表示名は、システムの指示に書かれた自分のモデル名を `"Claude Fable 5.1"` の形で書く。分からなければ推測しない（ユーザーに聞く。エージェントなら `failed`、`model_unknown`）。日本語のページは訳さず、本文を 1 文字も変えず、`translated_by` は `""` のままにする。
+- **W6.** W2 の出力の `needs_translation` が `true` なら、本文を段落ごとに日本語に訳し、ファイルの本文を訳文で置き換える。判定は、`source_lang`（`<html lang>`）を優先し、空か本文と食い違うときは `ja_ratio`（かなと漢字の割合）で決めたものである。依頼の `language: translate` は翻訳を追加する指定である。`keep` でも、取得で翻訳が必要と判定された入力を翻訳不要にはできない。見出しの文言は訳し、段落の数と並び、見出しの階層、コードブロック、インラインのコード、リンク先、画像の行、表とリストの形、識別子、固有名詞（人名、製品名、地名、手法や検定の名前）の英語表記は変えない（カタカナにしない）。日本語に訳すのがふつうの一般の語（`Domain Model`、`Boolean` など）を訳すときは、原語を括弧で添える（`ドメインモデル（Domain Model）`）。表のセルの訳文の中の `|` は `\|` と書く。原文にない内容を、自分の知識で補わない。長いページは、`references/ingest-workflow.md` の「長いページの訳し方」に従い、ブロック（段落、見出し、リストの項目、表のセル）ごとに訳し、コードブロックと画像の行には手を付けずに残して、組み立てた訳文で raw を置き換える。作業用のファイル（訳文の断片、書き戻すスクリプトなど）を作るなら、作業用のフォルダー `<WIKI_ROOT>/.wiki-cache/ingest/<スラッグ>/` の中に置く（W8 の `--finish` で消える）。そのフォルダーの `fetched.md`、`fetch.json`、`cleaned.md`、`removed.json` は書き換えない。訳し終えたら、frontmatter の `translated_by: ""` に自分の表示名を `str_replace` で入れる。表示名は、システムの指示に書かれた自分のモデル名を `"Claude Fable 5.1"` の形で書く。分からなければ推測しない（ユーザーに聞く。エージェントなら `failed`、`model_unknown`）。日本語のページは訳さず、本文を 1 文字も変えず、`translated_by` は `""` のままにする。
 - **W7.** W5 の出力の `images`（W2 で `work_stage` が `frozen` だったときは、W2 の出力の `images`）の各画像を開いて見て、画像を含むブロック（段落）のすぐあとに、空の行を 1 つ挟んで `> <表示名> 補足: ` で始まる引用で説明を書く。表示名は W6 と同じ（システムの指示に書かれた自分のモデル名を `Claude Fable 5.1` の形で）で、訳さないページでも同じにする。すべての補足でそろえ、訳したページでは `translated_by` と同じにする。1 つの段落に画像が 2 つ以上あれば、画像の順に補足を続けて書く。補足は 1 つずつ別の引用にし、段落の文だけで書く（引用やリストを入れ子にせず、画像も置かない）。画像がリストの項目や引用の中にあるときは、同じ入れ物の中に置く（リストの項目なら同じ字下げ、引用の中なら `> > <表示名> 補足: `）。画像のあとに同じ段落の文が続くときは、その文のあとに置く。何の図か、軸や凡例、読み取れる数値、本文との関係を 2〜5 文を目安に書き、元の alt があれば訳して含める（画像の行の alt そのものは変えない）。パネルの多い図は、パネルごとに 1〜2 文を足してよく、補足の引用の中で段落を分けてもよい。alt が空の画像（`![](…)`）にも書く。取得できなかった画像（`（未取得）` の付いた行）には書かない。W2 の出力の `path` は raw のファイルのパスで、`images[].path` は raw のファイルからの相対パス（`assets/<スラッグ>/…`）である。
-- **W8.** `python "<skill-root>/scripts/wiki_rawcheck.py" check --wiki "<WIKI_ROOT>" --raw-root "<RAW_ROOT>" --slug "<スラッグ>" --finish --json` を実行する（`--json` は外さない。訳と補足の表示名（`translated_by`、`caption_names`）と、写しを消したか（`work_dir_removed`）が、機械で読める形で記録に残る）。補足を除いた raw を、W5 で固定した内容とブロックごとに照らす。結果は、出力の `ok`、`errors`、`warnings` と、`work_dir_removed` か `work_dir_kept` で読む。`--finish` は、誤りも警告もなければ作業用の写しを消す。誤りか警告があれば消さない（写しは再検査の基準なので）。誤りがあれば直して、もう一度実行する。リンクの誤りは、足りないリンクと増えたリンクの URL を示す。警告（原文にない英字や記号、訳文にない固有の名前、文体の混在、極端に短い訳）は、直してもう一度実行する。「訳文にない名前」は、固有名詞なら英語表記に戻し、一般の語を訳したものなら、警告の出たブロックで原語を括弧で添えて直す。「原文にない英字か記号」は、原文にない内容を足していないかを確かめる（日本語の文でふつうに使う略語の `PC`、`OS` などは数えない）。判定を覆して訳す（または訳さない）ときは、`--language-override translate`（または `keep`）と `--reason "<理由>"` を付ける。
+- **W8.** `python "<skill-root>/scripts/wiki_rawcheck.py" check --wiki "<WIKI_ROOT>" --raw-root "<RAW_ROOT>" --slug "<スラッグ>" --finish --json` を実行する（`--json` は外さない。訳と補足の表示名（`translated_by`、`caption_names`）と、写しを消したか（`work_dir_removed`）が、機械で読める形で記録に残る）。補足を除いた raw を、W5 で固定した内容とブロックごとに照らす。結果は、出力の `ok`、`errors`、`warnings`、`needs_translation`、`translation`、`completed` と、`work_dir_removed` か `work_dir_kept` で読む。`completed: true` だけが raw の段の完了を示す。検査だけの成功や未受理の警告では false のままになる。`--finish` は、誤りも警告もなければ作業用の写しを消す。誤りか警告があれば消さない（写しは再検査の基準なので）。誤りがあれば直して、もう一度実行する。リンクの誤りは、足りないリンクと増えたリンクの URL を示す。警告（原文にない英字や記号、訳文にない固有の名前、文体の混在、極端に短い訳）は、直してもう一度実行する。「訳文にない名前」は、固有名詞なら英語表記に戻し、一般の語を訳したものなら、警告の出たブロックで原語を括弧で添えて直す。「原文にない英字か記号」は、原文にない内容を足していないかを確かめる（日本語の文でふつうに使う略語の `PC`、`OS` などは数えない）。翻訳を追加するときは `--language-override translate` と `--reason "<理由>"` を付ける。`keep` は翻訳必須の判定を解除できない。`untranslated` と `translation_required` はエラーであり、警告の受理では通らない。
   - 直さない警告が残ったとき: エージェントは `--accept-warnings` を付けない。出力の `warnings` の警告と理由の案を、`warnings` の報告で返す（作業用の写しは残る。呼び出す側が log に理由を書いてから受け入れる）。自分で W1〜W8 を行っているときは、直さない理由を `log.md` の取り込みの行のサブ行に書いてから、同じ引数に `--accept-warnings` を足してもう一度実行する（写しが消える）。
 
 raw のファイルに手を入れてよいのは、W4 から W8 の間（取り込みの前）だけである。保存したあとの raw のファイルは、ほかの原本と同じく書き換えない。訳の誤りは、取り直して別版にする。
