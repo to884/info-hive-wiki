@@ -544,6 +544,12 @@ def article_path(wiki_root, rel, *, directory: bool = False, native: bool = Fals
     return ArticlePath("ok", Path(current))
 
 
+def resolve_raw(meta, page_path, wiki_root, wiki_root_given=None, allowed_roots=None, *, raw_roots=()):
+    """raw の共通の読む口。リンクの検査と版の照合は wiki_raw にまとめる。"""
+    from wiki_raw import resolve_raw as resolve
+    return resolve(meta, page_path, wiki_root, wiki_root_given, allowed_roots, raw_roots=raw_roots)
+
+
 def absolute_user_path(path) -> Path:
     """利用者のパスを、意味を変えずに絶対化する。途中の .. は解決する前に拒む（ADR-0029）。"""
     if ".." in Path(path).parts:
@@ -1147,6 +1153,8 @@ def refused_link(link: str, warnings: list, *, articles: bool = False) -> "dict 
     kind, target = lookup
     accepts = is_article_path if articles and kind == "path" else is_page_path
     for item in warnings:
+        if item.get("scope") == "raw":
+            continue  # raw の同名のファイルは、wiki のページの拒否ではない
         # OS 上の読み取りのパスは変えず、wikilink の照合だけをページの索引と同じ鍵にする。
         rel = posix_rel(item["path"])
         if kind == "path" and accepts(target + ".md", native=True) and target.startswith(rel + "/"):

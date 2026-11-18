@@ -10,12 +10,14 @@ wiki の健全性のチェックである。操作のたびにではなく、決
 
 ## 手順 1: 構造の lint をかける
 
+raw の根は `/wiki:ingest` と同じ順（利用者の明示、プロジェクトの指示、グローバルの指示、既定の `raw/`）で決める。MCP に `raw_root`、CLI に `--raw-root "<RAW_ROOT>"` を必ず渡す。根を省くと、原本そのものは調べるが、根が分からない途中の道は調べず、`raw_paths_unchecked` に出す。過去の raw の根の自動の発見と記録の読み込みは、後続段階である。根が未指定で rag の絶対パスを外の原本として扱ったときも、範囲が未確認であることを raw_paths_unchecked に出す。summary.links は報告した全件数で、wiki 側の検査済みかどうかは links_wiki、raw 側は links_raw で分ける。未検査の側は null である。
+
 まず wiki の MCP サーバーのツール `lint` を使う。`wiki` に wiki のルートの絶対パスを渡す。`SCHEMA.md` がページの大きさの上限や必須の frontmatter を既定と違う値に決めている場合は、`soft_cap`、`hard_cap`、`soft_char_cap`、`hard_char_cap`、`required_fm` にその値を渡す。`SCHEMA.md` の「タグの体系」にタグが並んでいれば、そのタグをすべて `allowed_tags` に配列で渡す（CLI では `--allowed-tags` にカンマ区切りで渡す）。「構成の例」に挙げたタグも、この wiki で使っているなら含める。体系がひな形のまま空なら渡さない。渡さないとタグの検査はせず、`summary.unknown_tags` は `null`（0 ではない）になる。結果は下の CLI の `--json` と同じ形である。wiki に任意のグラフ層がある（`wiki/graph/ontology.yaml` がある）場合は、グラフの lint の結果も `graph.findings` に入る（`graph.state` が `checked`）。`disabled` はオントロジーがないこと、`error` はオントロジーを読めないことを表す。
 
 ツールが使えないときは、スクリプトを実行する。使い分けは `SKILL.md` の「MCP のツールと CLI の使い分け」にある。
 
 ```bash
-python "<skill-root>/scripts/wiki_lint.py" wiki/
+python "<skill-root>/scripts/wiki_lint.py" wiki/ --raw-root "<RAW_ROOT>"
 ```
 
 `wiki/` は実際の wiki のディレクトリに置き換える。省くと、作業領域の設定（`.info-hive/workspace.json`）の `dirs.wiki`、設定がなければ `./wiki` を使う。設定が壊れているときは理由を書いて終了コード 1 で止まる。
@@ -44,10 +46,11 @@ lint のレポートには、次のものが含まれる。
 - **大文字と小文字だけが違うページかディレクトリ**（`case_only_duplicates`）: `concepts/Kalman.md` と `concepts/kalman.md`、`Concepts/` と `concepts/` のように、大文字と小文字を同一視すると同じになるパス。Windows と macOS の既定のファイルシステムでは同じ場所を取るので、閲覧のための書き出しで名前に接尾辞が付くか、書き出しが止まる。`kind` は、ページのファイルどうしなら `file`、ディレクトリの名前が違うなら `dir` である。どちらかの名前を変えるよう提案する。
 - **索引の分類の誤り**（`index_type_mismatch`）: `index.md` の種類の見出し（「ソース」「エンティティ」「コンセプト」「シンセシス」と、英語の `Sources` など）の下に、別の `type` のページが並んでいるもの。たとえば「シンセシス」の欄にある `type: "source"` のページである。分割した索引（`indexes/sources.md`、`indexes/entities-people.md` など）は、ファイル名を種類として読む。読むのは見出しの下のリストの項目の最初の wikilink だけで、冒頭の説明文の例示や、要約の中のリンクは数えない。索引の項目がリンク切れのとき（分割した `index.md` が `indexes/` を指すときなど）と、`type` のないページは見ない。
 - **出典の参照切れ**（`unresolved_sources`）: frontmatter の `sources:` に、ないページ（`reason` が `missing`）か、`type` が `source` でないページ（`not_source`）を書いているもの。`sources_consulted` は種類を問わないので見ない。
-- **原本がない**（`missing_raw`）: source ページの `raw:` が指すファイルかディレクトリがないもの。相対パスは、wiki のルート（`../raw/...`、`../W1_Raw/...`）、wiki の親（取り込みのひな形の `raw/...`）、ページのディレクトリのどれかを基準にして見つかればよい。rag が書く `C:/...` のような絶対パスはそのまま確かめる。URL は見ない。
+- **原本がない**（`missing_raw`）: 共通の raw 解決で一致する原本がないもの。wiki の与えられた綴りと解決した綴りから、wiki の根、親、ページのディレクトリを基準にする。session_id のあるページは wiki の親だけを使う。raw_sha256 があれば版を照らし、なければ session_id / url / final_url で身元を照らす。URL は見ない。リンクや曖昧さは missing_raw に混ぜない。ファイルはあるが版・身元が違うときは mismatches に候補と理由を出し、物理的な欠落と区別する。
+- **raw の参照の留保**: `raw_ambiguous` は候補が複数ある参照、`raw_unknown` は途中の `..` や読み取りの失敗などで解けない参照、`raw_version_unverified` は SHA-256 の版を照らせない参照、`raw_paths_unchecked` は根が分からず途中を検査していない参照、`raw_outside` は隠し項目など記事の対象外の参照。候補と理由を利用者に知らせる。既存の raw: を自動で直さず、曖昧な候補を選ばない。
 - **タグの体系にないタグ**（`unknown_tags`）: `allowed_tags`（`--allowed-tags`）を渡したときだけ、そこにないタグを持つページを挙げる。タグは NFKC にそろえてから比べる。
 - **字幕の訂正と留保の食い違い**（`caption_corrections`）: YouTube の動画の raw を `raw` に持つ要約ページと、`〔訂正 …〕`、`〔留保 …〕` の印のあるページを、raw と照らす（info-hive-dev の ADR-0027）。定義の字幕の語が raw の行にないもの、根拠の場所に訂正した語がないもの、印と定義の対応の誤り、印の直前の本文の末尾が語と合わないもの、要約ページの間で食い違う定義、書かれた `confidence` と計算した値の違いを挙げる。各項目は `path`、`line`、`code`、`message` を持つ。直し方は `ingest-workflow.md` の「字幕の訂正と留保」と「confidence の決め方」に従い、ユーザーの承認を得てからページを直す。raw は直さない。
-- **記事のリンク**（`links`）: wiki の記事（ページ、最上位の `index.md`、`log.md`、`SCHEMA.md`、`indexes/` の下の索引）か、記事までの途中のディレクトリが、シンボリックリンク（`symlink`）、ジャンクション（`junction`）、名前の代理のリパースポイント（`reparse`。Windows のマウントしたフォルダーなど）、ハードリンク（`hardlink`。リンクの数が 2 以上のふつうのファイル）であるもの。wiki と raw の記事にはリンクを置かない（info-hive-dev の ADR-0029）。リンクの記事は、検索、閲覧、統計、グラフ、lint のどれも読まない。読まないページへの wikilink は、リンク切れとしては挙げない（ここで挙げる）。リンクのディレクトリの下のページへの wikilink は、名前が分からないので、リンク切れとして挙がる。wiki の根そのものと、その祖先のリンクは許す。記事でないもの（`.git/`、`.wiki-cache/`、`graph/`、`assets/`、`raw/` の中で `raw:` から指されていないもの、`.md` でないファイル）のリンクは挙げない。この版では、raw の側（source ページの `raw:` が指すもの）は調べない（`summary.links_raw` が `null`）。調べられなかった項目（一覧を作れないディレクトリ、属性を取れない項目）は `links_unchecked` に挙がる。
+- **記事のリンク**（`links`）: wiki の記事（ページ、最上位の `index.md`、`log.md`、`SCHEMA.md`、`indexes/` の下の索引）か、記事までの途中のディレクトリが、シンボリックリンク（`symlink`）、ジャンクション（`junction`）、名前の代理のリパースポイント（`reparse`。Windows のマウントしたフォルダーなど）、ハードリンク（`hardlink`。リンクの数が 2 以上のふつうのファイル）であるもの。wiki と raw の記事にはリンクを置かない（info-hive-dev の ADR-0029）。リンクの記事は、検索、閲覧、統計、グラフ、lint のどれも読まない。読まないページへの wikilink は、リンク切れとしては挙げない（ここで挙げる）。リンクのディレクトリの下のページへの wikilink は、名前が分からないので、リンク切れとして挙がる。wiki の根そのものと、その祖先のリンクは許す。記事でないもの（`.git/`、`.wiki-cache/`、`graph/`、`assets/`、`raw/` の中で `raw:` から指されていないもの、`.md` でないファイル）のリンクは挙げない。raw の側は source ページの `raw:` が指すファイルかディレクトリを調べ、`scope: "raw"`、`source`、`raw` と、拒んだ場所・種類・起点を返す。ディレクトリ内の隠し項目は除く。`raw_root` そのものと祖先のリンクを許す。`rag_job_id` のあるページの、wiki と指定された raw の根の外の絶対パスは外の原本なので調べない。`summary.links_raw` は raw 側の件数で、0 も検査済みを表す。調べられなかった項目（一覧を作れないディレクトリ、属性を取れない項目）は `links_unchecked` に挙がる。
 - **日本語の書き損じ**: 英語のキーと日本語の別名を両方書いている frontmatter（`title` と `タイトル` など）、キーのあとが全角の「：」になっている frontmatter、リストの値を「、」で区切っている frontmatter、全角の「｜」か「＃」を使った wikilink、`created`・`updated`・`ingested` の日付が `YYYY-MM-DD` の形になっていないページ、文字列の値が二重引用符で囲まれていない frontmatter（`unquoted_strings`。配列の要素も含む。日付と数値は対象外）。
 
 このスクリプトは控えめに動く。検出結果を報告するが、修正はしない。レポートをユーザーに示す。
@@ -121,7 +124,7 @@ lint のレポートには、次のものが含まれる。
 参照されているのに、まだページになっていないものを探す。ツールの `lint` に `suggest_pages=true` を渡すか、次を実行する。
 
 ```bash
-python "<skill-root>/scripts/wiki_lint.py" wiki/ --suggest-pages
+python "<skill-root>/scripts/wiki_lint.py" wiki/ --raw-root "<RAW_ROOT>" --suggest-pages
 ```
 
 多くのページ（既定では 5 ページ以上。`--suggest-min` で変えられる）に出てくるのに専用のページがない、エンティティやコンセプトらしい語を見つける。候補にするのは、3 文字以上のカタカナ語、3 文字以上の漢字の並び（「消費税」「仕入税額控除」など）、大文字で始まる英語の語句で、題名かスラッグが同じページがすでにあるものは除き、出てくるページの多い順に最大 30 件を挙げる。漢字の並びは途中で切らずに数えるので、「消費税率」は「消費税」とは別の語になる。どれを独立したページにし、どれを本文での言及のままにするかは、ユーザーが決められる。
@@ -153,3 +156,5 @@ lint の修正のあとは、ほぼ確実にインデックスの更新が必要
 **lint のレポートが手に負えなくなるまで放置する。** レポートが長すぎてユーザーが仕分けられないなら、頻度が合っていない（もっと頻繁にかける）か、wiki が規約に収まらないほど大きくなっている（スキーマを見直す）。
 
 **問題がなさそうだからと lint をスキップする。** 気づかないうちに内容が壊れていくことは、もっとも検出しにくく、もっとも被害の大きい失敗である。lint はそれを見つける。
+
+raw の診断の読み方: `mismatches` はファイルがあるが版・身元が違う候補と理由、`scope_unverified` は raw の根を省いて外の原本と扱った分類の未確認を表す。`links_wiki` / `links_raw` と `links_unchecked_wiki` / `links_unchecked_raw` は側ごとの件数で、未検査の側は null である。`links` と `links_unchecked` は報告した全件数。指定した根の外にある、記録のない過去の rag の原本は外の原本として扱う。過去の根の記録の作成と読み込みは後続段階であり、現在の根の指定だけで過去の根まで検査したことにはならない。

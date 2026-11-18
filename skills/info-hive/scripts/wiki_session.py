@@ -1680,6 +1680,12 @@ def cmd_decide(args) -> int:
 def cmd_write(args) -> int:
     wiki = Path(args.wiki)
     raw_root = Path(args.raw_root)
+    from wiki_pages import absolute_user_path
+    try:
+        absolute_user_path(wiki)
+        absolute_user_path(raw_root)
+    except ValueError as exc:
+        raise Fail(str(exc)) from None
     if not os.path.isdir(raw_root):
         raise Fail(f"raw のルートがない（作らない）: {raw_root}")
     import wiki_fetch
@@ -1704,10 +1710,11 @@ def cmd_write(args) -> int:
     if state in ("created", "identical"):
         if target.read_bytes() != data:
             raise Fail(f"書いた raw を読み直すと、バイト列が違う: {target}")
-        import wiki_lint
-        if wiki_lint.missing_raw({"type": "source", "raw": result["raw_ref"]},
-                                 wiki / "sources" / f"{args.slug}.md", wiki):
-            raise Fail(f"要約ページの raw に書く値で、raw が見つからない: {result['raw_ref']}")
+        from wiki_pages import resolve_raw
+        checked = resolve_raw({"type": "source", "raw": result["raw_ref"], "raw_sha256": sha, "session_id": ex.session_id},
+                              wiki / "sources" / f"{args.slug}.md", wiki, raw_roots=[raw_root])[0]
+        if checked.state != "resolved":
+            raise Fail(f"要約ページの raw を確かめられない: {checked.state}: {checked.reason} {result['raw_ref']}")
         make_read_only(target)
     out_json(result) if args.json else out_lines(result)
     return 0 if state in ("created", "identical") else 3
