@@ -4,7 +4,7 @@ Claude Code のプラグインとして入れると、利用者が指示を送�
 
 ## 流れ
 
-1. `hooks/hooks.json` が、`uv run --no-project --no-config --quiet --quiet --offline --no-python-downloads --python ">=3.12,<3.15" python -I -S "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_prompt_hook.py"; exit 0` を起動する。呼び出し元のプロジェクトやuvの設定ファイルを使わず、既存のPythonを選ぶ。スクリプト専用の仮想環境を作る `--script` は使わない。`VIRTUAL_ENV` やcwdの `.venv` がある場合はそれを使うことがあり、入口のvenvランチャーのコストは残る。末尾の `; exit 0` は、uv の段の失敗で利用者の指示が止まるのを防ぐ。exec 形式（`args`）にはしない。
+1. `hooks/hooks.json` が、次の形で入口を起動する（この文書ではスクリプトの位置を `<skill-root>` で表す）。`uv run --no-project --no-config --quiet --quiet --offline --no-python-downloads --python ">=3.12,<3.15" python -I -S "<skill-root>/scripts/wiki_prompt_hook.py"; exit 0` を起動する。呼び出し元のプロジェクトやuvの設定ファイルを使わず、既存のPythonを選ぶ。スクリプト専用の仮想環境を作る `--script` は使わない。`VIRTUAL_ENV` やcwdの `.venv` がある場合はそれを使うことがあり、入口のvenvランチャーのコストは残る。末尾の `; exit 0` は、uv の段の失敗で利用者の指示が止まるのを防ぐ。exec 形式（`args`）にはしない。
 2. `wiki_prompt_hook.py` は標準入力の JSON を読む。飛ばす指示なら子を起こさず、既存のセッションのターンだけを更新する。その OS の待ちにはタイマーを掛ける。検索する指示では、CPythonの元の実行ファイル（仮想環境から呼ばれた場合はその基底）を使う子プロセスで候補の選別だけを行う。入口と子のPythonには `-I -S` を付け、`PYTHONPATH`、`site`、利用者のPython起動時の処理を読み込まない。uvが既存のPythonを探す段では有効な仮想環境を検出し、そこで起動時の処理が実行されることがある。子が失敗したときも、終了コード 0 で何も出さずに終わる。親子で単調時計の絶対期限を共有し、2.5 秒を過ぎたら処理を停止する。子は候補のメタデータだけを親へ返す。親が候補の JSON を標準出力へ書いて flush したあと、実際に出した候補の既出状態を保存する。子も走査、読み込み、採点の前後で締め切りを確認する。フックの `timeout` は 5 秒である。Windows の子には `CREATE_NO_WINDOW` を付ける。なお、起動失敗の標準エラーは末尾の `exit 0` だけでは消えない。利用者の画面での扱いは未確認である。
 3. 次の指示は、重いモジュールを読み込む前に飛ばす。
    - 設定で無効にしている。
