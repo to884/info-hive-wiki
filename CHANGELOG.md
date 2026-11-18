@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [0.36.0]
+
 ### Changed
 
 - セッション取り込みは raw の根を wiki に記録してから原本を保存する。根を記録できない場合は保存を止める。source ページには `write` の `raw_sha256` を写し、lint で保存時の版を照合できるようにした（ADR-0029 段階3）。
@@ -15,6 +17,7 @@
 - 検索用のパースキャッシュとローカルの SQLite ベクトル索引に共通の経路検査を適用した。パースキャッシュを使えない場合は記事から解析し、ベクトル索引を書けない場合は警告を出して BM25 で検索する。
 - MCP の SQLite と Tantivy の索引に経路検査を適用した。wiki の `query`、`get_page`、`stats` は索引を開けないか書けない場合、理由と `wiki_search.py --no-embed` の案内を返す。
 - MCP の起動ロックとサーバーの記録に経路検査を適用した。リンクなどで拒んだ場合は場所と理由を知らせる。
+- `/wiki:graph` のロック、一時ファイルと成果物を共通の経路検査に通す。リンクや SQLite の付随ファイルで公開を拒んだ場合は場所と理由を知らせる。
 - `/wiki:upgrade` が現在の raw の根を記録する。`--previous-raw-root` で過去の根も追加でき、lint が既存の原本の参照を検査する際に使う。
 - lint は指定された現在の raw の根に加えて、`.wiki-cache/raw-roots.d/` にある過去の根の記録も使う。記録を読めない場合は `links_unchecked` に理由を出す。
 
@@ -941,7 +944,8 @@ Web ページの取得（`wiki_fetch.py`）が、Medium の記事の図とコー
 [0.2.0]: https://github.com/to884/info-hive-wiki/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/to884/info-hive-wiki/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.1.0
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.34.0...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.36.0...HEAD
+[0.36.0]: https://github.com/to884/info-hive-wiki/compare/v0.35.2...v0.36.0
 [0.34.0]: https://github.com/to884/info-hive-wiki/compare/v0.33.0...v0.34.0
 [0.32.0]: https://github.com/to884/info-hive-wiki/compare/v0.31.1...v0.32.0
 
