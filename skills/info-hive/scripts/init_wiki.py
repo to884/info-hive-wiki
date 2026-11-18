@@ -57,7 +57,7 @@ SCHEMA_SECTION_MARKERS = [
         "marker": "## Claim destinations",
         "version": "0.8.0",
         "anchor": "## Claim destinations",
-        "label": "ソースの要約ページの主張と行き先の表",
+        "label": "ソースの要約ページの「取り込んだ内容と載せたページ」の表",
     },
     {
         "marker": "## Skill evolution",
