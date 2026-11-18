@@ -43,12 +43,15 @@ import shutil
 import sys
 import unicodedata
 from collections import Counter
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wiki_text import localize_argparse, parse_frontmatter_text  # noqa: E402
 import wiki_initialized  # noqa: E402
 import wiki_pages  # noqa: E402
+from wiki_fsguard import WriteGuard  # noqa: E402
+from wiki_raw_roots import record_raw_root  # noqa: E402
 
 WORK_SUBDIR = (".wiki-cache", "ingest")
 CAPTION_MARK = " 補足: "
@@ -125,19 +128,43 @@ def read_text(path: Path) -> str:
     return path.read_bytes().decode("utf-8").replace("\r\n", "\n")
 
 
-def write_text(path: Path, text: str) -> None:
-    path.write_bytes(text.encode("utf-8"))
-
-
-def write_atomic(path: Path, text: str) -> None:
+def write_atomic(guard: WriteGuard, path: Path, text: str) -> None:
     """一時の名前で書き終えてから、名前を変える。途中で止まっても、書きかけのファイルは正式な名前に現れない。"""
-    tmp = path.with_name(path.name + ".tmp")
-    write_text(tmp, text)
-    os.replace(tmp, path)
+    guard.write_bytes(path, text.encode("utf-8"), replace=True)
 
 
 def work_dir(wiki: Path, slug: str) -> Path:
     return wiki.joinpath(*WORK_SUBDIR, slug)
+
+
+def check_work_files(guard: WriteGuard, wd: Path) -> bool:
+    if guard.directory_info(wd) is None:
+        return False
+    for name in ("fetch.json", "fetched.md", "cleaned.md", "removed.json", "translation-review.json"):
+        guard.file_info(wd / name)
+    return True
+
+
+def check_image_backups(guard: WriteGuard, slug: str) -> None:
+    assets = guard.root / "assets"
+    if guard.directory_info(assets):
+        for path in assets.glob(f".{slug}.*.old"):
+            suffix = path.name[len(slug) + 2:-4]
+            # 旧版の PID 付きの名前と、新しい乱数の名前を認める。
+            if not re.fullmatch(r"[0-9a-f]{32}|[0-9]+\.[a-z0-9_]{8}", suffix):
+                continue
+            if guard.directory_info(path) and any(path.iterdir()):
+                raise ValueError(f"保存中に止まった画像の退避が残っている: {path}。原本と照合して画像を戻してからやり直す")
+
+
+@contextmanager
+def web_write_locks(wiki_guard: WriteGuard, raw_guard: WriteGuard, slug: str):
+    wiki_locks = wiki_guard.root / ".wiki-cache" / "ingest-locks"
+    raw_locks = raw_guard.root / ".wiki-fetch-locks"
+    for guard, directory in ((wiki_guard, wiki_locks), (raw_guard, raw_locks)):
+        guard.ensure_directory(directory)
+    with wiki_guard.hold_lock(wiki_locks / f"{slug}.lock"), raw_guard.hold_lock(raw_locks / f"{slug}.lock"):
+        yield
 
 
 # JSON のファイルを読むときに上がりうる例外。ValueError は、UnicodeDecodeError と JSONDecodeError のほか、桁の
@@ -149,9 +176,10 @@ def work_dir_complete(wiki: Path, slug: str) -> bool:
     """作業用の写しがそろっているか。wiki_fetch.py は fetch.json を最後に、raw を書き終えてから置く。そろって
     いれば、raw はこの写しと同じ取得で書いたものである（raw をあとで書き換えたかは、freeze と check が照らす）。"""
     wd = work_dir(wiki, slug)
-    if not ((wd / "fetched.md").is_file() and (wd / "fetch.json").is_file()):
-        return False
     try:
+        check_work_files(WriteGuard(wiki), wd)
+        if not ((wd / "fetched.md").is_file() and (wd / "fetch.json").is_file()):
+            return False
         json.loads(read_text(wd / "fetch.json"))
     except JSON_READ_ERRORS:
         return False
@@ -170,6 +198,8 @@ def check_slug(slug: str) -> None:
     指せないようにする。"""
     import wiki_fetch  # wiki_fetch.py が wiki_rawcheck を読み込むので、使うときに読み込む
     wiki_fetch.check_slug(slug)
+    if slug.startswith("."):
+        raise ValueError("Web のスラッグはピリオドで始められない")
 
 
 def remove_work_dir(wiki: Path, slug: str) -> bool:
@@ -180,19 +210,31 @@ def remove_work_dir(wiki: Path, slug: str) -> bool:
     """
     check_slug(slug)
     target = work_dir(wiki, slug)
-    step = wiki
-    for part in (*WORK_SUBDIR, slug):
-        step = step / part
-        if not os.path.lexists(step):
-            return False
-        if _is_link(step):
-            raise ValueError(f"作業用のフォルダーの途中がリンクなので消さない: {step}")
-    parent = os.path.realpath(wiki.joinpath(*WORK_SUBDIR))
-    real = os.path.realpath(target)
-    if os.path.dirname(real) != parent:
-        raise ValueError(f"作業用のフォルダーの置き場の直下ではないので消さない: {real}")
-    shutil.rmtree(target)
+    try:
+        trash = detach_work_dir(WriteGuard(wiki), target)
+    except OSError as exc:
+        raise ValueError(str(exc)) from exc
+    if trash is None:
+        return False
+    shutil.rmtree(trash)
     return True
+
+
+def detach_work_dir(guard: WriteGuard, target: Path) -> Path | None:
+    """比較元を使い終わる境界は、削除の完了ではなく、作業名からの移動にする。"""
+    if guard.directory_info(target) is None:
+        return None
+    stack = [target]
+    while stack:
+        for path in stack.pop().iterdir():
+            if path.is_dir() and not _is_link(path):
+                guard.directory_info(path)
+                stack.append(path)
+            else:
+                guard.file_info(path)
+    trash = guard.temporary_directory(target.parent, prefix=f".{target.name}.", suffix=".done")
+    guard.move_directory(target, trash / "work")
+    return trash
 
 
 def split_frontmatter(text: str) -> tuple[list[str], str]:
@@ -276,6 +318,8 @@ def work_dir_matches_raw(wiki: Path, slug: str, raw_path: Path) -> bool:
     あとで raw の frontmatter を書き換えたか、raw を別の版に戻したもの（手で戻した、など）を見分ける。
     """
     try:
+        if WriteGuard(raw_path.parent).file_info(raw_path) is None:
+            return False
         return frontmatter_lines(read_text(work_dir(wiki, slug) / "fetched.md")) == \
             frontmatter_lines(read_text(raw_path))
     except (OSError, UnicodeDecodeError):
@@ -673,9 +717,12 @@ def derivable(src: Node, out: Node, failure: list[Node] | None = None,
 def freeze(wiki: Path, raw_root: Path, slug: str) -> tuple[int, dict]:
     wd = work_dir(wiki, slug)
     raw_path = raw_root / f"{slug}.md"
+    wiki_guard, raw_guard = WriteGuard(wiki), WriteGuard(raw_root)
+    check_work_files(wiki_guard, wd)
+    check_image_backups(raw_guard, slug)
     if not work_dir_complete(wiki, slug):
         raise FileNotFoundError(f"作業用の写しがそろっていない: {wd}（wiki_fetch.py に --force を付けて取り直す）")
-    if not raw_path.is_file():
+    if raw_guard.file_info(raw_path) is None:
         raise FileNotFoundError(f"raw がない: {raw_path}")
     fetch = load_fetch(wd)
     src_text, out_text = read_text(wd / "fetched.md"), read_text(raw_path)
@@ -688,7 +735,7 @@ def freeze(wiki: Path, raw_root: Path, slug: str) -> tuple[int, dict]:
     refs = Counter(src for n in walk(out_tree) for src, _a, _t in images_of(n.inline))
     base = raw_path.parent
     for norm, rel in sorted(fetched_images(fetch).items()):
-        exists = (base / rel).is_file()
+        exists = raw_guard.file_info(base / rel) is not None
         if refs.get(norm) and not exists:
             errors.append({"kind": "image_file", "message": f"残した画像が参照するファイルがない: {rel}"})
         if not refs.get(norm) and exists:
@@ -705,9 +752,9 @@ def freeze(wiki: Path, raw_root: Path, slug: str) -> tuple[int, dict]:
     if not errors:
         # どちらも一時の名前で書き終えてから名前を変える。cleaned.md は最後に置く。cleaned.md があることを、
         # 削除を固定し終えた印にする（wiki_fetch.py の work_stage）。書きかけの cleaned.md は残らない。
-        write_atomic(wd / "removed.json", json.dumps({"removed_lines": removed, "shortened_lines": changed},
-                                                     ensure_ascii=False, indent=1))
-        write_atomic(wd / "cleaned.md", out_text)
+        write_atomic(wiki_guard, wd / "removed.json", json.dumps({"removed_lines": removed, "shortened_lines": changed},
+                                                                 ensure_ascii=False, indent=1))
+        write_atomic(wiki_guard, wd / "cleaned.md", out_text)
     return (0 if not errors else 1), result
 
 
@@ -776,7 +823,7 @@ def caption_of(node: Node) -> tuple[str, str] | None:
     return m.group(1).strip(), m.group(2)
 
 
-def strip_captions(node: Node, fetched: dict[str, str], base: Path, errors: list[dict], names: set[str],
+def strip_captions(node: Node, fetched: dict[str, str], guard: WriteGuard, errors: list[dict], names: set[str],
                    removed: list[tuple[int, int]]) -> None:
     """木から補足の引用を取り除き、画像ごとの補足の数と表示名を調べる。
 
@@ -792,12 +839,12 @@ def strip_captions(node: Node, fetched: dict[str, str], base: Path, errors: list
         i += 1
         images = images_of(child.inline)
         if not images:
-            strip_captions(child, fetched, base, errors, names, removed)
+            strip_captions(child, fetched, guard, errors, names, removed)
             continue
         needed = []
         for src, _alt, _title in images:
             if src in fetched:
-                if not (base / fetched[src]).is_file():
+                if guard.file_info(guard.root / fetched[src]) is None:
                     errors.append({"kind": "image_file", "line": child.line,
                                    "message": f"取得した画像のファイルがない: {fetched[src]}"})
                 needed.append(src)
@@ -831,7 +878,7 @@ def strip_captions(node: Node, fetched: dict[str, str], base: Path, errors: list
                            "message": f"画像の補足が足りない（取得した画像 {len(needed)}、補足 {found}）。"
                            "補足は、画像を含むブロック（段落）のすぐあとに、同じ入れ物の中で書く",
                            "raw": ", ".join(src for src, _a, _t in images)[:200]})
-        strip_captions(child, fetched, base, errors, names, removed)
+        strip_captions(child, fetched, guard, errors, names, removed)
     node.children = new_children
 
 
@@ -1141,11 +1188,14 @@ def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: s
     wd = work_dir(wiki, slug)
     cleaned_path = wd / "cleaned.md"
     raw_path = raw_root / f"{slug}.md"
+    raw_guard = WriteGuard(raw_root)
+    check_work_files(WriteGuard(wiki), wd)
+    check_image_backups(raw_guard, slug)
     if not cleaned_path.is_file():
         raise FileNotFoundError(f"cleaned.md がない: {cleaned_path}（先に freeze を実行する）")
     if not (wd / "fetch.json").is_file():
         raise FileNotFoundError(f"fetch.json がない: {wd / 'fetch.json'}")
-    if not raw_path.is_file():
+    if raw_guard.file_info(raw_path) is None:
         raise FileNotFoundError(f"raw がない: {raw_path}")
     fetch = load_fetch(wd)
     required = fetch.get("needs_translation")
@@ -1187,7 +1237,7 @@ def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: s
     src_tree, out_tree = parse_tree(src_body), parse_tree(out_body)
     names: set[str] = set()
     caption_ranges: list[tuple[int, int]] = []
-    strip_captions(out_tree, fetched_images(fetch), raw_path.parent, errors, names, caption_ranges)
+    strip_captions(out_tree, fetched_images(fetch), raw_guard, errors, names, caption_ranges)
     if translate and any(n.type == "html_block" for tree in (src_tree, out_tree) for n in walk(tree)):
         errors.append({"kind": "translation_html",
                        "message": "HTML ブロックは文章の翻訳を検査できない。未検査のまま完了にはしない。"
@@ -1227,7 +1277,36 @@ def check(wiki: Path, raw_root: Path, slug: str, override: str | None, reason: s
                               "checked_blocks": translation["checked_blocks"], **review},
               "completed": False,
               "errors": errors, "warnings": warnings}
+    result["check_sha256"] = snapshot_sha256(json.dumps(result, ensure_ascii=False, sort_keys=True).encode("utf-8"))
     return (0 if not errors else 1), result
+
+
+def read_raw_version(raw_root: Path, slug: str, expected: str) -> bytes:
+    path = raw_root / f"{slug}.md"
+    guard = WriteGuard(raw_root)
+    check_image_backups(guard, slug)
+    if guard.file_info(path) is None:
+        raise FileNotFoundError(path)
+    data = path.read_bytes()
+    if snapshot_sha256(data) != expected:
+        raise ValueError(f"確認した版と、現在の raw のバイト列が一致しない: {path}")
+    return data
+
+
+def finish(wiki_guard: WriteGuard, raw_guard: WriteGuard, slug: str, result: dict) -> None:
+    path = raw_guard.root / f"{slug}.md"
+    sha = result["translation"]["basis"]["raw_sha256"]
+    read_raw_version(raw_guard.root, slug, sha)
+    record_raw_root(wiki_guard.root, raw_guard.root, writer="wiki_rawcheck")
+    wd = work_dir(wiki_guard.root, slug)
+    trash = detach_work_dir(wiki_guard, wd)
+    if trash is None:
+        raise FileNotFoundError(wd)
+    result.update(completed=True, work_dir_removed=True, raw_ref=path.as_posix(), raw_sha256=sha)
+    try:
+        shutil.rmtree(trash)
+    except OSError as exc:
+        result["cleanup_pending"] = {"path": str(trash), "reason": str(exc)}
 
 
 # ---------------------------------------------------------------- 出力
@@ -1279,12 +1358,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = localize_argparse(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter))
     sub = parser.add_subparsers(dest="command", required=True)
     for name, help_text in (("freeze", "雑音の削除の段を検査し、削除のあとの内容を固定する"),
-                            ("check", "訳と補足の段を検査する")):
+                            ("check", "訳と補足の段を検査する"),
+                            ("read", "確定した版と一致する raw の本文を出す")):
         p = localize_argparse(sub.add_parser(name, help=help_text))
         p.add_argument("--wiki", type=Path, required=True, help="wiki のルート（<WIKI_ROOT>）")
         p.add_argument("--raw-root", type=Path, required=True, help="raw ソースのルート（<RAW_ROOT>）")
         p.add_argument("--slug", required=True, help="取り込みのスラッグ")
         p.add_argument("--json", action="store_true", help="結果を JSON で出力する。キーは英語のまま")
+        if name == "read":
+            p.add_argument("--expect-sha256", required=True, help="W8 が返した raw_sha256")
         if name == "check":
             p.add_argument("--language-override", choices=("translate", "keep"),
                            help="translate は翻訳を追加する。keep で翻訳必須の判定を解除することはできない")
@@ -1295,6 +1377,7 @@ def main(argv: list[str] | None = None) -> int:
                            help="誤りも警告もなければ、作業用のフォルダーを消す（検査の基準も消えるので、再検査はできなくなる）")
             p.add_argument("--accept-warnings", action="store_true",
                            help="--finish で、警告が残っていても消す。直さない警告の理由を log.md の prepare の記録に書いてから付ける")
+            p.add_argument("--expect-check-sha256", help="記録した警告と版を表す check_sha256")
     args = parser.parse_args(argv)
     # 作業用のフォルダーを読み書きする前に、初期化された wiki かを確かめる（ADR-0019）。
     found = wiki_initialized.problem(args.wiki)
@@ -1303,27 +1386,43 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     try:
         check_slug(args.slug)
-        if args.command == "freeze":
-            code, result = freeze(args.wiki, args.raw_root, args.slug)
-        else:
+        if args.command == "read":
+            data = read_raw_version(args.raw_root, args.slug, args.expect_sha256)
+            if args.json:
+                print(json.dumps({"text": data.decode("utf-8")}, ensure_ascii=False))
+            else:
+                sys.stdout.buffer.write(data)
+            return 0
+        if args.command == "check":
             if args.language_override and not args.reason:
                 print("--language-override には --reason で理由を付ける", file=sys.stderr)
                 return 1
             if args.accept_warnings and not args.finish:
                 print("--accept-warnings は --finish と一緒に付ける", file=sys.stderr)
                 return 1
-            code, result = check(args.wiki, args.raw_root, args.slug, args.language_override, args.reason, args.translation_review)
-            if args.finish:
+        locking = args.command == "freeze" or args.finish
+        if locking:
+            wiki_guard, raw_guard = WriteGuard(args.wiki), WriteGuard(args.raw_root)
+        with web_write_locks(wiki_guard, raw_guard, args.slug) if locking else nullcontext():
+            if args.command == "freeze":
+                code, result = freeze(args.wiki, args.raw_root, args.slug)
+            else:
+                code, result = check(args.wiki, args.raw_root, args.slug, args.language_override, args.reason, args.translation_review)
+            if args.command == "check" and args.finish:
                 # 作業用のフォルダーは検査の基準なので、直す作業が残るあいだは消さない。誤りがあれば直して再検査する。
                 # 警告は、直して再検査するか、直さない理由を残して受け入れる（--accept-warnings）まで残す。
+                if args.expect_check_sha256 is not None and args.expect_check_sha256 != result["check_sha256"]:
+                    code = 1
+                    result["ok"] = False
+                    result["errors"].append({"kind": "check_changed",
+                                             "message": "確認した版か検査の結果が変わった。警告を確認し直す"})
                 if code != 0:
                     result["work_dir_kept"] = "errors"
                 elif result["warnings"] and not args.accept_warnings:
                     result["work_dir_kept"] = "warnings"
                 else:
-                    result["work_dir_removed"] = remove_work_dir(args.wiki, args.slug)
-                    result["completed"] = result["work_dir_removed"]
-    except (FileNotFoundError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    finish(wiki_guard, raw_guard, args.slug, result)
+    except (OSError, ValueError, RuntimeError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
     print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else render(result))

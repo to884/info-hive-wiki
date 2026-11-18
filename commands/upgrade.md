@@ -1,7 +1,7 @@
 ---
 description: 既存のユーザースコープまたはプロジェクトの LLM Wiki を、現在のプラグインのバージョンにアップグレードする。
-argument-hint: "[--user] [--wiki-dir <name>] [--raw-dir <name>]"
-argument-description: "`--user` を付けるとユーザースコープの wiki を対象にし、付けなければ現在のプロジェクトの wiki を対象にする。`--wiki-dir` と `--raw-dir` は、既定と違うディレクトリ名で作った wiki を指すときに使う。"
+argument-hint: "[--user] [--wiki-dir <path>] [--raw-dir <path>] [--previous-raw-root <path> ...]"
+argument-description: "`--user` を付けるとユーザースコープの wiki を対象にし、付けなければ現在のプロジェクトの wiki を対象にする。`--wiki-dir` と `--raw-dir` は現在の根を指定する。`--previous-raw-root` は過去に使った根を登録する。繰り返し指定できる。"
 ---
 
 選んだ wiki を、現在のプラグインのバージョンにアップグレードする。`info-hive` スキルを使う。
@@ -11,7 +11,9 @@ argument-description: "`--user` を付けるとユーザースコープの wiki 
 `--global` は `--user` に改名して受け付けなくなったので、`--global` が渡されたら何も実行せず、`--user` を使うように伝えて止める。
 
 1. `<WIKI_ROOT>` と `<RAW_ROOT>` は、`--user`、明示されたパス、もっとも近いプロジェクトの指示、グローバルなエージェントの指示の順に探し、どれにもなければ現在のプロジェクトの `wiki/` と `raw/` とする。`<WIKI_ROOT>/SCHEMA.md` がなければ、初期化された wiki ではない（ほかの用途の `wiki/` のこともある）。MCP のツールもスクリプトも呼ばず、何も書かずに止まり、ユーザースコープの wiki なら `/wiki:init --user`、プロジェクトの wiki なら `/wiki:init` を提案する。別の場所の wiki に黙って切り替えたり、`SCHEMA.md` を自分で作ったりしてはならない。ツールやスクリプトが「初期化された wiki ではない」と返したときも同じにする。`init_wiki.py --upgrade` も実行しない（スクリプトも、`SCHEMA.md` のない wiki には何も作らずに終了コード 1 で止まる）。`SCHEMA.md` だけを消してしまった wiki は、同じ場所で `/wiki:init` を実行すると、既存のファイルを上書きせずに `SCHEMA.md` を足して戻せる。
-2. ベースディレクトリと、特定したルートとちょうど一致する wiki と raw の相対パスを指定して、`init_wiki.py` を実行する。ユーザースコープの標準の構成（`~/info-hive/wiki/` と `~/info-hive/raw/`）では `python "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/init_wiki.py" "<absolute-home-directory>/info-hive" --upgrade` を使う。以前の既定（`~/wiki/` と `~/wiki/raw/`）で作った wiki は `"<absolute-home-directory>" --wiki-dir wiki --raw-dir wiki/raw --upgrade` のまま使い、移動はしない。プロジェクトの既定の構成では、プロジェクトルートの絶対パスに `--upgrade` を付ける。プラグインのディレクトリに対して実行してはならない。実行環境の JSON が `"status": "ready"` を示していない限り、アップグレードの完了を報告してはならない。
+2. 特定した wiki と現在の raw の根を `--wiki-dir` と `--raw-dir` に指定して、ベースディレクトリに対して `init_wiki.py --upgrade` を実行する。絶対パスをそのまま渡せる。相対パスはベースディレクトリからのもので、`..` は含めない。ユーザースコープの標準の構成（`~/info-hive/wiki/` と `~/info-hive/raw/`）では `python "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/init_wiki.py" "<absolute-home-directory>/info-hive" --upgrade` を使う。以前の既定（`~/wiki/` と `~/wiki/raw/`）で作った wiki は `"<absolute-home-directory>" --wiki-dir wiki --raw-dir wiki/raw --upgrade` のまま使う。プロジェクトの既定の構成では、プロジェクトルートの絶対パスに `--upgrade` を付ける。プラグインのディレクトリに対して実行してはならない。
+   - 過去に使った raw の根が明示されていれば、そのディレクトリを `--previous-raw-root "<パス>"` で渡す。複数あれば繰り返す。以前の別名が移動済みなら、当時の実体のパスが分かる場合にそれも渡せる。指定がなければ、過去の根が判明したときに引数を付けて再実行できることを伝える。
+   - スクリプトは現在と指定済みの過去の根を `.wiki-cache/raw-roots.d/` に登録する。記録時のエラーを利用者に伝え、実行環境の JSON が `"status": "ready"` を示していない限り、アップグレードの完了を報告しない。ハッシュを持たない旧ページは引き続き lint で版未検証になる。
 3. スクリプトの "Upgrade required: <SCHEMA.md>" の出力を読む。そこに挙がっている、SCHEMA.md に欠けているセクションごとに、次のことを行う。
    - `skills/info-hive/assets/SCHEMA.md.template` を開き、見出しが一致するセクションを探す。
    - そのセクションの内容をユーザーに示し、`str_replace` でユーザーの SCHEMA.md に追記することを提案する。セクションごとに承認を待つ。SCHEMA.md はユーザーと一緒に改訂してきたものなので、黙って変更してはならない。
@@ -52,7 +54,9 @@ argument-description: "`--user` を付けるとユーザースコープの wiki 
    追加する内容を示して承認を得てから、`str_replace` で書き込む。ユーザーが「見送る」と答えたら、それ以上勧めない。
 6. `wiki_graph_extract.py` は自動で実行しない。`graph:` メタデータを持つページが1つもないうちは、実行しても何も得られない。ユーザーの準備ができたときの次の手順として伝えておく。
 
-7. **経験の記録とスキルの改善（llm-wiki の v3.2.0 で加わった機能）:** init と upgrade は、`.experience-template.json`、`.pattern-template.md`、`.evolution/README.md` を、既存のファイルを上書きせずに追加する。`## Skill evolution` のスキーマセクションは、任意のマージとして提案する。経験の記録とスキルの改善はオプトイン方式で、既存のページやコマンドに移行作業は要らない。実験のアーカイブは、`.wiki-cache/` と違って消えずに残る。`/wiki:learn`、`/wiki:evolve`、パイロットスイート、検証・適用・ロールバックを明示的に行う流れについては、`references/evolution-workflow.md` を案内する。
+7. **経験の記録とスキルの改善（llm-wiki の v3.2.0 で加わった機能）:** init と upgrade は、`.experience-template.json`、`.pattern-template.md`、`.evolution/README.md` を、既存のファイルを上書きせずに追加する。`## Skill evolution` のスキーマセクションは、任意のマージとして提案する。経験の記録とスキルの改善はオプトイン方式で、既存のページやコマンドに移行作業は要らない。実験のアーカイブは `.evolution/` に残る。`/wiki:learn`、`/wiki:evolve`、パイロットスイート、検証・適用・ロールバックを明示的に行う流れについては、`references/evolution-workflow.md` を案内する。
+
+   既存の `SCHEMA.md` に `.wiki-cache/` をまとめて削除してよいという記述があれば、削除してよいのは検索用のキャッシュであり、`.wiki-cache/raw-roots.d/` は保管することを追記するよう提案する。
 
 8. **判定レイヤー（llm-wiki の v4.0.0 で加わった機能）の注意点**（これもあわせて伝える）:
    - 既存の wiki に移行作業は要らない。ファイル、スクリプト、検索、コマンドは、これまでどおり動く。

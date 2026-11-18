@@ -113,10 +113,10 @@ def _win():
 _SHARE_ALL = 0x7
 
 
-def _win_handle(path, access, disposition, flags):
-    """CreateFileW を、共有 _SHARE_ALL で呼び、ハンドルを返す。失敗は、winerror を持つ OSError にする。"""
+def _win_handle(path, access, disposition, flags, *, share=_SHARE_ALL):
+    """CreateFileW のハンドルを返す。失敗は、winerror を持つ OSError にする。"""
     ctypes, msvcrt, wintypes, k32, Info = _win()
-    handle = k32.CreateFileW(os.fspath(path), access, _SHARE_ALL, None, disposition, flags, None)
+    handle = k32.CreateFileW(os.fspath(path), access, share, None, disposition, flags, None)
     if handle in (None, wintypes.HANDLE(-1).value):
         code = ctypes.get_last_error()
         raise OSError(None, ctypes.FormatError(code).strip(), os.fspath(path), code)
@@ -138,7 +138,7 @@ def _win_open_read(path):
         raise
 
 
-def _win_open(path, disposition, flags):
+def _win_open(path, disposition, flags, *, share=_SHARE_ALL):
     """Windows で、最後の名前の再解析点をたどらずに、ファイルを作るか開く。開いたものが通常のファイルでなければ失敗する。
 
     CreateFileW に FILE_FLAG_OPEN_REPARSE_POINT を付ける。名前がリンクなら、リンクそのものを開くので、先は作らない
@@ -146,9 +146,13 @@ def _win_open(path, disposition, flags):
     再解析点とディレクトリを拒む（名前を調べてから開く形にしない。設計の 3.2）。
     """
     ctypes, msvcrt, wintypes, k32, Info = _win()
-    access = 0x40000000 | (0x80000000 if flags == os.O_RDWR else 0)      # GENERIC_WRITE と GENERIC_READ
+    if flags & os.O_APPEND:
+        access = 0x4  # FILE_APPEND_DATA。ハンドルを引き継ぐ子プロセスも末尾に書く。
+    else:
+        access = {os.O_RDONLY: 0x80000000, os.O_WRONLY: 0x40000000,
+                  os.O_RDWR: 0xC0000000}[flags]  # GENERIC_READ / GENERIC_WRITE
     # FILE_ATTRIBUTE_NORMAL、FILE_FLAG_OPEN_REPARSE_POINT
-    handle = _win_handle(path, access, disposition, 0x80 | 0x00200000)
+    handle = _win_handle(path, access, disposition, 0x80 | 0x00200000, share=share)
     try:
         info = Info()
         if not k32.GetFileInformationByHandle(handle, ctypes.byref(info)):
@@ -209,12 +213,25 @@ class Os:
             return _win_open_read(path)
         return os.open(path, os.O_RDONLY | O_BINARY)       # 対照（read_without_share_delete）は、Windows でもこの形
 
-    def open_lock(self, path, create=True):
+    def open_plain_read(self, path):
+        """最後の名前のリンクをたどらずに、検査に使う読み取り用のハンドルを開く。"""
+        if NT:
+            return _win_open(path, _OPEN_EXISTING, os.O_RDONLY)
+        return os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+
+    def open_append(self, path, mode):
+        """最後の名前のリンクをたどらずに、追記用に開く。"""
+        if NT:
+            return _win_open(path, _OPEN_ALWAYS, os.O_WRONLY | os.O_APPEND)
+        return os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, mode)
+
+    def open_lock(self, path, create=True, *, share_delete=True):
         """ロックのファイルを開く。create なら、なければ作る。最後の名前がリンクなら、たどらずに失敗する。"""
         if "follow_on_open" in MUTANTS:
             return os.open(path, os.O_RDWR | (os.O_CREAT if create else 0) | O_BINARY, 0o600)  # 対照: 6 版目の形
         if NT:
-            return _win_open(path, _OPEN_ALWAYS if create else _OPEN_EXISTING, os.O_RDWR)
+            return _win_open(path, _OPEN_ALWAYS if create else _OPEN_EXISTING, os.O_RDWR,
+                             share=_SHARE_ALL if share_delete else 0x3)
         fd = os.open(path, os.O_RDWR | (os.O_CREAT if create else 0) | os.O_NOFOLLOW, 0o600)
         try:
             if not stat.S_ISREG(os.fstat(fd).st_mode):

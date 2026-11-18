@@ -21,7 +21,7 @@ YouTube から来た文字（字幕、題名、チャンネルの名前、チャ
             [--json]
             選んだトラックの json3 を取り直し、ハッシュが H と同じときだけ raw を重ねて書かない形で置いて、
             読み取り専用にする。上書きの手段は持たない。
-    verify  --wiki <W> --raw-root <R> --slug <S> [--page <wiki からの相対パス>=<ファイル> ...] [--json]
+    verify  --wiki <W> --raw-root <R> (--slug <S> | --raw-path <P>) [--page <相対パス>=<ファイル> ...] [--json]
             用意したページ（--page。wiki のページに重ねて読む）と wiki のページを、raw と照らす。定義と印の対応、
             根拠の場所、confidence の計算を確かめ、「raw にない語」を挙げる。ネットにつながない。
     define  --id L123-1 --caption <字幕の語> [--nth N] [--corrected <訂正した語> --basis <種類:場所>]
@@ -38,7 +38,6 @@ import argparse
 import hashlib
 import json
 import os
-import secrets
 import sys
 import time
 import urllib.parse
@@ -50,6 +49,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import wiki_captions as wc  # noqa: E402
 import wiki_initialized  # noqa: E402
 import wiki_youtube_url  # noqa: E402
+from wiki_fsguard import Refused, WriteGuard, external_raw_guard  # noqa: E402
+from wiki_pages import absolute_user_path, resolve_raw  # noqa: E402
+from wiki_raw import within  # noqa: E402
+from wiki_raw_roots import read_raw_roots, record_raw_root  # noqa: E402
 from wiki_text import localize_argparse, nfc  # noqa: E402
 
 SCRIPT_VERSION = "wiki_youtube.py 0.1"
@@ -341,9 +344,9 @@ def render(info: dict, video_id: str, track: Track, video_lang: str, data: bytes
 # ---------------------------------------------------------------- 置いてある raw との関係
 
 
-def existing_raws(raw_root: Path, video_id: str) -> tuple[list[dict], list[str]]:
-    """<RAW_ROOT> の直下の .md のうち、frontmatter の video_id が同じもの（パス, sha）と、読めないファイルの名前。"""
-    found, unreadable = [], []
+def existing_raws(raw_root: Path, video_id: str, guard: WriteGuard) -> tuple[list[dict], list[str], list[dict]]:
+    """根の直下で、既存の原本と読めなかった項目を調べる。"""
+    found, unreadable, warnings = [], [], []
     try:
         entries = sorted(os.scandir(raw_root), key=lambda e: e.name)
     except OSError as exc:
@@ -351,10 +354,18 @@ def existing_raws(raw_root: Path, video_id: str) -> tuple[list[dict], list[str]]
     for entry in entries:
         if not entry.name.lower().endswith(".md") or entry.name.startswith("."):
             continue
+        path = Path(entry.path)
         try:
-            if not entry.is_file(follow_symlinks=False):
+            info = guard.file_info(path)
+            if info is None:
                 continue
-            text = Path(entry.path).read_text(encoding="utf-8-sig")
+            data = path.read_bytes()
+            text = data.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
+        except Refused as exc:
+            if exc.kind != "not_file":
+                unreadable.append(entry.name)
+                warnings.append({"path": str(exc.path), "kind": exc.kind, "reason": str(exc)})
+            continue
         except (OSError, UnicodeDecodeError):
             unreadable.append(entry.name)
             continue
@@ -363,41 +374,50 @@ def existing_raws(raw_root: Path, video_id: str) -> tuple[list[dict], list[str]]
             unreadable.append(entry.name)
             continue
         if str(meta.get("video_id") or "") == video_id:
-            found.append({"path": Path(entry.path), "slug": nfc(entry.name[:-3]),
-                          "sha": str(meta.get("source_sha256") or "")})
-    return found, unreadable
+            found.append({"path": path, "slug": nfc(entry.name[:-3]), "info": info,
+                          "sha": str(meta.get("source_sha256") or ""),
+                          "raw_sha256": hashlib.sha256(data).hexdigest()})
+    return found, unreadable, warnings
 
 
-def relations(wiki: Path, raw_root: Path, video_id: str, sha: str | None, slug: str | None) -> dict:
-    found, unreadable = existing_raws(raw_root, video_id)
+def relations(wiki: Path, raw_root: Path, video_id: str, sha: str | None, slug: str | None,
+              *, guard: WriteGuard | None = None) -> dict:
+    if guard is None:
+        try:
+            guard = WriteGuard(raw_root)
+        except (OSError, ValueError) as exc:
+            raise Fail(f"raw のルートを読めない（{exc}）") from exc
+    found, unreadable, warnings = existing_raws(raw_root, video_id, guard)
     same = [r for r in found if sha and r["sha"] == sha]
     out = {
         "existing": [{"path": r["path"].as_posix(), "slug": r["slug"],
                       "state": "same" if sha and r["sha"] == sha else "different"} for r in found] if sha else [],
         "unreadable": unreadable,
+        "raw_link_warnings": warnings,
         "slug_state": None,
     }
     if slug is not None:
         target = raw_root / f"{slug}.md"
-        if os.path.lexists(target):
+        try:
+            info = guard.file_info(target)
+        except Refused as exc:
+            info = None
+            out["slug_state"] = "slug_taken"
+            warning = {"path": str(exc.path), "kind": exc.kind, "reason": str(exc)}
+            if exc.kind != "not_file" and warning not in warnings:
+                warnings.append(warning)
+        except OSError as exc:
+            raise Fail(f"raw の行き先を確かめられない（{exc}）") from exc
+        if info is not None:
             # スラッグのファイルが、見つけた同じ動画の raw のどれかと同じ実体か。名前の字面で比べると、大文字と
             # 小文字だけが違う指定で、同じ動画の別版を slug_taken と取り違えた（実装のレビューの 14 回目）。
-            mine = None
-            for r in found:
-                try:
-                    if os.path.samefile(target, r["path"]):
-                        mine = r
-                        break
-                except OSError:
-                    continue
+            mine = next((r for r in found if info.st_ino and os.path.samestat(info, r["info"])), None)
             if mine is None:
                 out["slug_state"] = "slug_taken"
             else:
                 out["slug_state"] = "same" if sha and mine["sha"] == sha else "different"
-        elif os.path.lexists(wiki / "sources" / f"{slug}.md"):
-            out["slug_state"] = "slug_taken"
-        else:
-            out["slug_state"] = "free"
+        elif out["slug_state"] is None:
+            out["slug_state"] = "slug_taken" if os.path.lexists(wiki / "sources" / f"{slug}.md") else "free"
     out["_same"] = same
     out["_different"] = [r for r in found if not (sha and r["sha"] == sha)]
     return out
@@ -413,46 +433,36 @@ def check_slug(slug: str) -> None:
         raise Fail("スラッグに制御文字がある")
 
 
-def publish(wiki: Path, raw_root: Path, slug: str, data: bytes) -> tuple[str, Path]:
-    """raw を重ねて書かない形で置き、読み取り専用にする。（created か exists, パス）。"""
-    import wiki_session as ws
-    target = raw_root / f"{slug}.md"
-    busy = 0
-    while True:
+def publish(guard: WriteGuard, target: Path, data: bytes) -> bool:
+    """raw を重ねて書かず、名前の競合を返す。"""
+    for attempt in range(51):
         try:
-            ws.check_destination(wiki, raw_root, target)
-        except ws.Fail as exc:
-            raise Fail(str(exc))
-        if os.path.lexists(target):
-            return "exists", target
-        tmp = raw_root / f".wiki-youtube-{secrets.token_hex(8)}.tmp"
-        try:
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o644)
-            with os.fdopen(fd, "wb") as fh:
-                fh.write(data)
-                fh.flush()
-                os.fsync(fh.fileno())
-            try:
-                ws.publish_exclusive(tmp, target)
-            except FileExistsError:
-                continue
-            except PermissionError as exc:
-                if WINDOWS and busy < 50:
-                    busy += 1
-                    time.sleep(0.02)
-                    continue
-                raise Fail(f"raw を置けない（{exc}）")
-            except ws.ExclusiveUnsupported as exc:
-                raise Fail(f"このファイルシステムでは、raw を重ねて書かない形で置けないので書かない（{exc}）")
-            ws.make_read_only(target)
-            return "created", target
-        finally:
-            if os.path.lexists(tmp):
-                os.unlink(tmp)
+            guard.write_bytes(target, data, prefix=".wiki-youtube-")
+            return True
+        except FileExistsError:
+            return False
+        except PermissionError:
+            if not WINDOWS or attempt == 50:
+                raise
+            time.sleep(0.02)
 
 
-def raw_ref_of(wiki: Path, target: Path) -> str:
-    return wc.raw_label(target, wiki)
+def finish_raw(wiki: Path, guard: WriteGuard, path: Path, sha: str) -> dict:
+    """source に書く参照で、保存した版を lint と同じ方法で確かめる。"""
+    absolute = absolute_user_path(path).as_posix()
+    historical, _unchecked = read_raw_roots(wiki)
+    for ref in dict.fromkeys((wc.raw_label(path, wiki), absolute)):
+        meta = {"type": "source", "raw": ref, "raw_sha256": sha}
+        checked, = resolve_raw(meta, wiki / "sources" / path.name, wiki, raw_roots=[guard.root],
+                               recorded_raw_roots=historical)
+        if checked.state == "resolved" and checked.path.samefile(path):
+            guard.make_read_only(path)
+            info = guard.file_info(path)
+            if info is None:
+                raise FileNotFoundError(path)
+            return {"raw_path": path.as_posix(), "raw_ref": ref, "raw_sha256": sha,
+                    "read_only": not (info.st_mode & 0o222)}
+    raise Fail(f"要約ページの raw を確かめられない: {checked.state}: {checked.reason} {absolute}")
 
 
 # ---------------------------------------------------------------- サブコマンド
@@ -538,14 +548,10 @@ def cmd_inspect(args) -> int:
 
 def cmd_write(args) -> int:
     wiki, raw_root = Path(args.wiki), Path(args.raw_root)
-    from wiki_pages import absolute_user_path
     try:
-        absolute_user_path(wiki)
-        absolute_user_path(raw_root)
-    except ValueError as exc:
-        raise Fail(str(exc)) from None
-    if not raw_root.is_dir():
-        raise Fail(f"raw のルートがない: {raw_root}")
+        guard = external_raw_guard(wiki, raw_root)
+    except (OSError, ValueError) as exc:
+        raise Fail(f"raw の行き先を使えない: {exc}") from exc
     check_slug(args.slug)
     result = take(args.url, args.track)
     if result["track"] is None:
@@ -555,44 +561,38 @@ def cmd_write(args) -> int:
         result["status"] = "changed"
         result["message"] = "inspect のあとに字幕が変わったので書かない。inspect からやり直す"
         return emit(args, result, 3)
-    rel = relations(wiki, raw_root, result["video_id"], result["source_sha256"], args.slug)
+    rel = relations(wiki, raw_root, result["video_id"], result["source_sha256"], args.slug, guard=guard)
     result.update({k: v for k, v in rel.items() if not k.startswith("_")})
-    if rel["_same"]:
-        path = rel["_same"][0]["path"]
-        # 置いてある同じ資料の raw も、行き先を確かめてから読み取り専用に戻す。Git で取り直した raw や、公開と
-        # 読み取り専用のあいだで止まった raw は書き込みできる（セッションの raw の identical と同じ。
-        # to884/info-hive-wiki#74 のレビュー）。
-        import wiki_session as ws
-        try:
-            ws.check_destination(wiki, raw_root, path)
-        except ws.Fail as exc:
-            raise Fail(str(exc))
-        ws.make_read_only(path)
-        result.update({"status": "same", "raw_path": path.as_posix(), "raw_ref": raw_ref_of(wiki, path),
-                       "read_only": not (os.stat(path).st_mode & 0o222)})
-        return emit(args, result, 0)
-    if rel["slug_state"] == "different":
+    same = rel["_same"][0] if rel["_same"] else None
+    if same is None and rel["slug_state"] == "different":
         result["status"] = "different"
         result["message"] = ("このスラッグには、同じ動画の字幕の違う raw がある。別版のスラッグ（<スラッグ>-<YYYYMMDD>）で"
                              "書くと利用者が決めたら、そのスラッグと --new-version を付けて書く")
         return emit(args, result, 3)
-    if rel["slug_state"] != "free":
+    if same is None and rel["slug_state"] != "free":
         result["status"] = "slug_taken"
         return emit(args, result, 3)
-    if rel["_different"] and not args.new_version:
+    if same is None and rel["_different"] and not args.new_version:
         result["status"] = "different"
         result["message"] = ("同じ動画の、字幕の違う raw がある。別版のスラッグ（<スラッグ>-<YYYYMMDD>）で書くと利用者が"
                              "決めたら、--new-version を付けて書く")
         return emit(args, result, 3)
-    data = result["_raw"].encode("utf-8")
-    state, path = publish(wiki, raw_root, args.slug, data)
-    if state == "exists":
-        result["status"] = "slug_taken"
-        return emit(args, result, 3)
-    if path.read_bytes() != data:
-        raise Fail(f"書いた raw を読み戻すと中身が違う: {path}")
-    result.update({"status": "created", "raw_path": path.as_posix(), "raw_ref": raw_ref_of(wiki, path),
-                   "read_only": not (os.stat(path).st_mode & 0o222)})
+    try:
+        record_raw_root(wiki, guard.root, writer="wiki_youtube")
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise Fail(f"raw の根を記録できない: {exc}") from exc
+    try:
+        if same is not None:
+            result.update(finish_raw(wiki, guard, same["path"], same["raw_sha256"]), status="same")
+        else:
+            data = result["_raw"].encode("utf-8")
+            path = raw_root / f"{args.slug}.md"
+            if not publish(guard, path, data):
+                result["status"] = "slug_taken"
+                return emit(args, result, 3)
+            result.update(finish_raw(wiki, guard, path, hashlib.sha256(data).hexdigest()), status="created")
+    except (OSError, ValueError) as exc:
+        raise Fail(f"raw を保存できない（{exc}）") from exc
     return emit(args, result, 0)
 
 
@@ -619,16 +619,23 @@ def parse_page_args(values: list[str] | None, wiki=None) -> dict:
 
 def cmd_verify(args) -> int:
     wiki, raw_root = Path(args.wiki), Path(args.raw_root)
-    check_slug(args.slug)
-    raw_path = raw_root / f"{args.slug}.md"
+    historical, unchecked = read_raw_roots(wiki)
+    if args.raw_path is not None:
+        raw_path = Path(args.raw_path)
+    else:
+        check_slug(args.slug)
+        raw_path = raw_root / f"{args.slug}.md"
     try:
-        from wiki_pages import resolve_raw
-        checked = resolve_raw({"type": "source", "raw": str(raw_path.absolute())},
-                              wiki / "sources" / f"{args.slug}.md", wiki, raw_roots=[raw_root])[0]
+        absolute = absolute_user_path(raw_path)
+        root = absolute_user_path(raw_root)
+        if not any(within(absolute, base) and absolute != base for base in (root, root.resolve(strict=True))):
+            raise ValueError("対象の raw は --raw-root の中に指定する")
+        checked, = resolve_raw({"type": "source", "raw": str(absolute)}, wiki / "sources" / raw_path.name,
+                               wiki, raw_roots=[root], recorded_raw_roots=historical)
         if checked.state != "resolved":
             raise ValueError(f"{checked.state}: {checked.reason} {checked.links or checked.unchecked}")
         raw_path = checked.path
-        doc = wc.parse_raw(raw_path.read_text(encoding="utf-8"))
+        doc = wc.parse_raw(raw_path.read_text(encoding="utf-8-sig"))
     except (OSError, UnicodeDecodeError, ValueError, wc.CaptionError) as exc:
         raise Fail(f"動画の raw を読めない（{exc}）: {raw_path}")
     overlay = parse_page_args(args.page, wiki)
@@ -636,7 +643,7 @@ def cmd_verify(args) -> int:
     # 指摘は wiki 全体のものを返す（この raw に関わるかで絞らない）。結果と「raw にない語」だけをこの raw に絞る。
     try:
         result = wc.check_wiki(wiki, overlay, only_raw=str(Path(os.path.abspath(raw_path))), unknown_for=set(overlay),
-                               raw_roots=[raw_root], wiki_root_given=wiki)
+                               raw_roots=[raw_root], recorded_raw_roots=historical, wiki_root_given=wiki)
     except ValueError as exc:
         raise Fail(str(exc))
     raws = [r.as_dict() for r in result.raws]
@@ -645,7 +652,7 @@ def cmd_verify(args) -> int:
         "raw": label, "video_id": doc.video_id, "caption_kind": doc.caption_kind, "lines": doc.count,
         "read_only": not (os.stat(raw_path).st_mode & 0o222),
         "findings": findings, "result": raws[0] if raws else None, "unknown_words": result.unknown_words,
-        "raw_warnings": result.raw_warnings,
+        "raw_warnings": result.raw_warnings + [{"state": "unknown_raw_root", **item} for item in unchecked],
     }
     if not raws or not raws[0]["summaries"]:
         if not any(f["code"] == "no_summary" for f in obj["findings"]):
@@ -673,10 +680,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="YouTube の動画の字幕を、固定した yt-dlp で取り、raw を 1 回で作る（ADR-0027）"))
     sub = parser.add_subparsers(dest="command", required=True)
 
-    def common(p, slug_required: bool):
+    def common(p, slug_required: bool | None):
         p.add_argument("--wiki", required=True)
         p.add_argument("--raw-root", required=True)
-        p.add_argument("--slug", required=slug_required)
+        if slug_required is not None:
+            p.add_argument("--slug", required=slug_required)
         p.add_argument("--json", action="store_true")
 
     p = localize_argparse(sub.add_parser("inspect", help="メタデータとトラックを取り、source_sha256 を出す（書かない）"))
@@ -693,7 +701,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = localize_argparse(sub.add_parser("verify", help="用意したページと wiki のページを raw と照らす"))
     p.add_argument("--page", action="append", default=None,
                    help="<wiki からの相対パス>=<ファイル>。wiki のページに重ねて読む（繰り返し指定できる）")
-    common(p, True)
+    common(p, None)
+    target = p.add_mutually_exclusive_group(required=True)
+    target.add_argument("--slug")
+    target.add_argument("--raw-path", help="write が返した対象の原本のパス")
     p = localize_argparse(sub.add_parser("define", help="定義の 1 行を決まった書き方で出す"))
     p.add_argument("--id", required=True)
     p.add_argument("--caption", required=True)

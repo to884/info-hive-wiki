@@ -48,12 +48,12 @@ import socket
 import struct
 import subprocess
 import sys
-import tempfile
 import time
 import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import nullcontext
 from datetime import datetime
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -65,6 +65,8 @@ import wiki_initialized  # noqa: E402
 import wiki_pages  # noqa: E402
 import wiki_rawcheck  # noqa: E402
 import wiki_youtube_url  # noqa: E402
+from wiki_fsguard import WriteGuard  # noqa: E402
+from wiki_raw_roots import record_raw_root  # noqa: E402
 
 FETCHED_BY = "wiki_fetch.py 0.1"
 USER_AGENT = "Mozilla/5.0 (compatible; info-hive-wiki-fetch/0.1; +https://github.com/to884/info-hive-wiki)"
@@ -1156,14 +1158,6 @@ def check_slug(slug: str) -> None:
         raise ValueError(f"スラッグに Windows の予約された名前は使えない: {slug!r}")
 
 
-def inside(root: Path, path: Path) -> bool:
-    try:
-        path.resolve().relative_to(root.resolve())
-        return True
-    except ValueError:
-        return False
-
-
 def existing_sha(path: Path) -> str | None:
     text = path.read_text(encoding="utf-8-sig")
     m = FRONTMATTER_RE.match(text)
@@ -1188,13 +1182,13 @@ _REPLACE_RETRY_DELAYS = (0.05, 0.1, 0.15, 0.2, 0.25, 0.25)
 _RETRY_REPLACE_ON_WINDOWS = os.name == "nt"
 
 
-def replace_with_retry(src: Path, dst: Path) -> None:
-    """os.replace(src, dst) を行う。Windows で PermissionError になったときだけ、間を置いて試し直す。
+def replace_delays() -> tuple[float, ...]:
+    return _REPLACE_RETRY_DELAYS if _RETRY_REPLACE_ON_WINDOWS else ()
 
-    ほかの例外は試し直さずに上げる。試し直しても失敗したら、最後の PermissionError を上げる。
-    ファイルは消さない。失敗したときの後始末は呼び出し側が行う。
-    """
-    for delay in _REPLACE_RETRY_DELAYS if _RETRY_REPLACE_ON_WINDOWS else ():
+
+def replace_with_retry(src: Path, dst: Path) -> None:
+    """作業用のファイルの名前を変える。Windows の一時的なアクセス拒否は再試行する。"""
+    for delay in replace_delays():
         try:
             os.replace(src, dst)
             return
@@ -1203,88 +1197,76 @@ def replace_with_retry(src: Path, dst: Path) -> None:
     os.replace(src, dst)
 
 
-def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text: str,
-                  images: list[tuple[str, bytes]]) -> None:
-    """本文と画像を書く。途中で失敗したら、前の本文と画像をそのまま残す。
+def raw_version(info: os.stat_result | None) -> tuple | None:
+    if info is None:
+        return None
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_mode
 
-    新しい本文と画像は一時の場所に書き、古い画像を退避してから、新しい画像と本文を置く。
-    どこかで失敗したら、置いた新しい画像を消して、退避した古い画像を戻す。
-    名前の変更（退避、配置、本文の置き換え、戻し）は replace_with_retry で行う。
-    退避の場所は呼び出しごとに新しく作り、前の呼び出しが残した退避の場所は使わない。
-    退避した古い画像を消すのは、本文を置き換えたあとだけである。戻しきれなかった古い画像は、
-    ただ 1 つの写しなので退避の場所に残し、その場所を例外の注記（add_note）で知らせる。
-    書き込み先はすべて RAW_ROOT の中に限り、シンボリックリンクを通して外に書かない。
-    RAW_ROOT そのものは作らない。初期化（init_wiki.py）が作る（ADR-0019）。
-    """
-    if not raw_root.is_dir():
-        raise FileNotFoundError(f"raw のルートがない: {raw_root}")
-    pid = os.getpid()
-    tmp = raw_root / f".{slug}.md.{pid}.tmp"
-    staging = asset_dir.parent / f".{slug}.{pid}.new"
-    # 退避の場所（.<スラッグ>.<プロセス ID>.<乱数>.old）は、古い画像があるときに mkdtemp で作る。
-    backup: Path | None = None
-    if target.is_symlink():
-        raise ValueError(f"保存先がシンボリックリンクになっている: {target}")
-    for path in [tmp, asset_dir] + [asset_dir / name for name, _ in images]:
-        if path.is_symlink():
-            if path == asset_dir:
-                raise ValueError(f"保存先がシンボリックリンクになっている: {path}")
-            path.unlink()
-        if not inside(raw_root, path):
-            raise ValueError(f"保存先が RAW_ROOT の外になる: {path}")
-    old_files = sorted(asset_dir.glob(f"{slug}-*")) if asset_dir.is_dir() else []
-    placed: list[Path] = []
+
+def check_outputs(guard: WriteGuard, target: Path, asset_dir: Path, slug: str,
+                  images: list[tuple[str, bytes]]) -> list[Path]:
+    guard.file_info(target)
+    old_files = sorted(asset_dir.glob(f"{slug}-*")) if guard.directory_info(asset_dir) else []
+    for old in old_files:
+        guard.file_info(old)
+    for name, _ in images:
+        if Path(name).name != name:
+            raise ValueError(f"画像の名前にディレクトリを指定できない: {name}")
+        guard.file_info(asset_dir / name)
+    return old_files
+
+
+def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text: str,
+                  images: list[tuple[str, bytes]], *, guard: WriteGuard | None = None) -> None:
+    """本文と画像を保存する。失敗時は退避した画像を戻す。"""
+    guard = guard or WriteGuard(raw_root)
+    old_files = check_outputs(guard, target, asset_dir, slug, images)
+    delays = replace_delays()
+    staging = backup = None
     moved: list[tuple[Path, Path]] = []
+    placed: list[tuple[Path, Path]] = []
     replaced = False
     try:
-        with tmp.open("w", encoding="utf-8", newline="") as f:
-            f.write(text)
         if images:
-            staging.mkdir(parents=True, exist_ok=True)
+            guard.ensure_directory(asset_dir)
+            staging = guard.temporary_directory(asset_dir.parent, prefix=f".{slug}.", suffix=".new")
             for name, data in images:
-                (staging / name).write_bytes(data)
+                guard.write_bytes(staging / name, data)
         if old_files:
-            # 前の呼び出しが戻しきれずに残した退避の場所（同じプロセス ID のこともある）を使い回すと、
-            # そこにある古い画像を上書きするか、後始末で消す。毎回、まだない名前の場所を作る。
-            backup = Path(tempfile.mkdtemp(prefix=f".{slug}.{pid}.", suffix=".old", dir=asset_dir.parent))
+            backup = guard.temporary_directory(asset_dir.parent, prefix=f".{slug}.", suffix=".old")
             for old in old_files:
                 dest = backup / old.name
-                # 移す前に記録する。移した直後に止められても、戻しと注記がその画像を知っている。
                 moved.append((dest, old))
-                replace_with_retry(old, dest)
-        if images:
-            asset_dir.mkdir(parents=True, exist_ok=True)
-            for name, _data in images:
-                replace_with_retry(staging / name, asset_dir / name)
-                placed.append(asset_dir / name)
-        replace_with_retry(tmp, target)
+                guard.replace_file(old, dest, delays=delays)
+        for name, _ in images:
+            source = staging / name
+            dest = asset_dir / name
+            placed.append((source, dest))
+            guard.replace_file(source, dest, delays=delays)
+        guard.write_bytes(target, text.encode("utf-8"), replace=True, delays=delays)
         replaced = True
     except BaseException:
         try:
-            for path in placed:
-                if path.exists():
-                    path.unlink()
+            for source, dest in placed:
+                if guard.file_info(source) is None:
+                    guard.remove_file(dest)
             for dest, original in moved:
-                if dest.exists():
-                    replace_with_retry(dest, original)
+                if guard.file_info(dest) is not None:
+                    guard.replace_file(dest, original, delays=delays)
         except BaseException as exc:
-            if any(dest.exists() for dest, _original in moved):
-                exc.add_note(f"古い画像を戻しきれなかった。戻していない古い画像を {backup} に残した。"
-                             f"{asset_dir} に移すと元に戻る")
+            if backup is not None:
+                exc.add_note(f"古い画像を戻しきれなかった。退避先 {backup} を確認する。元の場所は {asset_dir}")
             raise
         raise
     finally:
-        if tmp.exists():
-            tmp.unlink()
-        # 退避の場所の中身を消すのは、本文を置き換えたあとだけにする。失敗したときに残っているのは、
-        # 戻しきれなかった古い画像のただ 1 つの写しなので消さない。空になった場所だけを消す。
-        for d, drop_files in ((staging, True), (backup, replaced)):
-            if d is not None and d.is_dir():
-                if drop_files:
-                    for leftover in d.iterdir():
-                        leftover.unlink()
-                if not any(d.iterdir()):
-                    d.rmdir()
+        for directory, files, drop in ((staging, (staging / name for name, _ in images), True),
+                                       (backup, (path for path, _ in moved), replaced)):
+            if directory is not None and guard.directory_info(directory):
+                if drop:
+                    for path in files:
+                        guard.remove_file(path)
+                if not any(directory.iterdir()):
+                    directory.rmdir()
 
 
 MAX_TIMEOUT = 86400.0  # --timeout の上限（秒）。大きすぎる値は、ソケットの待ち時間で OverflowError になる。
@@ -1461,31 +1443,43 @@ def build(args) -> tuple[int, dict]:
     check_slug(args.slug)
     target = raw_root / f"{args.slug}.md"
     asset_dir = raw_root / "assets" / args.slug
-    if not inside(raw_root, target) or not inside(raw_root, asset_dir):
-        raise ValueError(f"保存先が RAW_ROOT の外になる: {target}")
-
     wiki = getattr(args, "wiki", None)
     html_file = getattr(args, "html_file", None)
     # YouTube の URL は、Web ページの経路で取らない（ADR-0027）。途中の取り込みの再開よりも先に止める。
     refuse_youtube(args.url, "渡された URL ")
     if getattr(args, "page_url", None):
         refuse_youtube(args.page_url, "--page-url ")
+    if wiki is None:
+        raise ValueError("raw の根を記録するために --wiki を指定する")
+    if args.slug.startswith("."):
+        raise ValueError("Web のスラッグはピリオドで始められない")
+    raw_guard, wiki_guard = WriteGuard(raw_root), WriteGuard(wiki)
+    wd = wiki_rawcheck.work_dir(wiki, args.slug)
+    initial = raw_version(raw_guard.file_info(target))
+    raw_guard.directory_info(asset_dir)
+    wiki_rawcheck.check_image_backups(raw_guard, args.slug)
+    has_work = wiki_rawcheck.check_work_files(wiki_guard, wd)
     # 途中の取り込みは、取得の前に再開する。続けるかは写しと raw の状態だけで決まるので、ページを取り直さない。
     # 取り直して原文を比べると、--html-file で取ったページ（DOM のハッシュ）や、取得のたびに変わるページでは、
     # 写しがそろっていても内容が違うとして止まり、ネットにつながらなければ取得の失敗で止まる。
     # --html-file は、渡した内容で取るという入力なので、ここでは続けずに、読んで比べる（下の枝）。
     # 0.14.1 までの版が書いた写しは、resumable_fetch が続けられないものとする（どちらの枝でも続けない）。
-    if wiki is not None and not html_file and not getattr(args, "browser_only", False) and not args.force and target.exists():
-        saved = wiki_rawcheck.resumable_fetch(wiki, args.slug, target)
-        if saved is not None and saved["url"] == args.url:
-            # 前の版で始めた取り込みの転送先が YouTube なら、続けずに止まる（ADR-0027）。
-            refuse_youtube(saved.get("final_url") or "", "前の取得の最後の URL ")
-            # 前の取得の出力（警告を含む）に、取得しなかったことと、どの段まで進んだかを足して返す。
-            result = {"path": target.as_posix(), "url": args.url, "final_url": saved["final_url"],
-                      "source_sha256": saved["source_sha256"], "unchanged": True, "fetch_skipped": True,
-                      "work_dir": True}
-            result.update(wiki_rawcheck.resume_fields(wiki, args.slug, saved))
-            return 0, result
+    if has_work and initial is not None and not html_file and not getattr(args, "browser_only", False) and not args.force:
+        with wiki_rawcheck.web_write_locks(wiki_guard, raw_guard, args.slug):
+            if raw_version(raw_guard.file_info(target)) != initial:
+                raise ValueError("取得前に raw が変わった。いまの原本を確かめてやり直す")
+            wiki_rawcheck.check_image_backups(raw_guard, args.slug)
+            wiki_rawcheck.check_work_files(wiki_guard, wd)
+            saved = wiki_rawcheck.resumable_fetch(wiki, args.slug, target)
+            if saved is not None and saved["url"] == args.url:
+                # 前の版で始めた取り込みの転送先が YouTube なら、続けずに止まる（ADR-0027）。
+                refuse_youtube(saved.get("final_url") or "", "前の取得の最後の URL ")
+                # 前の取得の出力（警告を含む）に、取得しなかったことと、どの段まで進んだかを足して返す。
+                result = {"path": target.as_posix(), "url": args.url, "final_url": saved["final_url"],
+                          "source_sha256": saved["source_sha256"], "unchanged": True, "fetch_skipped": True,
+                          "work_dir": True}
+                result.update(wiki_rawcheck.resume_fields(wiki, args.slug, saved))
+                return 0, result
 
     # 内部のアドレスを取るかは、ユーザーが渡した URL で決める。公開のページが内部のアドレスへ
     # リダイレクトしても、その先は取らない。ユーザーが内部のページを直接渡したときだけ許す。
@@ -1549,22 +1543,28 @@ def build(args) -> tuple[int, dict]:
         # 原文が同じでも違っても（終了コード 3）、続けられない旧版の写しがあることを知らせる。
         result["old_work_dir"] = True
 
-    if target.exists() and not args.force:
-        old = existing_sha(target)
-        if old == sha:
-            result["unchanged"] = True
-            if wiki is not None:
-                # 写しがそろい（そろった印は raw を書いたあとに置くので、raw と同じ取得で書いたもの）、raw の
-                # frontmatter を書き換えていないときだけ、途中から続けられる。
-                saved = wiki_rawcheck.resumable_fetch(wiki, args.slug, target)
+    if initial is not None and not args.force:
+        has_work = wiki_rawcheck.check_work_files(wiki_guard, wd)
+        with wiki_rawcheck.web_write_locks(wiki_guard, raw_guard, args.slug) if has_work else nullcontext():
+            if raw_version(raw_guard.file_info(target)) != initial:
+                raise ValueError("取得中に raw が変わった。いまの原本を確かめてやり直す")
+            wiki_rawcheck.check_image_backups(raw_guard, args.slug)
+            if has_work:
+                wiki_rawcheck.check_work_files(wiki_guard, wd)
+            old = existing_sha(target)
+            if raw_version(raw_guard.file_info(target)) != initial:
+                raise ValueError("既存の raw を読んでいる間に版が変わった")
+            if old == sha:
+                result["unchanged"] = True
+                saved = wiki_rawcheck.resumable_fetch(wiki, args.slug, target) if has_work else None
                 result["work_dir"] = saved is not None
                 if saved is not None:
                     result.update(wiki_rawcheck.resume_fields(wiki, args.slug, saved))
-            return 0, result
-        suggestion = f"{args.slug}-{datetime.now().strftime('%Y%m%d')}"
-        result["suggested_slug"] = suggestion
-        result["error"] = "existing_differs"
-        return 3, result
+                return 0, result
+            suggestion = f"{args.slug}-{datetime.now().strftime('%Y%m%d')}"
+            result["suggested_slug"] = suggestion
+            result["error"] = "existing_differs"
+            return 3, result
 
     page = page or prepare_page(data, content_type, final_url, keep_noise)
     result["warnings"].extend(page.warnings)
@@ -1698,19 +1698,19 @@ def build(args) -> tuple[int, dict]:
     # 書いたものである。raw を書けずに止まると（--force の取り直しで、前の raw が残るときも）、写しはそろわず、
     # 取り直しは work_dir を偽にする。写しがそろったかは、fetched.md と、JSON として読める fetch.json の両方で
     # 判定する（wiki_rawcheck.work_dir_complete）。
-    tmp = None
-    if wiki is not None:
+    record_raw_root(wiki, raw_guard.root, writer="wiki_fetch")
+    with wiki_rawcheck.web_write_locks(wiki_guard, raw_guard, args.slug):
+        if raw_version(raw_guard.file_info(target)) != initial:
+            raise ValueError("取得中に raw が変わった。いまの原本を確かめてやり直す")
+        wiki_rawcheck.check_image_backups(raw_guard, args.slug)
+        check_outputs(raw_guard, target, asset_dir, args.slug, pending)
         wiki_rawcheck.remove_work_dir(wiki, args.slug)
-        wd = wiki_rawcheck.work_dir(wiki, args.slug)
-        wd.mkdir(parents=True)
+        wiki_guard.ensure_directory(wd)
         result["work_dir"] = True
-        (wd / "fetched.md").write_bytes(text.encode("utf-8"))
-        tmp = wd / "fetch.json.tmp"
-        tmp.write_bytes(json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"))
-    write_outputs(raw_root, target, asset_dir, args.slug, text, pending)
-    if tmp is not None:
-        # 書いた直後の fetch.json.tmp は、ウイルス対策の検査が開いていることがある（write_outputs と同じ理由）。
-        replace_with_retry(tmp, tmp.with_name("fetch.json"))
+        wiki_guard.write_bytes(wd / "fetched.md", text.encode("utf-8"), replace=True, delays=replace_delays())
+        write_outputs(raw_root, target, asset_dir, args.slug, text, pending, guard=raw_guard)
+        wiki_guard.write_bytes(wd / "fetch.json", json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"),
+                               replace=True, delays=replace_delays())
     return 0, result
 
 

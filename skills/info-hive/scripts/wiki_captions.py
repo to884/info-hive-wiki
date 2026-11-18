@@ -1102,7 +1102,8 @@ def unknown_words(prose: list[str], raw: RawDoc, corrected: list[str]) -> list[s
 
 
 def check_pages(pages: list[PageIn], wiki_root: Path, only_raw: str | None = None,
-                unknown_for: set | None = None, *, raw_roots=(), wiki_root_given=None) -> CheckResult:
+                unknown_for: set | None = None, *, raw_roots=(), recorded_raw_roots=(),
+                wiki_root_given=None) -> CheckResult:
     """wiki のページの集合を照らす（ADR-0027 の (1)〜(5)）。
 
     指摘は、いつも wiki 全体のものを返す。1 つの raw に関わる指摘だけに絞ると、「関わる」の決め方の漏れ（分類から
@@ -1159,7 +1160,8 @@ def check_pages(pages: list[PageIn], wiki_root: Path, only_raw: str | None = Non
         problems_by_page[p.rel] = []
         is_video = bool(p.meta.get("video_id") or p.meta.get("caption_kind") or scans[p.rel].definitions)
         relevant[p.rel] = is_video
-        for resolved in resolve_raw(p.meta, wiki_root / p.rel, wiki_root, wiki_root_given, raw_roots=raw_roots):
+        for resolved in resolve_raw(p.meta, wiki_root / p.rel, wiki_root, wiki_root_given,
+                                    raw_roots=raw_roots, recorded_raw_roots=recorded_raw_roots):
             selected = selected_path is not None and any(Path(c) == selected_path for c in resolved.candidates)
             relevant[p.rel] = relevant[p.rel] or selected
             if resolved.state not in ("resolved", "outside") or (resolved.state == "outside" and resolved.candidates):
@@ -1592,13 +1594,15 @@ def load_pages(wiki_root: Path, overlay: dict | None = None) -> tuple[list[PageI
 
 
 def check_wiki(wiki_root: Path, overlay: dict | None = None, only_raw: str | None = None,
-               unknown_for: set | None = None, *, raw_roots=(), wiki_root_given=None) -> CheckResult:
+               unknown_for: set | None = None, *, raw_roots=(), recorded_raw_roots=(),
+               wiki_root_given=None) -> CheckResult:
     """wiki のページ（overlay を重ねたもの）を照らす。読めないページは、only_raw によらず指摘に入れる
     （そのページがこの raw に関わるかを確かめられないため）。"""
     pages, unreadable, renamed = load_pages(wiki_root, overlay)
     # 「raw にない語」を探すページも、ディスクの綴りに直した名前で指す（実装のレビューの 8 回目）。
     if unknown_for:
         unknown_for = {renamed.get(r.replace("\\", "/"), nfc(r)) for r in unknown_for}
-    result = check_pages(pages, wiki_root, only_raw, unknown_for, raw_roots=raw_roots, wiki_root_given=wiki_root_given)
+    result = check_pages(pages, wiki_root, only_raw, unknown_for, raw_roots=raw_roots,
+                         recorded_raw_roots=recorded_raw_roots, wiki_root_given=wiki_root_given)
     result.findings = unreadable + result.findings
     return result

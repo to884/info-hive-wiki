@@ -12,9 +12,9 @@
 
 ### PDF と rag の連携
 
-`rag` の MCP ツールが使える場合、PDF は原本の場所に置いたまま、`register_pdf(wiki_root, source, source_page, title)` を呼ぶ。
-`wiki_root` は特定した wiki の絶対パス、`source` はユーザーが指定した PDF の絶対パス、`source_page` は `sources/<スラッグ>.md` である。
-相対パスで指定されたら、作業ディレクトリから絶対パスにして渡す。ユーザーが指定していない PDF は登録しない。PDF はどのフォルダにあってもよく、先に登録しておく必要はない。
+`rag` の MCP ツールが使える場合、PDF は原本の場所に置いたまま登録する。先に `python "<skill-root>/scripts/wiki_raw_ingest.py" pdf --wiki "<WIKI_ROOT>" --raw-root "<RAW_ROOT>" --source "<指定された PDF>"` を実行する。失敗したら理由を伝えて止まる。成功したら `register_pdf(wiki_root, source, source_page, title)` を呼ぶ。
+`wiki_root` は特定した wiki の絶対パス、`source` は検査の JSON が返した `source`、`source_page` は `sources/<スラッグ>.md` である。
+検査が返したパスの綴りを使う。ユーザーが指定していない PDF は登録しない。
 rag は、登録のときに、拡張子が `.pdf` の通常のファイルだけを受け付け、UNC パスと rag の派生データの中の PDF を拒む。
 PDF のヘッダー（`%PDF-`）は、登録のあとの処理で確かめ、ヘッダーがなければジョブが `failed` になる。rag 0.5.1 以降は、`%PDF-` の前にあるバイトが 1024 バイト以下なら受け付ける（先頭に改行や空白があるだけの PDF も読む）。rag 0.5.0 以前は、先頭がちょうど `%PDF-` の PDF だけを受け付ける。
 登録を拒まれたり、ジョブが `failed` になったりしたら、理由をそのまま伝える。
@@ -36,7 +36,7 @@ rag が使えない場合は、下の通常手順を使える。ただし RAG �
 
 ### 通常のソース
 
-ソースがまだ `raw/` にない場合は、そこに置く。ファイル名は次の規則でスラッグにし、元の拡張子を付ける（`raw/インボイス制度の手引き.pdf`、`raw/attention-is-all-you-need.pdf`）。
+ローカルのファイルやディレクトリは `python "<skill-root>/scripts/wiki_raw_ingest.py" save --wiki "<WIKI_ROOT>" --raw-root "<RAW_ROOT>" --source "<資料のパス>" --name "<保存名>"` で保存する。raw の根にすでに置かれた資料は、`--source` にそのパスを渡し、`--name` を省く。外にあるリンクの資料は先の中身を写す。wiki 記事や、その位置で使う raw にリンクがあれば、理由を伝えて止まる。保存直後に中断したときは、保存済みの原本を確かめて `save` の `--source` に指定すれば再開できる。ファイルの保存名は次の規則でスラッグにし、元の拡張子を付ける。
 
 - 日本語を使ってよい。題名が日本語のソースは、日本語のスラッグにするのを基本にする。英語の固有名詞や技術用語は英語のままでよい。
 - 英字は小文字にし、英単語の間はハイフンでつなぐ。
@@ -44,9 +44,9 @@ rag が使えない場合は、下の通常手順を使える。ただし RAG �
 - `\ / : * ? " < > |`、`# | [ ] ^`、全角の `｜` と `＃` は使わない。全角英数字と半角カタカナも使わない（`ＡＩ入門.pdf` ではなく `ai入門.pdf`）。
 - NFC で書く（ふつうに入力すれば NFC になる）。
 
-Web ページは、下の「Web ページ」の手順で `wiki_fetch.py` を使って取得し、本文の Markdown（日本語でなければ訳文）を `raw/<スラッグ>.md` に保存する。ユーザーが Obsidian Web Clipper などで保存した `.md` を渡したときは、そのまま置く。PDF は `.pdf` のままにする。文字起こしは `.md` か `.txt` で保存する。
+Web ページの URL は下の「Web ページ」の手順で取り込む。Obsidian Web Clipper などで保存した `.md` はローカルの資料として扱う。rag が使えない場合の PDF は `.pdf` のまま保存する。文字起こしは `.md` か `.txt` で保存する。
 
-テキストのソース（`.txt`、`.md`、`.csv` など）は、読む前に `python "<skill-root>/scripts/wiki_encoding.py" raw/<ファイル名>` で文字コードを確かめる。日本語のテキストは、Shift_JIS（出力では `cp932`）、EUC-JP、ISO-2022-JP で書かれていることがあり、UTF-8 だと思って読むと文字化けする。`encoding` が `utf-8` か `utf-8-sig` でなければ、`--output raw/<スラッグ>.utf8.<拡張子>` を付けて UTF-8 に変換したファイルを別に書き出し、それを読む。元のファイルは書き換えずに残し、ソースの要約ページの `raw:` には元のファイルを書き、本文に変換したファイルも記す。終了コードが 2（文字コードを判定できない、またはバイナリ）なら、推測で読まずに、ユーザーに文字コードを確かめる。
+テキストのソースは、`save` の JSON が返した版を `python "<skill-root>/scripts/wiki_raw_ingest.py" encoding --wiki "<WIKI_ROOT>" --raw-root "<RAW_ROOT>" --source "<raw_path>" --expect-sha256 <raw_sha256>` で照合してから読む。このコマンドは文字コードも返す。`utf-8` と `utf-8-sig` ならそのまま読む。`cp932`（Shift_JIS）、EUC-JP、ISO-2022-JP などなら、同じコマンドに `--name "<スラッグ>.utf8.<拡張子>"` を足して UTF-8 の派生版を保存し、その `raw_path` を読む。終了コード 2（判定できない、またはバイナリ）なら、ユーザーに文字コードを確かめる。
 
 ここで決めたスラッグは、`wiki/sources/` に作るソースの要約ページのスラッグになる。内容が分かり、あとで変えなくて済むものにする。
 
@@ -191,7 +191,7 @@ raw（`raw/<スラッグ>.md`）は、frontmatter（`page-conventions.md` の「
 
 セッションのソースの要約ページは、次のように書く。
 
-- frontmatter に、ふつうの項目（手順 5）に加えて `session_id: "<セッションの ID>"` を書く。`raw` には `write` が出した `raw_ref` を書く。`url` は書かない。
+- frontmatter に、ふつうの項目（手順 5）に加えて `session_id: "<セッションの ID>"` を書く。`raw` には `write` が出した `raw_ref`、`raw_sha256` には同じ出力の `raw_sha256` を書く。`url` は書かない。
 - 本文は記事の形にする。何を目的に何をしたか、決めたこととその理由、うまくいかなかったことと原因、残った課題を、時間の順ではなく話題ごとにまとめる。
 - 根拠の位置は、raw のターンの番号（`T12`、`T12〜T15`）で書く。
 - 会話の中で言われたこと（ユーザーやモデルの発言、推測）と、確かめられたこと（試験の結果、コマンドの出力が示した事実）を分けて書く。モデルの発言は、それだけでは事実の根拠にしない。
@@ -222,8 +222,8 @@ raw（`raw/<スラッグ>.md`）は、frontmatter（`page-conventions.md` の「
 
 動画のソースの要約ページは、次のように書く。
 
-- `raw` には、動画の raw を 1 つだけ書く（どの raw の行と照らし、どの raw の confidence に数えるかを決めるため）。
-- frontmatter に、ふつうの項目（手順 5）に加えて、`url`（raw の `url`）、`video_id`、`caption_kind`（raw の値を写す）、`confidence`（下の決め方による `"high"`、`"medium"`、`"low"`。分割したときは親のページだけに書く）、`fetched_at`（`write` の結果の `fetched_at` を写す。字幕を取った時刻で、時差つきの ISO 8601 の文字列）を書く。`raw` には `write` が出した `raw_ref` を書く。
+- `raw` には `write` が返した `raw_ref` を 1 つだけ書き、`raw_sha256` には同じ出力の `raw_sha256` を書く。このハッシュは保存された Markdown の版を照合するために使う。
+- frontmatter に、ふつうの項目（手順 5）に加えて、`url`（raw の `url`）、`video_id`、`caption_kind`（raw の値を写す）、`confidence`（下の決め方による `"high"`、`"medium"`、`"low"`。分割したときは親のページだけに書く）、`fetched_at`（`write` の結果の `fetched_at` を写す。字幕を取った時刻で、時差つきの ISO 8601 の文字列）を書く。
 - `caption_kind` が `asr` なら、本文の冒頭に「自動字幕から書いた。固有名詞と数値には聞き違いが含まれうる」と書く。
 - 動画が日本語でなくても raw は訳さない。要約ページは日本語で書き、引用は字幕の言語のまま、raw の逐語で引く。
 - 根拠の位置は、raw の行の番号と時刻（`L123 [12:34]`）で書く。動画へのリンクは `https://www.youtube.com/watch?v=<ID>&t=<秒>s` にする。
@@ -347,7 +347,8 @@ type: "source"
 title: "ソースの元の題名"
 authors: ["著者名"]
 url: "https://..."
-raw: "raw/<source-slug>.<ext>"
+raw: "<raw_ref>"
+raw_sha256: "<raw_sha256>"
 ingested: 2026-04-15
 created: 2026-04-15
 updated: 2026-04-15
@@ -358,6 +359,8 @@ concepts: ["コンセプトのスラッグ1", "コンセプトのスラッグ2"]
 ```
 
 `url` は、ソースに URL があるときだけ書く。frontmatter のリストの値は、そのままのスラッグにする。`[[wikilink]]` の書き方は本文で使い、YAML では使わない。キーと `type` の値は英語で書き、キーのあとのコロンとリストの区切りは半角にする（全角の「：」や「、」は lint が指摘する）。文字列の値は、配列の要素も含めて二重引用符で囲む。日付は `YYYY-MM-DD` の形で書き、囲まない。
+
+通常のソースでは、`raw` に `save` の `raw_ref`、`raw_sha256` に同じ出力の版を写す。派生版を読んだ場合は原本・派生版の順で、`raw` と `raw_sha256` の両方に配列で書く。
 
 本文には、LLM がまとめたソースの要約を書く。主な主張、必要なら方法論、結論、未解決の問いを書く。ソース全体を言い換えてはならない。それでは要約の意味がない。将来のクエリで、raw ファイルを読み直さずに済むだけの内容をとらえた要約を目指す。
 

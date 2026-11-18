@@ -194,12 +194,12 @@ class State:
                 index = self.wikis[root] = wiki_index.WikiIndex(root)
         return index
 
-    def chunk_store(self, name: str):
+    def chunk_store(self, name: str, *, open_existing: bool = True):
         import wiki_index
         with self.lock:
             store = self.chunks.get(name)
             if store is None:
-                store = self.chunks[name] = wiki_index.ChunkStore(name)
+                store = self.chunks[name] = wiki_index.ChunkStore(name, open_existing=open_existing)
         return store
 
     def embedder(self, wait: bool):
@@ -296,6 +296,7 @@ def build_app(state: State, token: str, port: int):
     from mcp.server.fastmcp import FastMCP
     from mcp.server.fastmcp.exceptions import ToolError
     from mcp.server.transport_security import TransportSecuritySettings
+    from wiki_index import IndexWriteError
 
     mcp = FastMCP(
         "info-hive-wiki", host="127.0.0.1", port=port, json_response=True, log_level="WARNING",
@@ -307,7 +308,7 @@ def build_app(state: State, token: str, port: int):
                                                      allowed_hosts=[f"127.0.0.1:{port}"], allowed_origins=[]),
     )
 
-    def with_notices(fn, *args):
+    def with_notices(fn, args, wiki_index_fallback):
         """ツールの関数を、走査と読む口の知らせの受け皿を開いて動かす（ADR-0029 の I4）。
 
         リンクなので読まなかったものを結果の link_warnings に、調べられなかったものを unverified に足す。誤りなら、
@@ -317,13 +318,16 @@ def build_app(state: State, token: str, port: int):
         with wiki_pages.capture_notices() as notes:
             try:
                 result = fn(*args)
-            except (ValueError, FileNotFoundError) as exc:
+            except (ValueError, FileNotFoundError, IndexWriteError) as exc:
                 error = exc
             else:
                 error = None
         lines = wiki_pages.notice_lines(notes.items)
         if error is not None:
-            raise ToolError(str(error) + (f"（{'、'.join(lines)}）" if lines else "")) from error
+            message = str(error)
+            if wiki_index_fallback and isinstance(error, IndexWriteError):
+                message += "。CLI の wiki_search.py --no-embed で wiki を語彙検索できる。"
+            raise ToolError(message + (f"（{'、'.join(lines)}）" if lines else "")) from error
         if isinstance(result, dict):
             refused = [n for n in notes.items if n["kind"] not in wiki_pages.NOTICE_UNVERIFIED]
             result["link_warnings"] = wiki_pages.dedupe_notices(list(result.get("link_warnings") or []) + refused)
@@ -332,8 +336,8 @@ def build_app(state: State, token: str, port: int):
                 result["unverified"] = unverified
         return result
 
-    async def offload(fn, *args):
-        return await anyio.to_thread.run_sync(with_notices, fn, *args)
+    async def offload(fn, *args, wiki_index_fallback=False):
+        return await anyio.to_thread.run_sync(with_notices, fn, args, wiki_index_fallback)
 
     @mcp.tool()
     async def query(query: str, wiki: str | None = None, top: int = 10, type: str | None = None,
@@ -357,7 +361,8 @@ def build_app(state: State, token: str, port: int):
                 return store.search(query, list(query_tokens or []), top=top, docs=docs, max_distance=max_distance,
                                     embedder=embedder)
             return await offload(run)
-        return await offload(state.query_wiki, wiki, query, top, type, tags, since, per_page)
+        return await offload(state.query_wiki, wiki, query, top, type, tags, since, per_page,
+                             wiki_index_fallback=True)
 
     @mcp.tool()
     async def get_page(wiki: str, page: str) -> dict:
@@ -373,7 +378,7 @@ def build_app(state: State, token: str, port: int):
                 # 読まなかった場所や調べられなかった場所は、with_notices が誤りの文に添える
                 raise FileNotFoundError(f"ページが見つからない: {page}")
             return found
-        return await offload(run)
+        return await offload(run, wiki_index_fallback=True)
 
     @mcp.tool()
     async def list_index(wiki: str, name: str | None = None) -> dict:
@@ -397,8 +402,8 @@ def build_app(state: State, token: str, port: int):
         type、title、tags、created、updated を必須にする。
         allowed_tags には SCHEMA.md の「タグの体系」に並ぶタグを渡す。渡すと体系にないタグを unknown_tags に
         挙げる。省くか空にするとタグの検査をせず、summary の unknown_tags は null になる。
-        raw_root は利用者が決めた raw の根。渡すと、原本までの途中の道も検査する。省くと根を推し量らず、
-        途中を調べなかった raw: を raw_paths_unchecked に出す。リンクも曖昧な raw: も書き換えない。
+        raw_root は利用者が決めた現在の raw の根。wiki に記録された過去の根も使い、原本までの道を検査する。
+        途中を調べなかった raw: は raw_paths_unchecked に出す。リンクも曖昧な raw: も書き換えない。
         graph が真なら、`wiki_graph_lint.py --json` の結果も graph に入れる。graph の state は、
         checked（findings に結果）、disabled（オントロジーがない。message に理由）、error（オントロジーを
         読めない）、skipped（graph が偽）のどれかになる。判定モデルを使う検査（--decide）は含めない。
@@ -454,7 +459,7 @@ def build_app(state: State, token: str, port: int):
             }
             result["server"] = {"version": common.code_version(), "protocol": common.PROTOCOL, "pid": os.getpid()}
             return result
-        return await offload(run)
+        return await offload(run, wiki_index_fallback=True)
 
     @mcp.tool()
     async def graph(wiki: str, command: Literal["neighbors", "edges", "path", "facts"], node: str | None = None,
@@ -497,7 +502,7 @@ def build_app(state: State, token: str, port: int):
         1 回の要求の本文は 64 MiB まで。ベクトルつきなら 1,000〜2,000 件ずつに分けて渡す。
         """
         def run():
-            store = state.chunk_store(collection)
+            store = state.chunk_store(collection, open_existing=not reset)
             needs_embedding = any(c.get("vector") is None and not c.get("vector_b64") for c in chunks)
             embedder = state.embedder(wait=True) if needs_embedding else None
             return store.index(chunks, generation, tokenizer, list(delete_docs or []), reset, embedder)
@@ -520,6 +525,10 @@ def main():
     idle = args.idle if args.idle else common.idle_seconds()
     import uvicorn
 
+    files = common.ServerFiles()
+    pid = os.getpid()
+    start_id = os.environ.get(common.START_ID_ENV)
+    published = False
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
@@ -531,6 +540,7 @@ def main():
                                            timeout_graceful_shutdown=5))
 
     async def run():
+        nonlocal published
         serving = asyncio.create_task(server.serve(sockets=[sock]))
         while not server.started:
             if serving.done():
@@ -539,28 +549,35 @@ def main():
             await asyncio.sleep(0.02)
         # 待機の時間は、待ち受けを始めたときから数える（起動にかかった時間を含めない）。
         activity.touch()
-        common.write_server_info({"port": port, "token": token, "pid": os.getpid(), "version": common.code_version(),
-                                  "protocol": common.PROTOCOL, "started": time.time()})
-        print(f"wiki の MCP サーバーを 127.0.0.1:{port} で起動した（pid {os.getpid()}、待機 {idle:.0f} 秒で停止）",
-              file=sys.stderr, flush=True)
         try:
-            while not serving.done():
-                await asyncio.sleep(0.5)
-                if activity.idle_for() > idle:
-                    print("要求がないので止まる", file=sys.stderr, flush=True)
-                    server.should_exit = True
-                    break
+            files.write_info({"port": port, "token": token, "pid": pid, "version": common.code_version(),
+                              "protocol": common.PROTOCOL, "started": time.time()}, start_id=start_id)
+        except OSError as exc:
+            print(f"wiki の MCP サーバーの起動記録を書けない。{exc}", file=sys.stderr, flush=True)
+            server.should_exit = True
             await serving
-        finally:
-            # 索引を閉じ終えてから server.json を消す。次のサーバーは索引のロックを待つ。
-            state.close()
-            common.remove_server_info(os.getpid())
+            raise
+        published = True
+        print(f"wiki の MCP サーバーを 127.0.0.1:{port} で起動した（pid {pid}、待機 {idle:.0f} 秒で停止）",
+              file=sys.stderr, flush=True)
+        while not serving.done():
+            await asyncio.sleep(0.5)
+            if activity.idle_for() > idle:
+                print("要求がないので止まる", file=sys.stderr, flush=True)
+                server.should_exit = True
+                break
+        await serving
 
     try:
         asyncio.run(run())
     finally:
         state.close()
-        common.remove_server_info(os.getpid())
+        # 索引を閉じ終えてから server.json を消す。次のサーバーは索引のロックを待つ。
+        if published:
+            try:
+                files.remove_own_info(pid, token)
+            except OSError as exc:
+                print(f"wiki の MCP サーバーの起動記録を消せない。{exc}", file=sys.stderr, flush=True)
 
 
 if __name__ == "__main__":

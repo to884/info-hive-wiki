@@ -63,6 +63,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wiki_text import format_fm_value, localize_argparse, parse_frontmatter_text  # noqa: E402
 import wiki_initialized  # noqa: E402
+from wiki_fsguard import ExclusiveUnsupported, Refused, WriteGuard, external_raw_guard  # noqa: E402
+from wiki_raw_roots import record_raw_root  # noqa: E402
 
 # 直接実行した入口を、Codex アダプターからも同じモジュールとして参照する。
 # 二重に読み込むと Fail が別のクラスになり、入口で捕まえられなくなる。
@@ -1189,12 +1191,18 @@ def check_no_secret(label: str, value: str, ex: Extract, spans: list) -> None:
         raise Fail(f"{label}に、伏せた文字列か、自動の伏せ字の規則に当たる文字列がある（{rules}）")
 
 
-def check_slug_value(slug: str, ex: Extract, spans: list) -> None:
+def check_slug(slug: str) -> None:
     import wiki_fetch
+    if slug.startswith("."):
+        raise Fail("セッションのスラッグはピリオドで始められない")
     try:
         wiki_fetch.check_slug(slug)
     except ValueError as exc:
-        raise Fail(str(exc))
+        raise Fail(str(exc)) from exc
+
+
+def check_slug_value(slug: str, ex: Extract, spans: list) -> None:
+    check_slug(slug)
     check_no_secret("スラッグ", slug, ex, spans)
 
 
@@ -1205,46 +1213,12 @@ def _is_link(path: Path) -> bool:
     return os.path.islink(path) or os.path.isjunction(path)
 
 
-def path_within(inner: str, outer: str) -> bool:
-    """inner が outer と同じか、その中にあるか。ドライブの違うパス（Windows の C: と D:）は、中にない。"""
-    try:
-        return os.path.commonpath([inner, outer]) == outer
-    except ValueError:
-        return False
-
-
-def check_destination(wiki: Path, raw_root: Path, target: Path) -> None:
+def check_destination(wiki: Path, raw_root: Path) -> WriteGuard:
     """raw の行き先を確かめる（設計の 9 節の手順 4）。"""
-    raw_abs = Path(os.path.abspath(raw_root))
-    # raw のルートと、そのすべての祖先（wiki の親の外にあっても）を見る（設計の 9 節の手順 4）。
-    for p in (raw_abs, *raw_abs.parents):
-        if _is_link(p):
-            raise Fail(f"raw のルートか、その途中の階層がリンクかジャンクションなので書かない: {p}")
-    if os.path.lexists(target) and (_is_link(target) or not stat.S_ISREG(os.lstat(target).st_mode)):
-        raise Fail(f"raw の行き先がリンクか、ふつうのファイルではないので書かない: {target}")
-    real_raw = os.path.normcase(os.path.realpath(raw_abs))
-    real_wiki = os.path.normcase(os.path.realpath(wiki))
-    if path_within(real_raw, real_wiki) or path_within(real_wiki, real_raw):
-        raise Fail(f"raw のルートと wiki のルートの一方が、他方の中にある（raw のルート {real_raw}、wiki {real_wiki}）。"
-                   "raw のルートには /wiki:init が作る raw/ などを使う")
-
-
-class ExclusiveUnsupported(Exception):
-    """重ねて書かない形で置けないファイルシステム。"""
-
-
-def publish_exclusive(tmp: Path, target: Path) -> None:
-    """一時ファイルを、行き先に重ねて書かない形で置く。行き先があれば FileExistsError。"""
-    if WINDOWS:
-        os.rename(tmp, target)
-        return
     try:
-        os.link(tmp, target)
-    except FileExistsError:
-        raise
-    except OSError as exc:
-        raise ExclusiveUnsupported(str(exc))
-    os.unlink(tmp)
+        return external_raw_guard(wiki, raw_root)
+    except (OSError, ValueError) as exc:
+        raise Fail(f"raw の行き先を使えない: {exc}") from exc
 
 
 def before_publish() -> None:
@@ -1255,14 +1229,12 @@ def after_publish() -> None:
     """公開の直後（試験が例外を差し込む口）。"""
 
 
-def make_read_only(path: Path) -> None:
-    mode = os.stat(path).st_mode
-    if mode & 0o222:
-        os.chmod(path, stat.S_IMODE(mode) & ~0o222)
-
-
 def is_read_only(path: Path) -> bool:
     return not (os.stat(path).st_mode & 0o222)
+
+
+def make_read_only(path: Path) -> None:
+    WriteGuard(path.parent, strict_root=True).make_read_only(path)
 
 
 def raw_ref_of(wiki: Path, target: Path) -> str:
@@ -1277,41 +1249,45 @@ def raw_ref_of(wiki: Path, target: Path) -> str:
 def write_raw(wiki: Path, raw_root: Path, slug: str, data: bytes) -> tuple[str, Path]:
     """raw を重ねて書かない形で置く。返り値は（状態, パス）。"""
     target = raw_root / f"{slug}.md"
+    guard = check_destination(wiki, raw_root)
     busy = 0
+    recorded = False
     while True:
-        check_destination(wiki, raw_root, target)
-        if os.path.lexists(target):
-            return ("identical" if target.read_bytes() == data else "conflict"), target
-        if os.path.lexists(wiki / "sources" / f"{slug}.md"):
-            return "slug_taken", target
-        tmp = raw_root / f".wiki-session-{secrets.token_hex(8)}.tmp"
         try:
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o644)
-            with os.fdopen(fd, "wb") as fh:
-                fh.write(data)
-                fh.flush()
-                os.fsync(fh.fileno())
-            before_publish()
-            try:
-                publish_exclusive(tmp, target)
-            except FileExistsError:
+            exists = guard.file_info(target) is not None
+            if exists and target.read_bytes() != data:
+                return "conflict", target
+            if not exists and os.path.lexists(wiki / "sources" / f"{slug}.md"):
+                return "slug_taken", target
+            if not recorded:
+                try:
+                    record_raw_root(wiki, guard.root, writer="wiki_session")
+                except (OSError, ValueError, RuntimeError) as exc:
+                    raise Fail(f"raw の根を記録できないので保存しない: {exc}") from exc
+                recorded = True
+            if exists:
+                return "identical", target
+            guard.write_bytes(target, data, prefix=".wiki-session-", before_publish=before_publish)
+        except FileExistsError:
+            continue
+        except Refused as exc:
+            # POSIX の排他公開で、一時名の削除までの短い間だけハードリンクになる。
+            if exc.kind == "hardlink" and exc.path == guard.root / target.name and busy < 5:
+                busy += 1
+                time.sleep(0.02)
                 continue
-            except PermissionError as exc:
-                # Windows では、ほかのプロセスが同じ行き先へ名前を変えている最中だと、FileExistsError ではなく
-                # アクセスの拒否になる。少し待って行き先を確かめ直す（できていれば identical か conflict）。
-                # 回数を限り、本当に書けないディレクトリでは止まる。
-                if WINDOWS and busy < 50:
-                    busy += 1
-                    time.sleep(0.02)
-                    continue
-                raise Fail(f"raw を置けない（{exc}）")
-            except ExclusiveUnsupported as exc:
-                raise Fail(f"このファイルシステムでは、raw を重ねて書かない形で置けないので書かない（{exc}）")
-            after_publish()
-            return "created", target
-        finally:
-            if os.path.lexists(tmp):
-                os.unlink(tmp)
+            raise
+        except PermissionError as exc:
+            # Windows では、名前の変更の競合で一時的にアクセス拒否になることがある。
+            if WINDOWS and busy < 50:
+                busy += 1
+                time.sleep(0.02)
+                continue
+            raise Fail(f"raw を置けない（{exc}）") from exc
+        except ExclusiveUnsupported as exc:
+            raise Fail(f"このファイルシステムでは、raw を重ねて書かない形で置けないので書かない（{exc}）") from exc
+        after_publish()
+        return "created", target
 
 
 # ---------------------------------------------------------------- 入口の共通
@@ -1460,16 +1436,46 @@ def cmd_list(args) -> int:
 def _raw_frontmatter(path: Path) -> dict:
     try:
         text = path.read_bytes().decode("utf-8")
-    except (OSError, UnicodeDecodeError):
+    except UnicodeDecodeError:
         return {}
     m = FRONTMATTER_RE.match(text)
     return parse_frontmatter_text(m.group(1)) if m else {}
+
+
+def _inspect_saved_raw(raw_root: Path, slug: str) -> tuple[dict, list[str]]:
+    target = raw_root / f"{slug}.md"
+    exists = False
+    reason = None
+    fm = {}
+    temps = []
+    try:
+        guard = WriteGuard(raw_root, strict_root=True)
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError) as exc:
+        exists, reason = None, str(exc)
+    else:
+        try:
+            with os.scandir(guard.root) as entries:
+                temps = sorted(e.name for e in entries if e.name.startswith(".wiki-session-") and e.name.endswith(".tmp"))
+            exists = guard.file_info(target) is not None
+            if exists:
+                fm = _raw_frontmatter(target)
+        except (OSError, ValueError) as exc:
+            exists, reason = None, str(exc)
+    raw = {"exists": exists, "session_id": fm.get("session_id"),
+           "source_sha256": fm.get("source_sha256"), "cut_before": fm.get("cut_before")}
+    if reason is not None:
+        raw["reason"] = reason
+    return raw, temps
 
 
 def cmd_inspect(args) -> int:
     trio = (args.wiki, args.raw_root, args.slug)
     if any(v is not None for v in trio) and not all(v is not None for v in trio):
         raise Fail("--wiki、--raw-root、--slug は 3 つそろえて渡す")
+    if args.slug is not None:
+        check_slug(args.slug)
     ex = load_extract(args)
     v, reason = verdict(ex)
     tail = [{"uuid": uid, "time": t, "head": " ".join(text.split())[:40]} for uid, t, text in ex.humans[-5:]]
@@ -1497,18 +1503,8 @@ def cmd_inspect(args) -> int:
         result["source_kind"] = ex.source_kind
         result["source_sha256_of"] = ex.source_sha256_of
     if args.wiki is not None:
-        raw_root = Path(args.raw_root)
-        target = raw_root / f"{args.slug}.md"
-        exists = os.path.lexists(target)
-        fm = _raw_frontmatter(target) if exists else {}
-        result["raw"] = {"exists": exists, "session_id": fm.get("session_id"),
-                         "source_sha256": fm.get("source_sha256"), "cut_before": fm.get("cut_before")}
+        result["raw"], result["temp_files"] = _inspect_saved_raw(Path(args.raw_root), args.slug)
         result["source_page_exists"] = os.path.lexists(Path(args.wiki) / "sources" / f"{args.slug}.md")
-        temps = []
-        if os.path.isdir(raw_root):
-            with os.scandir(raw_root) as it:
-                temps = sorted(e.name for e in it if e.name.startswith(".wiki-session-") and e.name.endswith(".tmp"))
-        result["temp_files"] = temps
     out_json(result) if args.json else out_lines(result)
     return 0 if v == "session" else 2
 
@@ -1688,11 +1684,7 @@ def cmd_write(args) -> int:
         raise Fail(str(exc)) from None
     if not os.path.isdir(raw_root):
         raise Fail(f"raw のルートがない（作らない）: {raw_root}")
-    import wiki_fetch
-    try:
-        wiki_fetch.check_slug(args.slug)
-    except ValueError as exc:
-        raise Fail(str(exc))
+    check_slug(args.slug)
     dec = load_decisions(Path(args.decisions))
     ex = load_extract(args, dec)
     require_session(ex)
@@ -1705,28 +1697,41 @@ def cmd_write(args) -> int:
         raise Fail(f"作った raw のハッシュが、承認したものと一致しない（{sha}）。show --meta からやり直す")
     check_title(args.title, ex, dec.spans)
     check_slug_value(args.slug, ex, dec.spans)
-    state, target = write_raw(wiki, raw_root, args.slug, data)
+    try:
+        state, target = write_raw(wiki, raw_root, args.slug, data)
+    except (OSError, ValueError) as exc:
+        raise Fail(f"raw を保存できない: {exc}") from exc
     result = {"raw_state": state, "raw_path": str(target), "raw_ref": raw_ref_of(wiki, target), "render_sha256": sha}
     if state in ("created", "identical"):
-        if target.read_bytes() != data:
-            raise Fail(f"書いた raw を読み直すと、バイト列が違う: {target}")
         from wiki_pages import resolve_raw
         checked = resolve_raw({"type": "source", "raw": result["raw_ref"], "raw_sha256": sha, "session_id": ex.session_id},
                               wiki / "sources" / f"{args.slug}.md", wiki, raw_roots=[raw_root])[0]
         if checked.state != "resolved":
             raise Fail(f"要約ページの raw を確かめられない: {checked.state}: {checked.reason} {result['raw_ref']}")
-        make_read_only(target)
+        try:
+            guard = check_destination(wiki, raw_root)
+            if guard.file_info(target) is None or target.read_bytes() != data:
+                raise Fail(f"書いた raw を読み直すと、バイト列が違う: {target}")
+            make_read_only(target)
+        except OSError as exc:
+            raise Fail(f"書いた raw を読み取り専用にできない: {exc}") from exc
+        result["raw_sha256"] = sha
     out_json(result) if args.json else out_lines(result)
     return 0 if state in ("created", "identical") else 3
 
 
 def cmd_verify(args) -> int:
     target = Path(args.raw_root) / f"{args.slug}.md"
-    if not os.path.lexists(target) or _is_link(target) or not stat.S_ISREG(os.lstat(target).st_mode):
-        raise Fail(f"raw がないか、ふつうのファイルではない: {target}")
-    sha = hashlib.sha256(target.read_bytes()).hexdigest()
+    try:
+        guard = WriteGuard(Path(args.raw_root), strict_root=True)
+        info = guard.file_info(target)
+        if info is None:
+            raise FileNotFoundError(target)
+        sha = hashlib.sha256(target.read_bytes()).hexdigest()
+    except (OSError, ValueError) as exc:
+        raise Fail(f"raw を確かめられない: {exc}") from exc
     result = {"raw_path": str(target), "sha256_matches": sha == args.expect_sha256,
-              "read_only": is_read_only(target)}
+              "read_only": not (info.st_mode & 0o222)}
     out_json(result) if args.json else out_lines(result)
     return 0 if result["sha256_matches"] and result["read_only"] else 1
 

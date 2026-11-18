@@ -22,13 +22,14 @@ import hashlib
 import json
 import math
 import os
-import shutil
+import stat
 import sqlite3
 import sys
 import threading
 import time
 from argparse import Namespace
 from collections import Counter
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -36,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import wiki_mcp_common as common  # noqa: E402
 import wiki_pages  # noqa: E402
 import wiki_search  # noqa: E402
+from wiki_fsguard import Refused, WriteGuard  # noqa: E402
 
 # 埋め込みモデル（ADR-0011）。重みは onnx-community の書き出し、トークナイザーと設定は cl-nagoya の固定の
 # revision から取り、models/ の下に組み立てる。sha256 は追加測定 E9（onnx-distribution.json）の値。
@@ -300,44 +302,19 @@ class WriterLock:
 
     NAME = "writer.lock"
 
-    def __init__(self, folder: Path, timeout: float | None = None):
-        timeout = WRITER_LOCK_TIMEOUT if timeout is None else timeout
-        folder.mkdir(parents=True, exist_ok=True)
-        self._handle = open(folder / self.NAME, "a+b")  # noqa: SIM115 - close() で閉じる
-        ends = time.monotonic() + timeout
-        while True:
-            try:
-                self._lock()
-                return
-            except OSError:
-                if time.monotonic() > ends:
-                    self._handle.close()
-                    raise RuntimeError(f"索引 {folder.name} を別のプロセスが使っている") from None
-                time.sleep(0.1)
+    def __init__(self, folder: Path, guard: WriteGuard):
+        self.path = folder / self.NAME
+        self.guard = guard
+        self._lock = guard.hold_lock(self.path, timeout=WRITER_LOCK_TIMEOUT)
+        self._fd = self._lock.__enter__()
 
-    def _lock(self):
-        if os.name == "nt":
-            import msvcrt
-            self._handle.seek(0)
-            msvcrt.locking(self._handle.fileno(), msvcrt.LK_NBLCK, 1)
-        else:
-            import fcntl
-            fcntl.flock(self._handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    def check(self):
+        self.guard.check_lock_file(self.path, self._fd)
 
     def release(self):
-        if self._handle.closed:
-            return
-        try:
-            if os.name == "nt":
-                import msvcrt
-                self._handle.seek(0)
-                msvcrt.locking(self._handle.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
-        except OSError:
-            pass
-        self._handle.close()
+        if self._fd is not None:
+            self._fd = None
+            self._lock.__exit__(None, None, None)
 
 
 # ---------------------------------------------------------------------------
@@ -360,15 +337,45 @@ class Item:
 METADATA_FILES = ("writer.lock", "collection.json", "wiki.json")
 
 
-def wipe(folder: Path, keep: tuple[str, ...] = ("writer.lock",)) -> None:
+class IndexWriteError(RuntimeError):
+    """MCP の索引の配置を検査できないか、索引を書けなかった。"""
+
+
+@contextmanager
+def index_io(path: Path):
+    """索引を扱う箇所で、利用者に場所と理由を返せる形にする。"""
+    try:
+        yield
+    except Refused as exc:
+        raise IndexWriteError(f"索引への書き込みを拒んだ: {exc}") from exc
+    except (OSError, sqlite3.Error) as exc:
+        raise IndexWriteError(f"索引を読み書きできない: {path}（{exc}）") from exc
+
+
+def index_destination(path: Path) -> tuple[WriteGuard, Path]:
+    with index_io(path):
+        # 設定されたデータの場所そのものと、その祖先の別名は許す。
+        try:
+            root = wiki_pages.absolute_user_path(common.data_dir())
+            path = wiki_pages.absolute_user_path(path)
+        except ValueError as exc:
+            raise IndexWriteError(str(exc)) from exc
+        root.mkdir(parents=True, exist_ok=True)
+        guard = WriteGuard(root)
+        guard.ensure_directory(path)
+    return guard, path
+
+
+def wipe(guard: WriteGuard, folder: Path) -> None:
     """索引のディレクトリの中身を消す。持っているロックのファイルは残す。"""
-    for child in folder.iterdir():
-        if child.name in keep:
+    for child, info in reversed(guard.tree_entries(folder)):
+        if child.parent == folder and child.name in METADATA_FILES:
             continue
-        if child.is_dir():
-            shutil.rmtree(child)
+        if stat.S_ISDIR(info.st_mode):
+            if guard.directory_info(child) is not None:
+                child.rmdir()
         else:
-            child.unlink()
+            guard.remove_file(child)
 
 
 def fingerprint_digest(fingerprint: dict) -> str:
@@ -378,8 +385,14 @@ def fingerprint_digest(fingerprint: dict) -> str:
 class Collection:
     """1 つの索引の集まり。wiki のセクションと、index_chunks のチャンクの両方に使う。"""
 
-    def __init__(self, path: Path, fingerprint: dict):
+    def __init__(self, path: Path, fingerprint: dict, guard: WriteGuard, *,
+                 metadata: tuple[str, dict] | None = None, reset: bool = False,
+                 writer_lock: WriterLock | None = None):
         self.path = path
+        self.guard = guard
+        self.ledger = path / "ledger.sqlite"
+        self.lexical_dir = path / "lexical"
+        self._usearch_path = path / "vectors.usearch"
         self.fingerprint = fingerprint
         self.digest = fingerprint_digest(fingerprint)
         self.lock = RWLock()
@@ -391,26 +404,72 @@ class Collection:
         self._last_save = 0.0
         # 書き込みが途中で失敗し、台帳と索引がずれているかもしれない。そろえ直すまで dirty の印を消さない。
         self._needs_reconcile = False
-        self._writer_lock = WriterLock(path)
-        try:
-            self._open()
-        except BaseException:
-            self._writer_lock.release()
-            raise
+        self.db = None
+        self.lexical = None
+        self._opened_paths = {}
+        self._writer_lock = writer_lock
+        with index_io(path):
+            try:
+                self._remember_path(path)
+                self._check_files()
+                if self._writer_lock is None:
+                    self._writer_lock = WriterLock(path, self.guard)
+                self._check_paths()
+                if reset:
+                    wipe(self.guard, self.path)
+                self._open()
+                if metadata is not None:
+                    name, payload = metadata
+                    self.guard.write_bytes(path / name, json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                                           replace=True)
+            except BaseException:
+                try:
+                    self._close_resources()
+                except Exception as exc:
+                    log(f"初期化に失敗した索引を閉じられなかった: {path}（{exc}）")
+                raise
+
+    def _remember_path(self, path: Path) -> None:
+        info = self.guard.entry_info(path)
+        if info is None:
+            raise FileNotFoundError(path)
+        self._opened_paths[path] = (info.st_dev, info.st_ino)
+
+    def _check_files(self) -> None:
+        for name in METADATA_FILES:
+            self.guard.file_info(self.path / name)
+        self.guard.check_sqlite(self.ledger)
+        self.guard.tree_entries(self.lexical_dir)
+        self.guard.file_info(self._usearch_path)
+
+    def _check_paths(self) -> None:
+        for path, identity in self._opened_paths.items():
+            info = self.guard.entry_info(path)
+            if info is None or (info.st_dev, info.st_ino) != identity:
+                raise Refused(path, "changed", "索引を開いたときと実体が変わった。サーバーを再起動してやり直す")
+        self._writer_lock.check()
+        self._check_files()
+
+    def check_paths(self) -> None:
+        with self.lock.read(), index_io(self.path):
+            self._check_paths()
 
     # --- 開く、そろえる ---
 
     def _open(self):
-        self.path.mkdir(parents=True, exist_ok=True)
-        self.db =sqlite3.connect(self.path / "ledger.sqlite", check_same_thread=False, timeout=30)
+        self.guard.check_sqlite(self.ledger)
+        self.db = sqlite3.connect(self.ledger, check_same_thread=False, timeout=30)
+        self._remember_path(self.ledger)
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         meta = dict(self.db.execute("SELECT key, value FROM meta"))
         if meta and (meta.get("fingerprint") != self.digest or meta.get("schema") != str(LEDGER_SCHEMA)):
             log(f"索引の fingerprint が変わったので作り直す: {self.path.name}")
             self.db.close()
+            self.db = None
+            del self._opened_paths[self.ledger]
             # 索引を開くための情報（collection.json、wiki.json）は残す。消すと、再起動のあとで見つからなくなる。
-            wipe(self.path, keep=METADATA_FILES)
+            wipe(self.guard, self.path)
             return self._open()
         with self.db:
             self.db.execute(
@@ -443,11 +502,10 @@ class Collection:
 
     def _open_usearch(self):
         from usearch.index import Index
-        self._usearch_path = self.path / "vectors.usearch"
         self.vectors = Index(ndim=self.fingerprint.get("dimension", MODEL["dimension"]), metric=USEARCH["metric"],
                              dtype=USEARCH["dtype"], connectivity=USEARCH["connectivity"],
                              expansion_add=USEARCH["expansion_add"], expansion_search=USEARCH["expansion_search"])
-        if self._usearch_path.exists():
+        if self.guard.file_info(self._usearch_path) is not None:
             try:
                 # view ではなく読み込む。メモリに写像したままにすると、Windows で置き換えられなくなる。
                 self.vectors.load(str(self._usearch_path))
@@ -466,19 +524,25 @@ class Collection:
         builder.add_integer_field("key", stored=True, indexed=True, fast=True)
         builder.add_text_field("terms", stored=False, tokenizer_name="ws", index_option="freq")
         self._schema = builder.build()
-        folder = self.path / "lexical"
-        folder.mkdir(exist_ok=True)
-        self.lexical = tantivy.Index(self._schema, path=str(folder), reuse=True)
-        self.lexical.register_tokenizer("ws", tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.whitespace()).build())
-        self.lexical.reload()
+        self.guard.ensure_directory(self.lexical_dir)
+        self.guard.tree_entries(self.lexical_dir)
+        self._remember_path(self.lexical_dir)
+        try:
+            self.lexical = tantivy.Index(self._schema, path=str(self.lexical_dir), reuse=True)
+            self.lexical.register_tokenizer("ws", tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.whitespace()).build())
+            self.lexical.reload()
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise IndexWriteError(f"Tantivy の索引を開けない: {self.lexical_dir}（{exc}）") from exc
 
     def reconcile(self) -> dict:
         """台帳に合わせて、Tantivy と usearch をそろえ直す。"""
-        with self.lock.write():
+        with self.lock.write(), index_io(self.path):
             return self._reconcile_locked()
 
     def _reconcile_locked(self) -> dict:
         """reconcile の本体。書き込みのロックを持って呼ぶ。"""
+        self._check_paths()
+        self._needs_reconcile = True
         ledger = {key: terms for key, terms in self.db.execute("SELECT key, terms FROM rows")}
         searcher = self.lexical.searcher()
         in_lexical = set()
@@ -497,10 +561,10 @@ class Collection:
         with self.db:
             self.db.executemany("UPDATE rows SET has_vector = 0 WHERE key = ?", [(k,) for k in lost])
         self._vector_keys = with_vector - set(lost)
-        self._needs_reconcile = False
         self._save_vectors(force=True)
         with self.db:
             self._set_meta("dirty", "0")
+        self._needs_reconcile = False
         summary = {"lexical_removed": len(extra), "lexical_added": len(missing),
                    "vectors_removed": len(orphan), "vectors_lost": len(lost)}
         if any(summary.values()):
@@ -516,6 +580,8 @@ class Collection:
         tantivy = self._tantivy
         last = None
         for attempt in range(TANTIVY_RETRIES):
+            # 拒否された経路では、writer の取得も commit の再試行もしない。
+            self._check_paths()
             writer = None
             failure = None
             try:
@@ -536,20 +602,38 @@ class Collection:
                         pass
             writer = None  # 書き手を手放し、Tantivy のロックを外す
             if failure is None:
-                self.lexical.reload()
+                self._check_paths()
+                try:
+                    self.lexical.reload()
+                except (OSError, ValueError, RuntimeError) as exc:
+                    raise IndexWriteError(f"Tantivy の索引を読み直せない: {self.lexical_dir}（{exc}）") from exc
                 return
             last = failure
             time.sleep(0.05 * (attempt + 1))
-        raise RuntimeError(f"Tantivy の commit が {TANTIVY_RETRIES} 回失敗した: {last}")
+        raise IndexWriteError(f"Tantivy の commit が {TANTIVY_RETRIES} 回失敗した: {self.lexical_dir}（{last}）")
 
     def _save_vectors(self, force: bool = False) -> None:
         if not (self._dirty_vectors or force):
             return
         if not force and time.monotonic() - self._last_save < SAVE_INTERVAL_SECONDS:
             return
-        temporary = self._usearch_path.with_suffix(".usearch.tmp")
-        self.vectors.save(str(temporary))
-        os.replace(temporary, self._usearch_path)
+        self._check_paths()
+        stage = self.guard.temporary_directory(self.path, prefix=".vectors-", suffix=".tmp")
+        temporary = stage / self._usearch_path.name
+        try:
+            self.guard.file_info(temporary)
+            try:
+                self.vectors.save(str(temporary))
+            except (RuntimeError, ValueError) as exc:
+                raise IndexWriteError(f"usearch の索引を保存できない: {self._usearch_path}（{exc}）") from exc
+            self.guard.replace_file(temporary, self._usearch_path)
+        finally:
+            try:
+                self.guard.remove_file(temporary)
+                if self.guard.directory_info(stage) is not None:
+                    stage.rmdir()
+            except Refused:
+                pass
         self._dirty_vectors = False
         self._last_save = time.monotonic()
         if not self._needs_reconcile:
@@ -557,7 +641,7 @@ class Collection:
                 self._set_meta("dirty", "0")
 
     def flush(self) -> None:
-        with self.lock.write():
+        with self.lock.write(), index_io(self.path):
             self._save_vectors(force=self._dirty_vectors)
 
     def hashes(self) -> dict[str, str]:
@@ -566,7 +650,7 @@ class Collection:
 
     def apply(self, upserts: list[Item], deletes: list[str] = ()) -> dict:
         """行を加え、置き換え、消す。置き換えた行は新しい key を持つ（古い key は古い世代として消える）。"""
-        with self.lock.write():
+        with self.lock.write(), index_io(self.path):
             self._before_write()
             try:
                 return self._apply_locked(upserts, deletes)
@@ -580,6 +664,7 @@ class Collection:
 
     def _before_write(self) -> None:
         """書き込みの前に、前に失敗した書き込みの分をそろえ直し、dirty の印を立てる。"""
+        self._check_paths()
         if self._needs_reconcile:
             self._reconcile_locked()
         with self.db:
@@ -636,7 +721,8 @@ class Collection:
         sql = "SELECT key, text FROM rows WHERE has_vector = 0 ORDER BY key"
         if limit:
             sql += f" LIMIT {int(limit)}"
-        with self.lock.read():
+        with self.lock.read(), index_io(self.path):
+            self._check_paths()
             return list(self.db.execute(sql))
 
     def pending_count(self) -> int:
@@ -646,7 +732,7 @@ class Collection:
     def add_vectors(self, keys: list[int], vectors) -> int:
         """埋め込んだベクトルを加える。その間に消えた行の分は捨てる。"""
         import numpy as np
-        with self.lock.write():
+        with self.lock.write(), index_io(self.path):
             pairs = [(k, v) for k, v in zip(keys, vectors) if k in self._keys and k not in self._vector_keys]
             if not pairs:
                 return 0
@@ -747,11 +833,22 @@ class Collection:
             return {"rows": len(self._keys), "embedded": len(self._vector_keys)}
 
     def close(self) -> None:
+        if self.db is None:
+            return
         try:
             self.flush()
         finally:
-            self.db.close()
-            self._writer_lock.release()
+            self._close_resources()
+
+    def _close_resources(self) -> None:
+        self.lexical = None
+        db, self.db = self.db, None
+        try:
+            if db is not None:
+                db.close()
+        finally:
+            if self._writer_lock is not None:
+                self._writer_lock.release()
 
 
 def embed_pending(collection: Collection, embedder, batch: int = 64, should_stop=None, progress=None) -> int:
@@ -852,10 +949,9 @@ class WikiIndex:
 
     def __init__(self, root: Path):
         self.root = root
-        self.dir = common.wiki_index_dir(root)
-        self.dir.mkdir(parents=True, exist_ok=True)
-        (self.dir / "wiki.json").write_text(json.dumps({"root": root.as_posix()}, ensure_ascii=False), encoding="utf-8")
-        self.collection = Collection(self.dir, wiki_fingerprint())
+        guard, self.dir = index_destination(common.wiki_index_dir(root))
+        self.collection = Collection(self.dir, wiki_fingerprint(), guard,
+                                     metadata=("wiki.json", {"root": root.as_posix()}))
         self._refresh_lock = threading.Lock()
         self._signature = None
         self.pages: list[dict] = []
@@ -863,17 +959,24 @@ class WikiIndex:
         self.by_locator: dict[str, dict] = {}
         self._page_bm25 = None
         self.link_warnings: list[dict] = []
+        self._parse_cache_warnings: list[dict] = []
 
     def refresh(self) -> dict:
         """wiki の変更を台帳と語彙の索引に入れる。埋め込みは embed_pending で別に行う。"""
         with self._refresh_lock:
+            self.collection.check_paths()
             if self.collection.needs_reconcile:
                 # 前の書き込みが途中で失敗した。台帳の行は残っているので、索引を台帳に合わせる。
                 self.collection.reconcile()
-            signature, self.link_warnings = _signature_and_links(self.root)
+            signature, article_warnings = _signature_and_links(self.root)
+            self.link_warnings = article_warnings + self._parse_cache_warnings
             if signature == self._signature:
                 return {"changed": False}
-            pages = wiki_search.collect_pages(self.root, self.dir / "parse-cache.json")
+            cache_warnings = []
+            pages = wiki_search.collect_pages(self.root, self.dir / "parse-cache.json",
+                                              cache_root=self.collection.guard.root, cache_warnings=cache_warnings)
+            self._parse_cache_warnings = cache_warnings
+            self.link_warnings = article_warnings + cache_warnings
             sections = wiki_search.collect_sections(pages)
             current = {section_locator(s): s for s in sections}
             known = self.collection.hashes()
@@ -1072,42 +1175,70 @@ def decode_vector(chunk: dict):
 class ChunkStore:
     """index_chunks で受け取ったチャンクの索引。collection ごとに 1 つ。"""
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, *, open_existing: bool = True):
         self.name = name
-        self.dir = common.collection_dir(name)
-        self.dir.mkdir(parents=True, exist_ok=True)
-        info_path = self.dir / "collection.json"
-        try:
-            info = json.loads(info_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            info = None
-        self.tokenizer = info.get("tokenizer") if info else None
+        self.guard, self.dir = index_destination(common.collection_dir(name))
         # collection を開く・作り直すときのロック。同時に初めて呼ばれても、索引は 1 回だけ開く。
         self._init_lock = threading.RLock()
-        # 書き込みを直列にするロック。検索はこのロックを待たない。
+        # 書き込みを直列にするロック。検索中の世代は _init_lock で固定する。
         self._write_lock = threading.Lock()
-        self.collection = Collection(self.dir, chunk_fingerprint(self.tokenizer)) if self.tokenizer else None
+        self.collection, self.tokenizer = self._open_collection() if open_existing else (None, None)
+
+    def _read_tokenizer(self) -> str | None:
+        info_path = self.dir / "collection.json"
+        hint = "。作り直す場合は reset を真にする"
+        if self.guard.file_info(info_path) is None:
+            if self.guard.file_info(self.dir / "ledger.sqlite") is not None:
+                raise IndexWriteError(f"既存の台帳があるが索引のメタデータがない: {info_path}{hint}")
+            return None
+        try:
+            info = json.loads(info_path.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            raise IndexWriteError(f"索引のメタデータを読めない: {info_path}（{exc}）{hint}") from exc
+        tokenizer = info.get("tokenizer") if isinstance(info, dict) else None
+        if not isinstance(tokenizer, str) or not tokenizer:
+            raise IndexWriteError(f"索引のメタデータに tokenizer がない: {info_path}{hint}")
+        return tokenizer
+
+    def _open_collection(self, tokenizer: str | None = None, *, reset: bool = False):
+        with index_io(self.dir):
+            writer = WriterLock(self.dir, self.guard)
+            try:
+                saved = None if reset else self._read_tokenizer()
+                if tokenizer is None:
+                    if not saved:
+                        writer.release()
+                        return None, None
+                    tokenizer, metadata = saved, None
+                else:
+                    if saved and saved != tokenizer and not reset:
+                        raise ValueError(f"collection {self.name} の tokenizer は {saved} で、{tokenizer} ではない。"
+                                         "作り直すときは reset を真にする")
+                    metadata = ("collection.json", {"name": self.name, "tokenizer": tokenizer})
+                return Collection(self.dir, chunk_fingerprint(tokenizer), self.guard, metadata=metadata,
+                                  reset=reset, writer_lock=writer), tokenizer
+            except BaseException:
+                writer.release()
+                raise
 
     def ensure(self, tokenizer: str, reset: bool = False) -> bool:
         """tokenizer を確かめる。違う tokenizer の索引があれば、reset が真のときだけ作り直す。"""
+        if not tokenizer:
+            raise ValueError("tokenizer は空にできない")
         with self._init_lock:
             return self._ensure_locked(tokenizer, reset)
 
     def _ensure_locked(self, tokenizer: str, reset: bool) -> bool:
         if self.collection is not None and self.tokenizer == tokenizer and not reset:
+            self.collection.check_paths()
             return False
         if self.collection is not None and self.tokenizer != tokenizer and not reset:
             raise ValueError(f"collection {self.name} の tokenizer は {self.tokenizer} で、{tokenizer} ではない。"
                              "作り直すときは reset を真にする")
         if self.collection is not None:
-            self.collection.close()
-            self.collection = None
-        if reset:
-            wipe(self.dir)
-        (self.dir / "collection.json").write_text(json.dumps({"name": self.name, "tokenizer": tokenizer}),
-                                                  encoding="utf-8")
-        self.tokenizer = tokenizer
-        self.collection = Collection(self.dir, chunk_fingerprint(tokenizer))
+            previous, self.collection = self.collection, None
+            previous.close()
+        self.collection, self.tokenizer = self._open_collection(tokenizer, reset=reset)
         return True
 
     def index(self, chunks: list[dict], generation: int, tokenizer: str, delete_docs: list[str] = (),
@@ -1116,8 +1247,12 @@ class ChunkStore:
             return self._index_locked(chunks, generation, tokenizer, delete_docs, reset, embedder)
 
     def _index_locked(self, chunks, generation, tokenizer, delete_docs, reset, embedder) -> dict:
-        was_reset = self.ensure(tokenizer, reset)
-        collection = self.collection
+        generation = int(generation)
+        if not -(2**63) <= generation < 2**63:
+            raise ValueError("generation は符号付き64ビット整数の範囲にする")
+        delete_docs = [str(doc) for doc in delete_docs]
+        for doc in delete_docs:
+            doc.encode("utf-8")
         items, seen = [], set()
         for chunk in chunks:
             chunk_id = str(chunk.get("id") or "")
@@ -1127,6 +1262,9 @@ class ChunkStore:
                 raise ValueError("チャンクの id は空にできず、1 回の呼び出しの中で重ねられない")
             if not isinstance(text, str) or not isinstance(tokens, list) or not all(isinstance(t, str) for t in tokens):
                 raise ValueError(f"チャンク {chunk_id} には text（文字列）と tokens（文字列の配列）が要る")
+            doc = str(chunk.get("doc") or "")
+            chunk_id.encode("utf-8")
+            doc.encode("utf-8")
             seen.add(chunk_id)
             # 語彙の索引は空白で区切るので、トークンの中の空白は取り除く。
             terms = [t.replace(" ", "").replace("\t", "").replace("\n", "") for t in tokens]
@@ -1135,7 +1273,7 @@ class ChunkStore:
             payload = {"metadata": chunk.get("metadata") or {}}
             content = json.dumps([text, terms, payload], ensure_ascii=False)
             items.append(Item(locator=chunk_id, content_hash=hashlib.sha256(content.encode("utf-8")).hexdigest(),
-                              terms=terms, text=text, doc=str(chunk.get("doc") or ""), generation=int(generation),
+                              terms=terms, text=text, doc=doc, generation=generation,
                               payload=payload, vector=vector))
         if items and any(item.vector is None for item in items):
             if embedder is None:
@@ -1144,24 +1282,33 @@ class ChunkStore:
             vectors = embedder.passages([item.text for item in missing])
             for item, vector in zip(missing, vectors):
                 item.vector = vector
+        # reset で既存の世代を消す前に、入力を検査し、新しい行を用意する。
+        was_reset = self.ensure(tokenizer, reset)
+        collection = self.collection
         result = collection.apply(items, []) if items else {"added": 0, "removed": 0}
         retired = []
         docs = sorted({item.doc for item in items if item.doc})
         for doc in docs:
-            retired += collection.delete_where("doc = ? AND generation < ?", (doc, int(generation)))
+            retired += collection.delete_where("doc = ? AND generation < ?", (doc, generation))
         for doc in delete_docs:
-            retired += collection.delete_where("doc = ?", (str(doc),))
+            retired += collection.delete_where("doc = ?", (doc,))
         stats = collection.stats()
-        return {"collection": self.name, "tokenizer": tokenizer, "generation": int(generation),
+        return {"collection": self.name, "tokenizer": tokenizer, "generation": generation,
                 "accepted": len(items), "replaced": result["removed"], "retired": len(retired),
                 "reset": was_reset and reset, "rows": stats["rows"], "embedded": stats["embedded"]}
 
     def search(self, query: str, query_tokens: list[str], top: int = 10, docs: list[str] | None = None,
                max_distance: float | None = None, embedder=None) -> dict:
         with self._init_lock:
-            collection = self.collection
+            return self._search(query, query_tokens, top, docs, max_distance, embedder)
+
+    def _search(self, query, query_tokens, top, docs, max_distance, embedder) -> dict:
+        if self.collection is None:
+            self.collection, self.tokenizer = self._open_collection()
+        collection = self.collection
         if collection is None:
             raise FileNotFoundError(f"collection {self.name} はまだない")
+        collection.check_paths()
         allowed = None
         if docs:
             marks = ",".join("?" * len(docs))
@@ -1188,5 +1335,7 @@ class ChunkStore:
                 "index": {"rows": stats["rows"], "embedded": stats["embedded"]}}
 
     def close(self):
-        if self.collection is not None:
-            self.collection.close()
+        with self._init_lock:
+            if self.collection is not None:
+                previous, self.collection = self.collection, None
+                previous.close()

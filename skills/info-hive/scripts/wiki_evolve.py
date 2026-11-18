@@ -39,6 +39,8 @@ from wiki_text import localize_argparse, normalize_quote  # noqa: E402
 import wiki_initialized  # noqa: E402
 import wiki_workspace  # noqa: E402
 import wiki_pages  # noqa: E402
+from wiki_fsguard import WriteGuard  # noqa: E402
+from wiki_raw_roots import record_raw_root  # noqa: E402
 
 IGNORED = {'.git', '__pycache__', '.wiki-cache', '.evolution', 'node_modules', '.wiki-evolve-lock'}
 # wiki を使わない操作。ほかの操作はどれも、振り分けの前に wiki の判定を通る。
@@ -176,7 +178,11 @@ def manifest(exp):
 
 
 def capture(args):
-    record = read_json(args.record, getattr(args, 'wiki', None))
+    return capture_record(args.wiki, args.raw, read_json(args.record, args.wiki))
+
+
+def capture_record(wiki, raw, record):
+    wiki = wiki_initialized.require(wiki_pages.absolute_user_path(wiki))
     slug(record.get('id'))
     for key in ('task', 'verification', 'model', 'tools', 'scope'):
         require(isinstance(record.get(key), str) and record[key].strip(), f'{key} がない')
@@ -185,26 +191,36 @@ def capture(args):
             and all(isinstance(x, str) and x.strip() for x in record['actions']), 'actions がない')
     for key in ('hypothesis', 'counterexamples'):
         require(isinstance(record.get(key, ''), str), f'{key} は文字列にする')
-    raw = args.raw.resolve()
+    raw = wiki_pages.absolute_user_path(raw)
     # raw のディレクトリは作らない。初期化（init_wiki.py）が作る。
     require(raw.is_dir(), f'raw のディレクトリがない: {raw}。--raw が正しいかを確かめる。'
                           '初期化した wiki の raw をなくしたときは、/wiki:upgrade で作り直せる')
+    guard = WriteGuard(raw)
     folder = raw / 'experiences'
-    require(not folder.is_symlink(), 'experiences のディレクトリをシンボリックリンクにはできない')
-    folder.mkdir(exist_ok=True)
     path = folder / (record['id'] + '.json')
     data = encode(record).encode('utf-8')
-    if path.exists():
-        require(not path.is_symlink(), 'この ID の経験はすでに記録されていて、変更できない')
+    exists = guard.file_info(path) is not None
+    record_raw_root(wiki, raw, writer="wiki_evolve")
+    if not exists:
+        guard.ensure_directory(folder)
+        try:
+            guard.write_bytes(path, data)
+        except FileExistsError:
+            exists = True  # 並行実行が先に置いた記録も、内容を照合してから使う
+    if exists:
+        if guard.file_info(path) is None:
+            raise FileNotFoundError(path)
         stored = path.read_bytes()
         # 0.19.1 までは文字のモードで書いたので、Windows の記録はすべての改行が CRLF になっている。
         # 中身が同じなら受け入れ、raw は変更不可なので書き直さない。返す値は、実際のバイト列の SHA-256 にする。
         # encode() は文字列の中の改行を \n とエスケープするので、改行はどれも JSON の行の区切りである。
         require(stored in (data, data.replace(b'\n', b'\r\n')), 'この ID の経験はすでに記録されていて、変更できない')
     else:
-        create(path, data)
         stored = data
-    return {'raw': str(path), 'sha256': digest(stored), 'next': 'Ingest as a source; consolidate supported patterns'}
+    sha256 = digest(stored)
+    legacy = raw.resolve(strict=True) / path.relative_to(raw)
+    return {'raw': str(legacy), 'sha256': sha256, 'raw_ref': path.as_posix(), 'raw_sha256': sha256,
+            'next': 'Ingest as a source; consolidate supported patterns'}
 
 
 def propose(args, state):
@@ -600,7 +616,10 @@ def main():
     if args.wiki is None and uses_wiki:
         args.wiki = wiki_workspace.default_wiki_or_exit()
     try:
-        if uses_wiki:
+        if args.action == 'capture':
+            # 入力が wiki の根の別名を通る場合も、指定時の綴りで記事を検査する。
+            args.wiki = wiki_initialized.require(wiki_pages.absolute_user_path(args.wiki))
+        elif uses_wiki:
             # 振り分けより前の 1 か所で、判定してから同じパスを解決する（ADR-0019）。capture の記録も、あとで
             # この wiki にソースとして取り込むので、SCHEMA.md のない wiki には書かない。
             args.wiki = wiki_initialized.resolve(args.wiki)
