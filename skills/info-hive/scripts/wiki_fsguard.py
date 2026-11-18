@@ -10,7 +10,7 @@ import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, Callable
 
 from wiki_links import FILE_ATTRIBUTE_REPARSE_POINT, link_kind
 from wiki_pages import absolute_user_path
@@ -185,12 +185,18 @@ class WriteGuard:
         self.directory_info(path)
         return path
 
-    def replace_file(self, src: Path, dst: Path, *, delays: tuple[float, ...] = ()) -> None:
+    def replace_file(self, src: Path, dst: Path, *, delays: tuple[float, ...] = (),
+                     expected: os.stat_result | None = None, before_replace: Callable[[], None] | None = None) -> None:
         """再試行のたびに、移動元と移動先の名前を確かめる。"""
         for delay in (*delays, None):
-            if self.file_info(src) is None:
+            current = self.file_info(src)
+            if current is None:
                 raise FileNotFoundError(src)
+            if expected is not None and not os.path.samestat(current, expected):
+                raise Refused(src, "changed", "一時ファイルの実体が変わった")
             self.file_info(dst)
+            if before_replace is not None:
+                before_replace()
             try:
                 os.replace(src, dst)
                 return
@@ -220,6 +226,19 @@ class WriteGuard:
         with os.fdopen(X.open_plain_read(path), "rb") as handle:
             self._check_open_file(path, handle.fileno(), previous=previous)
             return handle.read()
+
+    def open_new(self, path: Path, *, mode: int = 0o644) -> BinaryIO:
+        """検査した場所に、既にない通常のファイルを開く。"""
+        from wiki_browse_fs import X
+
+        self.file_info(path)
+        handle = os.fdopen(X.open_excl(path, mode), "wb")
+        try:
+            self._check_open_file(path, handle.fileno())
+        except BaseException:
+            handle.close()
+            raise
+        return handle
 
     def open_append(self, path: Path, *, mode: int = 0o644) -> BinaryIO:
         from wiki_browse_fs import X
