@@ -1711,7 +1711,7 @@ def cmd_write(args) -> int:
         if target.read_bytes() != data:
             raise Fail(f"書いた raw を読み直すと、バイト列が違う: {target}")
         from wiki_pages import resolve_raw
-        checked = resolve_raw({"type": "source", "raw": result["raw_ref"], "raw_sha256": sha},
+        checked = resolve_raw({"type": "source", "raw": result["raw_ref"], "raw_sha256": sha, "session_id": ex.session_id},
                               wiki / "sources" / f"{args.slug}.md", wiki, raw_roots=[raw_root])[0]
         if checked.state != "resolved":
             raise Fail(f"要約ページの raw を確かめられない: {checked.state}: {checked.reason} {result['raw_ref']}")

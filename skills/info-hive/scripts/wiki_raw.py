@@ -125,6 +125,14 @@ def _inspect(path: Path, origin: Path | None) -> dict:
     stack, seen = [(path, st)], set()
     while stack:
         directory, dst = stack.pop()
+        # 待っている間に置き換わった道を、一覧を取る直前にもう一度調べる。根のリンクの例外は保つ。
+        if directory != origin:
+            dst = inspect_one(directory, listed=True)
+            if dst is None:
+                continue
+            if not stat.S_ISDIR(dst.st_mode):
+                result["unchecked"].append({"path": str(directory), "reason": "走査待ちの道がディレクトリでなくなった"})
+                continue
         try:
             ident = _identity(directory, dst)
             if ident in seen:

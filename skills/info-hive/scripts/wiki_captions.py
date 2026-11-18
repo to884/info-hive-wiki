@@ -1164,10 +1164,13 @@ def check_pages(pages: list[PageIn], wiki_root: Path, only_raw: str | None = Non
             relevant[p.rel] = relevant[p.rel] or selected
             if resolved.state not in ("resolved", "outside") or (resolved.state == "outside" and resolved.candidates):
                 problems_by_page[p.rel].append(f"{resolved.raw}: {resolved.state}: {resolved.reason}")
-            if resolved.state in ("link", "unknown", "ambiguous") or (resolved.state == "outside" and resolved.candidates):
+            if (resolved.state in ("link", "unknown", "ambiguous")
+                    or (resolved.state == "outside" and resolved.candidates)
+                    or (resolved.state == "missing" and resolved.mismatches)):
                 raw_warnings.append({"source": p.rel, "raw": resolved.raw, "state": resolved.state,
                                      "reason": resolved.reason, "candidates": resolved.candidates,
-                                     "links": resolved.links, "unchecked": resolved.unchecked})
+                                     "links": resolved.links, "unchecked": resolved.unchecked,
+                                     "mismatches": resolved.mismatches})
                 if is_video or selected:
                     findings.append(Finding(p.rel, 1, "unreadable_raw", f"{resolved.raw}: {resolved.reason}"))
             elif resolved.state == "resolved" and resolved.path.is_file():
