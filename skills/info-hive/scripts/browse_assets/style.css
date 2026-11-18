@@ -276,6 +276,32 @@ pre {
   padding: var(--spacingVerticalM) var(--spacingHorizontalM); border-radius: var(--borderRadiusMedium); line-height: 1.6;
 }
 pre code { background: none; padding: 0; font-size: var(--fontSizeBase300); overflow-wrap: normal; }
+
+/* セッションの raw では、行と空白を保ったまま発言を折り返す。 */
+#_body h2.session-turn {
+  margin: var(--spacingVerticalL) 0 var(--spacingVerticalXS);
+  padding: 0;
+  border: none;
+  font-size: var(--fontSizeBase400);
+  line-height: var(--lineHeightBase400);
+  overflow-wrap: anywhere;
+}
+#_body .session-turn + pre {
+  margin: 0;
+  font: inherit;
+  white-space: pre-wrap;
+  white-space: break-spaces;
+  overflow-wrap: anywhere;
+  background-color: var(--colorNeutralBackground2);
+  border-inline-start: var(--strokeWidthThick) solid var(--colorNeutralStroke1);
+}
+#_body .session-turn + pre code { font: inherit; overflow-wrap: inherit; }
+#_body .session-turn-user { color: var(--colorBrandForeground2); }
+#_body .session-turn-user + pre {
+  background-color: var(--colorBrandBackground2);
+  border-inline-start-color: var(--colorBrandStroke1);
+}
+
 /* 図（ADR-0030）。入れ物は Fluent の Card、画像は Image で、色、角、影は fluent2.css に任せる。ここは配置だけを決める。
    入れ物の幅は中身に合わせ、大きな図は幅に合わせて縮める（図の描画の設計の 8）。Card の flex と fit-content の組では、
    WebKit が読み込む前の画像の幅 0 のまま組むので、inline-block にする */

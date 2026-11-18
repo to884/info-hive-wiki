@@ -1433,7 +1433,7 @@ def remove_record(root, browse_root, state_dir, owner, instance) -> None:
 # 読む側（設計の 4、5）
 # ---------------------------------------------------------------------------
 
-def walk_inputs(root):
+def walk_inputs(root, raw_root=None):
     """入力の一覧（設計の 4）。(entries, problem) を返す。
 
     entries は (種類, ディスク上の / 区切りの相対パス, 大きさ, 更新時刻) の並びで、ページ、索引、リンク、オントロジーの順。
@@ -1491,6 +1491,8 @@ def walk_inputs(root):
     entries += [("overview", item.disk_rel, item.size, f"unsafe:{item.mtime_ns}" if item.unsafe else item.mtime_ns)
                 for item in overviews.files]
     entries += [("overview_entry", item.disk_rel, item.size, item.mtime_ns) for item in overviews.unexpected]
+    if raw_root is not None:
+        entries.extend(_walk_raw_inputs(raw_root))
     return entries, None
 
 
@@ -1501,6 +1503,57 @@ def read_overview(root, rel):
     if match is None or rel != f"assets/overview/{name}":
         return wiki_overview.Sidecar("unreadable", reason="invalid_name")
     return wiki_overview.read_sidecar(root, match[1])
+
+
+def _walk_raw_inputs(root):
+    """設定された raw の根を読み、Markdown の相対パスを raw/ 名前空間に載せる。"""
+    entries = []
+    directories = [(os.fspath(root), "raw")]
+    while directories:
+        directory, prefix = directories.pop()
+        try:
+            names = listdir(directory)
+        except Absent:
+            continue
+        except Unknown:
+            entries.append(("raw_dir", prefix, None, None))
+            continue
+        for name in names:
+            if name.startswith(".") or (prefix == "raw" and name.casefold() == "assets"):
+                continue
+            path = os.path.join(directory, name)
+            rel = f"{prefix}/{name}"
+            is_markdown = name.lower().endswith(".md")
+            try:
+                st = x("lstat", path)
+            except Absent:
+                continue
+            except Unknown:
+                entries.append(("raw" if is_markdown else "raw_dir", rel, None, None))
+                continue
+            if stat.S_ISLNK(st.st_mode) or getattr(st, "st_file_attributes", 0) & 0x400:
+                entries.append(("raw_link", rel, None, None))
+            elif stat.S_ISDIR(st.st_mode):
+                directories.append((path, rel))
+            elif is_markdown and stat.S_ISREG(st.st_mode):
+                if st.st_nlink > 1:
+                    entries.append(("raw_link", rel, None, None))
+                else:
+                    entries.append(("raw", rel, st.st_size, st.st_mtime_ns))
+    return sorted(entries, key=lambda entry: wiki_pages._sort_key(entry[1]))
+
+
+def read_raw_input(root, rel):
+    """raw の根より下のリンクを拒み、一覧に載った Markdown を読む。"""
+    parts = rel.split("/")[1:]  # 先頭の raw/ は閲覧用の名前空間
+    for pos in range(1, len(parts)):
+        if kind(os.path.join(root, *parts[:pos])) != "dir":
+            raise Absent(rel)
+    path = os.path.join(root, *parts)
+    st = x("lstat", path)
+    if not stat.S_ISREG(st.st_mode) or getattr(st, "st_file_attributes", 0) & 0x400 or st.st_nlink > 1:
+        raise Absent(rel)
+    return read_file(path)
 
 
 def read_input(root, rel) -> bytes:

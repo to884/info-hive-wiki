@@ -48,7 +48,7 @@ except (ImportError, SystemExit):
     wiki_graph_extract = None
 
 PROTOCOL_VERSION = 2   # 探しやすさの設計の 2.3、6（nav.js の形とグループの並びが変わった）
-CORE_VERSION = "browse-core-5"   # 5: 概要の入力・検査・表示（ADR-0033）。
+CORE_VERSION = "browse-core-6"   # 6: 概要の表示と原本の閲覧を併用する。
 NAME_LIMIT = 200
 # frame-src 'self' は、figures.js が作る Mermaid の図の枠のため（図の描画の設計の 7.3）
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src 'self'; "
@@ -138,12 +138,12 @@ class InputsChanged(Exception):
     """読む前と読んだあとの走査が違った（読んでいるあいだに Wiki が変わった。設計の 4.2）。"""
 
 
-def input_list(root) -> tuple:
+def input_list(root, raw_root=None) -> tuple:
     """入力の一覧（設計の 4）。(種類, ディスク上の相対パス, 大きさ, 更新時刻) の並び。分からなければ InputsUnknown。
 
     写しが読むものも、変化を知るための印も、比べる 2 回の走査も、この 1 つの一覧から作る。
     """
-    entries, problem = fs.walk_inputs(root)
+    entries, problem = fs.walk_inputs(root, raw_root)
     if problem is not None:
         raise InputsUnknown(problem)
     return tuple(entries)
@@ -157,9 +157,9 @@ def signature_of(entries) -> str:
     return h.hexdigest()
 
 
-def signature(root) -> str:
+def signature(root, raw_root=None) -> str:
     """今の入力の印。名前の集合が分からなければ InputsUnknown。"""
-    return signature_of(input_list(root))
+    return signature_of(input_list(root, raw_root))
 
 
 def read_text_like_lint(data: bytes) -> str:
@@ -176,6 +176,7 @@ class Snapshot:
     unreadable: list = field(default_factory=list)   # 中身を読めなかった入力の (種類, 相対パス)（UTF-8 でないものを含む）
     entries: tuple = ()                              # 入力の一覧（読み取りの情報。公開の前の検査が使う）
     transient: list = field(default_factory=list)    # そのうち、開けなかった入力（ファイルを変えずに読めるようになりうる）
+    raw_prefix: "str | None" = None                  # wiki の根から raw の根への相対パス
 
     def by_kind(self, kind: str) -> list:
         return [f for f in self.inputs if f.kind == kind]
@@ -302,13 +303,13 @@ def _read_asset(root, f: InputFile, size) -> None:
     f.data = data
 
 
-def take_snapshot(root, entries=None) -> Snapshot:
+def take_snapshot(root, entries=None, *, raw_root=None) -> Snapshot:
     """入力の一覧を作り、入力を読み、もう 1 度一覧を作る。2 回が同じときだけ、写しを採る（設計の 4.2）。
 
     違えば InputsChanged、名前の集合が分からなければ InputsUnknown。中身を読めない入力は、その入力がない Wiki と
     同じに描き、読み取りの印を足す（設計の 4.1）。
     """
-    first = input_list(root) if entries is None else tuple(entries)
+    first = input_list(root, raw_root) if entries is None else tuple(entries)
     inputs = []
     unreadable = []
     transient = []
@@ -339,11 +340,16 @@ def take_snapshot(root, entries=None) -> Snapshot:
             f.sha = hashlib.sha256(f"{rel_disk}\0{size}\0{_mtime}".encode("utf-8")).hexdigest()
         elif kind in ("asset", "asset_dir"):
             _read_asset(root, f, size)     # asset_dir（assets/ の一覧を作れない）は大きさがなく、読めない入力になる
+        elif kind == "raw_link":
+            f.error = "link"
         else:
             data = None
             if size is not None:
                 try:
-                    data = fs.read_input(root, rel_disk)
+                    if kind == "raw":
+                        data = fs.read_raw_input(raw_root, rel_disk)
+                    else:
+                        data = fs.read_input(root, rel_disk)
                 except (fs.Unknown, fs.Absent):
                     data = None
             if data is None:
@@ -360,11 +366,17 @@ def take_snapshot(root, entries=None) -> Snapshot:
             transient.append((kind, f.rel))
         gen.update(f"{kind}\0{rel_disk}\0{f.sha or '!' + str(f.error)}\n".encode("utf-8"))
         inputs.append(f)
-    second = input_list(root)
+    second = input_list(root, raw_root)
     if second != first:
         raise InputsChanged("読んでいるあいだに Wiki が変わった")
+    raw_prefix = None
+    if raw_root is not None:
+        try:
+            raw_prefix = posix_rel(os.path.relpath(raw_root, root))
+        except ValueError:
+            pass  # Windows で別ドライブにあるときは、wiki からの相対参照を使えない。
     return Snapshot(signature=signature_of(second), inputs=inputs, generation=gen.hexdigest()[:20],
-                    unreadable=unreadable, entries=second, transient=transient)
+                    unreadable=unreadable, entries=second, transient=transient, raw_prefix=raw_prefix)
 
 
 # ---------------------------------------------------------------------------
@@ -811,6 +823,26 @@ def overview_svg_name(data: bytes) -> str:
     return f"assets/overview/{hashlib.sha256(data).hexdigest()}.svg"
 
 
+_SESSION_SOURCE_KINDS = ("codex-session", "claude-code-session")
+_SESSION_SPEAKER_RE = re.compile(r"T[0-9]+ (ユーザー|Codex|Claude)（.+）")
+
+
+def _mark_session_turns(tokens: list) -> None:
+    """セッションの raw の発言を、本文の text フェンスと対になった見出しで見分ける。"""
+    for i, heading in enumerate(tokens[:-3]):
+        if heading.type != "heading_open" or heading.tag != "h2" or heading.level != 0:
+            continue
+        inline, close, message = tokens[i + 1:i + 4]
+        if inline.type != "inline" or close.type != "heading_close":
+            continue
+        if message.type != "fence" or message.info.strip() != "text":
+            continue
+        speaker = _SESSION_SPEAKER_RE.fullmatch(inline.content)
+        if speaker:
+            role = "user" if speaker.group(1) == "ユーザー" else "assistant"
+            heading.attrJoin("class", f"session-turn session-turn-{role}")
+
+
 class Core:
     """1 つの写しから組み立てた中核。描く関数は静的の書き出しとサーバーで同じものを使う。"""
 
@@ -829,6 +861,10 @@ class Core:
         # 読めなかった入力（読み取りの情報）。読み取りの印（「不完全」）を描くのに使う（構造の直しの設計の 4.1）
         unreadable = list(snapshot.unreadable)
         self.unreadable_pages = sorted(rel for kind, rel in unreadable if kind == "page")
+        for kind, rel in unreadable:
+            if kind == "raw_dir" or kind == "raw_link":
+                self.diagnostics.append({"kind": "raw_read_error", "target": rel,
+                                         "reason": "link" if kind == "raw_link" else "os"})
         self.unreadable_indexes = sorted(rel for kind, rel in unreadable if kind == "index")
         self.unreadable_ontology = [rel for kind, rel in unreadable if kind == "ontology"]
         self._render_lock = threading.Lock()
@@ -870,7 +906,9 @@ class Core:
         self.pages = {}          # disk_rel -> ページ（lint の形）
         self.page_files = {}     # disk_rel -> InputFile
         by_id = defaultdict(list)
-        for f in self.snapshot.by_kind("page"):
+        for f in self.snapshot.inputs:
+            if f.kind not in ("page", "raw"):
+                continue
             pid = _page_id(f.rel)
             if f.text is None:
                 self.diagnostics.append({"kind": "read_error", "page": pid, "reason": f.error})
@@ -882,8 +920,10 @@ class Core:
                 self.diagnostics.append({"kind": "read_error", "page": pid, "reason": "parse"})
                 self.parse_failures.append((f.kind, f.rel))
                 continue
+            if f.kind == "raw":
+                meta["type"] = "raw"
             p = {"rel_path": f.rel, "disk_rel_path": f.disk_rel, "slug": nfc(f.stem), "meta": meta,
-                 "body": body, "malformed_fm": malformed, "id": pid, "text": f.text}
+                 "body": body, "malformed_fm": malformed, "id": pid, "text": f.text, "kind": f.kind}
             self.pages[f.disk_rel] = p
             self.page_files[f.disk_rel] = f
             by_id[pid].append(f.disk_rel)
@@ -894,7 +934,38 @@ class Core:
             else:
                 self.diagnostics.append({"kind": "id_collision", "page": pid, "files": sorted(disks)})
         self.pages_by_path, self.pages_by_slug = wiki_pages.build_page_index(
-            list(self.pages.values()), lambda p: p["disk_rel_path"])
+            [p for p in self.pages.values() if p["kind"] == "page"], lambda p: p["disk_rel_path"])
+        self._inherit_raw_tags()
+
+    def _inherit_raw_tags(self) -> None:
+        """タグがない raw には、同じファイルを raw: で指すソースページのタグを使う。"""
+        prefix = self.snapshot.raw_prefix
+        if prefix is None:
+            return
+        raw_ids = {
+            posixpath.normpath(posixpath.join(prefix, self.page(pid)["rel_path"][4:])): pid
+            for pid in self.drawn if self.page(pid)["kind"] == "raw"
+        }
+        inherited = defaultdict(set)
+        for pid in self.drawn:
+            if self.page_type(pid) != "source":
+                continue
+            tags = tuple(self.page_tags(pid))
+            if not tags:
+                continue
+            page = self.page(pid)
+            bases = (".", "..", posixpath.dirname(page["rel_path"]))
+            for ref in wiki_pages.ref_values(page["meta"].get("raw")):
+                if classify_raw(ref)["kind"] != "relative":
+                    continue
+                ref = posix_rel(ref)
+                matches = {raw_ids.get(posixpath.normpath(posixpath.join(base, ref))) for base in bases}
+                matches.discard(None)
+                if len(matches) == 1:
+                    inherited[next(iter(matches))].add(tags)
+        for pid, candidates in inherited.items():
+            if len(candidates) == 1 and not self.page_tags(pid):
+                self.page(pid)["meta"]["tags"] = list(next(iter(candidates)))
 
     def _build_assets(self) -> None:
         """図の svg の表（図の描画の設計の 6.2、6.3）。NFC で同じ綴りになる svg は、どれも描かない。"""
@@ -948,7 +1019,12 @@ class Core:
         views = {}
         staged = {}
         conflicts = set()
-        rendered_keys = {wiki_overview.page_key(wiki_overview.page_id(disk)) for disk in self.drawn.values()}
+        rendered_pages = {
+            pid: wiki_overview.page_key(wiki_overview.page_id(disk))
+            for pid, disk in self.drawn.items()
+            if self.page(pid)["kind"] == "page"
+        }
+        rendered_keys = set(rendered_pages.values())
         for key in sorted(set(by_key) | set(sidecars) | rejected):
             pages = by_key.get(key, [])
             f = sidecars.get(key)
@@ -995,8 +1071,7 @@ class Core:
             else:
                 for name, data in result.figures.items():
                     self.overview_assets[self.overview_figure_out[key, name]] = data
-        for pid, disk in self.drawn.items():
-            key = wiki_overview.page_key(wiki_overview.page_id(disk))
+        for pid, key in rendered_pages.items():
             self.overviews[pid] = (key, views[key])
 
     def _overview_html(self, pid: str) -> str:
@@ -1139,6 +1214,10 @@ class Core:
         for disk, p in sorted(self.pages.items()):
             pid = p["id"]
             drawn = self.drawn.get(pid) == disk
+            if p["kind"] == "raw":
+                if drawn:
+                    self.links[pid] = []
+                continue
             if drawn:
                 tokens = self.tokens[pid]
             elif disk not in unparsed:
@@ -1224,6 +1303,8 @@ class Core:
         gpages = []
         diag = []
         for disk, p in sorted(self.pages.items()):
+            if p["kind"] == "raw":
+                continue
             # グラフの抽出と同じ読み方（wiki 0.9.5 の read_frontmatter）。最上位の欄は lint の値、graph だけを
             # PyYAML から取る（設計の 2）。PyYAML が組み立てられない値は、関係表の診断になる。
             try:
@@ -1365,8 +1446,11 @@ class Core:
                             listed.add(item["id"])
             file_groups.append((f, top))
         rest = defaultdict(list)
+        raw_items = []
         for pid in sorted(self.drawn):
-            if pid not in listed:
+            if self.page(pid)["kind"] == "raw":
+                raw_items.append({"state": "resolved", "id": pid, "label": self.title(pid)})
+            elif pid not in listed:
                 rest[str(self.page(pid)["meta"].get("type") or "")].append(pid)
         rest_groups = []
         if rest:
@@ -1377,6 +1461,10 @@ class Core:
                 sub["items"] = [{"state": "resolved", "id": pid, "label": self.title(pid)} for pid in rest[t]]
                 g["children"].append(sub)
             rest_groups.append(g)
+        if raw_items:
+            raw_group = new_group("raw", "_gr")
+            raw_group["items"] = raw_items
+            rest_groups.append(raw_group)
         self.nav_groups = self._nav_stage_two(file_groups, rest_groups)
         self._page_listing()
 
@@ -1458,27 +1546,29 @@ class Core:
     def _nav_tag_stage(self, top: list) -> None:
         """木の 3 つ目の段 N9（タグでまとめる設計の 2 節）。
 
-        ページの項目を自分の項目に持つグループのすべてで、ページの項目を、ページの最初のタグごとの子のグループ
-        （タグのないページは「タグなし」）に移す。ページでない項目は元のグループに残す。タグのグループは、
+        ページの項目を自分の項目に持つグループのすべてで、ページの項目をタグごとの子のグループに移す。
+        wiki のページは最初のタグ、raw は 2 つ目のタグを使う。該当する値がなければ「タグなし」にする。
+        ページでない項目は元のグループに残す。タグのグループは、
         元のグループの項目の並びでタグが初めて現れた順に、元の子のグループより前に並べ、「タグなし」を最後に置く。
         ID は `_gt` と、木を深さ優先でたどって（親、子の順）作った順の番号で、タグの文字を入れない。
         """
         before = {g["id"]: [it["id"] for it in g["items"] if it["state"] == "resolved"] for g in _walk(top)}
         listed = _page_ids(top)
-        first_tag = {}
+        group_tags = {}
         counter = [0]
 
         def tag_of(pid):
-            if pid not in first_tag:
+            if pid not in group_tags:
                 tags = self.page_tags(pid)
-                first_tag[pid] = tags[0] if tags else None
-            return first_tag[pid]
+                index = 1 if self.page(pid)["kind"] == "raw" else 0
+                group_tags[pid] = tags[index] if len(tags) > index else None
+            return group_tags[pid]
 
         def apply(g):
             original_children = g["children"]
             pages = [it for it in g["items"] if it["state"] == "resolved"]
             if pages:
-                buckets = {}           # 最初のタグ（なければ None）-> 項目。dict は入れた順を保つ
+                buckets = {}           # 分類に使うタグ（なければ None）-> 項目。dict は入れた順を保つ
                 for it in pages:
                     buckets.setdefault(tag_of(it["id"]), []).append(it)
                 keys = [k for k in buckets if k is not None] + ([None] if None in buckets else [])
@@ -1507,7 +1597,7 @@ class Core:
                         holders[pid].append(ch["title"])
             for pid in set(pids):
                 if holders.get(pid) != [tag_of(pid) or NO_TAG_LABEL]:
-                    raise NavInvariantError("ページが、最初のタグのグループのちょうど 1 つに入っていない")
+                    raise NavInvariantError("ページが、該当するタグのグループのちょうど 1 つに入っていない")
 
     def _page_listing(self) -> None:
         """索引のページの一覧と検索の索引に使う、ページごとの並び、グループ、階層、索引の行の要約（4.1、4.2）。"""
@@ -1658,12 +1748,15 @@ class Core:
         if pid in self._body_cache:
             return self._body_cache[pid]
         path = self.out_name[pid]
+        page = self.page(pid)
         # 下ごしらえの字句を 1 度だけ使う。描くときに字句を書き換えるので、描けずに終わったあとは、本文から
         # 解析し直して描く（設計の 7.2。描画は中核を変えないので、失敗のあとも同じ中核からもう一度描ける）。
         tokens = self.tokens.pop(pid, None)
         if tokens is None:
-            tokens = self.parser.parse(self.page(pid)["body"])
+            tokens = self.parser.parse(page["body"])
             assign_heading_ids(tokens)
+        if page["kind"] == "raw" and page["meta"].get("source_kind") in _SESSION_SOURCE_KINDS:
+            _mark_session_turns(tokens)
         counter = [0, self.links[pid]]
         insertion = 0
         for index, tok in enumerate(tokens):
@@ -1671,11 +1764,12 @@ class Core:
                 insertion = index + 1
                 break
         self._transform_tokens(tokens, path, counter, self.drawn[pid])
-        overview_html = self._overview_html(pid)
+        overview = self.overviews.get(pid)
+        overview_html = self._overview_html(pid) if overview is not None else ""
         if overview_html:
             tokens.insert(insertion, Token("html_block", "", 0, content=overview_html))
         rendered = self.parser.renderer.render(tokens, self.parser.options, {})
-        if self.overviews[pid][0] not in self.overview_render_failures:
+        if overview is None or overview[0] not in self.overview_render_failures:
             self._body_cache[pid] = rendered
         return rendered
 
