@@ -603,7 +603,7 @@ class InlineText:
     targets: dict
     line: int
     quote: bool
-    workflow_value: bool = False   # `## 取り込んだ内容と載せたページ` の表の「行き先」の列の、手順が決めた値だけのセル
+    workflow_value: bool = False   # `## 取り込んだ内容と載せたページ` の表の掲載方法を示す列で、手順が決めた値だけのセル
 
 
 def _wikilink_label(match: "re.Match") -> str:
@@ -622,7 +622,7 @@ def inline_texts(body_lines: list[str]) -> list[InlineText]:
     tokens = wiki_pages.new_parser().parse("\n".join(body_lines))
     out: list[InlineText] = []
     depth = 0
-    # 取り込みで記録した表の「行き先」の列を、パーサーの見出しと表のトークンから見分ける。
+    # 取り込みで記録した表の掲載方法を示す列を、パーサーの見出しと表のトークンから見分ける。
     section = ""
     headers: list = []
     col = -1
@@ -652,7 +652,7 @@ def inline_texts(body_lines: list[str]) -> list[InlineText]:
         if cell == "th":
             headers.append(tok.content.strip())
         elif (cell == "td" and section in CLAIMS_HEADINGS and 0 <= col < len(headers)
-              and headers[col] == CLAIMS_DESTINATION_COLUMN and tok.content.strip() in CLAIMS_DESTINATIONS):
+              and headers[col] in CLAIMS_DESTINATION_COLUMNS and tok.content.strip() in CLAIMS_DESTINATIONS):
             workflow_value = True
         chars: list = []
         kinds: list = []
@@ -788,14 +788,14 @@ def _is_code_example(it: InlineText, start: int) -> bool:
 
 # 取り込み手順 7b の表。旧見出しのページも同じ規則で検査する。
 CLAIMS_HEADINGS = ("取り込んだ内容と載せたページ", "主張と行き先")
-CLAIMS_DESTINATION_COLUMN = "行き先"
+CLAIMS_DESTINATION_COLUMNS = ("掲載方法", "行き先")
 CLAIMS_DESTINATIONS = ("create", "update", "source_only")
 
 
 def _prose(it: InlineText) -> str:
     """「raw にない語」を探す文字（本文、wikilink の表示名、画像の代替の文字。コードは空白にし、印を除く）。
 
-    `## 取り込んだ内容と載せたページ` の表の「行き先」の列で、中身がちょうど手順の値（create、update、source_only）のセルは、本文の
+    `## 取り込んだ内容と載せたページ` の表の「掲載方法」（旧表記は「行き先」）の列で、中身がちょうど手順の値（create、update、source_only）のセルは、本文の
     語でないので探さない。節や字面で外すと、表の主張や本文の同じ語まで隠れた（wiki 0.23.2 のレビューの 1 回目と 2 回目）。
     """
     if it.workflow_value:
