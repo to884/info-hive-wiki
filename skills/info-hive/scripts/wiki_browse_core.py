@@ -37,7 +37,9 @@ import wiki_lint  # noqa: E402
 import wiki_pages  # noqa: E402
 import wiki_overview  # noqa: E402
 from wiki_text import canonical_meta, nfc, posix_rel  # noqa: E402
-from markdown_it.token import Token  # noqa: E402  （wiki_pages が同梱のものを読み込んだあと）
+
+# 走査だけのimportは解析器を起こさない。本文を描く閲覧では同梱版を明示的に取得する。
+Token = wiki_pages.markdown_module("token").Token
 
 try:
     import yaml  # noqa: F401

@@ -1,6 +1,6 @@
 {
   "name": "wiki",
-  "version": "0.32.0",
+  "version": "0.33.0",
   "description": "日本語による Markdown の wiki を構築し、ローカルのハイブリッド検索、出典つきの回答、グラフ、タスクの経験からのスキル改善を提供する。praneybehl/llm-wiki-plugin v4.0.1 の日本語向け移植版。",
   "author": {
     "name": "to884"
@@ -18,5 +18,25 @@
     "markdown",
     "japanese",
     "llm-wiki"
-  ]
+  ],
+  "userConfig": {
+    "prompt_context": {
+      "type": "boolean",
+      "title": "指示に関係しそうな wiki のページを知らせる",
+      "description": "指示を送るたびに wiki を手元で探し、関係が強いページの題と場所だけをエージェントに知らせる。本文は渡さず、外部にも送らない。",
+      "default": true
+    },
+    "prompt_context_user_wiki": {
+      "type": "boolean",
+      "title": "ユーザースコープの wiki も探す",
+      "description": "INFO_HIVE_HOME（なければ ~/info-hive）の wiki も探し、プロジェクトの wiki の候補と分けて知らせる。",
+      "default": false
+    },
+    "prompt_context_delegate": {
+      "type": "boolean",
+      "title": "候補を読む段をサブエージェントに任せる",
+      "description": "候補の数と一致の種類から、読むのに合うモデルとエフォートを選び、wiki:wiki-reader に読ませるよう知らせる。切ると、いつもメインのエージェントが自分で読む。",
+      "default": true
+    }
+  }
 }
