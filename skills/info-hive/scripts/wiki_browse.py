@@ -9,7 +9,7 @@
 wiki_browse.py — wiki の閲覧（browse）の入口。
 
     uv run --script wiki_browse.py build <WIKI_ROOT> [--out DIR] [--raw text|link|basename|none] [--scope user|project]
-    uv run --script wiki_browse.py serve <WIKI_ROOT> [--page SLUG] [--no-open] [--idle-timeout 秒] [--scope user|project]
+    uv run --script wiki_browse.py serve <WIKI_ROOT> [--raw-root DIR] [--page SLUG] [--no-open] [--idle-timeout 秒] [--scope user|project]
     uv run --script wiki_browse.py stop <WIKI_ROOT>
     uv run --script wiki_browse.py core          （標準入力から 1 行に 1 つの JSON の要求を読む）
 
@@ -30,6 +30,7 @@ import sys
 sys.dont_write_bytecode = True
 
 import argparse  # noqa: E402
+import hashlib  # noqa: E402
 import hmac  # noqa: E402
 import html  # noqa: E402
 import http.client  # noqa: E402
@@ -283,9 +284,14 @@ def _quote_path(name: str) -> str:
 class BrowseState:
     """サーバーが持つ中核と、作り直しの状態（設計の 8.3）。"""
 
-    def __init__(self, root: PurePath, raw: str = "text", scope: "str | None" = None):
+    def __init__(self, root: PurePath, raw: str = "text", scope: "str | None" = None, *, raw_root=None):
         self.root = root
         self.raw = raw
+        self.raw_root = os.path.abspath(os.path.expanduser(raw_root)) if raw_root is not None else None
+        self.raw_root_key = (
+            hashlib.sha256(self.raw_root.encode("utf-8", errors="surrogatepass")).hexdigest()
+            if self.raw_root is not None else None
+        )
         # このサーバーが wiki のページ（サイドバーの先頭とタブの題名）に描くスコープ。サーバーは描くスコープを
         # ここにだけ持つ。組み立てるどの中核にも同じものを渡し、操作の口の status と起動の出力もこれを書く。
         # wiki を組み立てられないあいだは 503 を返してページを描かないが、この値は変わらない。
@@ -343,7 +349,7 @@ class BrowseState:
                 self.failed = self.failed or "InputsUnknown"
                 return self._answer(cur, request_sig, "failed")
             try:
-                snap = core.take_snapshot(self.root)
+                snap = core.take_snapshot(self.root, raw_root=self.raw_root)
                 new = core.Core(snap, scope=self.scope)
             except Exception as e:  # noqa: BLE001  前の中核を使い続ける（InputsUnknown、InputsChanged を含む）
                 self.failed = type(e).__name__
@@ -359,7 +365,7 @@ class BrowseState:
     def _signature(self) -> "str | None":
         """入力の印。入力の名前の集合が分からなければ None（どの中核の印とも一致しない）。"""
         try:
-            return core.signature(self.root)
+            return core.signature(self.root, self.raw_root)
         except Exception:  # noqa: BLE001  InputsUnknown のほか、思わない例外でも新しい中核を採らない
             return None
 
@@ -548,7 +554,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         op = rest[0] if rest else ""
         if op == "status" and self.command in ("GET", "HEAD") and len(rest) == 1:
             # scope は BrowseState.scope である。使い回すときの起動の出力は、これを書く。
-            return self._json(200, {"instance": app.instance, "wiki_key": app.key, "scope": app.state.scope})
+            return self._json(200, {"instance": app.instance, "wiki_key": app.key, "scope": app.state.scope,
+                                    "raw_root_key": app.state.raw_root_key})
         if op == "stop" and self.command == "POST" and len(rest) == 1:
             self._json(200, {"stopping": True})
             app.request_shutdown()
@@ -588,7 +595,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 class App:
     def __init__(self, root: PurePath, idle: float, verbose: bool = False, scope: "str | None" = None,
-                 assets: "dict | None" = None, frame_assets: "dict | None" = None):
+                 assets: "dict | None" = None, frame_assets: "dict | None" = None, *, raw_root=None):
         self.root = root
         self.key = common.wiki_key(root)
         self.idle = idle
@@ -598,7 +605,7 @@ class App:
         self.view_token = secrets.token_urlsafe(24)
         self.control_token = secrets.token_urlsafe(24)
         self.instance = secrets.token_hex(12)
-        self.state = BrowseState(root, scope=scope)
+        self.state = BrowseState(root, scope=scope, raw_root=raw_root)
         self.last = time.monotonic()
         self.httpd = None
         self.port = 0
@@ -727,7 +734,7 @@ def _page_url(base_url_for, port, token, target):
 
 
 def serve(root: PurePath, page: "str | None", open_browser: bool, idle: float, verbose: bool = False,
-          scope: "str | None" = None) -> int:
+          scope: "str | None" = None, *, raw_root=None) -> int:
     bdir = browse_dir()
     state_dir = _state_dir(root)
     if os.name == "nt" and os.environ.get(common.DATA_DIR_ENV, "").strip():
@@ -735,7 +742,7 @@ def serve(root: PurePath, page: "str | None", open_browser: bool, idle: float, v
     assets = core.load_assets()
     frame_assets = core.load_frame_assets()
     owner = fs.owner_of(root)
-    app = App(root, idle, verbose, scope, assets, frame_assets)
+    app = App(root, idle, verbose, scope, assets, frame_assets, raw_root=raw_root)
 
     def make_record():
         # ロックを取ったあとに待ち受けを始め、記録を置き換える（設計の 7.1）
@@ -761,6 +768,8 @@ def serve(root: PurePath, page: "str | None", open_browser: bool, idle: float, v
         # 記録を読めなければ（'unreadable'）、動いているが届かないので待つ。読めた記録だけで使い回す（設計の 7.1）
         live = _answering(value) if outcome == "reuse" else None
         if live is not None:
+            if live.get("raw_root_key") != app.state.raw_root_key:
+                raise Failed("動いているサーバーの raw の設定が異なる。/wiki:browse --stop で止めてからやり直す")
             rec = value
             key = rec.get("wiki_key") or app.key
 
@@ -929,6 +938,7 @@ def _add_server_commands(sub, common_args) -> None:
     """serve と stop（設計の 8）。"""
     s = sub.add_parser("serve", help="127.0.0.1 のサーバーを起動して開く（動いていれば使い回す）", parents=[common_args])
     s.add_argument("wiki")
+    s.add_argument("--raw-root", help="raw カテゴリに表示する Markdown のルート")
     s.add_argument("--page", default=None, help="開くページ（[[slug]] と同じ規則で探す）")
     s.add_argument("--no-open", action="store_true", help="ブラウザで開かない（URL を出すだけ）")
     s.add_argument("--idle-timeout", type=float, default=DEFAULT_IDLE, help="操作がないときに終わるまでの秒数（既定 1800）")
@@ -941,7 +951,8 @@ def _add_server_commands(sub, common_args) -> None:
 def _run_server_command(args, root: PurePath) -> int:
     """root は、main() が判定した wiki のルート。"""
     if args.cmd == "serve":
-        return serve(root, args.page, not args.no_open, args.idle_timeout, args.verbose, args.scope)
+        return serve(root, args.page, not args.no_open, args.idle_timeout, args.verbose, args.scope,
+                     raw_root=args.raw_root)
     if args.cmd == "stop":
         return stop(root)
     raise Failed(f"未対応のコマンド: {args.cmd}")
