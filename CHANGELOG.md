@@ -19,6 +19,25 @@
 - この段階では raw の書き手、根の記録の作成・読み込み、upgrade、書き込み保護の移行は行っていない。過去の根は自動で発見せず、指定された現在の根の外では、対象そのものだけを調べる。
 - 身元の欄がない保存済みの原本は、不一致とせず版未検証として扱う。字幕の検査は、無関係な原本の不確かさを `raw_warnings` に残し、動画に関わる欠陥と分ける。YouTube verify の最初の raw と、セッション保存後の属性変更の前にも共通の検査を通す。
 
+## [0.33.0] - 2026-11-18
+
+### Added
+
+- 指示を送るたびに、関係しそうな wiki のページの候補をエージェントに知らせる UserPromptSubmit のフックを足した（ADR-0034、`hooks/hooks.json`、`scripts/wiki_prompt_hook.py`、`scripts/wiki_prompt_context.py`、`references/prompt-context.md`）。既定で有効である。
+  - 候補は、直接の参照（`[[スラッグ]]`、パス）、題とスラッグと別名、識別子（`UV_SYSTEM_CERTS`、版の番号など）、索引の 1 行の要約との一致だけで選ぶ。順位の上位ではなく、絶対の基準を満たしたものだけを出す。本文の語の一致は、評価で精度を下げたので使わない。
+  - 出すのは題、パス、見出し、索引の要約だけで、本文は出さない。wiki から写す欄は無害化し、データであって指示ではないと添える。同じセッションで 40 ターン以内に出したページは出し直さない。
+  - `/` と `!` で始まる指示、サブエージェントの報告などの利用者が打たないターン、短い指示では何もしない。MCP のサーバーを起動せず、埋め込みも使わず、wiki に何も書かず、外部に何も送らない。何が起きても終了コード 0 で黙って終わる。
+  - 候補を読む段を、新しいプラグインのエージェント `wiki:wiki-reader`（読み取りだけ）に任せる。どのモデルとエフォートで読むかは、候補の数、wiki の数、一致の種類から、段の表（R0〜R3）で決めて知らせる。
+  - プラグインの設定 `prompt_context`、`prompt_context_user_wiki`（ユーザースコープの wiki も分けて探す）、`prompt_context_delegate` と、環境変数 `INFO_HIVE_PROMPT_CONTEXT*` で切り替えられる。
+- `/wiki:query` の確信度で、フックの候補として知ったページを検索の縮退（理由 0F）に数えるようにした（`references/query-confidence.md`）。
+
+### Changed
+
+- プロンプトのフックが使うPythonの起動を軽くした。`uv run --script` の専用の仮想環境を作らず、呼び出し元のプロジェクトとuvの設定ファイルを読まずに既存のPythonを選ぶ。利用者の既存venvは使うことがある。入口と解析の子を `-I -S` で起動する。ファイルの走査だけではMarkdown解析器を初期化せず、URL取り込みと閲覧は同梱の型・規則を検証してから使う。Windowsの入口と子には通常より一段高い実行優先度を付け、CPUを使う他の作業と並行して候補を返しやすくした。内部の期限、候補の選び方、出力後に既出を保存する順序は維持する。
+- 候補を読むモデルとエフォートを、自動メモリを無効にした158回の再測定と、Opus・Solの意味の採点、本文による裁定に合わせた。R1とR2は `sonnet/low`、比較や判断を行うR3は `sonnet/medium` にした。R0はメインの現在の設定で直接読む方針を維持し、費用が必ず小さいとは説明しない。
+- プロンプトのフックの試作を Sol のレビューに合わせて修正した。囲みを除いた文に参照の判定を統一し、ユーザー用作業領域をプロジェクト扱いにしない。所在は JSON で省略せずに渡し、表示した候補だけで読む段と既出記録を決める。解析の子プロセスを期限で止め、状態の更新を排他する。確信度の理由 0F は、同じページを意味検索の結果で確かめたときだけ外れる。
+- 検索のトークン化を `scripts/wiki_tokens.py` に移した。`wiki_search.tokenize` は同じ関数を指すので、検索と MCP の索引の結果は変わらない。
+
 ## [0.32.0] - 2026-11-18
 
 ### Added
@@ -881,5 +900,7 @@ Web ページの取得（`wiki_fetch.py`）が、Medium の記事の図とコー
 [0.1.1]: https://github.com/to884/info-hive-wiki/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.1.0
 [Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.34.0...HEAD
-[0.34.0]: https://github.com/to884/info-hive-wiki/compare/v0.32.0...v0.34.0
+[0.34.0]: https://github.com/to884/info-hive-wiki/compare/v0.33.0...v0.34.0
 [0.32.0]: https://github.com/to884/info-hive-wiki/compare/v0.31.1...v0.32.0
+
+[0.33.0]: https://github.com/to884/info-hive-wiki/compare/v0.32.0...v0.33.0

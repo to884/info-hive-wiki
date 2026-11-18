@@ -36,7 +36,6 @@ from __future__ import annotations
 import argparse
 import difflib
 import hashlib
-import importlib
 import json
 import os
 import re
@@ -55,9 +54,9 @@ WORK_SUBDIR = (".wiki-cache", "ingest")
 CAPTION_MARK = " 補足: "
 CAPTION_HEAD_RE = re.compile(r"([^\s][^\n]{0,59}?)" + re.escape(CAPTION_MARK) + r"(.*)\Z", re.S)
 
-# 表の規則（同梱の markdown-it-py）。パッケージの属性の table は関数なので、モジュールは import_module で取る。
-_TABLE_RULE = importlib.import_module("markdown_it.rules_block.table")
-_Token = importlib.import_module("markdown_it.token").Token
+# importの副作用に頼らず、同梱版を検証する共通の口から規則と型を取得する。
+_TABLE_RULE = wiki_pages.markdown_module("rules_block.table")
+_Token = wiki_pages.markdown_module("token").Token
 
 
 def _row_cells(state, line: int) -> list[str]:

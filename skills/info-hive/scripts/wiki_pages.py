@@ -36,6 +36,7 @@ import threading
 import unicodedata
 from collections import defaultdict
 from pathlib import Path, PurePosixPath
+from threading import RLock
 from typing import NamedTuple
 
 from wiki_text import canonical_kind, canonical_type, nfc, posix_rel
@@ -788,7 +789,9 @@ def _vendor_digest() -> str:
     return digest.hexdigest()[:12]
 
 
-PARSER_ID = f"markdown-it-py {MARKDOWN_IT_VERSION} / mdurl {MDURL_VERSION} / {_vendor_digest()}"
+@functools.lru_cache(maxsize=1)
+def _parser_id() -> str:
+    return f"markdown-it-py {MARKDOWN_IT_VERSION} / mdurl {MDURL_VERSION} / {_vendor_digest()}"
 # セクションの分け目になる見出しの行（検索の split_sections の HEADING_RE と同じく、行頭の # のあとに空白と文字）。
 # 中身のない見出し（# だけの行）では分けない。
 _SECTION_HEADING_RE = re.compile(r"#{1,6}[ 	]+\S")
@@ -823,8 +826,41 @@ def _load_vendored():
     return mdit
 
 
-markdown_it = _load_vendored()
-import markdown_it.common.utils as _md_utils  # noqa: E402  （同梱のものを読み込んだあと）
+_PARSER_STATE = None
+_PARSER_LOCK = RLock()
+
+
+def _parser():
+    """本文を解析するときだけ同梱の解析器を読む。ファイルの列挙には要らない。"""
+    global _PARSER_STATE
+    with _PARSER_LOCK:
+        if _PARSER_STATE is None:
+            markdown_it = _load_vendored()
+            import markdown_it.common.utils as utils
+            parser = markdown_it.MarkdownIt("commonmark", {"html": False}).enable("table")
+            _PARSER_STATE = (markdown_it, utils, parser)
+        return _PARSER_STATE
+
+
+def __getattr__(name):
+    # 既存の呼び出し側には同じ属性を公開し、走査だけの経路では解析器もハッシュも読まない。
+    if name == "PARSER_ID":
+        return _parser_id()
+    if name in ("markdown_it", "_md_utils", "_MD"):
+        return _parser()[("markdown_it", "_md_utils", "_MD").index(name)]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def markdown_module(name: str):
+    """同梱版の検証を済ませてから、本文の解析に使うサブモジュールを返す。"""
+    import importlib
+    with _PARSER_LOCK:
+        _parser()
+        module = importlib.import_module("markdown_it." + name)
+        file = getattr(module, "__file__", None)
+        if not file or VENDOR_DIR.resolve() not in Path(file).resolve().parents:
+            raise ImportError(f"同梱していないMarkdown解析器のモジュールを拒否した: {module.__name__}")
+        return module
 
 
 _SRC_PARSER = None
@@ -840,7 +876,7 @@ def destination_src(raw: str) -> str:
     global _SRC_PARSER
     if _SRC_PARSER is None:
         _SRC_PARSER = new_parser()
-    return _SRC_PARSER.normalizeLink(_md_utils.unescapeAll(raw))
+    return _SRC_PARSER.normalizeLink(_parser()[1].unescapeAll(raw))
 
 
 def new_parser():
@@ -849,10 +885,9 @@ def new_parser():
     lint などがリンクを拾うパーサーも、閲覧が描くパーサーも、これで作る。設定が同じなので、同じ本文から
     同じトークンができる。閲覧は、描くための規則を、自分で作ったパーサーにだけ足す。
     """
-    return markdown_it.MarkdownIt("commonmark", {"html": False}).enable("table")
+    return _parser()[0].MarkdownIt("commonmark", {"html": False}).enable("table")
 
 
-_MD = new_parser()
 _LINE_SPLIT_RE = re.compile(r"\r\n|\r|\n")
 
 
@@ -881,7 +916,7 @@ def _analyze(lines: "tuple[str, ...]") -> "tuple[tuple[str, ...], tuple[tuple[st
     kinds = ["other"] * len(lines)
     links: list[list[str]] = [[] for _ in lines]
     heading_splits = False
-    for tok in _MD.parse("\n".join(lines)):
+    for tok in _parser()[2].parse("\n".join(lines)):
         if tok.type in ("fence", "code_block") and tok.map is not None:
             start, end = tok.map
             for i in range(start, min(end, len(lines))):
