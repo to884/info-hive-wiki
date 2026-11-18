@@ -6,6 +6,12 @@
 
 ## [Unreleased]
 
+## [0.35.2] - 2026-11-19
+
+### 変更
+
+- YouTube 動画の取り込みを始めるときに、要約と字幕の訂正に使う設定を案内する。Codex では GPT-6.2 Sol / `high`、Claude Code では Claude Opus 5.5 / `medium` を勧める。
+
 ## [0.35.1] - 2026-11-18
 
 ### 変更
