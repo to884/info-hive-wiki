@@ -124,7 +124,7 @@ lint を実行するのは、`graph.relationships[]` を足したか直したと
 uv run --script "<skill-root>/scripts/wiki_graph_extract.py" wiki/ [--out <dir>] [--formats jsonl,sqlite,graphml] [--ontology <path>]
 ```
 
-**グラフ層が有効な wiki で、ページを足した、消した、名前を変えた、または書き換えたときは、必ず extract を実行する。** extract が作るエッジは `graph.relationships[]` だけから来るのではない。本文の `[[wikilink]]`（`mentions`）、frontmatter の `sources:`（`sourced_from`）、ソースページの `raw:`（`summarizes_raw`）からも作り、ノードの題名、種類、タグ、別名も frontmatter から読む。そのため、型付きの関係を足さず、新しいページも作らない取り込みでも、既存のページの本文や `sources:` を直せばグラフは変わる。オントロジーの `node_types` の `maps_from` を変えたときも、ノードの種類と ID が変わるので extract を実行する。extract を飛ばしてよいのは、wiki のページもオントロジーも 1 つも変えなかったときだけである。
+**グラフ層が有効なライブ wiki で、ページを足した、消した、名前を変えた、または書き換えたときは、extract を実行する。** 公開版を使う wiki では、通常保存の公開候補にグラフを含めて更新する。適用結果の `release_id` を指定して検査する。extract は `graph.relationships[]` に加え、本文の `[[wikilink]]`（`mentions`）、frontmatter の `sources:`（`sourced_from`）、ソースページの `raw:`（`summarizes_raw`）からエッジを作り、ノードの題名、種類、タグ、別名も frontmatter から読む。ライブでオントロジーの `node_types` の `maps_from` を変えたときも、ノードの種類と ID が変わるので extract を実行する。
 
 extract は、型付きの関係があればその前に lint を通す。lint の検出結果があっても extract は動くが、型の誤ったエッジもそのままグラフに入る。
 

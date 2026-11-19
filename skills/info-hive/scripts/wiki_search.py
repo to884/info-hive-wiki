@@ -901,7 +901,7 @@ def json_result(
 def emit_json(args, results: list[dict], mode: str = "lexical", decision: dict | None = None) -> None:
     payload = {
         "query": args.query,
-        "wiki": Path(args.wiki).as_posix(),
+        "wiki": Path(getattr(args, "publication_wiki", args.wiki)).as_posix(),
         "granularity": args.granularity,
         "mode": mode,
         "results": results,
@@ -912,6 +912,11 @@ def emit_json(args, results: list[dict], mode: str = "lexical", decision: dict |
         payload["unverified"] = args.unverified  # 調べられなかった場所
     if decision is not None:
         payload["decision"] = decision
+    if getattr(args, "publication_id", None):
+        from wiki_apply import resolve_publication
+
+        resolve_publication(args.publication_wiki, args.publication_id)
+        payload["release_id"] = args.publication_id
     print(json.dumps(payload, ensure_ascii=False))
 
 
@@ -1182,6 +1187,7 @@ def main():
     parser = localize_argparse(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter))
     parser.add_argument("query", nargs="?", default="", help="検索語")
     parser.add_argument("--wiki", type=Path, default=None, help=wiki_workspace.WIKI_DEFAULT_HELP)
+    parser.add_argument("--release-id", help="検索する公開版")
     parser.add_argument("--top", type=int, default=10, help="上位 N 件の結果を返す（既定: 10）")
     parser.add_argument("--type", help="frontmatter の type で絞り込む")
     parser.add_argument("--tag", action="append", default=[], help="タグで絞り込む（複数指定できる）")
@@ -1208,6 +1214,19 @@ def main():
         args.wiki = wiki_workspace.default_wiki_or_exit()
     # SCHEMA.md のないディレクトリは、初期化された wiki とみなさない（ADR-0019）。パースキャッシュを書く前に確かめる。
     wiki_initialized.require_or_exit(args.wiki)
+    from wiki_apply import resolve_publication
+
+    try:
+        release = resolve_publication(args.wiki, args.release_id)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    if release:
+        if args.cache:
+            parser.error("公開版の検索ではパースキャッシュを使えません")
+        args.publication_wiki = release.wiki
+        args.publication_id = release.release_id
+        args.wiki = release.root
+        args.no_embed = True
     cache_path = None
     if args.cache:
         cache_path = args.wiki / ".wiki-cache" / "search-index.json" if args.cache == "AUTO" else Path(args.cache)

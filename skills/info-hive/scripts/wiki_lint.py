@@ -927,11 +927,22 @@ def main():
                              "渡さないか空にすると、タグの検査はしない")
     parser.add_argument("--json", action="store_true", help="テキストの代わりに JSON を出力する。キーは英語のまま")
     parser.add_argument("--raw-root", type=Path, help="利用者が決めた raw の根。そこから原本までの道も検査する")
+    parser.add_argument("--release-id", help="検査する公開版")
     args = parser.parse_args()
     if args.wiki is None:
         args.wiki = wiki_workspace.default_wiki_or_exit()
     # SCHEMA.md のないディレクトリ（ほかの用途の wiki/ など）は、初期化された wiki とみなさない（ADR-0019）。
     wiki_initialized.require_or_exit(args.wiki)
+    from wiki_apply import resolve_publication
+
+    try:
+        release = resolve_publication(args.wiki, args.release_id)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    if release:
+        if args.raw_root is not None:
+            parser.error("公開版の lint にライブの raw は指定できません")
+        args.wiki = release.root
 
     pages = collect_pages(args.wiki)
     required_fm = [f.strip() for f in args.required_fm.split(",") if f.strip()]
@@ -942,6 +953,9 @@ def main():
                     args.soft_char_cap, args.hard_char_cap, index_entries=collect_index_entries(args.wiki),
                     allowed_tags=allowed_tags, wiki_root=args.wiki, raw_root=args.raw_root, wiki_root_given=args.wiki)
 
+    if release:
+        resolve_publication(release.wiki, release.release_id)
+        findings["release_id"] = release.release_id
     if args.json:
         print(json.dumps(findings, indent=2, default=str, ensure_ascii=False))
     else:

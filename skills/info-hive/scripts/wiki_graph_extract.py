@@ -35,6 +35,7 @@ PyYAML の固定した依存を持つので、`uv run --script` で実行する�
 """
 
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -1183,6 +1184,24 @@ def write_graphml(out_dir: Path, nodes: list[dict], edges: list[dict]) -> None:
 # ---------------------------------------------------------------------------
 
 
+@contextmanager
+def live_output_gate(output):
+    from wiki_live_apply import WAIT_SECONDS, live_mode, wiki_guard, with_gate
+
+    destination = output.absolute()
+    spellings = dict.fromkeys([destination, destination.resolve()])
+    root = next((parent for path in spellings for parent in (path, *path.parents)
+                 if os.path.lexists(parent / "SCHEMA.md")), None)
+    if root is None:
+        yield
+        return
+    guard = wiki_guard(root)
+    live_mode(guard)
+    with with_gate(guard, WAIT_SECONDS):
+        live_mode(guard)
+        yield
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("wiki", type=Path, help="wiki のディレクトリ")
@@ -1215,18 +1234,19 @@ def main():
     # 同じ出力先の extract は 1 つずつ動かす。ロックを取ってからページを読むので、
     # 後から動いた extract の成果物が、先の extract の成果物と混ざらない。
     try:
-        guard = common.output_guard(args.wiki, out_dir)
-        with common.extract_lock(out_dir, guard=guard):
-            common.remove_stale_temps(guard, out_dir, OUTPUT_NAMES)
-            try:
-                pages = collect_pages(args.wiki)
-                diagnostics: list[dict] = []
-                nodes, page_node_ids, aliases = build_nodes(pages, ontology, diagnostics)
-                edges = build_edges(pages, page_node_ids, diagnostics)
-            except (OSError, ValueError) as exc:
-                print(f"グラフの入力を処理できなかった: {exc}", file=sys.stderr)
-                sys.exit(1)
-            write_outputs(out_dir, formats, nodes, aliases, edges, guard=guard)
+        with live_output_gate(out_dir):
+            guard = common.output_guard(args.wiki, out_dir)
+            with common.extract_lock(out_dir, guard=guard):
+                common.remove_stale_temps(guard, out_dir, OUTPUT_NAMES)
+                try:
+                    pages = collect_pages(args.wiki)
+                    diagnostics: list[dict] = []
+                    nodes, page_node_ids, aliases = build_nodes(pages, ontology, diagnostics)
+                    edges = build_edges(pages, page_node_ids, diagnostics)
+                except (OSError, ValueError) as exc:
+                    print(f"グラフの入力を処理できなかった: {exc}", file=sys.stderr)
+                    sys.exit(1)
+                write_outputs(out_dir, formats, nodes, aliases, edges, guard=guard)
     except common.ExtractBusy as exc:
         print(str(exc), file=sys.stderr)
         sys.exit(1)

@@ -12,7 +12,7 @@ browse のファイルの入出力は、すべてこのモジュールを通す�
   領分の外では、自分が作ったものだけを置き換え、消す（守ること 1。ADR-0017）。
 - 静的の書き出し（build。設計の 6.3、6.4）と、サーバーの記録（設計の 7.1）。
 
-標準ライブラリと wiki_pages（走査と識別子の関数）だけで書き、単独では実行しない。
+走査、概要、公開版の確認には wiki 内の共通処理を使う。単独では実行しない。
 """
 
 from __future__ import annotations
@@ -81,7 +81,7 @@ _WIN = None
 
 
 def _win():
-    """CreateFileW と GetFileInformationByHandle（ctypes）。1 度だけ用意する。"""
+    """ファイル操作に使う Windows API（ctypes）。1 度だけ用意する。"""
     global _WIN
     if _WIN is None:
         import ctypes
@@ -94,6 +94,8 @@ def _win():
                                     wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
         k32.CloseHandle.argtypes = [wintypes.HANDLE]
         k32.CloseHandle.restype = wintypes.BOOL
+        k32.MoveFileExW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
+        k32.MoveFileExW.restype = wintypes.BOOL
 
         class Info(ctypes.Structure):
             _fields_ = [("attrs", wintypes.DWORD), ("c", wintypes.FILETIME), ("a", wintypes.FILETIME),
@@ -171,6 +173,11 @@ class Os:
 
     def lstat(self, path):
         return os.lstat(path)
+
+    def publication(self, path, release_id):
+        from wiki_apply import resolve_publication
+
+        return resolve_publication(path, release_id)
 
     def stat(self, path):
         return os.stat(path)
@@ -256,6 +263,15 @@ class Os:
     def replace(self, src, dst):
         os.replace(src, dst)
 
+    def move_write_through(self, src, dst, *, replace=False):
+        """Windows で、同一ボリューム内の名前の付け替えを同期して返す。"""
+        ctypes, _, _, k32, _ = _win()
+        # MOVEFILE_WRITE_THROUGH。置き換え時だけ MOVEFILE_REPLACE_EXISTING を加える。
+        flags = 0x8 | (0x1 if replace else 0)
+        if not k32.MoveFileExW(os.fspath(src), os.fspath(dst), flags):
+            code = ctypes.get_last_error()
+            raise OSError(None, ctypes.FormatError(code).strip(), os.fspath(src), code, os.fspath(dst))
+
     def unlink(self, path):
         os.unlink(path)
 
@@ -325,6 +341,14 @@ def x(name, *args):
         return getattr(X, name)(*args)
     except OSError as e:
         raise failure(classify(e), f"{name}: {type(e).__name__}", path, type(e)) from None
+
+
+def publication(root, release_id=None):
+    """公開の記録を照合し、整合性のエラーを閲覧の停止として伝える。"""
+    try:
+        return x("publication", root, release_id)
+    except ValueError as e:
+        raise Stop(str(e)) from e
 
 
 def listdir(path):
