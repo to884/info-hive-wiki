@@ -49,7 +49,7 @@ except (ImportError, SystemExit):
     wiki_graph_extract = None
 
 PROTOCOL_VERSION = 2   # 探しやすさの設計の 2.3、6（nav.js の形とグループの並びが変わった）
-CORE_VERSION = "browse-core-6"   # 6: 概要の表示と原本の閲覧を併用する。
+CORE_VERSION = "browse-core-7"   # 7: サーバー版の図を開く条件と、描画枠の同時実行を制限する。
 NAME_LIMIT = 200
 # frame-src 'self' は、figures.js が作る Mermaid の図の枠のため（図の描画の設計の 7.3）
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src 'self'; "
@@ -2002,17 +2002,18 @@ class Core:
                 f'<noscript><a class="fui-Link" href="{prefix}index.html">Index へ</a></noscript></div></nav>\n'
                 f'<main id="_main">\n{banner}')
 
-    def _tail(self, path: str, extra_data: tuple = ()) -> str:
+    def _tail(self, path: str, extra_data: tuple = (), *, allow_figures: bool = True) -> str:
         prefix = root_prefix(path)
         # figures.js は app.js と別のファイルにする。app.js は契約の版が違うときなどに途中で抜けるので、図の描画を
         # それに縛らない（図の描画の設計の 7.4）
         files = ("nav.js", "data/manifest.js", *extra_data, "assets/app.js")
-        if self.static_mermaid is None:
+        if allow_figures and self.static_mermaid is None:
             files += ("assets/figures.js",)
         scripts = "".join(f'<script src="{prefix}{name}"></script>\n' for name in files)
         return f"</main>\n{scripts}</body>\n</html>\n"
 
-    def render_page(self, pid: str, raw_mode: str = "text", stale: "str | None" = None) -> str:
+    def render_page(self, pid: str, raw_mode: str = "text", stale: "str | None" = None, *,
+                    allow_figures: bool = True) -> str:
         path = self.out_name[pid]
         title = self.title(pid)
         back = "".join(f'<li class="fui-ListItem"><a href="{html.escape(rel_href(path, self.out_name[b]))}">'
@@ -2029,7 +2030,7 @@ class Core:
                   f'<ul class="fui-List" role="list">{back}</ul></section>\n'
                 + self._relations_html(pid, path)
                 + self._diagnostics_html(diags, path)
-                + self._tail(path))
+                + self._tail(path, allow_figures=allow_figures))
 
     def _incomplete_html(self) -> str:
         """中身に依る一覧（未解決リンク、被リンク、関係）の「不完全」の印（構造の直しの設計の 4.1）。"""
@@ -2212,19 +2213,19 @@ class Core:
         raise KeyError(name)
 
     def render(self, name: str, raw_mode: str = "text", generated_at: str = "",
-               stale: "str | None" = None) -> str:
+               stale: "str | None" = None, *, allow_figures: bool = True) -> str:
         """出力の名前 1 つを描く。中核が知らない名前なら KeyError。ほかの要求と同時に呼んでよい。"""
         with self._render_lock:
-            return self._render(name, raw_mode, generated_at, stale)
+            return self._render(name, raw_mode, generated_at, stale, allow_figures)
 
-    def _render(self, name: str, raw_mode: str, generated_at: str, stale: "str | None") -> str:
+    def _render(self, name: str, raw_mode: str, generated_at: str, stale: "str | None", allow_figures: bool) -> str:
         if name == "index.html":
             return self.render_index(stale)
         if name in DATA_FILES:
             return self.render_data(name, generated_at, stale)
         pid = self.name_to_id[name]
         try:
-            return self.render_page(pid, raw_mode, stale)
+            return self.render_page(pid, raw_mode, stale, allow_figures=allow_figures)
         except Exception as e:  # noqa: BLE001  1 ページを描けなくても、その場所に「描けない」と出して続ける（設計の 7.2）
             if pid not in self.render_failures:
                 self.render_failures.append(pid)
