@@ -6,6 +6,12 @@
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-11-19
+
+### 追加
+
+- `/wiki:browse build` は、記事と概要にある Mermaid の図を Pele で明暗 2 配色の SVG に書き出す。幅の広いフロー図は、Pele が対応する場合に縦向きになる。書き出し時に Node.js 20 以上がない場合や描画に失敗した場合は、元の図のコードを表示する。
+
 ## [0.36.0] - 2026-11-19
 
 ### Changed
@@ -944,7 +950,8 @@ Web ページの取得（`wiki_fetch.py`）が、Medium の記事の図とコー
 [0.2.0]: https://github.com/to884/info-hive-wiki/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/to884/info-hive-wiki/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.1.0
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.36.0...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.37.0...HEAD
+[0.37.0]: https://github.com/to884/info-hive-wiki/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/to884/info-hive-wiki/compare/v0.35.2...v0.36.0
 [0.34.0]: https://github.com/to884/info-hive-wiki/compare/v0.33.0...v0.34.0
 [0.32.0]: https://github.com/to884/info-hive-wiki/compare/v0.31.1...v0.32.0
