@@ -122,6 +122,8 @@ READ_ATTEMPTS = 3
 
 def _read_and_render(root: PurePath, raw: str, scope: "str | None", generated_at: str):
     """写しを採り、すべてのページを描く。読んでいるあいだに Wiki が変われば、3 回までやり直す（設計の 4.2）。"""
+    import wiki_browse_pele
+
     for attempt in range(READ_ATTEMPTS):
         try:
             snap = core.take_snapshot(root)
@@ -130,7 +132,13 @@ def _read_and_render(root: PurePath, raw: str, scope: "str | None", generated_at
                 raise Failed("読んでいるあいだに Wiki が変わり続けた。前の世代を残して止める。少し待ってからやり直す")
             continue
         c = core.Core(snap, scope=scope)
-        return snap, c, c.render_all(raw, generated_at)
+        sources = c.mermaid_sources()
+        images, warnings = wiki_browse_pele.render_sources(sources)
+        missed = len(sources) - len(images)
+        if missed:
+            warnings.append(f"Mermaid の図を {missed} 種類描けない。その図はコードで表示する")
+        c.prepare_static_mermaid(images)
+        return snap, c, c.render_all(raw, generated_at), warnings
     raise AssertionError("unreachable")
 
 
@@ -166,9 +174,10 @@ def build(root: PurePath, out_arg: "str | None", raw: "str | None", scope: "str 
     raw = raw or ("link" if default else "basename")
     started = time.perf_counter()
     assets = core.load_assets()
+    assets.pop("assets/figures.js")
     owner = fs.owner_of(root)
     generated_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-    snap, c, files = _read_and_render(root, raw, scope, generated_at)
+    snap, c, files, warnings = _read_and_render(root, raw, scope, generated_at)
     files = {name: (content if isinstance(content, bytes) else content.encode("utf-8"))
              for name, content in files.items()}
     files.update(assets)
@@ -181,7 +190,6 @@ def build(root: PurePath, out_arg: "str | None", raw: "str | None", scope: "str 
     tokens, unreadable_records = fs.server_tokens(bdir)
     # 同梱の画面の部品は入力の中身を含まないので、調べない（図の描画の設計の 7.2）
     findings = core.scan_machine_info({n: v for n, v in files.items() if n not in assets}, needles, tokens)
-    warnings = []
     for name, what in findings:
         warnings.append(f"この出力に、{'絶対パス' if what == 'path' else 'サーバーの操作のトークン'}がある"
                         f"（{name}）。入力の中身にあるもので、持ち出すと渡る")

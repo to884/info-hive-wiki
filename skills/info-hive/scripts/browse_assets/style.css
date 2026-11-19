@@ -310,7 +310,15 @@ pre code { background: none; padding: 0; font-size: var(--fontSizeBase300); over
   margin-block: var(--spacingVerticalM); margin-inline: 0; overflow-x: auto;
 }
 #_body .wiki-fig > img { display: block; max-width: 100%; height: auto; }
-/* Mermaid の図のコード（Accordion）と、描けなかったときの警告（MessageBar）。figures.js が作る */
+/* 静的版の図は 2 配色を画像に固定し、閲覧側で表示する画像を選ぶ（ADR-0035）。 */
+#_body .wiki-fig > img[data-fig-theme="dark"],
+:root[data-theme="dark"] #_body .wiki-fig > img[data-fig-theme="light"] { display: none; }
+:root[data-theme="dark"] #_body .wiki-fig > img[data-fig-theme="dark"] { display: block; }
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="auto"] #_body .wiki-fig > img[data-fig-theme="light"] { display: none; }
+  :root[data-theme="auto"] #_body .wiki-fig > img[data-fig-theme="dark"] { display: block; }
+}
+/* Mermaid の図のコード（Accordion）と、描けなかったときの警告（MessageBar） */
 #_body .wiki-fig-source { margin-block-end: var(--spacingVerticalL); }
 #_body .wiki-fig-error { margin-block: var(--spacingVerticalS); }
 /* 概要（ADR-0033）。色と部品は同梱の Fluent 2 を使う。 */
