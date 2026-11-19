@@ -6,7 +6,7 @@
  * - 図 1 つにつき、見えない sandbox の枠（トークンのない /_frame/<版>/ の文書）を 1 つ作り、その図のソースと配色だけを
  *   送る。枠が返す SVG の文字列は DOM に入れず、data: の <img> にして出す。描き終えたら枠を消す。
  * - 描画は「回」として持つ。新しい回（配色が変わったとき）を始めるときは、前の回の枠をすべて消す。同時に生きている
- *   枠は、どの時点でも 2 つまでである。
+ *   枠は、同じオリジンのタブをまたいで 1 つまでとする。枠を消すまで Web Locks の排他ロックを保持する。
  * - 枠とのやり取りは使い切りである。ready を 1 回受けて送り、result を 1 回受けたら、すぐに枠を消して受け取りをやめる。
  * - 触るのは、自分で作った要素（入れ物、画像、Accordion、警告、枠）の属性と、<pre> の置き場所だけである。要素の
  *   style には触らない（el.style.x = ... も、style 属性を作るので使わない）。
@@ -15,6 +15,8 @@
 (function () {
   "use strict";
   if (location.protocol !== "http:" && location.protocol !== "https:") return;
+  // 別ページの描画側へ到達できる入口では描かない。本文とコードはそのまま読める。
+  if (window.parent !== window || window.opener || !navigator.locks) return;
   var body = document.getElementById("_body");
   if (!body) return;
   var codes = body.querySelectorAll("pre > code.language-mermaid");
@@ -23,7 +25,7 @@
   // 中核の FRAME_VERSION と同じ値（試験が一致を確かめる）
   var FRAME_VERSION = "mermaid-12.3.0-1";
   var FRAME_URL = location.origin + "/_frame/" + FRAME_VERSION + "/mermaid-frame.html";
-  var CONCURRENCY = 2;
+  var FRAME_LOCK = "info-hive-browse-figure";
   var TIMEOUT_MS = 20000;
   var MAX_SVG = 5000000;
   var MAX_SIDE = 20000;
@@ -205,34 +207,41 @@
   function Run(theme) {
     this.theme = theme;
     this.queue = items.slice();
-    this.live = [];
+    this.abort = new AbortController();
+    this.finish = null;
     this.stopped = false;
   }
 
   Run.prototype.stop = function () {
     this.stopped = true;
     this.queue = [];
-    this.live.slice().forEach(function (f) { f.finish(null); });
-  };
-
-  Run.prototype.start = function () {
-    for (var n = 0; n < CONCURRENCY; n++) this.next();
+    this.abort.abort();
+    if (this.finish) this.finish(null);
   };
 
   Run.prototype.next = function () {
     if (this.stopped) return;
     var it = this.queue.shift();
     if (!it) return;
-    this.open(it);
+    var run = this;
+    navigator.locks.request(FRAME_LOCK, { signal: run.abort.signal }, function () {
+      if (run.stopped) return;
+      return new Promise(function (release) { run.open(it, release); });
+    }).then(function () {
+      run.next();
+    }, function () {
+      if (run.stopped) return;
+      run.stop();
+      items.forEach(restoreCode);
+    });
   };
 
   // 図 1 つの枠。状態は "wait-ready"、"wait-result"、"done" の 3 つ
-  Run.prototype.open = function (it) {
+  Run.prototype.open = function (it, release) {
     var run = this;
     var frame = document.createElement("iframe");
     var state = "wait-ready";
     var timer = null;
-    var handle = { finish: finish };
 
     function finish(result) {
       if (state === "done") return;
@@ -240,11 +249,11 @@
       clearTimeout(timer);
       window.removeEventListener("message", onMessage);
       frame.remove();
-      run.live.splice(run.live.indexOf(handle), 1);
+      run.finish = null;
+      release();
       if (run.stopped) return;
       var url = result ? imageUrl(result) : null;
       if (url) showImage(it, url, result); else showWarning(it);
-      run.next();
     }
 
     function onMessage(e) {
@@ -267,10 +276,10 @@
     frame.setAttribute("width", "1200");
     frame.setAttribute("height", "800");
     window.addEventListener("message", onMessage);
-    run.live.push(handle);
+    run.finish = finish;
     timer = setTimeout(function () { finish(null); }, TIMEOUT_MS);
     frame.src = FRAME_URL;
-    document.body.appendChild(frame);
+    try { document.body.appendChild(frame); } catch (e) { finish(null); }
   };
 
   var current = null;
@@ -279,7 +288,7 @@
     if (current && current.theme.key === theme.key) return;
     if (current) current.stop();
     current = new Run(theme);
-    current.start();
+    current.next();
   }
 
   new MutationObserver(render).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
@@ -287,5 +296,12 @@
     var mq = window.matchMedia("(prefers-color-scheme: dark)");
     if (mq.addEventListener) mq.addEventListener("change", render);
   }
+  window.addEventListener("pagehide", function () {
+    if (current) current.stop();
+    current = null;
+  });
+  window.addEventListener("pageshow", function (event) {
+    if (event.persisted) render();
+  });
   render();
 })();

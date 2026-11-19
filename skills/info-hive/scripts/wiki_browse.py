@@ -539,9 +539,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # 図の svg。CSP の sandbox で、直接開かれても中のスクリプトを動かさない（図の描画の設計の 6.5）
             return self._send(200, svg, "image/svg+xml", csp=core.CSP_SVG)
         reason = None if stale is None else ("組み立てに失敗した" if stale == "failed" else "組み立てている")
-        text = c.render(name, app.state.raw, generated_at=getattr(c, "generated_at", ""), stale=reason)
+        # COOP で別オリジンの開き元が切れる前に、要求の種類で図を出す入口を絞る。
+        allow_figures = (self.headers.get("Sec-Fetch-Mode") == "navigate"
+                         and self.headers.get("Sec-Fetch-Dest") == "document"
+                         and self.headers.get("Sec-Fetch-Site") in ("none", "same-origin"))
+        text = c.render(name, app.state.raw, generated_at=getattr(c, "generated_at", ""), stale=reason,
+                        allow_figures=allow_figures)
         ctype = "text/javascript; charset=utf-8" if name.endswith(".js") else "text/html; charset=utf-8"
-        return self._send(200, text.encode("utf-8"), ctype)
+        extra = None if name.endswith(".js") else {"Cross-Origin-Opener-Policy": "same-origin"}
+        return self._send(200, text.encode("utf-8"), ctype, extra=extra)
 
     def _control_locate(self, target: str):
         """行き先を wikilink と同じ規則で解決し、状態と、解決したページの出力の名前を返す。"""

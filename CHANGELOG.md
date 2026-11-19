@@ -6,6 +6,12 @@
 
 ## [Unreleased]
 
+## [0.38.1] - 2026-11-19
+
+### 修正
+
+- サーバー版 browse の Mermaid 描画枠は、同じオリジンのタブをまたいで一度に 1 つだけ動かす。埋め込みや開き元のあるページには原稿を表示する。URL を直接開いた場合と同じタブでの記事移動では、従来どおり図を表示する。
+
 ## [0.38.0] - 2026-11-19
 
 ### 追加
@@ -956,7 +962,8 @@ Web ページの取得（`wiki_fetch.py`）が、Medium の記事の図とコー
 [0.2.0]: https://github.com/to884/info-hive-wiki/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/to884/info-hive-wiki/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.1.0
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.38.0...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.38.1...HEAD
+[0.38.1]: https://github.com/to884/info-hive-wiki/releases/tag/v0.38.1
 [0.38.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.38.0
 [0.37.0]: https://github.com/to884/info-hive-wiki/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/to884/info-hive-wiki/compare/v0.35.2...v0.36.0
