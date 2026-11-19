@@ -1,6 +1,6 @@
 # 閲覧（browse）の画面の資産
 
-閲覧の画面の CSS と JavaScript を置く。ページは CSP（`style-src 'self'; script-src 'self'`）の下で描くので、どれもファイルとして読み込む。
+閲覧の画面と静的の書き出しで使うファイルを置く。画面で使う CSS と JavaScript は、ページの CSP（`style-src 'self'; script-src 'self'`）に従って外部ファイルとして読み込む。
 
 | ファイル | 中身 |
 | --- | --- |
@@ -10,6 +10,8 @@
 | `figures.js` | 本文の Mermaid のフェンスを図として描くスクリプト（親の側）。サーバーの方式でだけ動く（ADR-0030） |
 | `mermaid-frame.html`、`mermaid-frame.js` | Mermaid を動かす sandbox の枠の文書と、その中のスクリプト。サーバーがトークンのない `/_frame/<版>/` から配り、静的の書き出しには入れない |
 | `mermaid.tiny.js` | Mermaid の束。下の「同梱した Mermaid」を参照 |
+| `render-pele.mjs` | 静的の書き出し時に Node.js 20 以上で図を読み、明暗 2 配色の SVG を生成する |
+| `pele.mjs` | 静的の書き出し時にだけ使う Pele の束。下の「同梱した Pele」を参照 |
 | `licenses/` | 同梱したファイルのライセンスの文書。閲覧の出力には含めない |
 
 ## 同梱した Fluent 2 の CSS
@@ -59,3 +61,16 @@
 2. `package/dist/mermaid.tiny.js` を `mermaid.tiny.js` に、`package/LICENSE` を `licenses/mermaid.LICENSE` に写す。`licenses/mermaid.THIRD-PARTY-NOTICES.txt` は、その版の package.json の依存のライセンスの文書から作り直す。
 3. 上の表の版、integrity、大きさ、SHA-256、写した日を書き換え、枠の版を上げる（3 か所）。
 4. 開発リポジトリの閲覧の試験（`tests/wiki/test_browse*.py` と `tests/wiki/browse/figures.test.mjs`）を、5 つのブラウザで流す。
+
+## 同梱した Pele
+
+`pele.mjs` は、npm の `pele` 1.13.0 の `dist/pele.js` をバイト列のまま写したファイルである。静的サイトでは生成した SVG を HTML から参照する。Pele の束と `render-pele.mjs` は書き出し先に含めない。
+
+| 項目 | 値 |
+| --- | --- |
+| 写した元 | [`pele-1.13.0.tgz`](https://registry.npmjs.org/pele/-/pele-1.13.0.tgz) の `package/dist/pele.js` |
+| 大きさ | 729,332 バイト |
+| SHA-256 | `37bea5005aa6d2dde929032ced5d2958cf642667cbc1fe675f9dfacf4ba15a51` |
+| ライセンス | Pele の MIT と Lucide アイコンの ISC（[licenses/pele.LICENSE](licenses/pele.LICENSE)） |
+
+更新するときは `npm pack pele@<版>` で tarball を取り、integrity をレジストリの公表値と照らす。束とライセンス文書を写し、表の値を更新して、開発リポジトリの `tests/wiki/test_browse.py` と `tests/wiki/browse/figures.test.mjs` を流す。

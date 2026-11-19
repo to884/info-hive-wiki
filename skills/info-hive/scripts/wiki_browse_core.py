@@ -28,6 +28,7 @@ import threading
 import urllib.parse
 from collections import defaultdict
 from dataclasses import dataclass, field
+from itertools import chain
 from pathlib import PurePosixPath
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -79,7 +80,7 @@ ASSET_OUT_DIR = "assets/wiki"
 ICON_LINK = '<link rel="icon" href="data:,">'
 RAW_MODES = ("text", "link", "basename", "none")
 # 画面の部品。fluent2.css は Fluent 2 の再現の CSS の同梱の写し（Fluent 2 の設計の 2）、theme.js は配色を描く前に決める
-# figures.js は Mermaid の図を描く（ADR-0030）。静的の書き出しでは何もしない
+# figures.js はサーバーの方式で Mermaid の図を描く（ADR-0030）。静的の書き出しには入れない（ADR-0035）
 ASSETS = ("assets/app.js", "assets/style.css", "assets/fluent2.css", "assets/theme.js", "assets/figures.js")
 ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "browse_assets")
 DATA_FILES = ("nav.js", "data/manifest.js", "data/diagnostics.js", "data/search.js")
@@ -854,6 +855,9 @@ class Core:
         self.parser = wiki_pages.new_parser()
         self.diagnostics = []
         self._body_cache = {}
+        self.static_mermaid = None  # None はサーバー用。書き出し時は、図がなくても辞書を設定する。
+        self.static_mermaid_assets = {}
+        self.static_overview_tokens = {}
         # 描けなかったページの識別子（設計の 7.2。そのページに「描けない」と出して続ける）
         self.render_failures = []
         # 解釈できなかった入力の (種類, 相対パス)。読めない入力と同じに扱い、「不完全」の印を描く
@@ -1084,7 +1088,9 @@ class Core:
             return self._message_bar("", "warning", "概要を読めない", "診断で元ページと概要の状態を確認する。", "wiki-overview-notice")
         try:
             path = self.out_name[pid]
-            tokens = self.parser.parse(result.body)
+            tokens = self.static_overview_tokens.pop(pid, None)
+            if tokens is None:
+                tokens = self.parser.parse(result.body)
 
             def image(token):
                 name = token.attrs.get("src", "").removeprefix("#fig-")
@@ -1095,7 +1101,7 @@ class Core:
                 return self._svg_image_html(src, token.content, data)
 
             self._transform_tokens(tokens, path, [0, []], self.drawn[pid], image, False)
-            body = self.parser.renderer.render(tokens, self.parser.options, {})
+            body = self._render_body_tokens(tokens, path)
             if key in self.overview_render_failures:
                 self.overview_render_failures.discard(key)
                 self.diagnostics[:] = [d for d in self.diagnostics if not (d["kind"] == "overview_render_error" and d.get("page") == pid)]
@@ -1145,16 +1151,21 @@ class Core:
 
     @staticmethod
     def _svg_image_html(src: str, alt_text: str, data: bytes) -> str:
-        alt = html.escape(alt_text, quote=True)
-        # 大きさが分からない svg は、置き換え要素の既定の大きさ（300×150）にする。Firefox は、大きさのない svg の
-        # 画像に固有の幅を持たせず、幅を中身で決める入れ物の中で幅 0 にする
-        width, height = svg_size(data) or (300, 150)
         # 入れ物は段落の中に置くので <span> にする。data-theme="light" で、手書きの svg の地を明るい配色に保つ
         # （図の描画の設計の 8）。リンクで包まない（静的版で svg を直接開くと、中のスクリプトが動く）。
         # 大きさは width と height の属性で渡す（svg_size）。loading="lazy" は付けない。WebKit は、幅を中身で決める
         # 入れ物の中の画像を、読み込む前の幅 0 のまま残す
         return (f'<span class="wiki-fig fui-Card" data-fig="svg" data-theme="light">'
-                f'<img class="fui-Image" src="{html.escape(src)}" alt="{alt}" width="{width}" height="{height}"></span>')
+                f'{Core._svg_img(src, alt_text, data)}</span>')
+
+    @staticmethod
+    def _svg_img(src: str, alt_text: str, data: bytes, theme: str | None = None) -> str:
+        alt = html.escape(alt_text, quote=True)
+        # 大きさが分からない SVG も、幅を中身で決める入れ物の中で幅 0 にしない。
+        width, height = svg_size(data) or (300, 150)
+        theme_attr = f' data-fig-theme="{theme}"' if theme else ""
+        return (f'<img class="fui-Image" src="{html.escape(src)}" alt="{alt}" '
+                f'width="{width}" height="{height}"{theme_attr}>')
 
     def page(self, pid: str) -> dict:
         return self.pages[self.drawn[pid]]
@@ -1744,6 +1755,53 @@ class Core:
             if tok.type == "inline" and tok.children:
                 tok.children = self._transform_inline(tok.children, path, counter, file, image_renderer, wikilinks)
 
+    @staticmethod
+    def _is_mermaid_fence(tok) -> bool:
+        return tok.type == "fence" and tok.info.split(maxsplit=1)[:1] == ["mermaid"]
+
+    def mermaid_sources(self) -> list[str]:
+        """書き出す本文と概要の字句から、図の原稿を重複なしで集める。"""
+        if not self.overview_scan_unknown:
+            for pid, (key, result) in self.overviews.items():
+                if key in self.overview_asset_conflicts or result.state not in ("fresh", "stale"):
+                    continue
+                try:
+                    self.static_overview_tokens[pid] = self.parser.parse(result.body)
+                except Exception:  # 概要の解析の失敗は、描くときにそのページの診断に出す。
+                    continue
+        streams = chain(self.tokens.values(), self.static_overview_tokens.values())
+        return list(dict.fromkeys(tok.content for tokens in streams for tok in (tokens or [])
+                                  if self._is_mermaid_fence(tok)))
+
+    def prepare_static_mermaid(self, images: dict) -> None:
+        """描画と検査を終えた SVG を、書き出しの世代に加える。"""
+        self.static_mermaid = {}
+        for source, (light, dark, title) in images.items():
+            names = []
+            for data in (light, dark):
+                name = f"assets/figures/{hashlib.sha256(data).hexdigest()}.svg"
+                self.static_mermaid_assets[name] = data
+                names.append(name)
+            self.static_mermaid[source] = (*names, title or "Mermaid の図")
+
+    def _static_mermaid_token(self, tok, path: str):
+        code = self.parser.renderer.render([tok], self.parser.options, {})
+        figure = self.static_mermaid.get(tok.content)
+        if figure is None:
+            content = '<p class="notice wiki-fig-error">この図を描けないため、コードを表示する。</p>\n' + code
+        else:
+            light, dark, alt = figure
+            images = "".join(self._svg_img(rel_href(path, name), alt, self.static_mermaid_assets[name], theme)
+                             for theme, name in (("light", light), ("dark", dark)))
+            content = (f'<figure class="wiki-fig fui-Card" data-fig="pele">{images}</figure>\n'
+                       f'<details class="wiki-fig-source"><summary>図のコード</summary>{code}</details>\n')
+        return Token("html_block", "", 0, content=content)
+
+    def _render_body_tokens(self, tokens, path: str) -> str:
+        if self.static_mermaid is not None:
+            tokens = [self._static_mermaid_token(tok, path) if self._is_mermaid_fence(tok) else tok for tok in tokens]
+        return self.parser.renderer.render(tokens, self.parser.options, {})
+
     def body_html(self, pid: str) -> str:
         if pid in self._body_cache:
             return self._body_cache[pid]
@@ -1768,7 +1826,7 @@ class Core:
         overview_html = self._overview_html(pid) if overview is not None else ""
         if overview_html:
             tokens.insert(insertion, Token("html_block", "", 0, content=overview_html))
-        rendered = self.parser.renderer.render(tokens, self.parser.options, {})
+        rendered = self._render_body_tokens(tokens, path)
         if overview is None or overview[0] not in self.overview_render_failures:
             self._body_cache[pid] = rendered
         return rendered
@@ -1948,8 +2006,10 @@ class Core:
         prefix = root_prefix(path)
         # figures.js は app.js と別のファイルにする。app.js は契約の版が違うときなどに途中で抜けるので、図の描画を
         # それに縛らない（図の描画の設計の 7.4）
-        scripts = "".join(f'<script src="{prefix}{name}"></script>\n'
-                          for name in ("nav.js", "data/manifest.js", *extra_data, "assets/app.js", "assets/figures.js"))
+        files = ("nav.js", "data/manifest.js", *extra_data, "assets/app.js")
+        if self.static_mermaid is None:
+            files += ("assets/figures.js",)
+        scripts = "".join(f'<script src="{prefix}{name}"></script>\n' for name in files)
         return f"</main>\n{scripts}</body>\n</html>\n"
 
     def render_page(self, pid: str, raw_mode: str = "text", stale: "str | None" = None) -> str:
@@ -2177,6 +2237,7 @@ class Core:
         for name, rel in self.asset_by_out.items():
             out[name] = self.assets[rel].data     # 図の svg は、読んだバイト列のまま書く
         out.update(self.overview_assets)
+        out.update(self.static_mermaid_assets)
         out["index.html"] = self.render_index()
         for name in DATA_FILES:
             out[name] = self.render_data(name, generated_at)
