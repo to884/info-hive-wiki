@@ -11,6 +11,7 @@ sys.path.insert(0, str(SCRIPTS))
 import wiki_evolve as lifecycle
 import wiki_evolve_loop as loop
 import wiki_evolve_agent as agent
+from wiki_text import parse_frontmatter_text
 
 # Windows の既定の文字コード（cp932 など）ではなく、UTF-8 で出力する。
 for _stream in (sys.stdout, sys.stderr):
@@ -30,7 +31,8 @@ def fails(fn, text):
 with tempfile.TemporaryDirectory() as tmp:
     root = Path(tmp)
     wiki, corpus, skill = root / 'wiki', root / 'corpus', root / 'skill'
-    for path in (wiki, corpus, skill):
+    raw = root / 'raw'
+    for path in (wiki, corpus, skill, raw):
         path.mkdir()
     (wiki / 'SCHEMA.md').write_text('schema', encoding='utf-8')
     (corpus / 'source.md').write_text('The verified value is 42.', encoding='utf-8')
@@ -103,6 +105,12 @@ print(json.dumps(o))
     args = SimpleNamespace(wiki=wiki, id='cycle', skill=skill, suite=suite_path, config=config_path)
     with lifecycle.locked(wiki) as state:
         result = loop.run(args, state)
+    records = list((raw / 'experiences').glob('evolution-*.json'))
+    assert records
+    for record in records:
+        page = (wiki / 'sources' / f'{record.stem}.md').read_text(encoding='utf-8')
+        meta = parse_frontmatter_text(page.split('---', 2)[1])
+        assert meta['raw_sha256'] == lifecycle.digest(record.read_bytes())
     assert result['test'] == {'baseline': {'passed':0,'total':1}, 'selected': {'passed':1,'total':1}}
     assert result['history'][0]['status'] == 'accepted'
     assert (skill / 'SKILL.md').read_text(encoding='utf-8') == 'baseline'

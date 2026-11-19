@@ -485,11 +485,18 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         # どの読む側の結果にも、同じ名前の欄で知らせる（MCP の query、get_page などと同じ形）
         findings["link_warnings"] = list(report["links"])
 
+    raw_roots = [raw_root] if raw_root is not None else []
+    recorded_raw_roots = []
+    if raw_wiki_root is not None:
+        from wiki_raw_roots import read_raw_roots
+        recorded_raw_roots, unchecked = read_raw_roots(Path(raw_wiki_root))
+        findings["links_unchecked"].extend({**item, "scope": "raw_roots"} for item in unchecked)
+
     # YouTube の字幕の訂正と留保（ADR-0027）。ページは照合のモジュールが読み直す（印の行の番号をファイルの
     # 行で示すため）。動画の raw を持たない wiki では、印のあるページだけを見る。
     if wiki_root is not None:
         import wiki_captions
-        result = wiki_captions.check_wiki(Path(wiki_root), raw_roots=([raw_root] if raw_root is not None else ()),
+        result = wiki_captions.check_wiki(Path(wiki_root), raw_roots=raw_roots, recorded_raw_roots=recorded_raw_roots,
                                           wiki_root_given=wiki_root_given)
         findings["caption_corrections"] = [f.as_dict() for f in result.findings]
         import wiki_overview
@@ -647,7 +654,7 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         # source ページの raw: の原本がない。
         if raw_wiki_root is not None:
             raw_results = resolve_raw(p["meta"], p["path"], raw_wiki_root, wiki_root_given,
-                                      raw_roots=([raw_root] if raw_root is not None else ()))
+                                      raw_roots=raw_roots, recorded_raw_roots=recorded_raw_roots)
             for item in raw_results:
                 location = {"path": p["rel_path"], "raw": item.raw}
                 if item.state == "missing":
@@ -778,8 +785,8 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         "links": len(findings["links"]) if raw_wiki_root is not None else None,
         "links_wiki": sum(f.get("scope") != "raw" for f in findings["links"]) if wiki_root is not None else None,
         "links_unchecked": len(findings["links_unchecked"]) if raw_wiki_root is not None else None,
-        "links_unchecked_wiki": sum(f.get("scope") != "raw" for f in findings["links_unchecked"]) if wiki_root is not None else None,
-        "links_unchecked_raw": sum(f.get("scope") == "raw" for f in findings["links_unchecked"]) if raw_wiki_root is not None else None,
+        "links_unchecked_wiki": sum(f.get("scope") not in ("raw", "raw_roots") for f in findings["links_unchecked"]) if wiki_root is not None else None,
+        "links_unchecked_raw": sum(f.get("scope") in ("raw", "raw_roots") for f in findings["links_unchecked"]) if raw_wiki_root is not None else None,
         "links_raw": sum(f.get("scope") == "raw" for f in findings["links"]) if raw_wiki_root is not None else None,
         "raw_ambiguous": len(findings["raw_ambiguous"]) if raw_wiki_root is not None else None,
         "raw_unknown": len(findings["raw_unknown"]) if raw_wiki_root is not None else None,
@@ -851,8 +858,8 @@ def render_text(findings: dict) -> str:
          lambda f: f"  - {f['path']}  {f['message']}"),
         ("links", "記事か記事までの道のリンク（読まずに飛ばした。プラグインは直さない。直し方は lint の手順の文書にある）",
          lambda f: f"  - {f['path']}  （{LINK_KIND_LABELS.get(f['kind'], f['kind'])}）"),
-        ("links_unchecked", "リンクかを調べられなかった項目（一覧を作れないか、属性を取れない）",
-         lambda f: f"  - {f['path']}"),
+        ("links_unchecked", "リンクかを調べられなかった項目や確認できなかった raw の根の記録",
+         lambda f: f"  - {f['path']}" + (f"  {f['reason']}" if f.get("reason") else "")),
         ("raw_ambiguous", "raw: の候補が複数ある（自動で選ばず、書き換えない）",
          lambda f: f"  - {f['path']}  raw: {f['raw']}  候補: {', '.join(f['candidates'])}"),
         ("raw_unknown", "raw: を確かめられない", lambda f: f"  - {f['path']}  raw: {f['raw']}  {f['reason']}"),

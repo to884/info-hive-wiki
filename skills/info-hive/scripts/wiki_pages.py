@@ -544,10 +544,12 @@ def article_path(wiki_root, rel, *, directory: bool = False, native: bool = Fals
     return ArticlePath("ok", Path(current))
 
 
-def resolve_raw(meta, page_path, wiki_root, wiki_root_given=None, allowed_roots=None, *, raw_roots=()):
+def resolve_raw(meta, page_path, wiki_root, wiki_root_given=None, allowed_roots=None, *,
+                raw_roots=(), recorded_raw_roots=()):
     """raw の共通の読む口。リンクの検査と版の照合は wiki_raw にまとめる。"""
     from wiki_raw import resolve_raw as resolve
-    return resolve(meta, page_path, wiki_root, wiki_root_given, allowed_roots, raw_roots=raw_roots)
+    return resolve(meta, page_path, wiki_root, wiki_root_given, allowed_roots,
+                   raw_roots=raw_roots, recorded_raw_roots=recorded_raw_roots)
 
 
 def absolute_user_path(path) -> Path:

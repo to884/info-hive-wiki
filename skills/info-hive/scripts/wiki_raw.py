@@ -62,7 +62,7 @@ def _roots(values) -> list[Path]:
     return result
 
 
-def _identity(path: Path, st):
+def file_identity(path: Path, st):
     from wiki_pages import win_file_id
     if os.name == "nt":
         return win_file_id(path)
@@ -134,7 +134,7 @@ def _inspect(path: Path, origin: Path | None) -> dict:
                 result["unchecked"].append({"path": str(directory), "reason": "走査待ちの道がディレクトリでなくなった"})
                 continue
         try:
-            ident = _identity(directory, dst)
+            ident = file_identity(directory, dst)
             if ident in seen:
                 raise OSError("ディレクトリの実体が重複している")
             seen.add(ident)
@@ -159,11 +159,16 @@ def _inspect(path: Path, origin: Path | None) -> dict:
     return result
 
 
+def _file_digest(path: Path) -> str:
+    with path.open("rb") as source:
+        return hashlib.file_digest(source, "sha256").hexdigest()
+
+
 def _digest(inspection) -> str:
     st = inspection["stat"]
     if stat.S_ISREG(st.st_mode):
-        return hashlib.sha256(inspection["files"][0][1].read_bytes()).hexdigest()
-    rows = [json.dumps([rel, hashlib.sha256(p.read_bytes()).hexdigest()], ensure_ascii=False)
+        return _file_digest(inspection["files"][0][1])
+    rows = [json.dumps([rel, _file_digest(p)], ensure_ascii=False)
             for rel, p in inspection["files"]]
     return hashlib.sha256("\n".join(rows).encode("utf-8")).hexdigest()
 
@@ -198,7 +203,8 @@ def _raw_meta(path):
     return {}  # 本文が水平線で始まる原本もある。身元を証明できないだけで、欠落ではない
 
 
-def resolve_raw(meta, page_path, wiki_root, wiki_root_given=None, allowed_roots=None, *, raw_roots=()):
+def resolve_raw(meta, page_path, wiki_root, wiki_root_given=None, allowed_roots=None, *,
+                raw_roots=(), recorded_raw_roots=()):
     """source の raw: を値ごとに解く。raw_roots は呼ぶ側が知っている根だけを渡す。推し量らない。
 
     allowed_roots は内容を読んでよい場所の制限で、リンク検査の起点ではない。外の原本にも当てる。
@@ -220,6 +226,8 @@ def resolve_raw(meta, page_path, wiki_root, wiki_root_given=None, allowed_roots=
         root = absolute_user_path(Path(wiki_root).expanduser())
         wiki_roots = _roots((given, root))
         known_raw = _roots(raw_roots)
+        # 記録は保存時点の綴りと実体を持つ。現在の実体へ解決し直さない。
+        historical = tuple(recorded_raw_roots)
         allowed = _roots(allowed_roots) if allowed_roots is not None else None
         page = absolute_user_path(page_path)
         rel_page = next((page.relative_to(w) for w in wiki_roots if within(page, w)), None)
@@ -269,14 +277,20 @@ def resolve_raw(meta, page_path, wiki_root, wiki_root_given=None, allowed_roots=
                 continue
             raw_matches = [r for r in known_raw if within(p, r)]
             wiki_matches = [w for w in wiki_roots if within(p, w)]
-            origins = raw_matches or wiki_matches
-            origin = max(origins, key=lambda r: len(r.parts)) if origins else None
+            origin = max(raw_matches or wiki_matches, key=lambda r: len(r.parts), default=None)
+            # 過去の根は検査範囲を広げる。既知の根の途中のリンクを検査から外さない。
+            if not raw_matches:
+                historical_matches = [r for r in historical if within(p, r)]
+                if origin is not None:
+                    historical_matches.append(origin)
+                origin = min(historical_matches, key=lambda r: len(r.parts), default=None)
+            external = bool(meta.get("rag_job_id") and absolute and origin is None)
             relative = p.relative_to(origin).parts if origin else (p.name,)
-            if any(part.startswith(".") for part in relative):
+            if not external and any(part.startswith(".") for part in relative):
                 excluded.append(p)
                 continue
-            external = bool(meta.get("rag_job_id") and absolute and origin is None)
             if external:
+                # 一致しない過去の記録だけでは、現在の raw の範囲は分からない。
                 result.scope_unverified = not known_raw
                 # 外の原本は記事ではない。リンクを含め、raw の版もここでは読まない。
                 try:
@@ -331,7 +345,7 @@ def resolve_raw(meta, page_path, wiki_root, wiki_root_given=None, allowed_roots=
             identities = {}
             for p, external, st in matched:
                 try:
-                    identities.setdefault(_identity(p, st), (p, external, st))
+                    identities.setdefault(file_identity(p, st), (p, external, st))
                 except OSError as exc:
                     result.unchecked.append({"path": str(p), "reason": str(exc)})
             matched = list(identities.values())

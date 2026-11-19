@@ -10,7 +10,7 @@ wiki の健全性のチェックである。操作のたびにではなく、決
 
 ## 手順 1: 構造の lint をかける
 
-raw の根は `/wiki:ingest` と同じ順（利用者の明示、プロジェクトの指示、グローバルの指示、既定の `raw/`）で決める。MCP に `raw_root`、CLI に `--raw-root "<RAW_ROOT>"` を必ず渡す。根を省くと、原本そのものは調べるが、根が分からない途中の道は調べず、`raw_paths_unchecked` に出す。過去の raw の根の自動の発見と記録の読み込みは、後続段階である。根が未指定で rag の絶対パスを外の原本として扱ったときも、範囲が未確認であることを raw_paths_unchecked に出す。summary.links は報告した全件数で、wiki 側の検査済みかどうかは links_wiki、raw 側は links_raw で分ける。未検査の側は null である。
+現在の raw の根は `/wiki:ingest` と同じ順（利用者の明示、プロジェクトの指示、グローバルの指示、既定の `raw/`）で決める。MCP には `raw_root`、CLI には `--raw-root "<RAW_ROOT>"` を渡す。lint は過去の根の記録 `.wiki-cache/raw-roots.d/` も読み、該当する根から原本までの道を調べる。根が分からない原本は途中の道が未検査であることを `raw_paths_unchecked` に出す。現在の根が指定されず、過去の根にも含まれない rag の絶対パスを外の原本と扱ったときも、範囲が未確認であることを同じ欄に出す。
 
 まず wiki の MCP サーバーのツール `lint` を使う。`wiki` に wiki のルートの絶対パスを渡す。`SCHEMA.md` がページの大きさの上限や必須の frontmatter を既定と違う値に決めている場合は、`soft_cap`、`hard_cap`、`soft_char_cap`、`hard_char_cap`、`required_fm` にその値を渡す。`SCHEMA.md` の「タグの体系」にタグが並んでいれば、そのタグをすべて `allowed_tags` に配列で渡す（CLI では `--allowed-tags` にカンマ区切りで渡す）。「構成の例」に挙げたタグも、この wiki で使っているなら含める。体系がひな形のまま空なら渡さない。渡さないとタグの検査はせず、`summary.unknown_tags` は `null`（0 ではない）になる。結果は下の CLI の `--json` と同じ形である。wiki に任意のグラフ層がある（`wiki/graph/ontology.yaml` がある）場合は、グラフの lint の結果も `graph.findings` に入る（`graph.state` が `checked`）。`disabled` はオントロジーがないこと、`error` はオントロジーを読めないことを表す。
 
@@ -157,4 +157,6 @@ lint の修正のあとは、ほぼ確実にインデックスの更新が必要
 
 **問題がなさそうだからと lint をスキップする。** 気づかないうちに内容が壊れていくことは、もっとも検出しにくく、もっとも被害の大きい失敗である。lint はそれを見つける。
 
-raw の診断の読み方: `mismatches` はファイルがあるが版・身元が違う候補と理由、`scope_unverified` は raw の根を省いて外の原本と扱った分類の未確認を表す。`links_wiki` / `links_raw` と `links_unchecked_wiki` / `links_unchecked_raw` は側ごとの件数で、未検査の側は null である。`links` と `links_unchecked` は報告した全件数。指定した根の外にある、記録のない過去の rag の原本は外の原本として扱う。過去の根の記録の作成と読み込みは後続段階であり、現在の根の指定だけで過去の根まで検査したことにはならない。
+raw の診断では、 `mismatches` はファイルがあるが版・身元が違う候補と理由、`scope_unverified` は raw の根が分からず外の原本と扱った分類の未確認を表す。`links_wiki` / `links_raw` と `links_unchecked_wiki` / `links_unchecked_raw` は側ごとの件数で、未検査の側は null である。`links` と `links_unchecked` は報告した全件数。指定した根と記録された根の外にある rag の原本は外の原本として扱う。過去の根の記録を読めなかった場合は `links_unchecked` に理由が出る。
+
+`.wiki-cache/raw-roots.d/` は過去の根を検査するための記録なので、検索キャッシュを削除するときも保管する。Git の既定の設定では記録が別のチェックアウトに移らない。

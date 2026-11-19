@@ -272,7 +272,7 @@ class FetchTests(unittest.TestCase):
         self.assertEqual(out["images"][0]["url"], f"{self.base}/img/diagram.png")
         self.assertEqual(out["images"][0]["path"], "assets/base/base-01.png")
 
-    def test_symlinked_image_file_is_not_written_through(self):
+    def test_symlinked_image_file_is_refused_and_preserved(self):
         outside = Path(self.tmp.name) / "outside.txt"
         outside.write_text("keep", encoding="utf-8")
         link = self.raw / "assets" / "k" / "k-01.png"
@@ -282,9 +282,12 @@ class FetchTests(unittest.TestCase):
         except (OSError, NotImplementedError):
             self.skipTest("シンボリックリンクを作れない環境")
         code, _out, err = self.run_fetch(f"{self.base}/article.html", "k")
-        self.assertEqual(code, 0, err)
+        self.assertEqual(code, 1, err)
+        self.assertIn(str(link), err)
+        self.assertIn("symlink", err)
         self.assertEqual(outside.read_text(encoding="utf-8"), "keep")
-        self.assertFalse(link.is_symlink())
+        self.assertTrue(link.is_symlink())
+        self.assertFalse((self.raw / "k.md").exists())
 
 
 class UnitTests(unittest.TestCase):

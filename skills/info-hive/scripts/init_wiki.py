@@ -34,12 +34,16 @@ import subprocess
 import sys
 from pathlib import Path
 from datetime import date
+from collections.abc import Iterable
 
 # スクリプトとして実行したときも、テストから importlib で読み込んだときも、
 # 同じディレクトリの wiki_text を import できるようにする。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wiki_text import display_width, ljust_display, localize_argparse  # noqa: E402
 import wiki_initialized  # noqa: E402
+from wiki_fsguard import WriteGuard  # noqa: E402
+from wiki_pages import absolute_user_path  # noqa: E402
+from wiki_raw_roots import RECORDS, raw_root_pair, register_upgrade_roots  # noqa: E402
 
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
@@ -104,16 +108,25 @@ SCHEMA_SECTION_MARKERS = [
 ]
 
 
-def copy_template(src: Path, dst: Path, substitutions: dict | None = None) -> bool:
+def copy_template(src: Path, dst: Path, substitutions: dict | None = None, *,
+                  guard: WriteGuard | None = None) -> bool:
     """テンプレートのファイルを dst にコピーする。ファイルを作成したら True、すでにあれば False を返す。"""
-    if dst.exists():
+    exists = guard.file_info(dst) is not None if guard is not None else dst.exists()
+    if exists:
         return False
     text = src.read_text(encoding="utf-8")
     if substitutions:
         for key, value in substitutions.items():
             text = text.replace(key, value)
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    dst.write_text(text, encoding="utf-8")
+    if guard is None:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_text(text, encoding="utf-8")
+    else:
+        guard.ensure_directory(dst.parent)
+        try:
+            guard.write_bytes(dst, text.encode("utf-8"))
+        except FileExistsError:
+            return False  # 並行した初期化で書かれたものを残す
     return True
 
 
@@ -195,7 +208,30 @@ def install_runtime(wiki: Path) -> None:
         raise SystemExit(exc.returncode) from exc
 
 
-def init_wiki(project_root: Path, wiki_dir: str, raw_dir: str, upgrade: bool = False) -> None:
+def register_upgrade_raw(wiki: Path, raw: Path, previous: Iterable[Path]) -> bool:
+    """過去の根を確認し、現在の根を作れたら、その組を wiki に記録する。"""
+    past = [raw_root_pair(root) for root in previous]
+    guard = WriteGuard(wiki)
+    guard.directory_info(guard.root / RECORDS)
+    created = False
+    try:
+        current = raw_root_pair(raw)
+    except FileNotFoundError:
+        # 現在の根がなければ、従来のアップグレードと同じように作る。
+        try:
+            raw.mkdir(parents=True)
+            created = True
+        except FileExistsError:
+            pass  # 先に別のアップグレードが作った根も、下で実体を確認する。
+        current = raw_root_pair(raw)
+    register_upgrade_roots(guard, [current, *past])
+    print("現在の raw の根と、指定済みの過去の根を登録した。")
+    print('過去に別の根を使っていた場合は、--previous-raw-root "<パス>" を付けてアップグレードを実行できる。')
+    return created
+
+
+def init_wiki(project_root: Path, wiki_dir: str, raw_dir: str, upgrade: bool = False, *,
+              previous_raw_roots: Iterable[Path] = ()) -> None:
     # アップグレードは初期化された wiki（SCHEMA.md がある）だけを対象にする（ADR-0019）。ほかの用途の wiki/ に
     # 一式を作らないよう、ディレクトリもファイルも作らず、実行環境も入れずに止まる。基準のディレクトリを解決する
     # 前に、渡されたとおりのパスで確かめる（解決で縮んだ別の場所を確かめないため）。基準のディレクトリがない
@@ -207,6 +243,7 @@ def init_wiki(project_root: Path, wiki_dir: str, raw_dir: str, upgrade: bool = F
                   "/wiki:init で初期化する。既定と違う名前で作った wiki なら、--wiki-dir と --raw-dir で指す。",
                   file=sys.stderr)
             sys.exit(1)
+    given_base = project_root
     project_root = project_root.resolve()
     created_base = False
     if not project_root.exists():
@@ -235,6 +272,16 @@ def init_wiki(project_root: Path, wiki_dir: str, raw_dir: str, upgrade: bool = F
     created = []
     skipped = []
 
+    if upgrade:
+        try:
+            base = absolute_user_path(given_base)
+            raw_created = register_upgrade_raw(wiki, absolute_user_path(base / raw_dir),
+                                               (base / root for root in previous_raw_roots))
+        except (OSError, ValueError, RuntimeError) as exc:
+            print(f"エラー: raw の根を記録できない: {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
+        (created if raw_created else skipped).append(f"{raw_dir}/")
+
     # wiki のサブディレクトリを作る
     for subdir in SUBDIRS:
         d = wiki / subdir
@@ -245,7 +292,8 @@ def init_wiki(project_root: Path, wiki_dir: str, raw_dir: str, upgrade: bool = F
             skipped.append(f"{wiki_dir}/{subdir}/")
 
     # raw と raw/assets を作る
-    for d, label in [(raw, raw_dir), (raw / "assets", f"{raw_dir}/assets")]:
+    raw_dirs = [] if upgrade else [(raw, raw_dir)]
+    for d, label in [*raw_dirs, (raw / "assets", f"{raw_dir}/assets")]:
         if not d.exists():
             d.mkdir(parents=True)
             created.append(f"{label}/")
@@ -271,10 +319,16 @@ def init_wiki(project_root: Path, wiki_dir: str, raw_dir: str, upgrade: bool = F
         if not src.exists():
             print(f"警告: テンプレートがない: {src}", file=sys.stderr)
             continue
-        if copy_template(src, dst):
-            created.append(str(dst.relative_to(project_root)))
+        if src_name == "wiki-cache_gitignore.template":
+            try:
+                copied = copy_template(src, dst, guard=WriteGuard(wiki))
+            except (OSError, ValueError) as exc:
+                print(f"警告: 検索キャッシュ用の .gitignore を書けない（{exc}）", file=sys.stderr)
+                continue
         else:
-            skipped.append(str(dst.relative_to(project_root)))
+            copied = copy_template(src, dst)
+        display = dst.relative_to(project_root) if dst.is_relative_to(project_root) else dst
+        (created if copied else skipped).append(str(display))
 
     # 結果を報告する
     if created:
@@ -311,12 +365,17 @@ def init_wiki(project_root: Path, wiki_dir: str, raw_dir: str, upgrade: bool = F
 def main():
     parser = localize_argparse(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter))
     parser.add_argument("project_root", type=Path, metavar="BASE_DIR", help="wiki と raw ソースのディレクトリを置く基準のディレクトリ（プロジェクトのルートや ~/info-hive など）。初期化では、なければ作る（親のディレクトリが必要）")
-    parser.add_argument("--wiki-dir", default="wiki", help="wiki のサブディレクトリの名前（既定: wiki）")
-    parser.add_argument("--raw-dir", default="raw", help="raw ソースのサブディレクトリの名前（既定: raw）")
+    parser.add_argument("--wiki-dir", default="wiki", help="wiki のパス。相対パスは BASE_DIR から（既定: wiki）")
+    parser.add_argument("--raw-dir", default="raw", help="raw のパス。相対パスは BASE_DIR から（既定: raw）")
     parser.add_argument("--upgrade", action="store_true",
                         help="既存の wiki をアップグレードする。足りないファイルを冪等に加え、手作業でマージすべき SCHEMA.md のセクションを示す")
+    parser.add_argument("--previous-raw-root", type=Path, action="append", default=[],
+                        help="アップグレードで登録する過去の raw の根。相対パスは BASE_DIR から。繰り返し指定できる")
     args = parser.parse_args()
-    init_wiki(args.project_root, args.wiki_dir, args.raw_dir, upgrade=args.upgrade)
+    if args.previous_raw_root and not args.upgrade:
+        parser.error("--previous-raw-root には --upgrade が必要である")
+    init_wiki(args.project_root, args.wiki_dir, args.raw_dir, upgrade=args.upgrade,
+              previous_raw_roots=args.previous_raw_root)
 
 
 if __name__ == "__main__":

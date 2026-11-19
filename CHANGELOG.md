@@ -6,6 +6,26 @@
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-11-19
+
+### Changed
+
+- セッション取り込みは raw の根を wiki に記録してから原本を保存する。根を記録できない場合は保存を止める。source ページには `write` の `raw_sha256` を写し、lint で保存時の版を照合できるようにした（ADR-0029 段階3）。
+- YouTube の字幕取り込みも raw の根を記録してから原本を保存する。既存の字幕を使う場合も根を記録し、保存済み Markdown の `raw_sha256` を返す。字幕の既存原本を探す際はリンクを報告して飛ばす。字幕の `verify` は `--raw-path` で対象を指定でき、wiki の照合に過去の根を使う。
+- Web 取り込みも raw の根を記録してから本文と画像を保存する。確定した Markdown の `raw_sha256` を source ページに渡し、`wiki_rawcheck.py read` で同じ版の本文を読み出せる。
+- ローカルのファイルやディレクトリ、UTF-8 の派生版、経験の JSON も raw の根を記録してから保存する。source ページに記す `raw_sha256` を各保存コマンドが返す。rag に渡す PDF は登録前に検査する。
+- 検索用のパースキャッシュとローカルの SQLite ベクトル索引に共通の経路検査を適用した。パースキャッシュを使えない場合は記事から解析し、ベクトル索引を書けない場合は警告を出して BM25 で検索する。
+- MCP の SQLite と Tantivy の索引に経路検査を適用した。wiki の `query`、`get_page`、`stats` は索引を開けないか書けない場合、理由と `wiki_search.py --no-embed` の案内を返す。
+- MCP の起動ロックとサーバーの記録に経路検査を適用した。リンクなどで拒んだ場合は場所と理由を知らせる。
+- `/wiki:graph` のロック、一時ファイルと成果物を共通の経路検査に通す。リンクや SQLite の付随ファイルで公開を拒んだ場合は場所と理由を知らせる。
+- `/wiki:upgrade` が現在の raw の根を記録する。`--previous-raw-root` で過去の根も追加でき、lint が既存の原本の参照を検査する際に使う。
+- lint は指定された現在の raw の根に加えて、`.wiki-cache/raw-roots.d/` にある過去の根の記録も使う。記録を読めない場合は `links_unchecked` に理由を出す。
+
+### Fixed
+
+- セッションの `inspect` は、リンクの raw を開かず確認できなかった理由を返す。先頭がピリオドのスラッグは保存前に拒む。
+- 現在の raw の根を指定していない lint では、無関係な過去の根の記録があっても、外の原本として扱った rag の参照の範囲が未確認であることを知らせる。
+
 ## [0.35.2] - 2026-11-19
 
 ### 変更
@@ -924,7 +944,8 @@ Web ページの取得（`wiki_fetch.py`）が、Medium の記事の図とコー
 [0.2.0]: https://github.com/to884/info-hive-wiki/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/to884/info-hive-wiki/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.1.0
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.34.0...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.36.0...HEAD
+[0.36.0]: https://github.com/to884/info-hive-wiki/compare/v0.35.2...v0.36.0
 [0.34.0]: https://github.com/to884/info-hive-wiki/compare/v0.33.0...v0.34.0
 [0.32.0]: https://github.com/to884/info-hive-wiki/compare/v0.31.1...v0.32.0
 

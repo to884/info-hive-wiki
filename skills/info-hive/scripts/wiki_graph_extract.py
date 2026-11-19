@@ -37,12 +37,15 @@ PyYAML の固定した依存を持つので、`uv run --script` で実行する�
 import argparse
 import hashlib
 import json
+import os
 import re
 import sqlite3
 import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from pathlib import Path
+from collections.abc import Iterable
+from typing import BinaryIO
 
 try:
     import yaml
@@ -63,6 +66,7 @@ from wiki_text import (  # noqa: E402
 )
 import wiki_graph_common as common  # noqa: E402
 import wiki_initialized  # noqa: E402
+from wiki_fsguard import Refused, WriteGuard  # noqa: E402
 
 
 # ページの集合とリンクの規則は wiki_pages の 1 か所に置く（ADR-0010 の決定の 1）。
@@ -886,63 +890,103 @@ def _normalize_for_json(value):
 
 
 OUTPUT_NAMES = ["nodes.jsonl", "edges.jsonl", "graph.sqlite", "graph.graphml"]
+FORMAT_OUTPUTS = {"sqlite": ("graph.sqlite",), "jsonl": ("nodes.jsonl", "edges.jsonl"), "graphml": ("graph.graphml",)}
 # 置き換える順序。読み手が開いていて置き換えに失敗しやすい graph.sqlite を最初にする。
 # graph.sqlite の置き換えに失敗したときは、ほかの成果物も前のまま残る。
 PUBLISH_ORDER = ["graph.sqlite", "nodes.jsonl", "edges.jsonl", "graph.graphml"]
 
 
-def _write_lines(path: Path, rows: list[dict]) -> None:
-    with path.open("w", encoding="utf-8", newline="\n") as f:
-        for row in rows:
-            f.write(json.dumps(_normalize_for_json(row), sort_keys=True, ensure_ascii=False))
-            f.write("\n")
+def _write_lines(file: BinaryIO, rows: list[dict]) -> None:
+    for row in rows:
+        line = json.dumps(_normalize_for_json(row), sort_keys=True, ensure_ascii=False)
+        file.write((line + "\n").encode("utf-8"))
 
 
-def stage_outputs(out_dir: Path, formats: list[str], nodes: list[dict], aliases: list[dict],
-                  edges: list[dict]) -> dict[str, Path]:
-    """選んだ形式の成果物を、すべて一時ファイルに書く。{成果物の名前: 一時ファイル} を返す。
+def check_outputs(guard: WriteGuard, out_dir: Path, names: Iterable[str]) -> None:
+    for name in names:
+        path = out_dir / name
+        if name == "graph.sqlite":
+            common.check_sqlite_output(guard, path)
+        else:
+            guard.file_info(path)
+
+
+def cleanup_outputs(guard: WriteGuard, staged: dict[str, tuple[Path, os.stat_result]], error: BaseException) -> None:
+    for path, created in staged.values():
+        try:
+            common.remove_temp(guard, path, created)
+        except OSError as exc:
+            error.add_note(f"一時ファイルを片付けられなかった: {exc}")
+
+
+def stage_outputs(guard: WriteGuard, out_dir: Path, formats: list[str], nodes: list[dict], aliases: list[dict],
+                  edges: list[dict]) -> dict[str, tuple[Path, os.stat_result]]:
+    """選んだ形式の成果物をすべて一時ファイルに書き、その場所と実体を返す。
 
     途中で失敗したら、書いた一時ファイルを消して例外を送出する。元の成果物には触れない。
     """
-    staged: dict[str, Path] = {}
+    staged: dict[str, tuple[Path, os.stat_result]] = {}
 
-    def temp(name: str) -> Path:
+    def open_temp(name: str):
         path = common.temp_path_for(out_dir / name)
-        common.remove_temp(path)
-        staged[name] = path
-        return path
+        handle = guard.open_new(path)
+        try:
+            staged[name] = (path, os.fstat(handle.fileno()))
+        except BaseException:
+            handle.close()
+            raise
+        return handle
 
     try:
         if "sqlite" in formats:
-            build_sqlite(temp("graph.sqlite"), nodes, aliases, edges)
+            with open_temp("graph.sqlite"):
+                pass
+            db_path, created = staged["graph.sqlite"]
+            common.check_sqlite_output(guard, db_path)
+            current = guard.file_info(db_path)
+            if current is None or not os.path.samestat(current, created):
+                raise Refused(db_path, "changed", "一時ファイルの実体が変わった")
+            build_sqlite(db_path, nodes, aliases, edges)
         if "jsonl" in formats:
-            _write_lines(temp("nodes.jsonl"), sorted(nodes, key=lambda n: n["id"]))
-            _write_lines(temp("edges.jsonl"), sorted(edges, key=lambda e: e["id"]))
+            with open_temp("nodes.jsonl") as handle:
+                _write_lines(handle, sorted(nodes, key=lambda n: n["id"]))
+            with open_temp("edges.jsonl") as handle:
+                _write_lines(handle, sorted(edges, key=lambda e: e["id"]))
         if "graphml" in formats:
-            write_graphml_file(temp("graph.graphml"), nodes, edges)
-    except BaseException:
-        for path in staged.values():
-            common.remove_temp(path)
+            with open_temp("graph.graphml") as handle:
+                write_graphml_file(handle, nodes, edges)
+    except BaseException as exc:
+        cleanup_outputs(guard, staged, exc)
         raise
     return staged
 
 
-def publish_outputs(out_dir: Path, staged: dict[str, Path]) -> None:
+def publish_outputs(guard: WriteGuard, out_dir: Path, staged: dict[str, tuple[Path, os.stat_result]]) -> None:
     """一時ファイルを PUBLISH_ORDER の順に置き換える。失敗したら残りの一時ファイルを消して例外を送出する。"""
-    names = [name for name in PUBLISH_ORDER if name in staged]
-    for index, name in enumerate(names):
-        try:
-            common.replace_atomically(staged[name], out_dir / name)
-        except BaseException:
-            for rest in names[index:]:
-                common.remove_temp(staged[rest])
-            raise
+    published = []
+    try:
+        check_outputs(guard, out_dir, staged)
+        for name in PUBLISH_ORDER:
+            if name in staged:
+                path, created = staged[name]
+                common.replace_atomically(path, out_dir / name, guard=guard, expected=created)
+                published.append(name)
+    except BaseException as exc:
+        if published:
+            remaining = [name for name in staged if name not in published]
+            exc.add_note(f"更新済みは {', '.join(published)}、未更新は {', '.join(remaining)}。")
+        elif isinstance(exc, PermissionError):
+            exc.add_note("前の成果物はそのまま残っている。")
+        cleanup_outputs(guard, staged, exc)
+        raise
 
 
 def write_outputs(out_dir: Path, formats: list[str], nodes: list[dict], aliases: list[dict],
-                  edges: list[dict]) -> None:
+                  edges: list[dict], *, guard: WriteGuard | None = None) -> None:
     """成果物を作り直す。すべて書き終えてから置き換えるので、書いている途中で止まっても前の成果物が残る。"""
-    publish_outputs(out_dir, stage_outputs(out_dir, formats, nodes, aliases, edges))
+    guard = guard or WriteGuard(out_dir)
+    check_outputs(guard, out_dir, (name for fmt in formats for name in FORMAT_OUTPUTS[fmt]))
+    publish_outputs(guard, out_dir, stage_outputs(guard, out_dir, formats, nodes, aliases, edges))
 
 
 def write_jsonl(out_dir: Path, nodes: list[dict], edges: list[dict]) -> None:
@@ -955,8 +999,12 @@ def write_sqlite(out_dir: Path, nodes: list[dict], aliases: list[dict], edges: l
 
 
 def build_sqlite(db_path: Path, nodes: list[dict], aliases: list[dict], edges: list[dict]) -> None:
-    """db_path に新しいグラフの DB を作る。db_path にはまだファイルがないこと。"""
-    conn = sqlite3.connect(db_path)
+    """排他で作った空のファイルに新しいグラフの DB を作る。"""
+    uri = db_path.absolute().as_uri()
+    # UNC はホスト指定を使わず、パスの先頭に //server/share を置く。
+    if uri.startswith("file://") and not uri.startswith("file:///"):
+        uri = "file:////" + uri.removeprefix("file://")
+    conn = sqlite3.connect(uri + "?mode=rw", uri=True)
     try:
         conn.executescript("""
             CREATE TABLE nodes (
@@ -1067,8 +1115,8 @@ def _xml_id(value) -> str:
     return _XML_INVALID_RE.sub(lambda m: "\ufffd{%X}" % ord(m.group()), text.replace("\ufffd", "\ufffd\ufffd"))
 
 
-def write_graphml_file(path: Path, nodes: list[dict], edges: list[dict]) -> None:
-    """GraphML を path に書く。置き換えは呼び出す側が行う。"""
+def write_graphml_file(path: Path | BinaryIO, nodes: list[dict], edges: list[dict]) -> None:
+    """GraphML を開いたファイルに書く。パスで指定されたファイルは単独で確定する。"""
     ns ="http://graphml.graphdrawing.org/xmlns"
     ET.register_namespace("", ns)
     root = ET.Element(f"{{{ns}}}graphml")
@@ -1119,7 +1167,11 @@ def write_graphml_file(path: Path, nodes: list[dict], edges: list[dict]) -> None
 
     tree = ET.ElementTree(root)
     ET.indent(tree, space="  ")
-    tree.write(path, encoding="utf-8", xml_declaration=True)
+    if isinstance(path, Path):
+        data = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+        WriteGuard(path.parent).write_bytes(path, data, replace=True)
+    else:
+        tree.write(path, encoding="utf-8", xml_declaration=True)
 
 
 def write_graphml(out_dir: Path, nodes: list[dict], edges: list[dict]) -> None:
@@ -1159,24 +1211,31 @@ def main():
     ontology = load_ontology(ontology_path)
 
     out_dir = args.out or (args.wiki / "graph")
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     # 同じ出力先の extract は 1 つずつ動かす。ロックを取ってからページを読むので、
     # 後から動いた extract の成果物が、先の extract の成果物と混ざらない。
     try:
-        with common.extract_lock(out_dir):
-            common.remove_stale_temps(out_dir, OUTPUT_NAMES)
-            pages = collect_pages(args.wiki)
-            diagnostics: list[dict] = []
-            nodes, page_node_ids, aliases = build_nodes(pages, ontology, diagnostics)
-            edges = build_edges(pages, page_node_ids, diagnostics)
-            write_outputs(out_dir, formats, nodes, aliases, edges)
+        guard = common.output_guard(args.wiki, out_dir)
+        with common.extract_lock(out_dir, guard=guard):
+            common.remove_stale_temps(guard, out_dir, OUTPUT_NAMES)
+            try:
+                pages = collect_pages(args.wiki)
+                diagnostics: list[dict] = []
+                nodes, page_node_ids, aliases = build_nodes(pages, ontology, diagnostics)
+                edges = build_edges(pages, page_node_ids, diagnostics)
+            except (OSError, ValueError) as exc:
+                print(f"グラフの入力を処理できなかった: {exc}", file=sys.stderr)
+                sys.exit(1)
+            write_outputs(out_dir, formats, nodes, aliases, edges, guard=guard)
     except common.ExtractBusy as exc:
         print(str(exc), file=sys.stderr)
         sys.exit(1)
-    except PermissionError as exc:
-        print(f"成果物を置き換えられなかった（ほかのプロセスが開いている可能性がある）: {exc}", file=sys.stderr)
-        print("前の成果物はそのまま残っている。開いているプロセスを閉じてから、もう一度実行する。", file=sys.stderr)
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        print(f"グラフの成果物を書けなかった: {exc}", file=sys.stderr)
+        for note in getattr(exc, "__notes__", ()):
+            print(note, file=sys.stderr)
+        if isinstance(exc, PermissionError):
+            print("成果物を開いているプロセスがあれば、閉じてからもう一度実行する。", file=sys.stderr)
         sys.exit(1)
 
     print(f"ノード {len(nodes)} 個、エッジ {len(edges)} 本を抽出した → {out_dir}")

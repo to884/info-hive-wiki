@@ -18,8 +18,10 @@ import time
 from types import SimpleNamespace
 
 from wiki_evolve import (atomic, copy_tree, digest, encode, event, finite, inside, locked,
-                         propose, read_json, require, run_runner, slug, tree, capture)
-from wiki_text import format_fm_value, format_frontmatter, localize_argparse, quote_in_text
+                         propose, read_json, require, run_runner, slug, tree, capture_record)
+from wiki_fsguard import WriteGuard
+from wiki_text import (format_fm_value, format_frontmatter, is_iso_date, localize_argparse,
+                       parse_frontmatter_text, quote_in_text)
 import wiki_initialized
 import wiki_pages
 
@@ -416,6 +418,42 @@ def consolidate(rows, patterns, history, calls, workspace, iteration):
     return patterns
 
 
+def publish_observation(guard, target, meta, narrative, legacy_raw):
+    if guard.file_info(target) is None:
+        guard.ensure_directory(target.parent)
+        guard.write_bytes(target, (format_frontmatter(meta) + narrative).encode('utf-8'))
+        return
+
+    stored = target.read_bytes()
+    previous = stored.decode('utf-8').replace('\r\n', '\n')
+    header = previous.partition('\n---\n')[0].removeprefix('---\n')
+    old_meta = parse_frontmatter_text(header)
+    for key in ('created', 'updated', 'ingested'):
+        date = old_meta.get(key)
+        require(isinstance(date, str) and is_iso_date(date), f'学習時の観察のソースの日付を確認できない: {target}')
+        meta[key] = date
+    if previous == format_frontmatter(meta) + narrative:
+        return
+
+    # 旧版で自動生成したページには、原本参照と日付を保ってハッシュを補う。
+    meta['raw'] = legacy_raw
+    with_hash = format_frontmatter(meta) + narrative
+    if previous == with_hash:
+        return
+    del meta['raw_sha256']
+    legacy = format_frontmatter(meta) + narrative
+    require(previous == legacy, '学習時の観察のソースが、別の内容ですでにある')
+    updated = with_hash.encode('utf-8')
+    if stored == legacy.encode('utf-8').replace(b'\n', b'\r\n'):
+        updated = updated.replace(b'\n', b'\r\n')
+
+    def unchanged():
+        require(guard.file_info(target) is not None and target.read_bytes() == stored,
+                f'学習時の観察のソースが作業中に変わった: {target}')
+
+    guard.write_bytes(target, updated, replace=True, before_publish=unchanged)
+
+
 def publish_learning(args, rows, patterns, iteration):
     """観測できる学習の raw の証拠と、検索できる通常のソースとコンセプトのページ。"""
     import wiki_pages
@@ -431,7 +469,7 @@ def publish_learning(args, rows, patterns, iteration):
         opened = wiki_pages.article_path(args.wiki, name)
         require(opened.state in ('ok', 'absent'), f'{name} はリンクか、調べられないので、学習の記録を書かない（{opened.state}）')
     raw = getattr(args, 'raw', None) or args.wiki.parent / 'raw'
-    raw.mkdir(parents=True, exist_ok=True)
+    wiki_guard = WriteGuard(args.wiki)
     today = time.strftime('%Y-%m-%d')
     source_names = []
     for row in rows:
@@ -441,22 +479,15 @@ def publish_learning(args, rows, patterns, iteration):
                   'verification': encode({'judge': row['judge'], 'checks': row['checks']}),
                   'model': row['model'], 'tools': encode(row['runner']).strip(),
                   'scope': 'training observation; not a causal generalization', 'observable': row}
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / 'experience.json'
-            path.write_text(encode(record), encoding='utf-8')
-            receipt = capture(SimpleNamespace(raw=raw, record=path))
+        receipt = capture_record(args.wiki, raw, record)
         source = f'sources/{name}.md'
-        target = inside(args.wiki, source)
-        target.parent.mkdir(exist_ok=True)
-        body = (format_frontmatter({'title': f'学習時の観察 {name}', 'type': 'source', 'tags': ['skill-evolution'],
-                                    'created': today, 'updated': today, 'authors': ['評価ループ'],
-                                    'raw': receipt['raw'], 'ingested': today}) + '\n'
-                f"課題: {row['question']}\n\n結果: {record['outcome']}\n\n"
-                + row['judge']['reason'] + '\n')
-        body = body.replace('—', '-')
-        require(not target.exists() or target.read_text(encoding='utf-8') == body, '学習時の観察のソースが、別の内容ですでにある')
-        if not target.exists():
-            target.write_text(body, encoding='utf-8')
+        target = wiki_guard.root / source
+        meta = {'title': f'学習時の観察 {name}', 'type': 'source', 'tags': ['skill-evolution'],
+                'created': today, 'updated': today, 'authors': ['評価ループ'],
+                'raw': receipt['raw_ref'], 'ingested': today, 'raw_sha256': receipt['raw_sha256']}
+        narrative = (f"\n課題: {row['question']}\n\n結果: {record['outcome']}\n\n"
+                     + row['judge']['reason'] + '\n').replace('—', '-')
+        publish_observation(wiki_guard, target, meta, narrative, receipt['raw'])
         source_names.append(source)
     for key, pattern in patterns.items():
         if pattern.get('run') != args.id or pattern['iteration'] != iteration:
@@ -721,10 +752,10 @@ def main():
         # 別の wiki に .evolution/ を作りうる。
         args.wiki = wiki_initialized.resolve(args.wiki)
         # 学習の証拠を書く raw のディレクトリは作らない（初期化が作る）。費用のかかる評価を始める前に確かめる。
-        # publish_learning() の mkdir は、この確かめのあとでは、ある raw の下の experiences/ にしか効かない。
-        raw = args.raw or args.wiki.parent / 'raw'
+        raw = wiki_pages.absolute_user_path(args.raw or args.wiki.parent / 'raw')
         require(raw.is_dir(), f'raw のディレクトリがない: {raw}。--raw が正しいかを確かめる。'
                               '初期化した wiki の raw をなくしたときは、/wiki:upgrade で作り直せる')
+        args.raw = raw
         with locked(args.wiki) as state:
             print(encode(run(args, state)), end='')
     except (ValueError, KeyError, TypeError, OSError) as exc:

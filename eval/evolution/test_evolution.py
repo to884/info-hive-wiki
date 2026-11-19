@@ -47,13 +47,16 @@ def main():
         data = {'id':'example', 'task':'query', 'outcome':'failure', 'verification':'checked source',
                 'actions':['read wrong source'], 'model':'test', 'tools':'test', 'scope':'query'}
         experience.write_text(e.encode(data), encoding='utf-8')
-        captured = e.capture(SimpleNamespace(raw=raw, record=experience))
-        assert Path(captured['raw']).exists()
-        e.capture(SimpleNamespace(raw=raw, record=experience))  # まったく同じ再試行は安全
+        capture_args = SimpleNamespace(wiki=wiki, raw=raw, record=experience)
+        captured = e.capture(capture_args)
+        saved = Path(captured['raw'])
+        assert Path(captured['raw_ref']).samefile(saved)
+        assert captured['raw_sha256'] == captured['sha256'] == e.digest(saved.read_bytes())
+        assert e.capture(capture_args) == captured  # まったく同じ再試行は安全
         data['task']='different'; experience.write_text(e.encode(data), encoding='utf-8')
-        fails(lambda:e.capture(SimpleNamespace(raw=raw, record=experience)), '変更できない')
+        fails(lambda: e.capture(capture_args), '変更できない')
         data['id']='../bad';experience.write_text(e.encode(data), encoding='utf-8')
-        fails(lambda:e.capture(SimpleNamespace(raw=raw, record=experience)))
+        fails(lambda: e.capture(capture_args))
 
         corpus=root/'corpus'; corpus.mkdir();(corpus/'fact.md').write_text('correct', encoding='utf-8')
         suite={'version':1,'corpus':'corpus','tasks':[
