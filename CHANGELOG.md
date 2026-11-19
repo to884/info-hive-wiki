@@ -6,6 +6,12 @@
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-11-19
+
+### 追加
+
+- Codex セッションの取り込みでは、原本の raw と、ツール通知を省いた会話版を保存する。両方に同じ伏せ字と削除指定を適用し、発言番号をそろえる。両方の版を承認してから保存し、browse の raw から開ける。
+
 ## [0.37.0] - 2026-11-19
 
 ### 追加
@@ -950,7 +956,8 @@ Web ページの取得（`wiki_fetch.py`）が、Medium の記事の図とコー
 [0.2.0]: https://github.com/to884/info-hive-wiki/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/to884/info-hive-wiki/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.1.0
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.37.0...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.38.0...HEAD
+[0.38.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.38.0
 [0.37.0]: https://github.com/to884/info-hive-wiki/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/to884/info-hive-wiki/compare/v0.35.2...v0.36.0
 [0.34.0]: https://github.com/to884/info-hive-wiki/compare/v0.33.0...v0.34.0

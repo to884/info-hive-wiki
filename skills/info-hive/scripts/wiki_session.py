@@ -56,7 +56,7 @@ import sys
 import time
 import unicodedata
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -599,6 +599,7 @@ class Extract:
     source_sha256_of: str = "jsonl-range"
     extracted_by: str = EXTRACTED_BY
     version_field: str = "claude_code_versions"
+    tool_turns: set[int] = field(default_factory=set)
 
     def base(self) -> dict:
         result = {
@@ -1119,6 +1120,17 @@ def render(ex: Extract, title: str, spans: list, drop: list) -> bytes:
     return "".join(p for _n, p in render_parts(ex, title, spans, drop)).encode("utf-8")
 
 
+def render_conversation(ex: Extract, title: str, spans: list, drop: list) -> bytes:
+    """承認対象の原本と同じ発言番号と伏せ字を使い、ツール通知だけを省く。"""
+    title = f"{title}（会話版）"
+    check_no_secret("会話版の題名", title, ex, spans)
+    conversation = replace(ex, turns=[turn for turn in ex.turns if turn.n not in ex.tool_turns],
+                           options=replace(ex.options, tools="none"))
+    tool_targets = {f"T{n}" for n in ex.tool_turns}
+    return render(conversation, title, [s for s in spans if s["target"] not in tool_targets],
+                  [n for n in drop if n not in ex.tool_turns])
+
+
 def self_check(text: str, fields: dict, turns: list) -> None:
     """frontmatter を分け、本文を同梱のパーサーで読み、見出しとターン、フェンスと本文のあるターン、印のターンと
     段落が 1 対 1 に対応することを確かめる。通らなければ RenderError。"""
@@ -1505,6 +1517,12 @@ def cmd_inspect(args) -> int:
     if args.wiki is not None:
         result["raw"], result["temp_files"] = _inspect_saved_raw(Path(args.raw_root), args.slug)
         result["source_page_exists"] = os.path.lexists(Path(args.wiki) / "sources" / f"{args.slug}.md")
+        if ex.source_kind == "codex-session":
+            filename = f"{args.slug}-会話版.md"
+            result["conversation"] = {
+                "raw_exists": os.path.lexists(Path(args.raw_root) / filename),
+                "source_page_exists": os.path.lexists(Path(args.wiki) / "sources" / filename),
+            }
     out_json(result) if args.json else out_lines(result)
     return 0 if v == "session" else 2
 
@@ -1541,6 +1559,15 @@ def cmd_show(args) -> int:
                   "render_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(), "chars": len(text),
                   "turns": len(ex.turns), "manual_redactions": sum(len(v) for v in merged_spans(spans).values()),
                   "dropped_turns": len(set(drop)), "warnings": summarize_warnings(ex.warnings)}
+        if ex.source_kind == "codex-session":
+            if args.slug is not None:
+                check_slug_value(f"{args.slug}-会話版", ex, spans)
+            try:
+                data = render_conversation(ex, args.title, spans, drop)
+            except RenderError as exc:
+                raise Fail(f"会話版の自己検査を通らない: {exc}") from None
+            result["conversation"] = {"turns": len(ex.turns) - len(ex.tool_turns),
+                                      "render_sha256": hashlib.sha256(data).hexdigest()}
         out_json(result) if args.json else out_lines(result)
         return 0
     first, last = parse_turn_range(args.turns, len(ex.turns))
@@ -1697,15 +1724,38 @@ def cmd_write(args) -> int:
         raise Fail(f"作った raw のハッシュが、承認したものと一致しない（{sha}）。show --meta からやり直す")
     check_title(args.title, ex, dec.spans)
     check_slug_value(args.slug, ex, dec.spans)
+    conversation = None
+    if args.expect_conversation_sha256 is not None:
+        if ex.source_kind != "codex-session":
+            raise Fail("会話版を一緒に書けるのは Codex のセッションだけ")
+        conversation_slug = f"{args.slug}-会話版"
+        check_slug_value(conversation_slug, ex, dec.spans)
+        try:
+            conversation = render_conversation(ex, args.title, dec.spans, dec.drop)
+        except RenderError as exc:
+            raise Fail(f"会話版の自己検査を通らない: {exc}") from None
+        if hashlib.sha256(conversation).hexdigest() != args.expect_conversation_sha256:
+            raise Fail("会話版のハッシュが、承認したものと一致しない。show --meta からやり直す")
+    result = save_raw(wiki, raw_root, args.slug, data, sha, ex.session_id)
+    ok = result["raw_state"] in ("created", "identical")
+    if ok and conversation is not None:
+        result["conversation"] = save_raw(wiki, raw_root, conversation_slug, conversation,
+                                          args.expect_conversation_sha256, ex.session_id)
+        ok = result["conversation"]["raw_state"] in ("created", "identical")
+    out_json(result) if args.json else out_lines(result)
+    return 0 if ok else 3
+
+
+def save_raw(wiki: Path, raw_root: Path, slug: str, data: bytes, sha: str, session_id: str) -> dict:
     try:
-        state, target = write_raw(wiki, raw_root, args.slug, data)
+        state, target = write_raw(wiki, raw_root, slug, data)
     except (OSError, ValueError) as exc:
         raise Fail(f"raw を保存できない: {exc}") from exc
     result = {"raw_state": state, "raw_path": str(target), "raw_ref": raw_ref_of(wiki, target), "render_sha256": sha}
     if state in ("created", "identical"):
         from wiki_pages import resolve_raw
-        checked = resolve_raw({"type": "source", "raw": result["raw_ref"], "raw_sha256": sha, "session_id": ex.session_id},
-                              wiki / "sources" / f"{args.slug}.md", wiki, raw_roots=[raw_root])[0]
+        checked = resolve_raw({"type": "source", "raw": result["raw_ref"], "raw_sha256": sha, "session_id": session_id},
+                              wiki / "sources" / f"{slug}.md", wiki, raw_roots=[raw_root])[0]
         if checked.state != "resolved":
             raise Fail(f"要約ページの raw を確かめられない: {checked.state}: {checked.reason} {result['raw_ref']}")
         try:
@@ -1716,8 +1766,7 @@ def cmd_write(args) -> int:
         except OSError as exc:
             raise Fail(f"書いた raw を読み取り専用にできない: {exc}") from exc
         result["raw_sha256"] = sha
-    out_json(result) if args.json else out_lines(result)
-    return 0 if state in ("created", "identical") else 3
+    return result
 
 
 def cmd_verify(args) -> int:
@@ -1929,6 +1978,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--raw-root", required=True)
     p.add_argument("--slug", required=True)
     p.add_argument("--expect-sha256", required=True)
+    p.add_argument("--expect-conversation-sha256", help="承認した会話版のハッシュ（Codex のセッション用）")
     p = localize_argparse(sub.add_parser("verify", help="raw が承認したバイト列で、読み取り専用かを照らす"))
     p.add_argument("--raw-root", required=True)
     p.add_argument("--slug", required=True)
