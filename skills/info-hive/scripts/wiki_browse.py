@@ -223,8 +223,6 @@ def build(root: PurePath, out_arg: "str | None", raw: "str | None", scope: "str 
 # ---------------------------------------------------------------------------
 
 def core_loop(stdin, stdout) -> int:
-    from wiki_apply import resolve_publication
-
     cache = {}
 
     def get(root):
@@ -247,7 +245,7 @@ def core_loop(stdin, stdout) -> int:
             req = json.loads(line)
             op = req.get("op")
             root = wiki_root(str(req.get("wiki", "")))
-            release = resolve_publication(root, req.get("release_id"))
+            release = fs.publication(root, req.get("release_id"))
             c = get(release.root if release else root)
             if op == "manifest":
                 res = {"ok": True, "protocol_version": core.PROTOCOL_VERSION, "generation": c.generation,
@@ -265,11 +263,11 @@ def core_loop(stdin, stdout) -> int:
             else:
                 res = {"ok": False, "error": "unknown_op"}
             if release and res["ok"]:
-                resolve_publication(release.wiki, release.release_id)
+                fs.publication(release.wiki, release.release_id)
                 res["release_id"] = release.release_id
         except Failed:
             res = {"ok": False, "error": "no_wiki"}
-        except (core.InputsUnknown, core.InputsChanged):
+        except (core.InputsUnknown, core.InputsChanged, fs.Absent, fs.Unknown, fs.Stop):
             res = {"ok": False, "error": "unavailable"}
         except (ValueError, AttributeError):
             res = {"ok": False, "error": "bad_request"}
@@ -414,16 +412,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             say(f"{self.command} {getattr(self, '_kind', '-')} {code}")
 
     def _publication_available(self):
-        from wiki_apply import resolve_publication
-
         app = self.server.app
         pinned = app.publication
         try:
             if pinned is None:
-                return resolve_publication(app.root) is None
-            resolve_publication(pinned.wiki, pinned.release_id)
+                return fs.publication(app.root) is None
+            fs.publication(pinned.wiki, pinned.release_id)
             return True
-        except (OSError, ValueError):
+        except (fs.Absent, fs.Unknown, fs.Stop):
             return False
 
     def _send(self, code: int, body: bytes, ctype: str = "text/plain; charset=utf-8", extra: "dict | None" = None,
@@ -946,12 +942,7 @@ def _dispatch(args) -> int:
     root = wiki_root(args.wiki) if hasattr(args, "wiki") else None
     release = None
     if root is not None:
-        from wiki_apply import resolve_publication
-
-        try:
-            release = resolve_publication(root, getattr(args, "release_id", None))
-        except (OSError, ValueError) as exc:
-            raise Failed(str(exc)) from exc
+        release = fs.publication(root, getattr(args, "release_id", None))
         if release:
             if getattr(args, "raw_root", None) is not None:
                 raise Failed("公開版の browse にライブの raw は指定できません")

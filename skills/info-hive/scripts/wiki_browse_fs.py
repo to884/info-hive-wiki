@@ -12,7 +12,7 @@ browse のファイルの入出力は、すべてこのモジュールを通す�
   領分の外では、自分が作ったものだけを置き換え、消す（守ること 1。ADR-0017）。
 - 静的の書き出し（build。設計の 6.3、6.4）と、サーバーの記録（設計の 7.1）。
 
-標準ライブラリと wiki_pages（走査と識別子の関数）だけで書き、単独では実行しない。
+走査、概要、公開版の確認には wiki 内の共通処理を使う。単独では実行しない。
 """
 
 from __future__ import annotations
@@ -173,6 +173,11 @@ class Os:
 
     def lstat(self, path):
         return os.lstat(path)
+
+    def publication(self, path, release_id):
+        from wiki_apply import resolve_publication
+
+        return resolve_publication(path, release_id)
 
     def stat(self, path):
         return os.stat(path)
@@ -336,6 +341,14 @@ def x(name, *args):
         return getattr(X, name)(*args)
     except OSError as e:
         raise failure(classify(e), f"{name}: {type(e).__name__}", path, type(e)) from None
+
+
+def publication(root, release_id=None):
+    """公開の記録を照合し、整合性のエラーを閲覧の停止として伝える。"""
+    try:
+        return x("publication", root, release_id)
+    except ValueError as e:
+        raise Stop(str(e)) from e
 
 
 def listdir(path):
