@@ -204,7 +204,7 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--expect-sha256", required=True, help="save が返した raw_sha256")
     args = parser.parse_args(argv)
     try:
-        wiki = wiki_initialized.require(absolute_user_path(args.wiki))
+        wiki = absolute_user_path(wiki_initialized.require(args.wiki))
         raw = absolute_user_path(args.raw_root)
         source = absolute_user_path(args.source)
         if args.action == "save":

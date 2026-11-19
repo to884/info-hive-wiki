@@ -178,11 +178,13 @@ def manifest(exp):
 
 
 def capture(args):
-    return capture_record(args.wiki, args.raw, read_json(args.record, args.wiki))
+    # 渡されたパスで初期化を確認し、根の別名を通る入力も記事として検査する。
+    wiki = wiki_initialized.require(args.wiki)
+    return capture_record(wiki, args.raw, read_json(args.record, wiki))
 
 
 def capture_record(wiki, raw, record):
-    wiki = wiki_initialized.require(wiki_pages.absolute_user_path(wiki))
+    wiki = wiki_pages.absolute_user_path(wiki_initialized.require(wiki))
     slug(record.get('id'))
     for key in ('task', 'verification', 'model', 'tools', 'scope'):
         require(isinstance(record.get(key), str) and record[key].strip(), f'{key} がない')
@@ -616,12 +618,8 @@ def main():
     if args.wiki is None and uses_wiki:
         args.wiki = wiki_workspace.default_wiki_or_exit()
     try:
-        if args.action == 'capture':
-            # 入力が wiki の根の別名を通る場合も、指定時の綴りで記事を検査する。
-            args.wiki = wiki_initialized.require(wiki_pages.absolute_user_path(args.wiki))
-        elif uses_wiki:
-            # 振り分けより前の 1 か所で、判定してから同じパスを解決する（ADR-0019）。capture の記録も、あとで
-            # この wiki にソースとして取り込むので、SCHEMA.md のない wiki には書かない。
+        if uses_wiki and args.action != 'capture':
+            # capture は入力を読むときに根の綴りを使う。他の操作は初期化の判定後にパスを解決する（ADR-0019）。
             args.wiki = wiki_initialized.resolve(args.wiki)
         if args.action == 'verify-bundle':
             result = verify_bundle(args.path)
