@@ -223,10 +223,11 @@ def build(root: PurePath, out_arg: "str | None", raw: "str | None", scope: "str 
 # ---------------------------------------------------------------------------
 
 def core_loop(stdin, stdout) -> int:
+    from wiki_apply import resolve_publication
+
     cache = {}
 
-    def get(wiki: str):
-        root = wiki_root(wiki)
+    def get(root):
         # 鍵は、綴りそのままの文字にする。PureWindowsPath は大文字と小文字を同一視して等しくするが、大文字と小文字を
         # 区別するディレクトリでは別の Wiki である（実装の 3 回目のレビューの重大 3）
         key = os.fspath(root)
@@ -245,7 +246,9 @@ def core_loop(stdin, stdout) -> int:
         try:
             req = json.loads(line)
             op = req.get("op")
-            c = get(str(req.get("wiki", "")))
+            root = wiki_root(str(req.get("wiki", "")))
+            release = resolve_publication(root, req.get("release_id"))
+            c = get(release.root if release else root)
             if op == "manifest":
                 res = {"ok": True, "protocol_version": core.PROTOCOL_VERSION, "generation": c.generation,
                        "manifest": c.manifest(), "nav": c._nav_json(), "diagnostics": c.diagnostics,
@@ -254,13 +257,16 @@ def core_loop(stdin, stdout) -> int:
             elif op == "page":
                 pid = str(req.get("id", ""))
                 raw = req.get("raw") or "text"
-                if pid not in c.drawn or raw not in core.RAW_MODES:
+                if pid not in c.drawn or raw not in core.RAW_MODES or (release and raw == "link"):
                     res = {"ok": False, "error": "unknown_page" if pid not in c.drawn else "bad_raw"}
                 else:
                     res = {"ok": True, "protocol_version": core.PROTOCOL_VERSION, "generation": c.generation,
                            "id": pid, "path": c.out_name[pid], "html": c.render(c.out_name[pid], raw)}
             else:
                 res = {"ok": False, "error": "unknown_op"}
+            if release and res["ok"]:
+                resolve_publication(release.wiki, release.release_id)
+                res["release_id"] = release.release_id
         except Failed:
             res = {"ok": False, "error": "no_wiki"}
         except (core.InputsUnknown, core.InputsChanged):
@@ -407,8 +413,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if app.verbose:
             say(f"{self.command} {getattr(self, '_kind', '-')} {code}")
 
+    def _publication_available(self):
+        from wiki_apply import resolve_publication
+
+        app = self.server.app
+        pinned = app.publication
+        try:
+            if pinned is None:
+                return resolve_publication(app.root) is None
+            resolve_publication(pinned.wiki, pinned.release_id)
+            return True
+        except (OSError, ValueError):
+            return False
+
     def _send(self, code: int, body: bytes, ctype: str = "text/plain; charset=utf-8", extra: "dict | None" = None,
               csp: "str | None" = None, cache: "str | None" = None):
+        if code in (200, 304) and getattr(self, "_kind", None) == "view":
+            if not self._publication_available():
+                return self._text(410, "公開版を取得できません")
+            if self.server.app.publication is not None:
+                cache = "no-store"
         # CSP は応答の種類ごとに選ぶ（図の描画の設計の 6.5、7.3）。CSP は重なって効くので、1 つの応答に 1 つだけ付ける
         self.send_response(code)
         self.send_header("Content-Type", ctype)
@@ -515,6 +539,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return self._send(200, body, "text/javascript; charset=utf-8", cache="private, max-age=86400")
 
     def _view(self, name: str):
+        if not self._publication_available():
+            return self._text(410, "公開版を取得できません")
+        return self._render_view(name)
+
+    def _render_view(self, name: str):
         app = self.server.app
         if name in core.ASSETS:
             ctype = "text/javascript; charset=utf-8" if name.endswith(".js") else "text/css; charset=utf-8"
@@ -552,6 +581,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _control_locate(self, target: str):
         """行き先を wikilink と同じ規則で解決し、状態と、解決したページの出力の名前を返す。"""
         app = self.server.app
+        if not self._publication_available():
+            return self._json(410, {"state": "unavailable"})
         c, _stale = app.state.get()
         if c is None:
             return self._json(200, {"state": "unavailable"})
@@ -609,7 +640,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 class App:
     def __init__(self, root: PurePath, idle: float, verbose: bool = False, scope: "str | None" = None,
-                 assets: "dict | None" = None, frame_assets: "dict | None" = None, *, raw_root=None):
+                 assets: "dict | None" = None, frame_assets: "dict | None" = None, *, raw_root=None,
+                 publication=None):
         self.root = root
         self.key = common.wiki_key(root)
         self.idle = idle
@@ -620,6 +652,7 @@ class App:
         self.control_token = secrets.token_urlsafe(24)
         self.instance = secrets.token_hex(12)
         self.state = BrowseState(root, scope=scope, raw_root=raw_root)
+        self.publication = publication
         self.last = time.monotonic()
         self.httpd = None
         self.port = 0
@@ -748,7 +781,7 @@ def _page_url(base_url_for, port, token, target):
 
 
 def serve(root: PurePath, page: "str | None", open_browser: bool, idle: float, verbose: bool = False,
-          scope: "str | None" = None, *, raw_root=None) -> int:
+          scope: "str | None" = None, *, raw_root=None, publication=None) -> int:
     bdir = browse_dir()
     state_dir = _state_dir(root)
     if os.name == "nt" and os.environ.get(common.DATA_DIR_ENV, "").strip():
@@ -756,7 +789,7 @@ def serve(root: PurePath, page: "str | None", open_browser: bool, idle: float, v
     assets = core.load_assets()
     frame_assets = core.load_frame_assets()
     owner = fs.owner_of(root)
-    app = App(root, idle, verbose, scope, assets, frame_assets, raw_root=raw_root)
+    app = App(root, idle, verbose, scope, assets, frame_assets, raw_root=raw_root, publication=publication)
 
     def make_record():
         # ロックを取ったあとに待ち受けを始め、記録を置き換える（設計の 7.1）
@@ -873,6 +906,7 @@ def main(argv=None) -> int:
     b = sub.add_parser("build", help="静的の HTML を書き出す", parents=[common_args])
     b.add_argument("wiki")
     b.add_argument("--out", default=None, help="書き出し先（既定は <data_dir>/browse/<wiki_key>/）")
+    b.add_argument("--release-id", help="閲覧する公開版")
     b.add_argument("--raw", choices=("text", "link", "basename", "none"), default=None,
                    help="raw: の出し方（既定は、既定の書き出し先で link、--out で basename）")
     _add_scope_arguments(b)
@@ -910,13 +944,29 @@ def _dispatch(args) -> int:
     # 新しいサブコマンドも、wiki を引数に取れば既定でここを通る。core は要求ごとに wiki を受け取り、要求ごとに
     # 判定する（core_loop）。
     root = wiki_root(args.wiki) if hasattr(args, "wiki") else None
+    release = None
+    if root is not None:
+        from wiki_apply import resolve_publication
+
+        try:
+            release = resolve_publication(root, getattr(args, "release_id", None))
+        except (OSError, ValueError) as exc:
+            raise Failed(str(exc)) from exc
+        if release:
+            if getattr(args, "raw_root", None) is not None:
+                raise Failed("公開版の browse にライブの raw は指定できません")
+            if getattr(args, "raw", None) == "link":
+                raise Failed("公開版の browse にライブの raw へのリンクは出せません")
+            if args.cmd == "build" and args.raw is None:
+                args.raw = "text"
+            root = release.root
     if args.cmd == "build":
         build(root, args.out, args.raw, args.scope)
         return EXIT_OK
     if args.cmd == "core":
         sys.stdin.reconfigure(encoding="utf-8")
         return core_loop(sys.stdin, sys.stdout)
-    return _run_server_command(args, root)
+    return _run_server_command(args, root, publication=release)
 
 
 def _exit_for(e: Exception, debug: bool) -> int:
@@ -953,6 +1003,7 @@ def _add_server_commands(sub, common_args) -> None:
     s = sub.add_parser("serve", help="127.0.0.1 のサーバーを起動して開く（動いていれば使い回す）", parents=[common_args])
     s.add_argument("wiki")
     s.add_argument("--raw-root", help="raw カテゴリに表示する Markdown のルート")
+    s.add_argument("--release-id", help="閲覧する公開版")
     s.add_argument("--page", default=None, help="開くページ（[[slug]] と同じ規則で探す）")
     s.add_argument("--no-open", action="store_true", help="ブラウザで開かない（URL を出すだけ）")
     s.add_argument("--idle-timeout", type=float, default=DEFAULT_IDLE, help="操作がないときに終わるまでの秒数（既定 1800）")
@@ -960,11 +1011,15 @@ def _add_server_commands(sub, common_args) -> None:
     _add_scope_arguments(s)
     t = sub.add_parser("stop", help="動いているサーバーを止める", parents=[common_args])
     t.add_argument("wiki")
+    t.add_argument("--release-id", help="サーバーを停止する公開版")
 
 
-def _run_server_command(args, root: PurePath) -> int:
+def _run_server_command(args, root: PurePath, *, publication=None) -> int:
     """root は、main() が判定した wiki のルート。"""
     if args.cmd == "serve":
+        if publication is not None:
+            return serve(root, args.page, not args.no_open, args.idle_timeout, args.verbose, args.scope,
+                         publication=publication)
         return serve(root, args.page, not args.no_open, args.idle_timeout, args.verbose, args.scope,
                      raw_root=args.raw_root)
     if args.cmd == "stop":

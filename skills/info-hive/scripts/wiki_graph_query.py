@@ -219,7 +219,8 @@ def render(result: dict, command: str) -> str:
 
 def run_query(wiki: Path, command: str, *, node: str | None = None, subject: str | None = None,
               predicate: str | None = None, start: str | None = None, goal: str | None = None,
-              max_depth: int = 6, about: str | None = None, db: Path | None = None) -> dict:
+              max_depth: int = 6, about: str | None = None, db: Path | None = None,
+              release_id: str | None = None) -> dict:
     """1 つの問い合わせを実行して結果を返す。CLI と MCP の graph ツールが使う。
 
     db を省くと、extract、lint と同じくオントロジーの有無でグラフ層が有効かを決め、なければ
@@ -228,6 +229,13 @@ def run_query(wiki: Path, command: str, *, node: str | None = None, subject: str
     作った場合など）。DB やノードがなければ QueryError を送出する。
     """
     wiki = Path(wiki)
+    from wiki_apply import archived_root, resolve_publication
+
+    release = resolve_publication(wiki, release_id)
+    if db is not None and (release is not None or archived_root(Path(db).resolve().parent.parent)):
+        raise QueryError("公開版の問い合わせでは --db を指定できません")
+    if release:
+        wiki = release.root
     if command not in COMMANDS:
         raise QueryError(f"未知の問い合わせ: {command}。使えるのは {', '.join(COMMANDS)}")
     # グラフのノード ID は NFC で書かれている。macOS のターミナルなどから NFD で渡されても
@@ -257,6 +265,9 @@ def run_query(wiki: Path, command: str, *, node: str | None = None, subject: str
     # CLI と MCP の graph の結果に、同じ欄で知らせる
     import wiki_pages
     result["link_warnings"] = wiki_pages.link_warnings(wiki_pages.walk_pages(wiki))
+    if release:
+        resolve_publication(release.wiki, release.release_id)
+        result["release_id"] = release.release_id
     return result
 
 
@@ -264,6 +275,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("wiki", type=Path, help="wiki のディレクトリ")
     parser.add_argument("--db", type=Path, help="graph.sqlite のパス（既定: <wiki>/graph/graph.sqlite）")
+    parser.add_argument("--release-id", help="問い合わせる公開版")
     parser.add_argument("--json", action="store_true", help="テキストの代わりに JSON を出力する。キーは英語のまま")
 
     sub = parser.add_subparsers(dest="command", required=True)
@@ -293,11 +305,11 @@ def main():
                            subject=getattr(args, "subject", None), predicate=getattr(args, "predicate", None),
                            start=getattr(args, "from", None), goal=getattr(args, "to", None),
                            max_depth=getattr(args, "max_depth", 6), about=getattr(args, "about", None),
-                           db=args.db)
+                           db=args.db, release_id=args.release_id)
     except common.GraphLayerDisabled as exc:
         common.report_disabled(exc)
         sys.exit(common.EXIT_GRAPH_DISABLED)
-    except QueryError as exc:
+    except (ValueError, OSError) as exc:
         print(str(exc), file=sys.stderr)
         sys.exit(1)
 

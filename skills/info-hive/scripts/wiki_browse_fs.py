@@ -81,7 +81,7 @@ _WIN = None
 
 
 def _win():
-    """CreateFileW と GetFileInformationByHandle（ctypes）。1 度だけ用意する。"""
+    """ファイル操作に使う Windows API（ctypes）。1 度だけ用意する。"""
     global _WIN
     if _WIN is None:
         import ctypes
@@ -94,6 +94,8 @@ def _win():
                                     wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
         k32.CloseHandle.argtypes = [wintypes.HANDLE]
         k32.CloseHandle.restype = wintypes.BOOL
+        k32.MoveFileExW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
+        k32.MoveFileExW.restype = wintypes.BOOL
 
         class Info(ctypes.Structure):
             _fields_ = [("attrs", wintypes.DWORD), ("c", wintypes.FILETIME), ("a", wintypes.FILETIME),
@@ -255,6 +257,15 @@ class Os:
 
     def replace(self, src, dst):
         os.replace(src, dst)
+
+    def move_write_through(self, src, dst, *, replace=False):
+        """Windows で、同一ボリューム内の名前の付け替えを同期して返す。"""
+        ctypes, _, _, k32, _ = _win()
+        # MOVEFILE_WRITE_THROUGH。置き換え時だけ MOVEFILE_REPLACE_EXISTING を加える。
+        flags = 0x8 | (0x1 if replace else 0)
+        if not k32.MoveFileExW(os.fspath(src), os.fspath(dst), flags):
+            code = ctypes.get_last_error()
+            raise OSError(None, ctypes.FormatError(code).strip(), os.fspath(src), code, os.fspath(dst))
 
     def unlink(self, path):
         os.unlink(path)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ntpath
 import os
 import secrets
 import shutil
@@ -9,7 +10,7 @@ import stat
 import sys
 import time
 from contextlib import contextmanager
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import BinaryIO, Callable
 
 from wiki_links import FILE_ATTRIBUTE_REPARSE_POINT, link_kind
@@ -43,18 +44,20 @@ def _check_link(path: Path, info: os.stat_result, *, allow_hardlink: bool = Fals
 
 
 def _reserved_windows_name(name: str) -> bool:
-    if hasattr(os.path, "isreserved"):
-        return os.path.isreserved(name)
-    return ":" in name or name.endswith((" ", ".")) or Path(name).is_reserved()
+    if hasattr(ntpath, "isreserved"):
+        return ntpath.isreserved(name)
+    return ":" in name or name.endswith((" ", ".")) or PureWindowsPath(name).is_reserved()
 
 
-def _mount_points(root: Path) -> set[Path]:
+def _mount_points(root: Path, *, required: bool = False) -> set[Path]:
     """Linux では同じファイルシステムのマウントも、マウント表で確かめる。"""
     if sys.platform != "linux":
         return set()
     try:
         contents = Path("/proc/self/mountinfo").read_bytes()
     except OSError:
+        if required:
+            raise
         return set()  # マウント表がない環境でも実体の輪と st_dev は検査する。
     real_root = root.resolve(strict=True)
     points = set()
@@ -186,7 +189,8 @@ class WriteGuard:
         return path
 
     def replace_file(self, src: Path, dst: Path, *, delays: tuple[float, ...] = (),
-                     expected: os.stat_result | None = None, before_replace: Callable[[], None] | None = None) -> None:
+                     expected: os.stat_result | None = None, before_replace: Callable[[], None] | None = None,
+                     write_through: bool = False) -> None:
         """再試行のたびに、移動元と移動先の名前を確かめる。"""
         for delay in (*delays, None):
             current = self.file_info(src)
@@ -198,7 +202,12 @@ class WriteGuard:
             if before_replace is not None:
                 before_replace()
             try:
-                os.replace(src, dst)
+                if write_through and os.name == "nt":
+                    from wiki_browse_fs import X
+
+                    X.move_write_through(src, dst, replace=True)
+                else:
+                    os.replace(src, dst)
                 return
             except PermissionError:
                 if delay is None:
@@ -298,24 +307,28 @@ class WriteGuard:
 
     def write_bytes(self, path: Path, data: bytes, *, replace: bool = False,
                     delays: tuple[float, ...] = (), prefix: str = ".wiki-write-", before_publish=None,
-                    mode: int = 0o644) -> None:
+                    mode: int = 0o644, temporary: Path | None = None, write_through: bool = False) -> None:
         """一時名に書き、排他公開する。replace のときは検査済みの名前を置き換える。"""
         self._write(path, lambda fh: fh.write(data), replace=replace, delays=delays,
-                    prefix=prefix, before_publish=before_publish, mode=mode)
+                    prefix=prefix, before_publish=before_publish, mode=mode, temporary=temporary,
+                    write_through=write_through)
 
     def write_stream(self, path: Path, source: BinaryIO) -> None:
         """読み取り中のストリームを、一時名に写して排他公開する。"""
         self._write(path, lambda fh: shutil.copyfileobj(source, fh))
 
     def _write(self, path: Path, write, *, replace: bool = False, delays: tuple[float, ...] = (),
-               prefix: str = ".wiki-write-", before_publish=None, mode: int = 0o644) -> None:
+               prefix: str = ".wiki-write-", before_publish=None, mode: int = 0o644,
+               temporary: Path | None = None, write_through: bool = False) -> None:
         from wiki_browse_fs import X
 
         path = absolute_user_path(path)
         existing = self.file_info(path)
         if existing is not None and not replace:
             raise FileExistsError(path)
-        tmp = path.with_name(f"{prefix}{secrets.token_hex(16)}.tmp")
+        tmp = temporary if temporary is not None else path.with_name(f"{prefix}{secrets.token_hex(16)}.tmp")
+        if tmp.parent != path.parent or tmp == path:
+            raise Refused(tmp, "temporary", "一時ファイルは行き先と同じディレクトリの別名にする")
         self.file_info(tmp)
         fd = X.open_excl(tmp, mode)
         temp_id = None
@@ -332,9 +345,11 @@ class WriteGuard:
                 raise Refused(tmp, "changed", "一時ファイルの実体が変わった")
             existing = self.file_info(path)
             if replace:
-                self.replace_file(tmp, path, delays=delays)
+                self.replace_file(tmp, path, delays=delays, expected=present, write_through=write_through)
             elif existing is not None:
                 raise FileExistsError(path)
+            elif write_through and os.name == "nt":
+                X.move_write_through(tmp, path)
             else:
                 publish_exclusive(tmp, path)
         finally:
@@ -350,6 +365,21 @@ class WriteGuard:
                 tmp.unlink()
         except (FileNotFoundError, Refused):
             pass
+
+    def clear_exclusive_temp(self, tmp: Path, target: Path) -> bool:
+        """新規公開の link と unlink の間で止まった場合も、一時名だけを外す。"""
+        info = self._check(tmp, directory=False, allow_linked_leaf=True)
+        if info is None:
+            return False
+        if info.st_nlink > 1:
+            peer = self._check(target, directory=False, allow_linked_leaf=True)
+            if (tmp.parent != target.parent or info.st_nlink != 2 or peer is None or
+                    _identity(info) != _identity(peer) or not stat.S_ISREG(info.st_mode)):
+                raise Refused(tmp, "hardlink", "一時名と公開したファイルの組が一致しない")
+            tmp.unlink()
+        else:
+            self.remove_file(tmp)
+        return True
 
 
 def external_raw_guard(wiki: Path, raw_root: Path) -> WriteGuard:
