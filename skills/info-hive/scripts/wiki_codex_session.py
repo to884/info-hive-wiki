@@ -429,6 +429,7 @@ def extract_snapshot(snapshot: dict, opts: ws.Options, max_bytes: int = ws.DEFAU
     raw_parts = [text for _kind, text, _dt, _ident, _tid in visible] + [meta["cwd"], meta["gitBranch"]]
     redacted = ws.redact_parts(raw_parts, red)
     turns, humans, times = [], [], []
+    tool_turns = set()
     target_by_turn = {}
     for (kind, _text, dt, ident, tid), text in zip(visible, redacted):
         if dt:
@@ -440,6 +441,8 @@ def extract_snapshot(snapshot: dict, opts: ws.Options, max_bytes: int = ws.DEFAU
             target_by_turn[tid] = turn.n
             humans.append((ident, when, text))
         else:
+            if kind == "tool":
+                tool_turns.add(len(turns) + 1)
             target = target_by_turn.get(tid)
             if target is None:
                 warnings.append(("reply_unresolved", len(turns) + 1))
@@ -456,6 +459,7 @@ def extract_snapshot(snapshot: dict, opts: ws.Options, max_bytes: int = ws.DEFAU
         cut_before=opts.before or "", options=opts, excluded=excluded, ignored=ignored, redactions=red,
         warnings=warnings, broken_lines=0, humans=humans, source_kind=SOURCE_KIND, source_sha256_of=SOURCE_HASH_KIND,
         extracted_by=EXTRACTED_BY, version_field="codex_versions",
+        tool_turns=tool_turns,
     )
 
 
