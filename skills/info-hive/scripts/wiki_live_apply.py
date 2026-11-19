@@ -165,12 +165,16 @@ def directory_tree(root, *, reject_mounts=False):
     return identities
 
 
-def protect_roots(guard, raw_root, additional=()):
+def protect_roots(guard, raw_root, additional=(), *, allow_local=True):
     roots, failures = read_raw_roots(guard.root)
     if failures:
         raise PublicationError("wiki が使った原本の根を確認できません")
-    if os.path.lexists(guard.root / "raw"):
-        raise PublicationError("wiki の内部に raw がある配置は使えません")
+    local = guard.root / "raw"
+    if os.path.lexists(local):
+        if not allow_local:
+            raise PublicationError("wiki 内に raw がある配置は公開の書く段に渡せません")
+        guard.directory_info(local)
+        roots.append(local)
     work = work_base()
     data = absolute_user_path(data_dir())
     if overlapping(work, guard.root) or overlapping(data.resolve(), guard.root):
@@ -189,19 +193,26 @@ def protect_roots(guard, raw_root, additional=()):
         if writer_ids.keys() & found.keys():
             raise PublicationError("作業用ディレクトリと wiki が同じ実体を参照しています")
         writer_ids.update(found)
-    explicit = external_raw_guard(guard.root, Path(raw_root)).root
+    explicit = Path(raw_root)
+    if allow_local and explicit.resolve().is_relative_to(local):
+        explicit = WriteGuard(explicit, strict_root=True).root
+    else:
+        explicit = external_raw_guard(guard.root, explicit).root
     for root in dict.fromkeys([*roots, *additional, explicit]):
         raw = root.resolve()
-        if overlapping(raw, data.resolve()) or overlapping(raw, guard.root):
+        if overlapping(raw, data.resolve()):
+            raise PublicationError(f"作業用ディレクトリまたは wiki と raw が重なっています: {root}")
+        local_raw = allow_local and raw.is_relative_to(local)
+        if overlapping(raw, guard.root) and not local_raw:
             raise PublicationError(f"作業用ディレクトリまたは wiki と raw が重なっています: {root}")
         if raw.is_dir():
             raw_ids = directory_tree(raw)
-            if alias := (writer_ids.keys() & raw_ids.keys()):
-                identity = next(iter(alias))
-                raise PublicationError(f"書き込み領域が raw の実体と重なっています: {writer_ids[identity]} / {raw_ids[identity]}")
+            for identity in writer_ids.keys() & raw_ids.keys():
+                if not local_raw or writer_ids[identity] != raw_ids[identity]:
+                    raise PublicationError(f"書き込み領域が raw の実体と重なっています: {writer_ids[identity]} / {raw_ids[identity]}")
 
 
-def check_raw_refs(guard, contents, *, is_draft=False, targets=()):
+def check_raw_refs(guard, contents, *, is_draft=False, targets=(), allow_local=True):
     """版の比較に原本の本文を読み込まず、既存と提案後の原本の行き先を守る。"""
     wiki = guard.root
     external = set()
@@ -222,8 +233,9 @@ def check_raw_refs(guard, contents, *, is_draft=False, targets=()):
                 resolved = candidate.resolve()
                 if overlapping(resolved, absolute_user_path(data_dir()).resolve()):
                     raise PublicationError(f"ページが作業用領域を原本として参照しています: {path}")
+                protected_local = allow_local and resolved.is_relative_to(wiki / "raw")
                 if resolved.is_relative_to(wiki) and (
-                        is_draft and (raw.is_absolute() or os.path.lexists(candidate) or resolved in targets)
+                        is_draft and not protected_local and (raw.is_absolute() or os.path.lexists(candidate) or resolved in targets)
                         or any(overlapping_names(resolved, target) for target in targets)):
                     raise PublicationError(f"ページが wiki または作業用領域を原本として参照しています: {path}")
                 if not resolved.is_relative_to(wiki):
@@ -243,10 +255,11 @@ def restrict_raw(guard, raw_root, candidate_pages=(), targets=(), *, view=None):
     found = walk_pages(source.root)
     if found.unknown or found.unlistable:
         raise PublicationError("既存のページが使う原本を確認できません")
+    allow_local = view is None
     roots = check_raw_refs(guard, ((guard.root / p.rel, source.read_bytes(source.root / p.rel)) for p in found.files),
-                           targets=targets)
-    roots.update(check_raw_refs(guard, candidate_pages, is_draft=True, targets=targets))
-    protect_roots(guard, raw_root, roots)
+                           targets=targets, allow_local=allow_local)
+    roots.update(check_raw_refs(guard, candidate_pages, is_draft=True, targets=targets, allow_local=allow_local))
+    protect_roots(guard, raw_root, roots, allow_local=allow_local)
 
 
 def live_mode(guard):
@@ -284,14 +297,13 @@ def plan_wiki(plan):
     guard = wiki_guard(plan["wiki"])
     if list(guard.root_id) != plan["wiki_identity"]:
         raise Conflict("試行を始めた wiki の実体が変わりました")
-    protect_roots(guard, plan["raw_root"])
+    protect_roots(guard, plan["raw_root"], allow_local="publication" not in plan)
     return guard
 
 
 def begin(wiki, raw_root, name, *, release_id=None, allow_publication=False):
     guard = wiki_guard(wiki)
     raw_root = absolute_user_path(raw_root)
-    restrict_raw(guard, raw_root)
     release = None
     if allow_publication:
         from wiki_apply import check_publication_writer, resolve_publication
@@ -305,6 +317,7 @@ def begin(wiki, raw_root, name, *, release_id=None, allow_publication=False):
             live_mode(guard)
     else:
         live_mode(guard)
+    restrict_raw(guard, raw_root, view=release)
     parent = work_base()
     existing = next(path for path in (parent, *parent.parents) if os.path.lexists(path))
     anchor = WriteGuard(existing, strict_root=True)

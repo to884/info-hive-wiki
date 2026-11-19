@@ -2,6 +2,8 @@
 
 通常の取り込みと `query`・`learn` の保存は、`scripts/wiki_apply.py` を使う。以下の `<A>` はそのスクリプトの絶対パスである。原本は、それぞれの操作の raw 保存手順で先に用意する。別プロジェクトの wiki に回答を保存するときは、保存先の wiki に対応する raw の根を使う。
 
+ライブ wiki では `<WIKI_ROOT>/raw/` も原本の根に使える。公開版では wiki の外に独立した原本の根を用意する。
+
 ## 読む版を固定する
 
 wiki が初期化済みであることを確かめ、`python "<A>" view --wiki "<WIKI_ROOT>"` を実行する。JSON の `read_root` から規約、索引、記事、グラフの定義を読む。公開版の場合、MCP の読み取りには元の `wiki` パスと `release_id` を渡し、CLI の読み取りには元の wiki パスと `--release-id <ID>` を渡す。ライブでは `release_id` は `null` になる。原本の保存や専用のキャッシュを使うツールには元の `<WIKI_ROOT>` を渡す。版の照合に失敗したら、エラーを報告して止まる。
