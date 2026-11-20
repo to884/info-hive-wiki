@@ -295,8 +295,25 @@ def is_dll_load_error(exc: BaseException, windows: bool | None = None) -> bool:
     return isinstance(exc, ImportError) and "DLL load failed" in str(exc)
 
 
-def vc_runtime_message() -> str:
-    return ("Visual C++ 再頒布可能パッケージ（vcruntime140.dll、vcruntime140_1.dll、msvcp140.dll）が必要である。"
+VC_RUNTIME_DLLS = ("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")
+
+
+def missing_vc_runtime_dlls(system_dir: Path | None = None) -> list[str]:
+    """システムのディレクトリ（System32）にない Visual C++ ランタイムの DLL の名前。
+
+    `DLL load failed` は、拡張ファイルの形式が不正なときなど、ランタイム不足以外でも出る。案内を出して
+    入れ直しをやめるのは、不足を実際に確かめられたときだけにする。Windows 以外では空を返す。
+    """
+    if system_dir is None:
+        if os.name != "nt":
+            return []
+        system_dir = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
+    return [name for name in VC_RUNTIME_DLLS if not (system_dir / name).is_file()]
+
+
+def vc_runtime_message(missing: list[str] | None = None) -> str:
+    names = "、".join(missing) if missing else "、".join(VC_RUNTIME_DLLS)
+    return (f"Visual C++ 再頒布可能パッケージ（{names}）が必要である。"
             f"次を実行して入れ、Claude Code を再起動する: {VC_REDIST_COMMAND}")
 
 
@@ -321,10 +338,12 @@ def require_env(modules) -> None:
             if getattr(module, "__file__", None) is None:
                 raise ImportError(f"{name} の本体（__init__.py）がない")
         except ImportError as exc:  # 共有ライブラリを読めないときも ImportError になる
-            if is_dll_load_error(exc):
-                # 入れ直しても直らない。BROKEN_ENV_EXIT にすると、起動した側が無駄に入れ直す。
+            missing = missing_vc_runtime_dlls() if is_dll_load_error(exc) else []
+            if missing:
+                # ランタイム不足を確かめられた。入れ直しても直らない。BROKEN_ENV_EXIT にすると、起動した側が
+                # 無駄に入れ直す。確かめられない DLL の失敗は、従来どおり壊れた環境として入れ直しに任せる。
                 print(f"[wiki] 依存の {name} の DLL を読み込めない（{type(exc).__name__}: {exc}）。"
-                      + vc_runtime_message(), file=sys.stderr, flush=True)
+                      + vc_runtime_message(missing), file=sys.stderr, flush=True)
                 sys.exit(RUNTIME_LIB_EXIT)
             print(f"[wiki] 依存の {name} を import できない（{type(exc).__name__}: {exc}）。uv の環境が壊れているかもしれない",
                   file=sys.stderr, flush=True)

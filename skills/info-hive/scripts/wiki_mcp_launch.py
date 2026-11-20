@@ -58,13 +58,6 @@ def main() -> int:
     if python is None:
         return 1
     code = run_relay(python)
-    if code == common.RUNTIME_LIB_EXIT:
-        # Visual C++ 再頒布可能パッケージがない。入れ直しても直らないので、対処を残して止まる。
-        try:
-            common.raise_vc_runtime_error("中継が依存の DLL を読み込めない。")
-        except common.VcRuntimeError as exc:
-            log(str(exc))
-        return 1
     if code == common.BROKEN_ENV_EXIT:
         # 中継は依存を import できずに、標準入力を読む前に止まった。環境を入れ直して、1 回だけ起動し直す。
         log("中継が依存を import できなかったので、環境を入れ直して起動し直す")
@@ -72,6 +65,14 @@ def main() -> int:
         if python is None:
             return 1
         code = run_relay(python)
+    if code == common.RUNTIME_LIB_EXIT:
+        # Visual C++ 再頒布可能パッケージがない。入れ直しても直らないので、最後の起動の結果として
+        # （初回でも、入れ直したあとでも）対処を launch.log に残して止まる。
+        try:
+            common.raise_vc_runtime_error("中継が依存の DLL を読み込めない。")
+        except common.VcRuntimeError as exc:
+            log(str(exc))
+        return 1
     return code
 
 

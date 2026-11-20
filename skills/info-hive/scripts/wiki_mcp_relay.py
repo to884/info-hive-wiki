@@ -294,16 +294,24 @@ class Upstream:
         self._info = None
         self._lock = anyio.Lock()
         self.started_server = None
+        self._runtime_error = None  # VcRuntimeError。確認済みなら保持する（_connect）
         self._last_ok = 0.0
         self._pending: set = set()  # 今の接続で待っている呼び出しの取り消しの範囲
 
     async def _connect(self):
+        if self._runtime_error is not None:
+            # VC++ ランタイムがない間は、要求のたびに uv sync とサーバーの起動を繰り返さない。案内は記録済み。
+            raise self._runtime_error
         import httpx
         from mcp import ClientSession
         from mcp.client.streamable_http import streamable_http_client
 
         anyio = self._anyio
-        info, started = await anyio.to_thread.run_sync(ensure_server)
+        try:
+            info, started = await anyio.to_thread.run_sync(ensure_server)
+        except common.VcRuntimeError as exc:
+            self._runtime_error = exc  # 利用者が入れて、Claude Code を再起動するまで変わらない
+            raise
         self.started_server = started
         ready = anyio.Event()
         closed = anyio.Event()
