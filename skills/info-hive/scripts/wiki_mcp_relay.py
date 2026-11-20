@@ -241,6 +241,9 @@ def _start_server(files: common.ServerFiles, start_id: str, log_file) -> dict:
         if info and info.get("start_id") == start_id and alive(info):
             return info
         code = process.poll()
+        if code == common.RUNTIME_LIB_EXIT:
+            # Visual C++ 再頒布可能パッケージがない。入れ直しても直らないので、対処を伝えて止まる。
+            common.raise_vc_runtime_error("wiki の MCP サーバーが依存の DLL を読み込めない。")
         if code == common.BROKEN_ENV_EXIT and not repaired:
             # サーバーが依存を import できなかった。環境を確かめて入れ直し、1 回だけ起動し直す。
             log("サーバーが依存を import できなかったので、環境を入れ直して起動し直す")
@@ -291,16 +294,24 @@ class Upstream:
         self._info = None
         self._lock = anyio.Lock()
         self.started_server = None
+        self._runtime_error = None  # VcRuntimeError。確認済みなら保持する（_connect）
         self._last_ok = 0.0
         self._pending: set = set()  # 今の接続で待っている呼び出しの取り消しの範囲
 
     async def _connect(self):
+        if self._runtime_error is not None:
+            # VC++ ランタイムがない間は、要求のたびに uv sync とサーバーの起動を繰り返さない。案内は記録済み。
+            raise self._runtime_error
         import httpx
         from mcp import ClientSession
         from mcp.client.streamable_http import streamable_http_client
 
         anyio = self._anyio
-        info, started = await anyio.to_thread.run_sync(ensure_server)
+        try:
+            info, started = await anyio.to_thread.run_sync(ensure_server)
+        except common.VcRuntimeError as exc:
+            self._runtime_error = exc  # 利用者が入れて、Claude Code を再起動するまで変わらない
+            raise
         self.started_server = started
         ready = anyio.Event()
         closed = anyio.Event()
