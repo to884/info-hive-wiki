@@ -179,6 +179,11 @@ def server_creationflags() -> int:
 # uv の環境が壊れているとき、中継とサーバーはこの終了コードで止まる（EX_TEMPFAIL）。
 # 起動した側（入口、中継）は、この終了コードを見て環境を入れ直し、1 回だけ起動し直す。
 BROKEN_ENV_EXIT = 75
+# Windows で、依存の共有ライブラリ（DLL）を読めないとき、中継とサーバーはこの終了コードで止まる。
+# 素の Windows にない Visual C++ 再頒布可能パッケージが原因で、環境を入れ直しても直らない。
+# 起動した側は、BROKEN_ENV_EXIT と違い、入れ直さずに利用者へ対処を伝えて止まる。
+RUNTIME_LIB_EXIT = 76
+VC_REDIST_COMMAND = "winget install --id Microsoft.VCRedist.2015+.x64 -e --source winget"
 # 中継とサーバーが起動の最初に import する外部の依存（require_env）。共有ライブラリが読めないことも見つける。
 RELAY_MODULES = ("anyio", "httpx", "psutil", "mcp", "mcp.types", "mcp.server.lowlevel",
                  "mcp.server.stdio", "mcp.client.session", "mcp.client.streamable_http")
@@ -282,6 +287,19 @@ def env_problems(limit: int = 10) -> list[str]:
     return problems
 
 
+def is_dll_load_error(exc: BaseException, windows: bool | None = None) -> bool:
+    """Windows で、依存の DLL を読めなかった ImportError か。CPython はこの文言を OS の言語によらず英語で付ける
+    （`DLL load failed while importing <module>: <OS のメッセージ>`）。"""
+    if not (os.name == "nt" if windows is None else windows):
+        return False
+    return isinstance(exc, ImportError) and "DLL load failed" in str(exc)
+
+
+def vc_runtime_message() -> str:
+    return ("Visual C++ 再頒布可能パッケージ（vcruntime140.dll、vcruntime140_1.dll、msvcp140.dll）が必要である。"
+            f"次を実行して入れ、Claude Code を再起動する: {VC_REDIST_COMMAND}")
+
+
 def require_env(modules) -> None:
     """uv の環境がそろっているかを確かめる。壊れていれば理由を標準エラーに書き、BROKEN_ENV_EXIT で止まる。
 
@@ -303,6 +321,11 @@ def require_env(modules) -> None:
             if getattr(module, "__file__", None) is None:
                 raise ImportError(f"{name} の本体（__init__.py）がない")
         except ImportError as exc:  # 共有ライブラリを読めないときも ImportError になる
+            if is_dll_load_error(exc):
+                # 入れ直しても直らない。BROKEN_ENV_EXIT にすると、起動した側が無駄に入れ直す。
+                print(f"[wiki] 依存の {name} の DLL を読み込めない（{type(exc).__name__}: {exc}）。"
+                      + vc_runtime_message(), file=sys.stderr, flush=True)
+                sys.exit(RUNTIME_LIB_EXIT)
             print(f"[wiki] 依存の {name} を import できない（{type(exc).__name__}: {exc}）。uv の環境が壊れているかもしれない",
                   file=sys.stderr, flush=True)
             sys.exit(BROKEN_ENV_EXIT)
@@ -396,6 +419,17 @@ class UvTlsError(UvSetupError):
 
 class UvResolveError(UvSetupError):
     """uv が依存を解決できなかった（使う Python に合う配布物がない、など）。環境を入れ直しても直らない。"""
+
+
+class VcRuntimeError(UvSetupError):
+    """Windows に Visual C++ 再頒布可能パッケージがなく、依存の DLL を読めない。環境を入れ直しても直らない。"""
+
+
+def raise_vc_runtime_error(prefix: str = "") -> None:
+    """VcRuntimeError を launch.log に記録して送り出す。理由と対処（vc_runtime_message）を含める。"""
+    message = prefix + vc_runtime_message()
+    record_failure(f"VcRuntimeError: {message}")
+    raise VcRuntimeError(message)
 
 
 def is_tls_error(text: str) -> bool:
@@ -658,6 +692,8 @@ def _imports_ok(python: str, script: Path, output, timeout: float) -> bool:
     out = subprocess.run([python, "-X", "utf8", str(script), CHECK_IMPORTS_ARG], stdin=subprocess.DEVNULL,
                          stdout=output, stderr=output, timeout=timeout, env={**os.environ, "PYTHONUTF8": "1"},
                          creationflags=child_creationflags())
+    if out.returncode == RUNTIME_LIB_EXIT:
+        raise_vc_runtime_error(f"{script.name} の依存の DLL を読み込めない。")  # 入れ直しても直らない
     if out.returncode in (0, BROKEN_ENV_EXIT):
         return out.returncode == 0
     raise RuntimeError(f"{script.name} の環境を確かめられなかった（{CHECK_IMPORTS_ARG} の終了コード {out.returncode}）")
@@ -677,6 +713,8 @@ def prepare_script(script: Path, *, output, timeout: float, log, force: bool = F
       ロックの中で確かめ直すので、2 つのセッションが同時に入れ直して、動いている環境を壊すことはない。
     - uv が TLS 証明書を検証できなかったとき、依存を解決できなかったとき（_uv_sync）: 環境は壊れていないので
       入れ直さず、UvTlsError か UvResolveError（どちらも UvSetupError）を送り出す。
+    - 依存の DLL を読めなかったとき（`--check-imports` が RUNTIME_LIB_EXIT で止まる）: Visual C++ 再頒布可能
+      パッケージがないので、入れ直さず VcRuntimeError（UvSetupError）を送り出す。
 
     失敗は、どれも利用者が読む logs/launch.log に残す。ホストは標準エラーを見せないことがあり、中継が
     サーバーの環境を用意するときは、uv の出力は server.log にしか書かれないためである。

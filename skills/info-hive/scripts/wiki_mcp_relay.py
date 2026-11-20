@@ -241,6 +241,9 @@ def _start_server(files: common.ServerFiles, start_id: str, log_file) -> dict:
         if info and info.get("start_id") == start_id and alive(info):
             return info
         code = process.poll()
+        if code == common.RUNTIME_LIB_EXIT:
+            # Visual C++ 再頒布可能パッケージがない。入れ直しても直らないので、対処を伝えて止まる。
+            common.raise_vc_runtime_error("wiki の MCP サーバーが依存の DLL を読み込めない。")
         if code == common.BROKEN_ENV_EXIT and not repaired:
             # サーバーが依存を import できなかった。環境を確かめて入れ直し、1 回だけ起動し直す。
             log("サーバーが依存を import できなかったので、環境を入れ直して起動し直す")

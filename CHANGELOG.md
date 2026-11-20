@@ -6,6 +6,12 @@
 
 ## [Unreleased]
 
+## [0.39.1] - 2026-11-20
+
+### 修正
+
+- 素の Windows 11 で Visual C++ 再頒布可能パッケージ（`vcruntime140.dll`、`vcruntime140_1.dll`、`msvcp140.dll`）がなく、`usearch.index` などの import が `DLL load failed` で失敗したとき、原因が分からないまま止まっていた。これを検出し、`logs/launch.log` と例外のメッセージに「Visual C++ 再頒布可能パッケージが必要」と `winget install --id Microsoft.VCRedist.2015+.x64 -e --source winget` を書く。入れ直しても直らない失敗なので、環境の入れ直しと起動のやり直しは行わない。
+
 ## [0.39.0] - 2026-11-19
 
 ### 追加
