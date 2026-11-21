@@ -21,6 +21,7 @@ import errno
 import hashlib
 import json
 import os
+import secrets
 import stat
 import sys
 import time
@@ -33,7 +34,8 @@ SERVER_MARKER = ".browse-server"
 MANIFEST = ".browse-generation"
 MARKERS = (WORK_MARKER, SERVER_MARKER, MANIFEST)
 LEGACY = ("seq", "build-report.json")       # 0.10.0 が作業用のディレクトリに書いたもの。消す
-STATE_KNOWN = ("server.lock", "server.json", "server.json.new", SERVER_MARKER + ".new")
+FILTER_KEY_FILE = "filters.key"
+STATE_KNOWN = ("server.lock", "server.json", "server.json.new", SERVER_MARKER + ".new", FILTER_KEY_FILE)
 O_BINARY = getattr(os, "O_BINARY", 0)
 NT = os.name == "nt"
 COMMON_LOCK_WAIT = 60.0
@@ -1354,6 +1356,27 @@ def read_record(state_dir) -> "dict | None":
     except ValueError:
         return None
     return data if isinstance(data, dict) else None
+
+
+def browse_filter_secret(state_dir) -> bytes | None:
+    """状態のディレクトリのロックを持つ起動処理だけが、絞り込み用の鍵を読むか作る。"""
+    path = os.path.join(state_dir, FILTER_KEY_FILE)
+    try:
+        found = kind(path)
+        if found == "file":
+            try:
+                key = read_file_capped(path, 32)
+            except TooLarge:
+                key = b""
+            if len(key) == 32:
+                return key
+        elif found != "absent":
+            return None
+        key = secrets.token_bytes(32)
+        replace_file(path, key, 0o600)
+        return key
+    except (Absent, Unknown):
+        return None
 
 
 def _record_while_locked(state_dir):

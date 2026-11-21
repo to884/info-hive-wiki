@@ -569,7 +569,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                          and self.headers.get("Sec-Fetch-Dest") == "document"
                          and self.headers.get("Sec-Fetch-Site") in ("none", "same-origin"))
         text = c.render(name, app.state.raw, generated_at=getattr(c, "generated_at", ""), stale=reason,
-                        allow_figures=allow_figures)
+                        allow_figures=allow_figures, filter_secret=app.filter_secret)
         ctype = "text/javascript; charset=utf-8" if name.endswith(".js") else "text/html; charset=utf-8"
         extra = None if name.endswith(".js") else {"Cross-Origin-Opener-Policy": "same-origin"}
         return self._send(200, text.encode("utf-8"), ctype, extra=extra)
@@ -644,6 +644,7 @@ class App:
         self.verbose = verbose
         self.assets = assets or {}
         self.frame_assets = frame_assets or {}   # Mermaid の図の枠の同梱物（図の描画の設計の 7.2）
+        self.filter_secret = b""
         self.view_token = secrets.token_urlsafe(24)
         self.control_token = secrets.token_urlsafe(24)
         self.instance = secrets.token_hex(12)
@@ -789,6 +790,11 @@ def serve(root: PurePath, page: "str | None", open_browser: bool, idle: float, v
 
     def make_record():
         # ロックを取ったあとに待ち受けを始め、記録を置き換える（設計の 7.1）
+        secret = fs.browse_filter_secret(state_dir)
+        if secret is not None:
+            app.filter_secret = hmac.digest(secret, owner.encode("utf-8"), "sha256")
+        else:
+            say("絞り込み用の鍵を使えないため、タグと種類の選択を保存できない")
         httpd = _Server(("127.0.0.1", 0), Handler)
         httpd.app = app
         app.httpd = httpd
