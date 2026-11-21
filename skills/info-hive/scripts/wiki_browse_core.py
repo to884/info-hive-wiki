@@ -37,7 +37,8 @@ import wiki_browse_fs as fs  # noqa: E402
 import wiki_lint  # noqa: E402
 import wiki_pages  # noqa: E402
 import wiki_overview  # noqa: E402
-from wiki_text import canonical_meta, nfc, posix_rel  # noqa: E402
+from wiki_raw import raw_path_is_safe  # noqa: E402
+from wiki_text import canonical_meta, nfc, nfkc, posix_rel  # noqa: E402
 
 # 走査だけのimportは解析器を起こさない。本文を描く閲覧では同梱版を明示的に取得する。
 Token = wiki_pages.markdown_module("token").Token
@@ -49,7 +50,7 @@ except (ImportError, SystemExit):
     wiki_graph_extract = None
 
 PROTOCOL_VERSION = 2   # 探しやすさの設計の 2.3、6（nav.js の形とグループの並びが変わった）
-CORE_VERSION = "browse-core-7"   # 7: サーバー版の図を開く条件と、描画枠の同時実行を制限する。
+CORE_VERSION = "browse-core-8"   # 8: 「原本」欄のリンクと raw のタグ分類。
 NAME_LIMIT = 200
 # frame-src 'self' は、figures.js が作る Mermaid の図の枠のため（図の描画の設計の 7.3）
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src 'self'; "
@@ -177,7 +178,7 @@ class Snapshot:
     unreadable: list = field(default_factory=list)   # 中身を読めなかった入力の (種類, 相対パス)（UTF-8 でないものを含む）
     entries: tuple = ()                              # 入力の一覧（読み取りの情報。公開の前の検査が使う）
     transient: list = field(default_factory=list)    # そのうち、開けなかった入力（ファイルを変えずに読めるようになりうる）
-    raw_prefix: "str | None" = None                  # wiki の根から raw の根への相対パス
+    raw_targets: dict = field(default_factory=dict)   # (参照元の相対パス, raw: の位置) -> 原本のページ ID
 
     def by_kind(self, kind: str) -> list:
         return [f for f in self.inputs if f.kind == kind]
@@ -370,14 +371,9 @@ def take_snapshot(root, entries=None, *, raw_root=None) -> Snapshot:
     second = input_list(root, raw_root)
     if second != first:
         raise InputsChanged("読んでいるあいだに Wiki が変わった")
-    raw_prefix = None
-    if raw_root is not None:
-        try:
-            raw_prefix = posix_rel(os.path.relpath(raw_root, root))
-        except ValueError:
-            pass  # Windows で別ドライブにあるときは、wiki からの相対参照を使えない。
     return Snapshot(signature=signature_of(second), inputs=inputs, generation=gen.hexdigest()[:20],
-                    unreadable=unreadable, entries=second, transient=transient, raw_prefix=raw_prefix)
+                    unreadable=unreadable, entries=second, transient=transient,
+                    raw_targets=_snapshot_raw_targets(inputs, root, raw_root))
 
 
 # ---------------------------------------------------------------------------
@@ -712,6 +708,61 @@ def _page_id(rel: str) -> str:
     return rel[:-3] if rel.lower().endswith(".md") else rel
 
 
+def _snapshot_raw_targets(inputs: list, root, raw_root) -> dict:
+    """raw: を読み込めた原本だけと照らす。中核に根の絶対パスやファイル操作を持ち込まない。"""
+    if raw_root is None:
+        return {}
+    raw_hashes = {f.rel: f.sha for f in inputs if f.kind == "raw" and f.text is not None}
+    if not raw_hashes:
+        return {}
+    root = os.path.abspath(root)
+    matches = {}
+    for f in inputs:
+        if f.kind != "page" or f.text is None:
+            continue
+        try:
+            fields, *_ = wiki_lint.parse_frontmatter_raw(f.text)
+            meta, _ = canonical_meta(fields)
+        except Exception:  # noqa: BLE001  読めないページの参照は解決しない。
+            continue
+        refs = wiki_pages.ref_values(meta.get("raw"))
+        hashes = wiki_pages.ref_values(meta.get("raw_sha256"))
+        if meta.get("raw_sha256") and (len(hashes) != len(refs) or
+                                     not all(re.fullmatch(r"[0-9a-fA-F]{64}", h) for h in hashes)):
+            continue
+        bases = (os.path.dirname(root),)
+        if not wiki_pages.ref_values(meta.get("session_id")):
+            bases += (root, os.path.join(root, os.path.dirname(f.disk_rel)))
+        for i, ref in enumerate(refs):
+            raw = classify_raw(ref)
+            if raw["kind"] == "url":
+                continue
+            absolute = raw["kind"] == "absolute"
+            value = raw["value"] if absolute else posix_rel(raw["value"])
+            if not raw_path_is_safe(value, absolute=absolute):
+                continue
+            if absolute:
+                path = os.path.expanduser(value)
+                if not os.path.isabs(path):
+                    continue
+                candidates = (path,)
+            else:
+                candidates = (os.path.join(base, value) for base in bases)
+            targets = set()
+            for path in candidates:
+                try:
+                    target = "raw/" + posix_rel(os.path.relpath(path, raw_root))
+                except (OSError, ValueError):
+                    continue
+                if target in raw_hashes:
+                    targets.add(target)
+            if len(targets) == 1:
+                target = next(iter(targets))
+                if not hashes or hashes[i].lower() == raw_hashes[target]:
+                    matches[f.rel, i] = _page_id(target)
+    return matches
+
+
 # MessageBar のアイコン（Fluent UI System Icons の WarningFilled と DiamondDismissFilled、20px。MIT）
 ICON_WARNING = ('<svg class="fui-Icon" width="20" height="20" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" '
                 'focusable="false"><path d="M7.37 3.56a3 3 0 0 1 5.26 0l5.5 10A3 3 0 0 1 15.5 18h-11a3 3 0 0 1-2.63-4.44z'
@@ -942,14 +993,7 @@ class Core:
         self._inherit_raw_tags()
 
     def _inherit_raw_tags(self) -> None:
-        """タグがない raw には、同じファイルを raw: で指すソースページのタグを使う。"""
-        prefix = self.snapshot.raw_prefix
-        if prefix is None:
-            return
-        raw_ids = {
-            posixpath.normpath(posixpath.join(prefix, self.page(pid)["rel_path"][4:])): pid
-            for pid in self.drawn if self.page(pid)["kind"] == "raw"
-        }
+        """分類できるタグがない raw には、同じファイルを指すソースページのタグを使う。"""
         inherited = defaultdict(set)
         for pid in self.drawn:
             if self.page_type(pid) != "source":
@@ -958,18 +1002,18 @@ class Core:
             if not tags:
                 continue
             page = self.page(pid)
-            bases = (".", "..", posixpath.dirname(page["rel_path"]))
-            for ref in wiki_pages.ref_values(page["meta"].get("raw")):
-                if classify_raw(ref)["kind"] != "relative":
-                    continue
-                ref = posix_rel(ref)
-                matches = {raw_ids.get(posixpath.normpath(posixpath.join(base, ref))) for base in bases}
-                matches.discard(None)
-                if len(matches) == 1:
-                    inherited[next(iter(matches))].add(tags)
+            for i, _ in enumerate(wiki_pages.ref_values(page["meta"].get("raw"))):
+                target = self.snapshot.raw_targets.get((page["rel_path"], i))
+                if target in self.drawn:
+                    inherited[target].add(tags)
         for pid, candidates in inherited.items():
-            if len(candidates) == 1 and not self.page_tags(pid):
-                self.page(pid)["meta"]["tags"] = list(next(iter(candidates)))
+            tags = self.page_tags(pid)
+            if len(candidates) == 1 and not self._raw_classification_tags(tags):
+                self.page(pid)["meta"]["tags"] = list(dict.fromkeys([*tags, *next(iter(candidates))]))
+
+    @staticmethod
+    def _raw_classification_tags(tags: list[str]) -> list[str]:
+        return [tag for tag in tags if nfkc(tag).casefold() != "raw"]
 
     def _build_assets(self) -> None:
         """図の svg の表（図の描画の設計の 6.2、6.3）。NFC で同じ綴りになる svg は、どれも描かない。"""
@@ -1558,7 +1602,8 @@ class Core:
         """木の 3 つ目の段 N9（タグでまとめる設計の 2 節）。
 
         ページの項目を自分の項目に持つグループのすべてで、ページの項目をタグごとの子のグループに移す。
-        wiki のページは最初のタグ、raw は 2 つ目のタグを使う。該当する値がなければ「タグなし」にする。
+        wiki のページは最初のタグ、raw は raw というタグを除いた最初のタグを使う。
+        該当する値がなければ「タグなし」にする。
         ページでない項目は元のグループに残す。タグのグループは、
         元のグループの項目の並びでタグが初めて現れた順に、元の子のグループより前に並べ、「タグなし」を最後に置く。
         ID は `_gt` と、木を深さ優先でたどって（親、子の順）作った順の番号で、タグの文字を入れない。
@@ -1571,8 +1616,9 @@ class Core:
         def tag_of(pid):
             if pid not in group_tags:
                 tags = self.page_tags(pid)
-                index = 1 if self.page(pid)["kind"] == "raw" else 0
-                group_tags[pid] = tags[index] if len(tags) > index else None
+                if self.page(pid)["kind"] == "raw":
+                    tags = self._raw_classification_tags(tags)
+                group_tags[pid] = tags[0] if tags else None
             return group_tags[pid]
 
         def apply(g):
@@ -1871,11 +1917,20 @@ class Core:
         raws = wiki_pages.ref_values(meta.get("raw"))
         if raws and raw_mode != "none":
             sha = str(meta.get("raw_sha256") or "")
-            cells = [self._raw_html(classify_raw(v), sha, raw_mode, path) for v in raws]
+            source = self.page(pid)["rel_path"]
+            cells = []
+            for i, value in enumerate(raws):
+                raw = classify_raw(value)
+                raw_id = self.snapshot.raw_targets.get((source, i)) if raw_mode == "text" else None
+                if raw_id in self.drawn:
+                    href = html.escape(rel_href(path, self.out_name[raw_id]))
+                    cells.append(f'<a href="{href}"><code>{html.escape(raw["value"])}</code></a>')
+                else:
+                    cells.append(self._raw_html(raw, sha, raw_mode))
             rows.append(self._meta_row("原本", "<br>".join(cells)))
         return "".join(rows)
 
-    def _raw_html(self, raw: dict, sha: str, mode: str, path: str) -> str:
+    def _raw_html(self, raw: dict, sha: str, mode: str) -> str:
         value = raw["value"]
         if raw["kind"] != "absolute" or mode == "text":
             return f"<code>{html.escape(value)}</code>"

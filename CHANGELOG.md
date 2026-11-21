@@ -6,6 +6,16 @@
 
 ## [Unreleased]
 
+## [0.40.3] - 2026-11-21
+
+### 追加
+
+- `/wiki:browse` のサーバー版で、要約ページの「原本」欄から raw の Markdown 本文を開けるようにした。
+
+### 変更
+
+- raw は `raw` タグを除いた最初のタグで分類する。分類用のタグがないときは、対応するソースページのタグを使う。
+
 ## [0.40.2] - 2026-11-21
 
 ### 追加
@@ -994,7 +1004,8 @@ Web ページの取得（`wiki_fetch.py`）が、Medium の記事の図とコー
 [0.2.0]: https://github.com/to884/info-hive-wiki/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/to884/info-hive-wiki/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.1.0
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.40.2...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.40.3...HEAD
+[0.40.3]: https://github.com/to884/info-hive-wiki/releases/tag/v0.40.3
 [0.40.2]: https://github.com/to884/info-hive-wiki/releases/tag/v0.40.2
 [0.40.1]: https://github.com/to884/info-hive-wiki/releases/tag/v0.40.1
 [0.40.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.40.0
