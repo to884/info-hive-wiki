@@ -46,6 +46,19 @@ def within(path, root) -> bool:
         return False
 
 
+def raw_path_is_safe(ref: str, *, absolute: bool) -> bool:
+    """先頭の .. だけを基準から畳む。途中の .. は、前のリンクを OS にたどらせる。"""
+    if "\x00" in ref:
+        return False
+    meaningful = False
+    for part in Path(ref).parts:
+        if part == ".." and (absolute or meaningful):
+            return False
+        if part not in ("..", "."):
+            meaningful = True
+    return True
+
+
 def _roots(values) -> list[Path]:
     from wiki_pages import absolute_user_path
     result = []
@@ -241,16 +254,7 @@ def resolve_raw(meta, page_path, wiki_root, wiki_root_given=None, allowed_roots=
         if not absolute and _SCHEME.match(ref):
             result.state, result.reason = "outside", "URL は raw のファイルとして読まない"
             continue
-        # 先頭の .. だけを基準から畳む。途中の .. は、前のリンクを OS にたどらせるので受け取らない。
-        parts = Path(ref).parts
-        meaningful = False
-        bad_parent = False
-        for part in parts:
-            if part == ".." and (absolute or meaningful):
-                bad_parent = True
-            elif part not in ("..", "."):
-                meaningful = True
-        if bad_parent or "\x00" in ref:
+        if not raw_path_is_safe(ref, absolute=absolute):
             result.state, result.reason = "unknown", "途中の .. か NUL を含む raw: は解けない"
             continue
         if os.name != "nt" and (_DRIVE.match(ref) or ref.startswith("\\")):
