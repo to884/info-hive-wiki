@@ -43,7 +43,7 @@ def capture_existing(url: str, timeout: float, max_bytes: int, block_private: bo
     if npm is None or shutil.which("node") is None:
         raise wiki_fetch.FetchError("普段のブラウザへの接続には Node.js 20 以上と npm が必要である")
     request = {"url": url, "timeout": timeout, "max_bytes": max_bytes, "max_images": max_images,
-               "channel": options["channel"], "executable_path": options.get("executable_path"),
+               "block_private": block_private, "channel": options["channel"], "executable_path": options.get("executable_path"),
                "python_executable": sys.executable, "selector_script": str(Path(__file__).resolve())}
     command = [npm, "exec", "--yes", f"--package=playwright-core@{EXTENSION_CORE_VERSION}", "--", "node",
                str(Path(__file__).with_name("wiki_browser_session.cjs"))]
@@ -57,6 +57,8 @@ def capture_existing(url: str, timeout: float, max_bytes: int, block_private: bo
     except ValueError:
         raise wiki_fetch.FetchError("普段のブラウザから読み取りの結果を得られなかった。Node.js、npm、Playwright 拡張を確かめる") from None
     if done.returncode != 0 or "error" in result:
+        if result.get("kind") == "youtube":
+            raise wiki_fetch.YouTubeRefused(result["url"], "ブラウザの移動先 ")
         raise wiki_fetch.FetchError(str(result.get("error", "普段のブラウザに接続できなかった")))
     return result
 
@@ -277,7 +279,24 @@ def inspect_dom(html: str, url: str, maximum: int) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    if (sys.argv[1:] if argv is None else argv) == ["--inspect-dom"]:
+    arguments = sys.argv[1:] if argv is None else argv
+    if arguments == ["--validate-browser-url"]:
+        request = json.load(sys.stdin)
+        result = {}
+        try:
+            url = request["url"]
+            allowed_url(url, False, navigation=True)
+            host = urllib.parse.urlsplit(url).hostname or ""
+            # ブラウザと Python が異なる経路で名前を解決する場合を考慮する。
+            if request["block_private"] and wiki_fetch.is_private_host(host, unresolved_is_private=True):
+                raise wiki_fetch.FetchError(f"内部のアドレスや名前を解決できない転送先は取得しない: {url}")
+        except wiki_fetch.YouTubeRefused as exc:
+            result = {"kind": "youtube", "url": exc.url, "error": str(exc)}
+        except (ValueError, wiki_fetch.FetchError) as exc:
+            result = {"kind": "invalid_redirect", "error": str(exc)}
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
+    if arguments == ["--inspect-dom"]:
         request = json.load(sys.stdin)
         print(json.dumps(inspect_dom(request["html"], request["url"], request["max_images"]), ensure_ascii=False))
         return 0
@@ -291,7 +310,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--browser-session", choices=("existing", "isolated"), default="existing",
                         help="既定は普段のブラウザに公式拡張で接続する。isolated は独立したブラウザで取得する")
     parser.add_argument("--max-images", type=int, default=50, help="既存タブから読む画像数の上限")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(arguments)
     try:
         result = capture_page(args.url, args.timeout, args.max_bytes, args.block_private, args.browser,
                               args.browser_session, args.max_images)

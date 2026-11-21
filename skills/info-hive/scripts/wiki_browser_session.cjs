@@ -10,7 +10,11 @@ const CORE_VERSION = '1.66.0-alpha-2026-11-09';
 const EXTENSION_TOKEN = 'PLAYWRIGHT_MCP_EXTENSION_TOKEN';
 
 class SessionError extends Error {
-  constructor(code, message) { super(message); this.code = code; }
+  constructor(code, message, url) {
+    super(message);
+    this.code = code;
+    this.url = url;
+  }
 }
 
 function runtimeTools() {
@@ -34,11 +38,11 @@ function canonicalURL(value) {
   return url.href;
 }
 
-async function inspectDOM(request, html) {
+async function runBrowserHelper(request, operation, payload) {
   return await new Promise((resolve, reject) => {
     const env = { ...process.env };
     delete env[EXTENSION_TOKEN];
-    const child = spawn(request.python_executable, [request.selector_script, '--inspect-dom'],
+    const child = spawn(request.python_executable, [request.selector_script, operation],
       { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true, shell: false, env });
     let output = '';
     const alarm = setTimeout(() => { child.kill(); reject(new Error('selector_timeout')); }, request.timeout * 1000);
@@ -51,8 +55,16 @@ async function inspectDOM(request, html) {
       catch (error) { reject(error); }
     });
     child.stdin.on('error', () => {});
-    child.stdin.end(JSON.stringify({ html, url: canonicalURL(request.url), max_images: request.max_images }));
+    child.stdin.end(JSON.stringify(payload));
   });
+}
+
+function inspectDOM(request, html, url) {
+  return runBrowserHelper(request, '--inspect-dom', { html, url, max_images: request.max_images });
+}
+
+function validateDestination(request, url) {
+  return runBrowserHelper(request, '--validate-browser-url', { url, block_private: request.block_private !== false });
 }
 
 function matchesURL(page, expected) {
@@ -68,7 +80,7 @@ async function readDOM(page, request, expected, deadline, inspect) {
     if (Buffer.byteLength(html, 'utf8') > request.max_bytes)
       throw new SessionError('too_large', '対象タブの DOM が大きさの上限を超えた');
     if ((deadline || request.max_images) && html !== previousHTML) {
-      const next = await inspect(request, html);
+      const next = await inspect(request, html, expected);
       if (next.body_sha256 !== analysis?.body_sha256) lastChange = performance.now();
       analysis = next;
       previousHTML = html;
@@ -81,12 +93,12 @@ async function readDOM(page, request, expected, deadline, inspect) {
   }
 }
 
-async function readPage(browser, request, inspect = inspectDOM) {
+async function readPage(browser, request, inspect = inspectDOM, validate = validateDestination) {
   const expected = canonicalURL(request.url);
   const timeout = request.timeout * 1000;
   const pages = browser.contexts().flatMap(context => context.pages());
   const matching = pages.filter(page => matchesURL(page, expected));
-  let page, deadline;
+  let page, deadline, finalURL = expected;
   if (matching.length === 1) {
     page = matching[0];
     await page.waitForLoadState('domcontentloaded', { timeout });
@@ -102,10 +114,19 @@ async function readPage(browser, request, inspect = inspectDOM) {
     }
     if (response && response.status() >= 400)
       throw new SessionError('http_error', `ブラウザでも HTTP ${response.status()} を受け取った`);
+    finalURL = canonicalURL(page.url());
+    // HTTP の応答 URL にフラグメントは含まれない。表示中の URL がこの移動の応答に対応することを確かめる。
+    const responseURL = response ? canonicalURL(response.url()) : expected;
+    if (response ? finalURL.split('#', 1)[0] !== responseURL.split('#', 1)[0] : finalURL !== expected)
+      throw new SessionError('tab_changed', '対象タブの URL が変わった。取り込むページのアドレスを確かめてやり直す');
+    if (finalURL !== expected) {
+      const refusal = await validate(request, finalURL);
+      if (refusal.error) throw new SessionError(refusal.kind, refusal.error, refusal.url);
+    }
   } else {
     throw new SessionError('tab_not_unique', 'Playwright の接続画面でタブを選ばずに許可するか、対象 URL のタブを 1 つだけ選ぶ');
   }
-  const { html, targets } = await readDOM(page, request, expected, deadline, inspect);
+  const { html, targets } = await readDOM(page, request, finalURL, deadline, inspect);
   // 本文内で既に読み込まれた画像を使う。fetch、画像の再読み込み、Cookie の読み取りは行わない。
   const capture = targets.length ? await page.evaluate(({ maxBytes, targets }) => {
     const images = [];
@@ -137,9 +158,9 @@ async function readPage(browser, request, inspect = inspectDOM) {
     }
     return { images, warnings };
   }, { maxBytes: request.max_bytes, targets }) : { images: [], warnings: [] };
-  if (!matchesURL(page, expected))
+  if (!matchesURL(page, finalURL))
     throw new SessionError('tab_changed', '読み取り中に対象タブの URL が変わった。目的のページを表示してやり直す');
-  return { ...capture, html, final_url: expected, request_url: request.url, matched_url: expected,
+  return { ...capture, html, final_url: finalURL, request_url: request.url, matched_url: finalURL,
     browser: request.channel, browser_session: 'existing' };
 }
 
@@ -200,7 +221,7 @@ if (require.main === module) {
       : process.env[EXTENSION_TOKEN]
         ? 'Playwright の公式拡張に接続できなかった。拡張の導入と PLAYWRIGHT_MCP_EXTENSION_TOKEN がブラウザのプロファイルに対応しているかを確かめる'
         : 'Playwright の公式拡張に接続できなかった。ブラウザで拡張の導入と接続を確かめる';
-    await writeResult({ error: message, kind: error.code || 'connection_failed' }).catch(() => {});
+    await writeResult({ error: message, kind: error.code || 'connection_failed', url: error instanceof SessionError ? error.url : undefined }).catch(() => {});
     process.exit(2);
   });
 }
