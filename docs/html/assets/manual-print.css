@@ -59,6 +59,9 @@ p, li { orphans: 2; widows: 2; }
 pre, blockquote, figure, .check, .page-navigation { break-inside: avoid; }
 pre, blockquote, .check { padding-block: var(--spacingVerticalS); }
 pre code { font-family: "BIZ UDGothic", "MS Gothic", var(--fontFamilyMonospace); }
+.code-toolbar { display: none; }
+.code-example { break-inside: avoid; }
+.code-example pre code span { color: inherit; }
 
 .page-content > #first-source {
   break-before: page;

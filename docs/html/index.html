@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="assets/fluent2.css">
   <link rel="stylesheet" href="assets/manual.css">
   <link rel="stylesheet" href="assets/manual-print.css" media="print">
+  <script defer src="assets/manual-code.js"></script>
 </head>
 <body class="fui-FluentProvider">
   <a class="skip-link fui-Link" href="#main">本文へ移動</a>
@@ -25,7 +26,6 @@
   <li><a class="fui-Link" data-inline href="#readme-ドキュメント">ドキュメント</a></li>
   <li><a class="fui-Link" data-inline href="#readme-移植元とクレジット">移植元とクレジット</a></li>
   <li><a class="fui-Link" data-inline href="#readme-ライセンス">ライセンス</a></li>
-  <li><a class="fui-Link" data-inline href="#readme-開発への参加">開発への参加</a></li>
 </ul>
       <!-- readme-toc:end -->
       <h3 id="tutorials">チュートリアル</h3>
@@ -112,6 +112,15 @@ $wiki:info-hive query この資料の要点は？
 <p>プロジェクト専用の wiki を作る場合は、<code>init</code> の <code>--user</code> を外す。既定では、そのプロジェクトの <code>wiki/</code> と <code>raw/</code> を使う。プラグインやスキルをインストールする範囲と、wiki を保存する範囲は別に選べる。</p>
 <p>定期的な点検には、Claude Code では <code>/wiki:lint</code>、Codex では <code>$wiki:info-hive lint</code> を使う。検出した問題は修正案として示し、黙って wiki を書き換えることはない。</p>
 <h3 id="readme-できること" class="fui-Subtitle2">できること</h3>
+<!-- page-summary:start -->
+<figure class="page-summary page-summary-groups">
+  <ul role="list" aria-label="概要">
+    <li><strong>資料を取り込む</strong><span>PDF・Web・会話</span></li>
+    <li><strong>根拠を探す</strong><span>検索・出典・関連ページ</span></li>
+    <li><strong>wiki を保つ</strong><span>点検・更新・経験の記録</span></li>
+  </ul>
+</figure>
+<!-- page-summary:end -->
 <ul>
 <li>資料を要約し、関連するページ、リンク、インデックスを更新する。</li>
 <li>日本語の語彙検索と意味検索を組み合わせ、出典つきで質問に答える。</li>
@@ -181,9 +190,6 @@ $wiki:info-hive query この資料の要点は？
 <li>閲覧画面の Fluent 2 の CSS、アイコン、Mermaid とその依存: <a href="licenses.html#browse-assets" class="fui-Link" data-inline="">browse_assets/README.md</a>、<a href="licenses.html#browse-licenses" class="fui-Link" data-inline="">ライセンスと第三者の表示</a></li>
 </ul>
 <p>info-hive は Microsoft の製品ではなく、Microsoft の提携、推薦、承認を受けたものでもない。Fluent、Microsoft、Segoe は Microsoft Corporation の商標である。書体は同梱しない。</p>
-<h3 id="readme-開発への参加" class="fui-Subtitle2">開発への参加</h3>
-<p>不具合や要望は<span>このリポジトリの Issues</span> に報告してほしい。PR の出し方は <a href="contributing.html" class="fui-Link" data-inline="">CONTRIBUTING.md</a> を参照。</p>
-<p>設計書、テスト、開発の運用は、開発用リポジトリ <span>info-hive-dev</span> で管理する。</p>
       <!-- readme-content:end -->
       </section>
     </main>

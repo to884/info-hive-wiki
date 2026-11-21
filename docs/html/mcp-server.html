@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="assets/fluent2.css">
   <link rel="stylesheet" href="assets/manual.css">
   <link rel="stylesheet" href="assets/manual-print.css" media="print">
+  <script defer src="assets/manual-code.js"></script>
 </head>
 <body class="fui-FluentProvider">
   <a class="skip-link fui-Link" href="#main">本文へ移動</a>
@@ -19,6 +20,15 @@
     </nav>
     <main class="page-content readme-content" id="main" tabindex="-1">
 <h1 id="wiki-の-mcp-サーバー" class="fui-Title1">wiki の MCP サーバー</h1>
+<!-- page-summary:start -->
+<figure class="page-summary page-summary-flow">
+  <ol role="list" aria-label="概要">
+    <li><strong>アプリから依頼</strong><span>Claude Code や Codex</span></li>
+    <li><strong>ローカルで処理</strong><span>検索・索引・構造点検</span></li>
+    <li><strong>結果を返す</strong><span>根拠候補・統計・関係</span></li>
+  </ol>
+</figure>
+<!-- page-summary:end -->
 <p>wiki のプラグインは、検索のためのローカルの MCP サーバーを持つ。埋め込みモデルの読み込み、埋め込み、索引の書き込みは、このサーバーだけが行う。wiki の Markdown は書き換えない。</p>
 <p>コマンドの <code>&lt;skill-root&gt;</code> は、このスキルのディレクトリ（<code>SKILL.md</code> のあるディレクトリ）の実際のパスに置き換える。書き方は <code>SKILL.md</code> の「スクリプトのパス」にある。</p>
 <p>この文書は、サーバーの仕組み、ツール、置き場所、困ったときの確かめ方をまとめる。コマンド（<code>/wiki:query</code>、<code>/wiki:lint</code>、<code>/wiki:stats</code>、<code>/wiki:graph</code>、<code>/wiki:ingest</code> のグラフの lint）は、まずこのサーバーのツールを使い、使えないときは CLI（<code>wiki_search.py</code> など）に戻る。使い分けの規則は <code>SKILL.md</code> の「MCP のツールと CLI の使い分け」にある。</p>

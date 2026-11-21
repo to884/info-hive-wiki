@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>学習とスキルの改善 | info-hive</title>
+  <title>経験の記録とスキルの改善 | info-hive</title>
   <link rel="stylesheet" href="assets/fluent2.css">
   <link rel="stylesheet" href="assets/manual.css">
   <link rel="stylesheet" href="assets/manual-print.css" media="print">
+  <script defer src="assets/manual-code.js"></script>
 </head>
 <body class="fui-FluentProvider">
   <a class="skip-link fui-Link" href="#main">本文へ移動</a>
@@ -18,7 +19,16 @@
       <a class="fui-Link" href="index.html#toc">文書の目次へ戻る</a>
     </nav>
     <main class="page-content readme-content" id="main" tabindex="-1">
-<h1 id="学習とスキルの改善" class="fui-Title1">学習とスキルの改善</h1>
+<h1 id="経験の記録とスキルの改善" class="fui-Title1">経験の記録とスキルの改善</h1>
+<!-- page-summary:start -->
+<figure class="page-summary page-summary-flow">
+  <ol role="list" aria-label="概要">
+    <li><strong>経験を記録</strong><span>learn で検証結果を残す</span></li>
+    <li><strong>改善案を評価</strong><span>evolve で比較する</span></li>
+    <li><strong>結果を判断</strong><span>承認して適用、必要なら復旧</span></li>
+  </ol>
+</figure>
+<!-- page-summary:end -->
 <p>任意で使える改善ループは、観測できるタスクの結果から学び、wiki にパターンとしてまとめ、1つのスキル全体に対する変更を提案し、検証の結果で改善を選ぶ。独立した最終テストを実行する前に、選んだスキルを固定する。インストール済みのスキルが変わるのは、ユーザーが得られた改善案を適用したときだけである。</p>
 <h2 id="研究上の根拠と取り入れ方" class="fui-Subtitle1">研究上の根拠と取り入れ方</h2>
 <p>改善の仕組みは、Liyan Tang らによる <span>WikiSkill: Compiling Agent Experience into Persistent Knowledge for Skill Evolution</span>（Google Research と Virginia Tech、2026 年）をもとにしている。論文の<span>手法</span>と LLM Wiki の実装は、次のように対応する。</p>

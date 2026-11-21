@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="assets/fluent2.css">
   <link rel="stylesheet" href="assets/manual.css">
   <link rel="stylesheet" href="assets/manual-print.css" media="print">
+  <script defer src="assets/manual-code.js"></script>
 </head>
 <body class="fui-FluentProvider">
   <a class="skip-link fui-Link" href="#main">本文へ移動</a>
@@ -19,6 +20,15 @@
     </nav>
     <main class="page-content readme-content" id="main" tabindex="-1">
 <h1 id="グラフ層" class="fui-Title1">グラフ層</h1>
+<!-- page-summary:start -->
+<figure class="page-summary page-summary-flow">
+  <ol role="list" aria-label="概要">
+    <li><strong>ページの関係</strong><span>種類と根拠を記録</span></li>
+    <li><strong>グラフを作る</strong><span>点検して抽出</span></li>
+    <li><strong>関係を調べる</strong><span>つながりや経路を確認</span></li>
+  </ol>
+</figure>
+<!-- page-summary:end -->
 <p>グラフは、markdown の wiki をもとにコンパイルする任意のインデックスである。出典つきの型付きの関係をプログラムからクエリできるようにしつつ、正本はあくまで markdown のままにする。グラフはいつでもページから作り直せる。</p>
 <blockquote>
 <p>グラフ層はオプトイン方式である。<code>wiki/graph/ontology.yaml</code> がなければ、その wiki はグラフ層を導入する前の状態である。extract、lint、query のスクリプトは、どれも何も書き出さずに終了コード 1 で止まる。オントロジーのファイルをでっち上げてはならない。先にグラフ層を初期化する（<a href="commands.html#wikigraph" class="fui-Link" data-inline=""><code>/wiki:graph</code></a> または <a href="commands.html#wikiinit" class="fui-Link" data-inline=""><code>/wiki:init</code></a> を使う）か、グラフ層なしで進める。</p>

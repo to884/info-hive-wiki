@@ -12,3 +12,7 @@ Get-FileHash -Algorithm SHA256 -LiteralPath 'skills/info-hive/scripts/browse_ass
 ```
 
 両方のハッシュが一致することを確かめ、上のハッシュとライセンスの写しを更新します。文書の画面と印刷の指定は `manual.css` と `manual-print.css` にあります。
+
+## コピーボタン
+
+`manual-code.js` に Microsoft の `@fluentui/svg-icons` 1.1.345 の `copy_16_regular.svg` と `copy_16_filled.svg` のパスを収録しています。出どころと MIT ライセンスは [第三者の表示](licenses/fluent2-html-replica.THIRD-PARTY-NOTICES.txt) を参照してください。

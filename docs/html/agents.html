@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="assets/fluent2.css">
   <link rel="stylesheet" href="assets/manual.css">
   <link rel="stylesheet" href="assets/manual-print.css" media="print">
+  <script defer src="assets/manual-code.js"></script>
 </head>
 <body class="fui-FluentProvider">
   <a class="skip-link fui-Link" href="#main">本文へ移動</a>
@@ -175,7 +176,7 @@ ln -s &quot;$(pwd)/info-hive-wiki/skills/info-hive&quot; ~/.hermes/skills/info-h
 <p>スラッシュコマンドは Claude Code 専用である。ほかのエージェントでは、「この論文を wiki に追加して」「X について wiki には何と書いてある？」「wiki に lint をかけて」のように、自然言語でスキルを呼び出す。wiki そのものは特定のエージェントに依存しないので、あるエージェントで取り込み、別のエージェントでクエリすることもできる。</p>
 </blockquote>
 <h2 id="経験の記録と手順の改善" class="fui-Subtitle1">経験の記録と手順の改善</h2>
-<p>一覧にあるスキル対応のエージェントはどれも、インストールされた <code>references/evolution-workflow.md</code> と <code>scripts/wiki_evolve.py</code> を使い、自然言語で <code>/wiki:learn</code> と <code>/wiki:evolve</code> のワークフローを実行できる。スラッシュコマンドそのものがあるのは Claude Code だけである。記録とライフサイクル管理のツールは、Python の標準ライブラリだけを使う。共通の評価用アダプターは、9つのホストすべてに対応している。ただし、ホストごとに、インストールされているバージョン、認証、使えるツール、報告される使用量の集計が異なる。改善ワークフローの実行要件と、実地検証のレポートを参照。教訓を記録するために、新しくエージェントとの連携を作る必要はない。<a href="evolution.html" class="fui-Link" data-inline="">学習とスキルの改善</a>を参照。</p>
+<p>一覧にあるスキル対応のエージェントはどれも、インストールされた <code>references/evolution-workflow.md</code> と <code>scripts/wiki_evolve.py</code> を使い、自然言語で <code>/wiki:learn</code> と <code>/wiki:evolve</code> のワークフローを実行できる。スラッシュコマンドそのものがあるのは Claude Code だけである。記録とライフサイクル管理のツールは、Python の標準ライブラリだけを使う。共通の評価用アダプターは、9つのホストすべてに対応している。ただし、ホストごとに、インストールされているバージョン、認証、使えるツール、報告される使用量の集計が異なる。改善ワークフローの実行要件と、実地検証のレポートを参照。教訓を記録するために、新しくエージェントとの連携を作る必要はない。<a href="evolution.html" class="fui-Link" data-inline="">経験の記録とスキルの改善</a>を参照。</p>
     </main>
   </div>
 </body>

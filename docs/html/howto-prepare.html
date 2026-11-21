@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="assets/fluent2.css">
   <link rel="stylesheet" href="assets/manual.css">
   <link rel="stylesheet" href="assets/manual-print.css" media="print">
+  <script defer src="assets/manual-code.js"></script>
 </head>
 <body class="fui-FluentProvider">
   <a class="skip-link fui-Link" href="#main">本文へ移動</a>
@@ -25,6 +26,15 @@
     <article class="page-content" aria-labelledby="page-title">
       <header class="intro">
         <h1 class="fui-Title1" id="page-title">事前準備を確認する</h1>
+<!-- page-summary:start -->
+<figure class="page-summary page-summary-groups">
+  <ul role="list" aria-label="概要">
+    <li><strong>コマンドを確認</strong><span>Git・uv・Python</span></li>
+    <li><strong>uv を入れる</strong><span>使う OS の手順を選ぶ</span></li>
+    <li><strong>通信を整える</strong><span>組織の証明書を使う</span></li>
+  </ul>
+</figure>
+<!-- page-summary:end -->
         <p>wiki を入れる前に、必要なコマンドと通信の設定を確認します。</p>
       </header>
       <section id="versions">
@@ -58,7 +68,7 @@ python --version</code></pre>
         <p>社内プロキシで TLS の検証に失敗する場合は、組織が配布した証明書が Windows の証明書ストアにあるか、管理者に確認します。</p>
         <ol>
           <li>次を実行し、uv が <code>UV_SYSTEM_CERTS</code> に対応することを確認します。<pre><code>uv sync --help | Select-String "UV_SYSTEM_CERTS"</code></pre></li>
-          <li>対応していれば、Windows のユーザー環境変数を設定します。<pre><code>[Environment]::SetEnvironmentVariable('UV_SYSTEM_CERTS', 'true', 'User')</code></pre></li>
+          <li>対応していれば、Windows のユーザー環境変数を設定します。<pre><code class="language-powershell">[Environment]::SetEnvironmentVariable('UV_SYSTEM_CERTS', 'true', 'User')</code></pre></li>
           <li>Claude デスクトップアプリを通知領域から終了します。</li>
           <li>Claude デスクトップアプリを起動し直します。</li>
         </ol>

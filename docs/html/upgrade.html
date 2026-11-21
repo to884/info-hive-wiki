@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="assets/fluent2.css">
   <link rel="stylesheet" href="assets/manual.css">
   <link rel="stylesheet" href="assets/manual-print.css" media="print">
+  <script defer src="assets/manual-code.js"></script>
 </head>
 <body class="fui-FluentProvider">
   <a class="skip-link fui-Link" href="#main">本文へ移動</a>
@@ -19,6 +20,15 @@
     </nav>
     <main class="page-content readme-content" id="main" tabindex="-1">
 <h1 id="アップグレード" class="fui-Title1">アップグレード</h1>
+<!-- page-summary:start -->
+<figure class="page-summary page-summary-flow">
+  <ol role="list" aria-label="概要">
+    <li><strong>対象を確認</strong><span>移植元の版と保存先</span></li>
+    <li><strong>更新を実行</strong><span>必要なファイルを追加</span></li>
+    <li><strong>差分を確認</strong><span>既存の規約を確認して反映</span></li>
+  </ol>
+</figure>
+<!-- page-summary:end -->
 <p>この文書は、移植元 llm-wiki-plugin の版ごとの変更点と、以前の版で作った wiki のアップグレード方法を説明する。バージョン番号は、とくに断らない限り移植元のものである。info-hive は移植元の v4.0.1 を起点にしている（<a href="upstream.html" class="fui-Link" data-inline="">UPSTREAM.md</a> を参照）。移植元の v4.0.0 で加わったホスト型 wiki は、info-hive には含めていない。</p>
 <h2 id="移植元の-v400-で変わった点" class="fui-Subtitle1">移植元の v4.0.0 で変わった点</h2>
 <p>v4.0.0 では、オプションの判定レイヤーが加わった。ローカルの wiki、ページの形式、ローカルの検索、すべてのコマンドは、これまでどおり動く。メジャーバージョンを上げたのは、Paperclip 連携を削除したためである。</p>
@@ -35,7 +45,7 @@
 <h2 id="v32-より前からのアップグレード" class="fui-Subtitle1">v3.2 より前からのアップグレード</h2>
 <p>v3.2.0 では、オプションの経験の記録と、評価済みのスキルの改善が加わった。既存の wiki、frontmatter、CLI のフラグは、引き続き互換性がある。バックグラウンドで動く最適化の仕組みが有効になることはない。</p>
 <p>設定した wiki に対して <code>/wiki:upgrade</code> を実行する。既存の実行環境のセットアップは、引き続き必須である。アップグレードでは、<code>.experience-template.json</code>、<code>.pattern-template.md</code>、<code>.evolution/README.md</code> を、ない場合にだけ追加する。カスタマイズしたファイルと SCHEMA.md は保持される。レビュー用に、オプションの <code>## Skill evolution</code> スキーマセクションを提案する。</p>
-<p>検証済みのタスクの経験には <code>/wiki:learn</code> を、根拠にもとづく改善案と、測定にもとづく採用には <code>/wiki:evolve</code> を使う。アップグレードの間に評価やスキルの置き換えが行われることはない。<code>.evolution/</code> は、いつでも作り直せる <code>.wiki-cache/</code> と違い、消えては困る履歴なのでバックアップしておく。ランナーの仕様、パイロットスイート、推論の予算、ロールバックについては<a href="evolution.html" class="fui-Link" data-inline="">学習とスキルの改善</a>を参照。</p>
+<p>検証済みのタスクの経験には <code>/wiki:learn</code> を、根拠にもとづく改善案と、測定にもとづく採用には <code>/wiki:evolve</code> を使う。アップグレードの間に評価やスキルの置き換えが行われることはない。<code>.evolution/</code> は、いつでも作り直せる <code>.wiki-cache/</code> と違い、消えては困る履歴なのでバックアップしておく。ランナーの仕様、パイロットスイート、推論の予算、ロールバックについては<a href="evolution.html" class="fui-Link" data-inline="">経験の記録とスキルの改善</a>を参照。</p>
 <h2 id="v30-より前からのアップグレード" class="fui-Subtitle1">v3.0 より前からのアップグレード</h2>
 <p>v3.0.0 では、プロバイダーを使った埋め込みが、既定のローカルの FastEmbed と sqlite-vec による検索に置き換わった。既存の Markdown には手を付けず、変わるのはいつでも作り直せるベクトルインデックスだけである。</p>
 <blockquote>

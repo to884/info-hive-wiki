@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="assets/fluent2.css">
   <link rel="stylesheet" href="assets/manual.css">
   <link rel="stylesheet" href="assets/manual-print.css" media="print">
+  <script defer src="assets/manual-code.js"></script>
 </head>
 <body class="fui-FluentProvider">
   <a class="skip-link fui-Link" href="#main">本文へ移動</a>
@@ -20,6 +21,15 @@
     <main class="page-content readme-content" id="main" tabindex="-1">
 <p>&lt;!-- Source: v3 local hybrid design: FastEmbed, sqlite-vec, BM25/RRF, JSON evidence, and incremental caches. --&gt;</p>
 <h1 id="検索と取得" class="fui-Title1">検索と取得</h1>
+<!-- page-summary:start -->
+<figure class="page-summary page-summary-flow">
+  <ol role="list" aria-label="概要">
+    <li><strong>検索語</strong><span>対象や期間を絞る</span></li>
+    <li><strong>照合</strong><span>語彙と意味の結果を統合</span></li>
+    <li><strong>根拠</strong><span>一致した節を見つける</span></li>
+  </ol>
+</figure>
+<!-- page-summary:end -->
 <p>v3.0.0 では、セクション単位のハイブリッド検索がローカルで動く既定の検索になった。FastEmbed がセマンティックなベクトルを生成し、sqlite-vec がそれを保存して順位を付け、BM25 が語の完全一致による精度を保ち、RRF が両方の結果リストを統合する。構造化された <code>--json</code> の証拠行と、内容のハッシュで管理する差分更新のキャッシュは、これまでと変わらない。</p>
 <p>検索スクリプトは、インデックスの1行の要約から適切な候補が見つからないときの代わりの手段である（<a href="workflows.html#wiki-にクエリする" class="fui-Link" data-inline="">クエリのワークフロー</a>を参照）。リポジトリのルートで実行する。</p>
 <pre><code class="language-bash">uv run --script skills/info-hive/scripts/wiki_search.py &quot;attention mechanism&quot; --wiki wiki --json

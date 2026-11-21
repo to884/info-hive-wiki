@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="assets/fluent2.css">
   <link rel="stylesheet" href="assets/manual.css">
   <link rel="stylesheet" href="assets/manual-print.css" media="print">
+  <script defer src="assets/manual-code.js"></script>
 </head>
 <body class="fui-FluentProvider">
   <a class="skip-link fui-Link" href="#main">本文へ移動</a>
@@ -19,6 +20,15 @@
     </nav>
     <main class="page-content readme-content" id="main" tabindex="-1">
 <h1 id="ワークフロー" class="fui-Title1">ワークフロー</h1>
+<!-- page-summary:start -->
+<figure class="page-summary page-summary-groups">
+  <ul role="list" aria-label="概要">
+    <li><strong>取り込む</strong><span>資料からページを作る</span></li>
+    <li><strong>質問する</strong><span>ページから根拠を探す</span></li>
+    <li><strong>点検する</strong><span>構造と内容を確認</span></li>
+  </ul>
+</figure>
+<!-- page-summary:end -->
 <p>wiki の操作は3つある。ソースの<a href="workflows.html#ソースを取り込む" class="fui-Link" data-inline="">取り込み</a>、蓄積した知識への<a href="workflows.html#wiki-にクエリする" class="fui-Link" data-inline="">クエリ</a>、健全性を確かめる <a href="workflows.html#lint-で健全性を確かめる" class="fui-Link" data-inline="">lint</a> である。ここでは、それぞれで何が起きるかをユーザーの視点から説明する。</p>
 <blockquote>
 <p>これらの操作は、コマンド（<code>/wiki:ingest</code>、<code>/wiki:query</code>、<code>/wiki:lint</code>）でも自然な言葉でも実行できる。記録の管理はエージェントが行う。ユーザーの役目は、ソースを選び、いくつかの質問に答え、編集を承認することである。</p>
@@ -123,8 +133,8 @@
 <p><strong>頻度</strong></p>
 <p>妥当な既定値は、構造の lint を取り込み 5 回ごと、内容の lint を毎週または取り込み 20 回ごと、足りない点の洗い出しを毎月である。lint のレポートが仕分けられる速さより早く増えていくなら、lint の頻度を上げるか、スキーマを見直す時期である。</p>
 </blockquote>
-<h2 id="学習とスキルの改善" class="fui-Subtitle1">学習とスキルの改善</h2>
-<p>完了したタスクは、<code>/wiki:learn</code> で変更不可の経験のソースと、再利用できるコンセプトのパターンにできる。<code>/wiki:evolve</code> は、回数に上限のある学習とパターンの統合を行い、スキル全体の変更を提案し、検証の結果で候補を選び、固定した選定結果を独立した最終テストで測定する。失敗した実験も残し、承認された変更を明示的に適用またはロールバックする。通常の事実情報としての wiki はそのまま使える。ワークフロー全体、実行できるパイロット、評価の範囲については、<a href="evolution.html" class="fui-Link" data-inline="">学習とスキルの改善</a>を参照。</p>
+<h2 id="経験の記録とスキルの改善" class="fui-Subtitle1">経験の記録とスキルの改善</h2>
+<p>完了したタスクは、<code>/wiki:learn</code> で変更不可の経験のソースと、再利用できるコンセプトのパターンにできる。<code>/wiki:evolve</code> は、回数に上限のある学習とパターンの統合を行い、スキル全体の変更を提案し、検証の結果で候補を選び、固定した選定結果を独立した最終テストで測定する。失敗した実験も残し、承認された変更を明示的に適用またはロールバックする。通常の事実情報としての wiki はそのまま使える。ワークフロー全体、実行できるパイロット、評価の範囲については、<a href="evolution.html" class="fui-Link" data-inline="">経験の記録とスキルの改善</a>を参照。</p>
     </main>
   </div>
 </body>
