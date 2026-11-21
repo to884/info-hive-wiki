@@ -71,7 +71,7 @@
 
       <section id="wikiquery">
         <h2 class="fui-Subtitle1">/wiki:query　出典付きの答えを得る</h2>
-        <p>質問を指定します。wiki のページを根拠に回答し、出典と確信度を示します。根拠が不足している部分はその旨を伝えます。必要に応じて検索を使います。</p>
+        <p>質問を指定すると、wiki のページをもとに、出典と確信度を添えて答えます。答えの一部で根拠が足りない場合は、どこが足りないかを伝えます。必要に応じて検索します。</p>
         <pre><code>/wiki:query &lt;質問&gt;</code></pre>
         <p>例 <code>/wiki:query 味噌の原料は？</code></p>
         <p><a class="fui-Link" data-inline href="explanation-how-wiki-works.html#lookup">索引と検索の仕組み</a></p>
@@ -79,7 +79,7 @@
 
       <section id="wikilint">
         <h2 class="fui-Subtitle1">/wiki:lint　構造と内容を点検する</h2>
-        <p>リンク切れ、孤立ページ、読み込みエラーなどの構造と、記述の矛盾や不足を点検します。<code>--suggest-pages</code> を付けると独立ページの候補も示します。</p>
+        <p>リンク切れ、孤立ページ、読み込みエラーなどを調べます。記述の矛盾や不足も確認します。<code>--suggest-pages</code> を付けると独立ページの候補も示します。</p>
         <pre><code>/wiki:lint [--suggest-pages]</code></pre>
         <p>例 <code>/wiki:lint</code></p>
         <p><a class="fui-Link" data-inline href="tutorial-second-source.html#lint">点検結果の見方</a></p>

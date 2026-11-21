@@ -20,7 +20,7 @@
     </nav>
     <main class="page-content readme-content" id="main" tabindex="-1">
 <h1 id="移植元の記録" class="fui-Title1">移植元の記録</h1>
-<p>info-hive は、<span>praneybehl/llm-wiki-plugin</span>（MIT ライセンス、作者 Praney Behl）を日本語向けに移植したものである。移植元の履歴は取り込まず、ファイルをコピーして独立させた（<span>移植計画</span>の方針 A）。</p>
+<p>info-hive は、<span>praneybehl/llm-wiki-plugin</span>（MIT ライセンス、作者 Praney Behl）を日本語向けに移植したものです。ファイルをコピーし、独立したリポジトリとして移植を始めました。移植元の履歴は引き継いでいません（<span>移植計画</span>の方針 A）。</p>
 <h2 id="起点" class="fui-Subtitle1">起点</h2>
 <div class="table-scroll" role="region" aria-label="表" tabindex="0">
 <table class="fui-Table">
@@ -50,7 +50,7 @@
 </tbody>
 </table>
 </div>
-<p>起点のコミットに、手元のフォーク（<code>to884/llm-wiki-plugin</code>）にあった未コミットの日本語訳 94 ファイルを重ねた状態を取り込んだ。訳を入れた各ファイルの SHA-256 は 開発用のリポジトリの <span>docs/upstream/translation-hashes.txt</span> に残してある。</p>
+<p>起点のコミットに、手元のフォーク（<code>to884/llm-wiki-plugin</code>）にあった未コミットの日本語訳 94 ファイルを重ねた状態を取り込みました。訳を入れた各ファイルの SHA-256 は 開発用のリポジトリの <span>docs/upstream/translation-hashes.txt</span> に残してあります。</p>
 <h2 id="取り込まなかったもの" class="fui-Subtitle1">取り込まなかったもの</h2>
 <div class="table-scroll" role="region" aria-label="表" tabindex="0">
 <table class="fui-Table">
@@ -79,11 +79,11 @@
 </tr>
 <tr class="fui-TableRow">
 <td class="fui-TableCell"><code>eval/decisions/results-fake.json</code>、<code>eval/decisions/results-local-d1-2b.json</code></td>
-<td class="fui-TableCell">移植元の英語の評価セットでの測定記録。判定レイヤーのしきい値の根拠として移植元で参照できる</td>
+<td class="fui-TableCell">移植元の英語の評価セットでの測定記録。判定レイヤーのしきい値の根拠を、移植元で確認できます。</td>
 </tr>
 <tr class="fui-TableRow">
 <td class="fui-TableCell"><code>eval/evolution/workflows/build_suite.py</code>、<code>eval/evolution/workflows/frozen-runtime.patch</code></td>
-<td class="fui-TableCell">移植元の固定コミットを <code>git show</code> で読むツールとその入力。スイートを作り直すときは移植元の起点のコミットで実行する</td>
+<td class="fui-TableCell">移植元の固定コミットを <code>git show</code> で読むツールとその入力。スイートを作り直すときは、移植元の起点のコミットで実行します。</td>
 </tr>
 <tr class="fui-TableRow">
 <td class="fui-TableCell"><code>AGENTS.md</code></td>
@@ -94,19 +94,19 @@
 </div>
 <h2 id="取り込み後の主な変更" class="fui-Subtitle1">取り込み後の主な変更</h2>
 <ul>
-<li>プラグイン名を <code>wiki</code>、マーケットプレイス名とスキル名を <code>info-hive</code> にした。マーケットプレイスの定義は、別のリポジトリ <span>to884/info-hive-marketplace</span> に置く。コマンドは <code>commands/</code> の直下に移し、<code>/wiki:query</code> の形で起動する。</li>
-<li>スキルのディレクトリを <code>skills/llm-wiki/</code> から <code>skills/info-hive/</code> に改名した。</li>
-<li>判定レイヤーの環境変数を <code>LLM_WIKI_DECISIONS*</code> から <code>INFO_HIVE_DECISIONS*</code> に、モデルのキャッシュを <code>~/.cache/llm-wiki/</code> から <code>~/.cache/info-hive/</code> に変えた。</li>
+<li>プラグイン名を <code>wiki</code>、マーケットプレイス名とスキル名を <code>info-hive</code> にしました。マーケットプレイスの定義は、別のリポジトリ <span>to884/info-hive-marketplace</span> に置きます。コマンドは <code>commands/</code> の直下に移し、<code>/wiki:query</code> の形で起動します。</li>
+<li>スキルのディレクトリを <code>skills/llm-wiki/</code> から <code>skills/info-hive/</code> に改名しました。</li>
+<li>判定レイヤーの環境変数を <code>LLM_WIKI_DECISIONS*</code> から <code>INFO_HIVE_DECISIONS*</code> に、モデルのキャッシュを <code>~/.cache/llm-wiki/</code> から <code>~/.cache/info-hive/</code> に変えました。</li>
 </ul>
-<p>日本語への対応の内容は <span>移植計画</span> と <code>CHANGELOG.md</code> にまとめる。移植元の v0.1.0 から v4.0.1 までの変更履歴の日本語訳は <span>docs/upstream-changelog.md</span> に残している。</p>
+<p>日本語への対応の内容は <span>移植計画</span> と <code>CHANGELOG.md</code> にまとめます。移植元の v0.1.0 から v4.0.1 までの変更履歴の日本語訳は <span>docs/upstream-changelog.md</span> に残しています。</p>
 <h2 id="移植元の修正を取り込む手順" class="fui-Subtitle1">移植元の修正を取り込む手順</h2>
-<p>移植元に役立つ修正が入ったら、必要なものだけを取り込む。履歴を共有していないので、パスの違い（<code>skills/llm-wiki/</code> と <code>skills/info-hive/</code>、<code>commands/wiki/</code> と <code>commands/</code>）に注意する。</p>
+<p>移植元に役立つ修正が入ったら、必要なものだけを取り込みます。履歴を共有していないので、パスの違い（<code>skills/llm-wiki/</code> と <code>skills/info-hive/</code>、<code>commands/wiki/</code> と <code>commands/</code>）に注意します。</p>
 <pre><code class="language-bash">git remote add upstream https://github.com/praneybehl/llm-wiki-plugin.git   # 初回だけ
 git fetch upstream
 git log --oneline 2d24ccf..upstream/main
 git cherry-pick &lt;コミット&gt;   # 衝突したら、パスを読み替えて手で直す
 </code></pre>
-<p>取り込んだら、下の表に 1 行追加する。</p>
+<p>取り込んだら、下の表に 1 行追加します。</p>
 <h2 id="取り込んだ移植元の修正" class="fui-Subtitle1">取り込んだ移植元の修正</h2>
 <div class="table-scroll" role="region" aria-label="表" tabindex="0">
 <table class="fui-Table">

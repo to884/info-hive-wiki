@@ -36,7 +36,7 @@
   </ol>
 </figure>
 <!-- page-summary:end -->
-        <p>Code タブで wiki が接続されないときや、初期化の実行環境が準備できないときに使います。</p>
+        <p>Code タブで wiki につながらないときや、初期化の準備でエラーが出たときに使う手順です。</p>
       </header>
       <section id="help">
         <h2 class="fui-Subtitle1">コマンド一覧が出ないとき</h2>
@@ -56,7 +56,7 @@
 
       <section id="diagnostic">
         <h2 class="fui-Subtitle1">Windows で起動の診断を実行する</h2>
-        <p>新しい PowerShell で次を実行します。<code>0.39.1</code> は導入済みの版に合わせます。最後の行が <code>0</code> なら起動診断は成功です。</p>
+        <p>新しい PowerShell で次を実行します。例の <code>0.39.1</code> は、Code タブの「Wiki」の詳細に表示される、プラグインの版に置き換えてください。最後の行が <code>0</code> なら、起動診断は成功です。</p>
         <pre><code>$version = '0.39.1'
 $launcher = Join-Path $env:USERPROFILE ".claude\plugins\cache\info-hive\wiki\$version\skills\info-hive\scripts\wiki_mcp_launch.py"
 uv run --quiet --script $launcher --ensure

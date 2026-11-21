@@ -44,7 +44,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.</pre>
 <h2 id="markdown-parser" class="fui-Title1">同梱したサードパーティのパッケージ</h2>
-<p><code>wiki_pages.py</code> が本文の wikilink を拾うときに使う Markdown の解析器を、ここに同梱している。lint と統計を、何も入れずに動かすためである。閲覧（browse）の中核も同じものを使い、どこがコードでどこが本文かの規則を 1 か所にする（ADR-0010 の決定の 1）。</p>
+<p><code>wiki_pages.py</code> は、同梱の Markdown 解析器で本文の wikilink を検出します。lint と統計は、別途パッケージをインストールせずに使えます。閲覧（browse）でも同じ解析器を使い、コードと本文を見分ける規則を 1 か所にまとめています（ADR-0010 の決定の 1）。</p>
 <div class="table-scroll" role="region" aria-label="表" tabindex="0">
 <table class="fui-Table">
 <thead class="fui-TableHeader">
@@ -75,16 +75,16 @@ SOFTWARE.</pre>
 </table>
 </div>
 <ul>
-<li>どちらも PyPI の wheel をそのまま展開したもので、中身は書き換えていない。SHA-256 は、PyPI が公表している値と一致することを確かめた（2026年11月9日）。</li>
-<li>markdown-it-py は mdurl に依存する。どちらも純粋な Python で、ほかの依存はない。</li>
-<li><code>wiki_pages.py</code> は、このディレクトリを <code>sys.path</code> の先頭に足してから読み込む。別の場所の <code>markdown_it</code> や <code>mdurl</code> が先に読み込まれていても、同梱したものに替える。読み込んだものが同梱したもので、版が <code>MARKDOWN_IT_VERSION</code> と <code>MDURL_VERSION</code> と同じことを確かめ、違えば止まる。</li>
+<li>どちらも PyPI の wheel をそのまま展開したもので、中身は書き換えていません。2026年11月9日に、SHA-256 が PyPI の公表値と一致することを確認しました。</li>
+<li>markdown-it-py は mdurl に依存します。どちらも純粋な Python で、ほかの依存はありません。</li>
+<li><code>wiki_pages.py</code> は、このディレクトリを <code>sys.path</code> の先頭に追加してから読み込みます。別の場所の <code>markdown_it</code> や <code>mdurl</code> が先に読み込まれていても、同梱したものに替えます。読み込んだものが同梱したもので、版が <code>MARKDOWN_IT_VERSION</code> と <code>MDURL_VERSION</code> と同じことを確かめ、違えば止まります。</li>
 </ul>
 <h3 id="markdown-parser-版を上げるとき" class="fui-Subtitle1">版を上げるとき</h3>
 <ol>
-<li>新しい版の wheel を取得し、SHA-256 を PyPI の公表値と照らす。</li>
-<li><code>markdown_it/</code> と <code>mdurl/</code> を入れ替え、ライセンスの文書も入れ替える。</li>
-<li><code>wiki_pages.py</code> の <code>MARKDOWN_IT_VERSION</code> と <code>MDURL_VERSION</code> を上げる。読み込んだ版がこの定数と違えば止まる。MCP サーバーの版（<code>wiki_mcp_common.code_version</code>）は <code>_vendor/</code> の中身も含めて計算するので、動いているサーバーは入れ替わる。検索のパースキャッシュは、解析器の名前（<code>PARSER_ID</code>）が変わるので作り直される。</li>
-<li>開発リポジトリの <code>tests/wiki/test_page_set.py</code> の例が通ることを確かめる。閲覧の中核も同じ版にそろえる。</li>
+<li>新しい版の wheel を取得し、SHA-256 を PyPI の公表値と照らします。</li>
+<li><code>markdown_it/</code> と <code>mdurl/</code> を入れ替え、ライセンスの文書も入れ替えます。</li>
+<li><code>wiki_pages.py</code> の <code>MARKDOWN_IT_VERSION</code> と <code>MDURL_VERSION</code> を上げます。読み込んだ版がこの定数と違えば止まります。MCP サーバーの版（<code>wiki_mcp_common.code_version</code>）は <code>_vendor/</code> の中身も含めて計算するので、動いているサーバーは入れ替わります。検索のパースキャッシュは、解析器の名前（<code>PARSER_ID</code>）が変わるので作り直されます。</li>
+<li>開発リポジトリの <code>tests/wiki/test_page_set.py</code> の例が成功することを確かめます。閲覧の中核も同じ版にそろえます。</li>
 </ol>
 
 <h2 id="markdown-parser-licenses">Markdown 解析器のライセンス</h2>
@@ -181,7 +181,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 IN THE SOFTWARE.</pre>
 <h2 id="browse-assets" class="fui-Title1">閲覧（browse）の画面の資産</h2>
-<p>閲覧の画面と静的の書き出しで使うファイルを置く。画面で使う CSS と JavaScript は、ページの CSP（<code>style-src 'self'; script-src 'self'</code>）に従って外部ファイルとして読み込む。</p>
+<p>閲覧画面の表示と静的サイトの書き出しに使うファイルです。閲覧画面は、ページの CSP（<code>style-src 'self'; script-src 'self'</code>）に従って、CSS と JavaScript を外部ファイルとして読み込みます。</p>
 <div class="table-scroll" role="region" aria-label="表" tabindex="0">
 <table class="fui-Table">
 <thead class="fui-TableHeader">
@@ -205,11 +205,11 @@ IN THE SOFTWARE.</pre>
 </tr>
 <tr class="fui-TableRow">
 <td class="fui-TableCell"><code>figures.js</code></td>
-<td class="fui-TableCell">本文の Mermaid のフェンスを図として描くスクリプト（親の側）。サーバーの方式でだけ動く（ADR-0030）</td>
+<td class="fui-TableCell">本文の Mermaid のフェンスを図として描くスクリプト（親の側）。サーバー方式でのみ動きます（ADR-0030）。</td>
 </tr>
 <tr class="fui-TableRow">
 <td class="fui-TableCell"><code>mermaid-frame.html</code>、<code>mermaid-frame.js</code></td>
-<td class="fui-TableCell">Mermaid を動かす sandbox の枠の文書と、その中のスクリプト。サーバーがトークンのない <code>/_frame/&lt;版&gt;/</code> から配り、静的の書き出しには入れない</td>
+<td class="fui-TableCell">Mermaid を動かす sandbox の枠の文書と、その中のスクリプト。サーバーがトークンのない <code>/_frame/&lt;版&gt;/</code> から配り、静的サイトには含めません。</td>
 </tr>
 <tr class="fui-TableRow">
 <td class="fui-TableCell"><code>mermaid.tiny.js</code></td>
@@ -225,13 +225,13 @@ IN THE SOFTWARE.</pre>
 </tr>
 <tr class="fui-TableRow">
 <td class="fui-TableCell"><code>licenses/</code></td>
-<td class="fui-TableCell">同梱したファイルのライセンスの文書。閲覧の出力には含めない</td>
+<td class="fui-TableCell">同梱したファイルのライセンスの文書。閲覧の出力には含めません。</td>
 </tr>
 </tbody>
 </table>
 </div>
 <h3 id="browse-同梱した-fluent-2-の-css" class="fui-Subtitle1">同梱した Fluent 2 の CSS</h3>
-<p><code>fluent2.css</code> は、スキル <code>fluent2-html-replica</code>（to884/fluent2-html-replica の <code>skills/fluent2-html-replica/</code>）に同梱された <code>assets/fluent2.css</code> を、中身を書き換えずに写したものである。プラグインは、このファイルだけを読み、スキルの場所には依存しない。</p>
+<p><code>fluent2.css</code> は、スキル <code>fluent2-html-replica</code>（to884/fluent2-html-replica の <code>skills/fluent2-html-replica/</code>）に同梱された <code>assets/fluent2.css</code> を、中身を変えずにコピーしたファイルです。プラグインは同梱したこのファイルだけを読みます。スキルの場所には依存しません。</p>
 <div class="table-scroll" role="region" aria-label="表" tabindex="0">
 <table class="fui-Table">
 <thead class="fui-TableHeader">
@@ -263,26 +263,26 @@ IN THE SOFTWARE.</pre>
 </tr>
 <tr class="fui-TableRow">
 <td class="fui-TableCell">ライセンス</td>
-<td class="fui-TableCell">MIT（<span>licenses/fluent2-html-replica.LICENSE</span>）。元になった Fluent UI（MIT、Copyright (c) Microsoft Corporation）と Fluent UI System Icons（MIT）の表示は <span>licenses/fluent2-html-replica.THIRD-PARTY-NOTICES.txt</span> にある。同じ表示が <code>fluent2.css</code> の先頭のコメントにも入っているので、閲覧の出力に写した <code>fluent2.css</code> にも表示が付いて回る</td>
+<td class="fui-TableCell">MIT（<span>licenses/fluent2-html-replica.LICENSE</span>）。元になった Fluent UI（MIT、Copyright (c) Microsoft Corporation）と Fluent UI System Icons（MIT）の表示は <span>licenses/fluent2-html-replica.THIRD-PARTY-NOTICES.txt</span> にあります。同じ表示が <code>fluent2.css</code> の先頭のコメントにも入っています。閲覧の出力にコピーした <code>fluent2.css</code> にも表示が残ります。</td>
 </tr>
 </tbody>
 </table>
 </div>
 <ul>
-<li>このプラグインと <code>fluent2.css</code> は Microsoft の製品ではなく、Microsoft の提携、推薦、承認を受けたものでもない。Fluent、Microsoft、Segoe は Microsoft Corporation の商標である。</li>
-<li>書体は同梱しない。<code>fluent2.css</code> は、フォントスタックに Segoe UI と日本語の書体（Yu Gothic UI、Meiryo UI ほか）の名前を並べるだけである。Segoe UI のない環境では、並びの次の書体で表示する。</li>
-<li>スキルの <code>fluent2.js</code> は同梱しない。要素の <code>style</code> に書き込むので、閲覧の画面の約束（要素の <code>style</code> を変えない）に反するからである。部品のふるまいが要るときは、<code>app.js</code> が受け持つ。</li>
-<li><code>fluent2.css</code> は生成物なので、手で直さない。閲覧の独自の規則は <code>style.css</code> に書き、<code>fluent2.css</code> のあとに読む。</li>
+<li>このプラグインと <code>fluent2.css</code> は Microsoft の製品ではなく、Microsoft の提携、推薦、承認を受けたものでもありません。Fluent、Microsoft、Segoe は Microsoft Corporation の商標です。</li>
+<li>書体は同梱しません。<code>fluent2.css</code> は、フォントスタックに Segoe UI と日本語の書体（Yu Gothic UI、Meiryo UI ほか）の名前を並べるだけです。Segoe UI のない環境では、並びの次の書体で表示します。</li>
+<li>スキルの <code>fluent2.js</code> は同梱しません。要素の <code>style</code> に書き込むので、閲覧の画面の約束（要素の <code>style</code> を変えない）に反するからです。部品のふるまいが要るときは、<code>app.js</code> が受け持ちます。</li>
+<li><code>fluent2.css</code> は生成物なので、手で直しません。閲覧の独自の規則は <code>style.css</code> に書き、<code>fluent2.css</code> のあとに読みます。</li>
 </ul>
 <h3 id="browse-写し直すとき" class="fui-Subtitle1">写し直すとき</h3>
 <ol>
-<li>スキル <code>fluent2-html-replica</code> を更新し、<code>SKILL.md</code> の基準の版と、<code>references/08-plain-html.md</code> の「互換性の注意」を読む。CSS 変数の名前は Fluent の内部の実装で、版で変わりうる。</li>
-<li>スキルの <code>assets/fluent2.css</code> を、このディレクトリの <code>fluent2.css</code> に写す。<code>LICENSE</code> と <code>THIRD-PARTY-NOTICES.txt</code> も、<code>licenses/</code> の同じ名前のファイルに写す。</li>
-<li>上の表の基準の版、大きさ、SHA-256、写した日を書き換える。</li>
-<li>開発リポジトリの閲覧の試験（<code>tests/wiki/test_browse*.py</code> と <code>tests/wiki/browse/</code>）を流し、明るい配色と暗い配色の画面を確かめる。</li>
+<li>スキル <code>fluent2-html-replica</code> を更新し、<code>SKILL.md</code> の基準の版と、<code>references/08-plain-html.md</code> の「互換性の注意」を読みます。CSS 変数の名前は Fluent の内部実装で、版によって変わることがあります。</li>
+<li>スキルの <code>assets/fluent2.css</code> を、このディレクトリの <code>fluent2.css</code> に写します。<code>LICENSE</code> と <code>THIRD-PARTY-NOTICES.txt</code> も、<code>licenses/</code> の同じ名前のファイルに写します。</li>
+<li>上の表の基準の版、大きさ、SHA-256、写した日を書き換えます。</li>
+<li>開発リポジトリの閲覧の試験（<code>tests/wiki/test_browse*.py</code> と <code>tests/wiki/browse/</code>）を実行し、明るい配色と暗い配色の画面を確かめます。</li>
 </ol>
 <h3 id="browse-同梱した-mermaid" class="fui-Subtitle1">同梱した Mermaid</h3>
-<p><code>mermaid.tiny.js</code> は、npm の <code>@mermaid-js/tiny</code> 12.3.0 の <code>dist/mermaid.tiny.js</code> を、中身を書き換えずに写したものである。Mermaid の全部入りの束（<code>mermaid.min.js</code>）は、elkjs（EPL-2.0 OR GPL-3.0-or-later）を含むので使わない。tiny は、マインドマップ、アーキテクチャ図、KaTeX の数式、<code>layout: elk</code> を含まず、それらの図は描けずにコードのまま出る。</p>
+<p><code>mermaid.tiny.js</code> は、npm の <code>@mermaid-js/tiny</code> 12.3.0 の <code>dist/mermaid.tiny.js</code> を、中身を変えずにコピーしたファイルです。Mermaid の全機能を含むファイル（<code>mermaid.min.js</code>）は、elkjs（EPL-2.0 OR GPL-3.0-or-later）を含むため使いません。tiny で描画できないマインドマップ、アーキテクチャ図、KaTeX の数式、<code>layout: elk</code> はコードとして表示します。</p>
 <div class="table-scroll" role="region" aria-label="表" tabindex="0">
 <table class="fui-Table">
 <thead class="fui-TableHeader">
@@ -314,24 +314,24 @@ IN THE SOFTWARE.</pre>
 </tr>
 <tr class="fui-TableRow">
 <td class="fui-TableCell">ライセンス</td>
-<td class="fui-TableCell">MIT（<span>licenses/mermaid.LICENSE</span>）。束に含まれる依存の表示は <span>licenses/mermaid.THIRD-PARTY-NOTICES.txt</span> にある。Mermaid の MIT の表示は、閲覧の出力に必ず入る <code>mermaid-frame.js</code> の先頭のコメントにもある</td>
+<td class="fui-TableCell">MIT（<span>licenses/mermaid.LICENSE</span>）。束に含まれる依存の表示は <span>licenses/mermaid.THIRD-PARTY-NOTICES.txt</span> にあります。Mermaid の MIT の表示は、閲覧の出力に必ず入る <code>mermaid-frame.js</code> の先頭のコメントにもあります。</td>
 </tr>
 </tbody>
 </table>
 </div>
 <ul>
-<li><code>.gitattributes</code> で、<code>mermaid.tiny.js</code> を <code>-text</code> にしている。改行の変換を受けず、上の SHA-256 のまま持つ。</li>
-<li>枠の 3 つのファイル（<code>mermaid-frame.html</code>、<code>mermaid-frame.js</code>、<code>mermaid.tiny.js</code>）は、サーバーが <code>/_frame/&lt;枠の版&gt;/</code> から、キャッシュを許して配る。どれかを変えたら、枠の版を上げる。枠の版は、<code>wiki_browse_core.py</code> の <code>FRAME_VERSION</code>、<code>figures.js</code> の <code>FRAME_VERSION</code>、この表の 3 か所にあり、試験が一致を確かめる。</li>
+<li><code>.gitattributes</code> で、<code>mermaid.tiny.js</code> を <code>-text</code> にしています。改行の変換を受けず、上の SHA-256 のまま持ちます。</li>
+<li>枠の 3 つのファイル（<code>mermaid-frame.html</code>、<code>mermaid-frame.js</code>、<code>mermaid.tiny.js</code>）は、サーバーが <code>/_frame/&lt;枠の版&gt;/</code> から、キャッシュを許して配ります。どれかを変えたら、枠の版を上げます。枠の版は、<code>wiki_browse_core.py</code> の <code>FRAME_VERSION</code>、<code>figures.js</code> の <code>FRAME_VERSION</code>、この表の 3 か所にあり、試験が一致を確かめます。</li>
 </ul>
 <h4 id="browse-mermaid-を写し直すとき" class="fui-Subtitle2">Mermaid を写し直すとき</h4>
 <ol>
-<li><code>npm pack @mermaid-js/tiny@&lt;版&gt;</code> で tarball を取り、integrity をレジストリの公表値と照らす。全部入りの束に替えるときは、束の中の依存のライセンス（とくに elkjs）を確かめる。</li>
-<li><code>package/dist/mermaid.tiny.js</code> を <code>mermaid.tiny.js</code> に、<code>package/LICENSE</code> を <code>licenses/mermaid.LICENSE</code> に写す。<code>licenses/mermaid.THIRD-PARTY-NOTICES.txt</code> は、その版の package.json の依存のライセンスの文書から作り直す。</li>
-<li>上の表の版、integrity、大きさ、SHA-256、写した日を書き換え、枠の版を上げる（3 か所）。</li>
-<li>開発リポジトリの閲覧の試験（<code>tests/wiki/test_browse*.py</code> と <code>tests/wiki/browse/figures.test.mjs</code>）を、5 つのブラウザで流す。</li>
+<li><code>npm pack @mermaid-js/tiny@&lt;版&gt;</code> で tarball を取り、integrity をレジストリの公表値と照らします。全部入りの束に替えるときは、束の中の依存のライセンス（とくに elkjs）を確かめます。</li>
+<li><code>package/dist/mermaid.tiny.js</code> を <code>mermaid.tiny.js</code> に、<code>package/LICENSE</code> を <code>licenses/mermaid.LICENSE</code> に写します。<code>licenses/mermaid.THIRD-PARTY-NOTICES.txt</code> は、その版の package.json の依存のライセンスの文書から作り直します。</li>
+<li>上の表の版、integrity、大きさ、SHA-256、写した日を書き換えます。枠の版を 3 か所で上げます。</li>
+<li>開発リポジトリの閲覧の試験（<code>tests/wiki/test_browse*.py</code> と <code>tests/wiki/browse/figures.test.mjs</code>）を、5 つのブラウザーで実行します。</li>
 </ol>
 <h3 id="browse-同梱した-pele" class="fui-Subtitle1">同梱した Pele</h3>
-<p><code>pele.mjs</code> は、npm の <code>pele</code> 1.13.0 の <code>dist/pele.js</code> をバイト列のまま写したファイルである。静的サイトでは生成した SVG を HTML から参照する。Pele の束と <code>render-pele.mjs</code> は書き出し先に含めない。</p>
+<p><code>pele.mjs</code> は、npm の <code>pele</code> 1.13.0 の <code>dist/pele.js</code> を、バイト列を変えずにコピーしたファイルです。静的サイトでは、HTML から生成済みの SVG を参照します。Pele のバンドルと <code>render-pele.mjs</code> は書き出し先に含めません。</p>
 <div class="table-scroll" role="region" aria-label="表" tabindex="0">
 <table class="fui-Table">
 <thead class="fui-TableHeader">
@@ -360,7 +360,7 @@ IN THE SOFTWARE.</pre>
 </tbody>
 </table>
 </div>
-<p>更新するときは <code>npm pack pele@&lt;版&gt;</code> で tarball を取り、integrity をレジストリの公表値と照らす。束とライセンス文書を写し、表の値を更新して、開発リポジトリの <code>tests/wiki/test_browse.py</code> と <code>tests/wiki/browse/figures.test.mjs</code> を流す。</p>
+<p>更新するときは <code>npm pack pele@&lt;版&gt;</code> で tarball を取り、integrity をレジストリの公表値と照らします。束とライセンス文書を写し、表の値を更新して、開発リポジトリの <code>tests/wiki/test_browse.py</code> と <code>tests/wiki/browse/figures.test.mjs</code> を実行します。</p>
 
 <h2 id="browse-licenses">閲覧画面のライセンス</h2>
 <h3>fluent2-html-replica.LICENSE</h3>

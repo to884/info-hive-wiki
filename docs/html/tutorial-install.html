@@ -38,7 +38,8 @@
   </ol>
 </figure>
 <!-- page-summary:end -->
-        <p>Windows 11 の x64 PC で、Claude デスクトップアプリの Code タブから wiki を使えるようにします。Windows 11 の VM で Claude 5.11492.5 と wiki 0.39.1 の導入を確認しました。画面の表記は Claude 6.6395 で照合しています。</p>
+        <p>Windows 11 の x64 PC で、Claude デスクトップアプリの Code タブに wiki を導入します。</p>
+        <p>Windows 11 の VM で、Claude 5.11492.5 に wiki 0.39.1 を導入できることを確認しました。手順に載せた画面の表記は Claude 6.6395 で確認しています。</p>
       </header>
       <section id="desktop">
         <h2 class="fui-Subtitle1">Claude デスクトップアプリを用意する</h2>
@@ -46,7 +47,7 @@
         <ol>
           <li>Anthropic の公式パッケージ <a class="fui-Link" data-inline href="https://claude.ai/api/desktop/win32/x64/msix/latest/redirect">Claude MSIX（Windows x64）</a>をダウンロードします。</li>
           <li>スタートメニューの「Windows PowerShell」を「管理者として実行」で開きます。</li>
-          <li>次のコマンドの「ダウンロードした MSIX のパス」を、ダウンロードしたファイルのフルパスに置き換えて実行します。<pre><code>Add-AppxPackage -Path "ダウンロードした MSIX のパス"</code></pre></li>
+          <li>次のコマンドの「ダウンロードした MSIX のパス」を、ファイルのフルパスに置き換えて実行します。<pre><code>Add-AppxPackage -Path "ダウンロードした MSIX のパス"</code></pre></li>
         </ol>
         <p>スタートメニューから Claude を開いてサインインします。</p>
       </section>

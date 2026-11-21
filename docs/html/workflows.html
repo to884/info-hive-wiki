@@ -29,12 +29,12 @@
   </ul>
 </figure>
 <!-- page-summary:end -->
-<p>wiki の操作は3つある。ソースの<a href="workflows.html#ソースを取り込む" class="fui-Link" data-inline="">取り込み</a>、蓄積した知識への<a href="workflows.html#wiki-にクエリする" class="fui-Link" data-inline="">クエリ</a>、健全性を確かめる <a href="workflows.html#lint-で健全性を確かめる" class="fui-Link" data-inline="">lint</a> である。ここでは、それぞれで何が起きるかをユーザーの視点から説明する。</p>
+<p>wiki の基本操作は 3 つあります。<a href="workflows.html#ソースを取り込む" class="fui-Link" data-inline="">ソースの取り込み</a>、<a href="workflows.html#wiki-にクエリする" class="fui-Link" data-inline="">wiki へのクエリ</a>、<a href="workflows.html#lint-で健全性を確かめる" class="fui-Link" data-inline="">lint による点検</a>です。</p>
 <blockquote>
-<p>これらの操作は、コマンド（<code>/wiki:ingest</code>、<code>/wiki:query</code>、<code>/wiki:lint</code>）でも自然な言葉でも実行できる。記録の管理はエージェントが行う。ユーザーの役目は、ソースを選び、いくつかの質問に答え、編集を承認することである。</p>
+<p>これらの操作は、コマンド（<code>/wiki:ingest</code>、<code>/wiki:query</code>、<code>/wiki:lint</code>）でも自然な言葉でも実行できます。記録の管理はエージェントが行います。ユーザーの役目は、ソースを選び、いくつかの質問に答え、編集を承認することです。</p>
 </blockquote>
 <h2 id="ソースを取り込む" class="fui-Subtitle1">ソースを取り込む</h2>
-<p>新しいソースが届いたら、次の手順で取り込む。各手順が次の手順に必要な文脈を作るので、順序が重要である。</p>
+<p>新しいソースが届いたら、次の順序で取り込みます。各手順の結果を、次の手順で使います。</p>
 <pre><code class="language-mermaid">flowchart TD
   src[&quot;place raw source in raw/&quot;] --&gt; reads[&quot;agent reads (chunk if large)&quot;]
   reads --&gt; disc[&quot;discuss takeaways&quot;]
@@ -47,19 +47,19 @@
   graphref --&gt; logline[&quot;append one line to log.md&quot;]
 </code></pre>
 <ol>
-<li><strong>raw ソースを置く。</strong> ファイルを <code>raw/</code> に置く。ファイル名は内容が分かるものにし、元の拡張子を付ける。日本語の題名なら日本語のファイル名でよい（<code>インボイス制度の手引き-2023.pdf</code>）。英字は小文字にしてハイフンでつなぎ、空白は使わない。Web ページは URL を渡せば <code>wiki_fetch.py</code> が本文を <code>.md</code> にして保存し、日本語でなければエージェントが訳して画像に補足を書く。PDF は <code>.pdf</code>、文字起こしは <code>.md</code> か <code>.txt</code> にする。このスラッグが、ソースの要約ページのスラッグになる。</li>
-<li><strong>エージェントが読む。</strong> 短いソースは一度に読む。長いソース（約 30 ページを超える論文、書籍の章、数時間分の文字起こし）はセクションごとに分割して読み、wiki の作業でコンテキストウィンドウがあふれないようにする。</li>
-<li><strong>要点を話し合う。</strong> エージェントが、目立った点、意外だった点、既存のページとつながる点を3〜4文で示す。ユーザーの反応によって編集の内容が変わる（「手法は省いて、結果だけでよい」「これは X のページと矛盾するので、指摘しておいて」など）。人が介在しないバッチモードではこの手順をスキップし、編集は控えめにする。</li>
-<li><strong>エージェントが関係するページを調べる。</strong> インデックスと候補のページを読み、更新するページ、新しく作るページ、指摘すべき矛盾の一覧を作る。この調査によって、重複したページができるのを防ぐ。</li>
-<li><strong>ソースの要約ページを書く。</strong> <code>wiki/sources/</code> に、主な主張、手法、結論、未解決の問いを書き、最後に <code>[[wikilinks]]</code> を並べた「関係するページ」のセクションを置く。ソース全体を言い換えたものではなく、要約である。その直前の「取り込んだ内容と載せたページ」のセクションには、手順 6 と 7 のあとで、抜き出した主張ごとに、どのページへ送ったか（<code>create</code>、<code>update</code>、<code>source_only</code>）と理由を表で残す。</li>
-<li><strong>関係するページを必要な箇所だけ更新する。</strong> 全体を書き直すのではなく、<code>str_replace</code> を使う。裏づけが得られた内容には出典を加える。矛盾する内容には、両方のソースを示した「Contradictions」の注記を目立つように付ける（黙って上書きすることはない）。</li>
-<li><strong>新しいページを作る。</strong> ページを作るに値する新しいエンティティやコンセプトについて作り、どのページにも frontmatter、本文、少なくとも1つの被リンクを付ける。どこからもリンクされていないページは、lint の検出結果にとどまらず、バグとして扱う。</li>
-<li><strong>インデックスを更新する。</strong> 新しいページごとに1行を追加する。<code>index.md</code> が 300 行を超えたら、インデックスを分割する時期である。<a href="commands.html#wikistats" class="fui-Link" data-inline="">スケーリングの閾値</a>を参照。</li>
-<li><strong>グラフ層を更新する。</strong> <code>wiki/graph/ontology.yaml</code> がある場合に限る。型付きエッジは、ソースが明示的に裏づけている場合に限って足す。ページを作るか書き換えたら、型付きエッジを足さなくても extract でグラフを作り直す（本文の wikilink や <code>sources:</code> からもエッジができるため）。<a href="graph.html" class="fui-Link" data-inline="">グラフ層のガイド</a>を参照。</li>
-<li><strong>ログに1行追記する。</strong> エージェントは、何をしたかをユーザーに伝える。更新したページ、作成したページ、指摘した矛盾、追って調べる価値のある点を報告する。</li>
+<li><strong>raw ソースを置きます。</strong> ファイルを <code>raw/</code> に置きます。ファイル名は内容が分かるものにし、元の拡張子を付けます。日本語の題名には、<code>インボイス制度の手引き-2023.pdf</code> のような日本語のファイル名を使えます。英字は小文字にしてハイフンでつなぎ、空白は使いません。Web ページは URL を渡せば <code>wiki_fetch.py</code> が本文を <code>.md</code> にして保存し、日本語でなければエージェントが訳して画像に補足を書きます。PDF は <code>.pdf</code>、文字起こしは <code>.md</code> か <code>.txt</code> にします。このスラッグが、ソースの要約ページのスラッグになります。</li>
+<li><strong>エージェントが読みます。</strong> 短いソースは一度に読みます。長いソース（約 30 ページを超える論文、書籍の章、数時間分の文字起こし）はセクションごとに分割して読み、wiki の作業でコンテキストウィンドウがあふれないようにします。</li>
+<li><strong>要点を話し合います。</strong> エージェントが、目立った点、意外だった点、既存のページとつながる点を3〜4文で示します。ユーザーの返答に合わせて編集内容を決めます。たとえば「手法は省いて、結果だけでよい」「これは X のページと矛盾するので、指摘しておいて」と伝えられます。人が介在しないバッチモードではこの手順をスキップし、編集は控えめにします。</li>
+<li><strong>エージェントが関係するページを調べます。</strong> インデックスと候補のページを読み、更新するページ、新しく作るページ、指摘すべき矛盾の一覧を作ります。この調査によって、重複したページができるのを防ぎます。</li>
+<li><strong>ソースの要約ページを書きます。</strong> <code>wiki/sources/</code> に、主な主張、手法、結論、未解決の問いを書き、最後に <code>[[wikilinks]]</code> を並べた「関係するページ」のセクションを置きます。ソース全体を言い換えたものではなく、要約です。その直前の「取り込んだ内容と載せたページ」のセクションには、手順 6 と 7 のあとで、抜き出した主張ごとに、どのページへ送ったか（<code>create</code>、<code>update</code>、<code>source_only</code>）と理由を表で残します。</li>
+<li><strong>関係するページを必要な箇所だけ更新します。</strong> 全体を書き直すのではなく、<code>str_replace</code> を使います。裏づけが得られた内容には出典を加えます。矛盾する内容には、両方のソースを示す「Contradictions」の注記を目立つ位置に付けます。矛盾があるまま、内容を無断で上書きすることはありません。</li>
+<li><strong>新しいページを作ります。</strong> ページを作るに値する新しいエンティティやコンセプトについて作り、どのページにも frontmatter、本文、少なくとも1つの被リンクを付けます。どこからもリンクされていないページは、lint の検出結果にとどまらず、バグとして扱います。</li>
+<li><strong>インデックスを更新します。</strong> 新しいページごとに1行を追加します。<code>index.md</code> が 300 行を超えたら、インデックスを分割する時期です。詳しくは<a href="commands.html#wikistats" class="fui-Link" data-inline="">スケーリングの閾値</a>を参照してください。</li>
+<li><strong>グラフ層を更新します。</strong> <code>wiki/graph/ontology.yaml</code> がある場合に限ります。型付きエッジは、ソースが明示的に裏づけている場合に限って追加します。ページを作成または更新したら、型付きエッジの追加の有無にかかわらず、extract でグラフを作り直します。本文の wikilink や <code>sources:</code> からもエッジが生成されるためです。詳しくは<a href="graph.html" class="fui-Link" data-inline="">グラフ層のガイド</a>を参照してください。</li>
+<li><strong>ログに1行追記します。</strong> エージェントは、何をしたかをユーザーに伝えます。更新したページ、作成したページ、指摘した矛盾、追って調べる価値のある点を報告します。</li>
 </ol>
 <h2 id="wiki-にクエリする" class="fui-Subtitle1">wiki にクエリする</h2>
-<p>目的は、ユーザーの質問に wiki をもとに出典つきで答えることと、残す価値のある回答をシンセシスのページとして wiki に保存することである。</p>
+<p>目的は、ユーザーの質問に wiki をもとに出典つきで答えることと、残す価値のある回答をシンセシスのページとして wiki に保存することです。</p>
 <pre><code class="language-mermaid">flowchart TD
   q[&quot;your question&quot;] --&gt; idx[&quot;read wiki/index.md&quot;]
   idx --&gt; cand{&quot;good candidates?&quot;}
@@ -75,66 +75,66 @@
 </code></pre>
 <ol>
 <li>
-<p><strong>最初にインデックスを読む。</strong> 必ず <code>wiki/index.md</code>（または該当する分割済みのインデックス）から始める。ページごとに簡潔な要約が1行あれば、たいていはそれで候補を見つけられる。</p>
+<p><strong>最初にインデックスを読みます。</strong> 必ず <code>wiki/index.md</code>（または該当する分割済みのインデックス）から始めます。ページごとに簡潔な要約が1行あれば、たいていはそれで候補を見つけられます。</p>
 </li>
 <li>
-<p><strong>候補のページを絞り込む。</strong> 候補は短く、厳選した一覧にする。1つの質問に答えるために 30 ページを読むのは力任せのやり方である。インデックスの要約だけでは候補を絞れない場合、エージェントはローカルのハイブリッド検索を実行する。</p>
+<p><strong>候補のページを絞り込みます。</strong> 候補は短く、厳選した一覧にします。1 つの質問に答えるときは、30 ページをまとめて読む前に候補を絞ります。インデックスの要約だけでは候補を絞れない場合、エージェントはローカルのハイブリッド検索を実行します。</p>
 <pre><code class="language-bash">uv run --script skills/info-hive/scripts/wiki_search.py \
   &quot;your query terms&quot; --top 10 --json
 </code></pre>
-<p>FastEmbed によるセマンティック検索の順位と BM25 の順位を、ローカルで統合する。絞り込むには <code>--type concept</code>、<code>--tag &lt;tag&gt;</code>、<code>--since YYYY-MM-DD</code> を付ける。依存パッケージを使わない語彙ベースの検索にしたい場合は、<code>uv run --script</code> の形ではなく <code>python skills/info-hive/scripts/wiki_search.py &quot;your query terms&quot; --no-embed</code> を実行する。詳しくは<a href="search.html" class="fui-Link" data-inline="">検索</a>を参照。</p>
+<p>FastEmbed によるセマンティック検索の順位と BM25 の順位を、ローカルで統合します。絞り込むには <code>--type concept</code>、<code>--tag &lt;tag&gt;</code>、<code>--since YYYY-MM-DD</code> を付けます。依存パッケージを使わない語彙ベースの検索にしたい場合は、<code>uv run --script</code> の形ではなく <code>python skills/info-hive/scripts/wiki_search.py &quot;your query terms&quot; --no-embed</code> を実行します。詳しくは<a href="search.html" class="fui-Link" data-inline="">検索</a>を参照してください。</p>
 </li>
 <li>
-<p><strong>関係を問う質問ではグラフを参照する。</strong> 「X とつながっているものは？」「Y を提案したのは誰？」「A → B の経路をたどって」のような質問で、<code>graph.sqlite</code> がある場合に使う。グラフは読むページを選ぶために使い、それだけを証拠にすることはない。</p>
+<p><strong>関係を問う質問ではグラフを参照します。</strong> 「X とつながっているものは？」「Y を提案したのは誰？」「A → B の経路をたどって」のような質問で、<code>graph.sqlite</code> がある場合に使います。グラフは読むページを選ぶために使い、それだけを証拠にすることはありません。</p>
 </li>
 <li>
-<p><strong>候補のページを読む。</strong> ページは全体を読み、有望な <code>[[wikilinks]]</code> をたどる。すべてのリンクを再帰的に追いかけることはしない。</p>
+<p><strong>候補のページを読みます。</strong> ページは全体を読み、有望な <code>[[wikilinks]]</code> をたどります。すべてのリンクを再帰的に追いかけることはしません。</p>
 </li>
 <li>
-<p><strong>必要ならバックリンクを調べる。</strong> 「X はどこで言及されているか」という質問では、ページそのものより、そのページへの被リンクのほうが役に立つことが多い。</p>
+<p><strong>必要ならバックリンクを調べます。</strong> 「X はどこで言及されているか」という質問では、ページそのものより、そのページへの被リンクのほうが役に立つことが多いです。</p>
 <pre><code class="language-bash">python skills/info-hive/scripts/wiki_search.py &quot;&quot; --backlinks &lt;slug&gt;
 </code></pre>
 </li>
 <li>
-<p><strong>回答をまとめる。</strong> エージェントは自分の言葉で回答を書き、<code>[[wikilink]]</code> で出典を示す。矛盾がある場合は、どちらか一方を選んで片づけず、矛盾をそのまま示す。wiki に関係する内容がなければそうはっきり伝え、取り込むとよいソースを提案する。話をでっち上げることはない。
-6b. <strong>確信度を示す。</strong> 回答の終わりに、wiki がその回答をどれだけ裏づけているかを、確信度（confidence）の「高」「中」「低」と理由で示す。前提を元の資料で確かめたか、結論に判断を加えたか、仮説や矛盾、古い記述に頼っていないか、検索が縮退していなかったかで決まる。「中」か「低」なら、上げる方法（取り込むとよい資料、確かめるページ）を提案する。wiki に関係する内容がなければ、確信度は付けず、wiki の外の知識で答えを添えることもしない。質問の一部だけを wiki が扱っていないときも、その部分は外の知識で埋めない。</p>
+<p><strong>回答をまとめます。</strong> エージェントは自分の言葉で回答を書き、<code>[[wikilink]]</code> で出典を示します。矛盾がある場合は、どちらか一方を選んで片づけず、矛盾をそのまま示します。wiki に関係する内容がなければそうはっきり伝え、取り込むとよいソースを提案します。回答は確認できた根拠の範囲にとどめます。
+6b. <strong>確信度を示します。</strong> 回答の終わりに、wiki がその回答をどれだけ裏づけているかを、確信度（confidence）の「高」「中」「低」と理由で示します。前提を元の資料で確かめたか、結論に判断を加えたか、仮説や矛盾、古い記述に頼っていないか、検索が縮退していなかったかで決まります。「中」か「低」なら、上げる方法（取り込むとよい資料、確かめるページ）を提案します。wiki に関係する内容がなければ、確信度は付けず、wiki の外の知識で答えを添えることもしません。質問の一部だけを wiki が扱っていないときも、その部分は外の知識で埋めません。</p>
 </li>
 <li>
-<p><strong>wiki への保存を提案する。</strong> 回答が新しいつながりを見いだしたものであれば、エージェントは <code>wiki/synthesis/</code> への保存を提案する。保存しておけば、次に関連する質問が来たときに役立つ。ちょっとした調べものなら断ってよい。確信度が「低」の回答は、保存を提案しない。保存したシンセシスのページは根拠に数えないので、保存しても確信度は上がらない。</p>
+<p><strong>wiki への保存を提案します。</strong> 回答が新しいつながりを見いだしたものであれば、エージェントは <code>wiki/synthesis/</code> への保存を提案します。保存しておけば、次に関連する質問が来たときに役立ちます。あとで使う必要がなければ、保存を断れます。確信度が「低」の回答は、保存を提案しません。保存したシンセシスのページは根拠に数えないので、保存しても確信度は上がりません。</p>
 </li>
 </ol>
 <h2 id="lint-で健全性を確かめる" class="fui-Subtitle1">lint で健全性を確かめる</h2>
-<p>定期的に行う健全性のチェックである。操作のたびに行うより、一定の間隔で行うのがよい。構造の確認（スクリプトが行う）と、内容の確認（エージェントがページを読んで行う）に分かれる。</p>
+<p>定期的に行う健全性のチェックです。操作のたびに行う必要はありません。一定の間隔で行います。構造の確認（スクリプトが行う）と、内容の確認（エージェントがページを読んで行う）に分かれます。</p>
 <ol>
 <li>
-<p><strong>構造の lint を実行する。</strong></p>
+<p><strong>構造の lint を実行します。</strong></p>
 <pre><code class="language-bash">python skills/info-hive/scripts/wiki_lint.py wiki/
 </code></pre>
-<p>孤立ページ、リンク切れの wikilink、大きすぎるページ、frontmatter の問題、更新の止まったページ、重複したスラッグを報告する。グラフ層があれば、<code>wiki_graph_lint.py</code> も実行される。</p>
+<p>孤立ページ、リンク切れの wikilink、大きすぎるページ、frontmatter の問題、更新の止まったページ、重複したスラッグを報告します。グラフ層があれば、<code>wiki_graph_lint.py</code> も実行されます。</p>
 </li>
 <li>
-<p><strong>検出結果をエージェントと一緒に仕分ける。</strong> 検出結果には、それぞれ修正案が付く。孤立ページを適切な親ページからリンクする、リンク切れを直すか削除する、大きすぎるページを分割する、欠けている frontmatter を追加する、更新の止まったページを更新する、重複したスラッグをマージする、といったものである。修正はユーザーが1件ずつ承認し、黙って適用されるものはない。</p>
+<p><strong>検出結果をエージェントと一緒に仕分けます。</strong> 検出結果には、それぞれ修正案が付きます。たとえば、孤立ページは適切な親ページからリンクし、リンク切れは修正するか削除します。大きすぎるページは分割し、欠けている frontmatter は追加します。更新が止まったページの更新や、重複したスラッグの統合も提案します。修正は、ユーザーが 1 件ずつ承認してから適用します。</p>
 </li>
 <li>
-<p><strong>内容の確認でページを読む。</strong> エージェントは、最近更新された約 10 ページと、もっとも多くリンクされているハブページを読み、古いページとの矛盾、ページ内の食い違い、あちこちで言及されているのに専用のページがないコンセプトを探す。ハブページは次のコマンドで見つける。</p>
+<p><strong>内容を確認します。</strong> エージェントは、最近更新された約 10 ページと、もっとも多くリンクされているハブページを読みます。古いページとの矛盾や、ページ内の食い違いを探します。複数のページに登場するのに、専用ページがないコンセプトも探します。ハブページは次のコマンドで見つけます。</p>
 <pre><code class="language-bash">python skills/info-hive/scripts/wiki_search.py &quot;&quot; --top-linked 10
 </code></pre>
 </li>
 <li>
-<p><strong>足りていない点を挙げる。</strong> 多くのページに出てくるのに専用のページがない名前は、独立したページにする候補である。</p>
+<p><strong>足りていない点を挙げます。</strong> 多くのページに出てくるのに専用のページがない名前は、独立したページにする候補です。</p>
 <pre><code class="language-bash">python skills/info-hive/scripts/wiki_lint.py wiki/ --suggest-pages
 </code></pre>
 </li>
 <li>
-<p><strong>インデックスを更新する。</strong> 追加、名前変更、削除したページについてインデックスを更新し、<code>log.md</code> に要約を1行追記する。</p>
+<p><strong>インデックスを更新します。</strong> 追加、名前変更、削除したページについてインデックスを更新し、<code>log.md</code> に要約を1行追記します。</p>
 </li>
 </ol>
 <blockquote>
 <p><strong>頻度</strong></p>
-<p>妥当な既定値は、構造の lint を取り込み 5 回ごと、内容の lint を毎週または取り込み 20 回ごと、足りない点の洗い出しを毎月である。lint のレポートが仕分けられる速さより早く増えていくなら、lint の頻度を上げるか、スキーマを見直す時期である。</p>
+<p>妥当な既定値は、構造の lint を取り込み 5 回ごと、内容の lint を毎週または取り込み 20 回ごと、足りない点の洗い出しを毎月です。lint のレポートが仕分けられる速さより早く増えていくなら、lint の頻度を上げるか、スキーマを見直す時期です。</p>
 </blockquote>
 <h2 id="経験の記録とスキルの改善" class="fui-Subtitle1">経験の記録とスキルの改善</h2>
-<p>完了したタスクは、<code>/wiki:learn</code> で変更不可の経験のソースと、再利用できるコンセプトのパターンにできる。<code>/wiki:evolve</code> は、回数に上限のある学習とパターンの統合を行い、スキル全体の変更を提案し、検証の結果で候補を選び、固定した選定結果を独立した最終テストで測定する。失敗した実験も残し、承認された変更を明示的に適用またはロールバックする。通常の事実情報としての wiki はそのまま使える。ワークフロー全体、実行できるパイロット、評価の範囲については、<a href="evolution.html" class="fui-Link" data-inline="">経験の記録とスキルの改善</a>を参照。</p>
+<p>完了したタスクは、<code>/wiki:learn</code> で変更不可の経験のソースと、再利用できるコンセプトのパターンにできます。<code>/wiki:evolve</code> は、回数に上限のある学習とパターンの統合を行い、スキル全体の変更を提案し、検証の結果で候補を選び、固定した選定結果を独立した最終テストで測定します。失敗した実験も残し、承認された変更を明示的に適用またはロールバックします。通常の事実情報としての wiki はそのまま使えます。ワークフロー全体、実行できるパイロット、評価の範囲については、<a href="evolution.html" class="fui-Link" data-inline="">経験の記録とスキルの改善</a>を参照してください。</p>
     </main>
   </div>
 </body>

@@ -54,7 +54,7 @@
     <main class="page-content readme-content" id="main" tabindex="-1">
       <header class="manual-overview" id="overview">
         <h1 class="fui-Title1">資料から、出典つきの答えへ</h1>
-        <p>info-hive は、手元の資料を AI が読み返せる wiki にします。</p>
+        <p>手元の資料を wiki に整理すると、AI が次の質問にも出典を添えて答えられます。</p>
         <figure class="overview-flow">
           <ol>
             <li>
@@ -85,8 +85,8 @@
       <section class="readme-section" aria-labelledby="readme-info-hive">
       <!-- readme-content:start -->
 <h2 id="readme-info-hive" class="fui-Subtitle1">info-hive</h2>
-<p>日本語の PDF、Web 記事、文字起こし、メモを、AI エージェントが整理・検索する Markdown の wiki に変える。蓄積した知識から出典つきの回答を得て、次の作業にも使えるように保存できる。</p>
-<p>Claude Code と Codex では <code>wiki@info-hive</code> プラグインとして、ほかの対応エージェントでは <code>info-hive</code> スキルとして使う。スキルは <span>Agent Skills</span> 形式である。</p>
+<p>AI エージェントが、日本語の PDF、Web 記事、文字起こし、メモを Markdown の wiki に整理します。あとから質問すると、wiki の内容をもとに、出典つきで答えます。得られた知識は、次の作業でも使えるように保存できます。</p>
+<p>Claude Code と Codex では <code>wiki@info-hive</code> プラグインとして、ほかの対応エージェントでは <code>info-hive</code> スキルとして使います。スキルは <span>Agent Skills</span> 形式です。</p>
 <h3 id="readme-インストール" class="fui-Subtitle2">インストール</h3>
 
 <p>Windows 11 の Claude デスクトップアプリで、Code タブから wiki を入れます。</p>
@@ -98,7 +98,7 @@
 <p><a class="fui-Link" data-inline href="tutorial-install.html">Windows 11 の導入手順</a>は、VM で確認した構成と操作をもとにしています。</p>
 <p>Codex や Claude Code の CLI を使う場合は、<a class="fui-Link" data-inline href="agents.html#インストールのコマンド例">エージェント別の導入方法</a>を参照できます。</p>
 <h3 id="readme-クイックスタート" class="fui-Subtitle2">クイックスタート</h3>
-<p>以下は、プロジェクトをまたいで使うユーザースコープの wiki を作る例である。まず <code>init</code> を実行し、保存先を確認して初期化する。続いて最初の資料を <code>~/info-hive/raw/your-source.pdf</code> に置き、<code>ingest</code>、<code>query</code> の順に実行する。資料のパスと質問は、使いたいものに置き換える。</p>
+<p>プロジェクトをまたいで使える wiki を作ります。まず <code>init</code> を実行し、保存先を確認して初期化します。最初の資料を <code>~/info-hive/raw/your-source.pdf</code> に置いたら、<code>ingest</code> で取り込み、<code>query</code> で質問します。例のパスと質問は、使いたい資料と質問に置き換えてください。</p>
 <h4 id="readme-claude-code" class="fui-Body1Strong">Claude Code</h4>
 <pre><code class="language-text">/wiki:init --user
 /wiki:ingest ~/info-hive/raw/your-source.pdf
@@ -109,8 +109,8 @@
 $wiki:info-hive ingest ~/info-hive/raw/your-source.pdf
 $wiki:info-hive query この資料の要点は？
 </code></pre>
-<p>プロジェクト専用の wiki を作る場合は、<code>init</code> の <code>--user</code> を外す。既定では、そのプロジェクトの <code>wiki/</code> と <code>raw/</code> を使う。プラグインやスキルをインストールする範囲と、wiki を保存する範囲は別に選べる。</p>
-<p>定期的な点検には、Claude Code では <code>/wiki:lint</code>、Codex では <code>$wiki:info-hive lint</code> を使う。検出した問題は修正案として示し、黙って wiki を書き換えることはない。</p>
+<p>プロジェクト専用の wiki を作る場合は、<code>init</code> の <code>--user</code> を外します。既定では、そのプロジェクトの <code>wiki/</code> と <code>raw/</code> を使います。プラグインやスキルを入れる範囲と、wiki の保存範囲は別々に選べます。</p>
+<p>定期的な点検には、Claude Code では <code>/wiki:lint</code>、Codex では <code>$wiki:info-hive lint</code> を使います。検出した問題は修正案として示し、黙って wiki を書き換えることはありません。</p>
 <h3 id="readme-できること" class="fui-Subtitle2">できること</h3>
 <!-- page-summary:start -->
 <figure class="page-summary page-summary-groups">
@@ -122,19 +122,19 @@ $wiki:info-hive query この資料の要点は？
 </figure>
 <!-- page-summary:end -->
 <ul>
-<li>資料を要約し、関連するページ、リンク、インデックスを更新する。</li>
-<li>日本語の語彙検索と意味検索を組み合わせ、出典つきで質問に答える。</li>
-<li>リンク切れ、孤立ページ、frontmatter の欠落、大きすぎるページを点検する。</li>
-<li>ページ間の関係をグラフで調べ、wiki をブラウザで閲覧する。</li>
-<li><code>/wiki:overview &lt;ページ&gt;</code> で、図を中心にした概要を本文と別に保存し、<code>/wiki:browse</code> で表示する（元のページが更新されると警告し、概要を折りたたむ）。</li>
-<li>検証済みのタスクの経験を記録し、スキルの変更を提案・評価する。</li>
+<li>資料を要約し、関連するページ、リンク、インデックスを更新します。</li>
+<li>日本語の語彙検索と意味検索を組み合わせ、出典つきで質問に答えます。</li>
+<li>リンク切れ、孤立ページ、frontmatter の欠落、大きすぎるページを点検します。</li>
+<li>ページ間の関係をグラフで調べ、wiki をブラウザーで閲覧します。</li>
+<li><code>/wiki:overview &lt;ページ&gt;</code> で、図を中心にした概要を本文と別に保存し、<code>/wiki:browse</code> で表示します。元のページが更新されると、警告を表示して概要を折りたたみます。</li>
+<li>検証済みのタスクの経験を記録し、スキルの変更を提案・評価します。</li>
 </ul>
-<p>正本はローカルの Markdown であり、複数のエージェントで同じ wiki を使える。検索の埋め込みと索引もローカルで処理し、外部のベクトルデータベースや埋め込み API は使わない。</p>
-<p>Claude Code では、任意の <a href="explanation-how-wiki-works.html#rag" class="fui-Link" data-inline="">rag@info-hive</a> を有効にすると、PDF の抽出・OCR・索引化を永続ジョブとして処理できる。受付済みの <code>queued</code> は索引化完了を意味しない。rag がなくても PDF は取り込める。rag の Codex 対応は含まない。</p>
-<p>Claude Code と Codex では、<code>ingest session</code> で実行中の会話を取り込める。Codex の呼び出し方は <code>$wiki:info-hive ingest session</code>、指定した会話を取り込む場合は <code>$wiki:info-hive ingest session:&lt;ID&gt;</code> である。保存する範囲と伏せ字を確認してから wiki に取り込む。</p>
-<p>スキルの改善は任意のワークフローである。移植元の調査では品質の向上は示されていない。<a href="evolution.html#研究上の根拠と取り入れ方" class="fui-Link" data-inline="">仕組みと検証の限界</a>を参照。</p>
+<p>wiki の正本は手元の Markdown です。同じ wiki を複数のエージェントで使えます。検索の埋め込みと索引もローカルで処理し、外部のベクトルデータベースや埋め込み API は使いません。</p>
+<p>Claude Code では、任意の <a href="explanation-how-wiki-works.html#rag" class="fui-Link" data-inline="">rag@info-hive</a> を有効にすると、PDF の抽出・OCR・索引化を永続ジョブとして処理できます。<code>queued</code> は、依頼を受け付けた段階です。この時点では、PDF の索引化は完了していません。rag がなくても PDF は取り込めます。rag の Codex 対応は含みません。</p>
+<p>Claude Code と Codex では、<code>ingest session</code> で実行中の会話を取り込めます。Codex の呼び出し方は <code>$wiki:info-hive ingest session</code>、指定した会話を取り込む場合は <code>$wiki:info-hive ingest session:&lt;ID&gt;</code> です。保存する範囲と伏せ字を確認してから、会話を wiki に取り込みます。</p>
+<p>スキルの改善は任意のワークフローです。移植元の調査では品質の向上は示されていません。<a href="evolution.html#研究上の根拠と取り入れ方" class="fui-Link" data-inline="">仕組みと検証の限界</a>で、調査結果の詳細を確認できます。</p>
 <h3 id="readme-ドキュメント" class="fui-Subtitle2">ドキュメント</h3>
-<p>手元の <a href="index.html#toc" class="fui-Link" data-inline="">docs/html/index.html</a> をブラウザーで開くと、図解と目次から使い方を参照できる。</p>
+<p>手元の <a href="index.html#toc" class="fui-Link" data-inline="">docs/html/index.html</a> をブラウザーで開くと、図解と目次から使い方を参照できます。</p>
 <div class="table-scroll" role="region" aria-label="表" tabindex="0">
 <table class="fui-Table">
 <thead class="fui-TableHeader">
@@ -180,16 +180,16 @@ $wiki:info-hive query この資料の要点は？
 </table>
 </div>
 <h3 id="readme-移植元とクレジット" class="fui-Subtitle2">移植元とクレジット</h3>
-<p>Praney Behl の <span>llm-wiki-plugin</span> v4.0.1（コミット <code>2d24ccf</code>、MIT ライセンス）を日本語向けに移植した。起点と取り込んだ修正は <a href="upstream.html" class="fui-Link" data-inline="">UPSTREAM.md</a> に記録している。移植元のホスト型 wiki は含めていない。</p>
-<p>LLM Wiki のパターンは Andrej Karpathy の <span>llm-wiki gist</span> にもとづく。移植元の検索は Cerebras の <span>How We Built Our Knowledge Base</span> を参考にし、ローカル検索への移行時には <span>Basic Memory</span> と比較している。スキルの改善のワークフローは <span>WikiSkill</span> を応用している。</p>
+<p>Praney Behl の <span>llm-wiki-plugin</span> v4.0.1（コミット <code>2d24ccf</code>、MIT ライセンス）を日本語向けに移植しました。起点と取り込んだ修正は <a href="upstream.html" class="fui-Link" data-inline="">UPSTREAM.md</a> に記録しています。移植元のホスト型 wiki は含めていません。</p>
+<p>LLM Wiki のパターンは Andrej Karpathy の <span>llm-wiki gist</span> にもとづきます。移植元の検索は Cerebras の <span>How We Built Our Knowledge Base</span> を参考にし、ローカル検索への移行時には <span>Basic Memory</span> と比較しています。スキルの改善のワークフローは <span>WikiSkill</span> を応用しています。</p>
 <h3 id="readme-ライセンス" class="fui-Subtitle2">ライセンス</h3>
-<p>MIT。<a href="licenses.html#project-license" class="fui-Link" data-inline="">LICENSE</a> に、移植元の Praney Behl と to884 の著作権表示・許諾文を記載している。</p>
-<p>同梱のライブラリと素材の取得元、版、ライセンスは次を参照。</p>
+<p>MIT。<a href="licenses.html#project-license" class="fui-Link" data-inline="">LICENSE</a> に、移植元の Praney Behl と to884 の著作権表示・許諾文を記載しています。</p>
+<p>同梱するライブラリと素材の入手元、バージョン、ライセンスは次の文書で確認できます。</p>
 <ul>
 <li>Markdown 解析器の markdown-it-py と mdurl: <a href="licenses.html#markdown-parser" class="fui-Link" data-inline="">_vendor/README.md</a>、<a href="licenses.html#markdown-parser-licenses" class="fui-Link" data-inline="">ライセンス</a></li>
 <li>閲覧画面の Fluent 2 の CSS、アイコン、Mermaid とその依存: <a href="licenses.html#browse-assets" class="fui-Link" data-inline="">browse_assets/README.md</a>、<a href="licenses.html#browse-licenses" class="fui-Link" data-inline="">ライセンスと第三者の表示</a></li>
 </ul>
-<p>info-hive は Microsoft の製品ではなく、Microsoft の提携、推薦、承認を受けたものでもない。Fluent、Microsoft、Segoe は Microsoft Corporation の商標である。書体は同梱しない。</p>
+<p>info-hive は Microsoft の製品ではなく、Microsoft の提携、推薦、承認を受けたものでもありません。Fluent、Microsoft、Segoe は Microsoft Corporation の商標です。書体は同梱しません。</p>
       <!-- readme-content:end -->
       </section>
     </main>

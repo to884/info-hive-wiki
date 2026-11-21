@@ -29,28 +29,28 @@
   </ol>
 </figure>
 <!-- page-summary:end -->
-<p>この文書は、移植元 llm-wiki-plugin の版ごとの変更点と、以前の版で作った wiki のアップグレード方法を説明する。バージョン番号は、とくに断らない限り移植元のものである。info-hive は移植元の v4.0.1 を起点にしている（<a href="upstream.html" class="fui-Link" data-inline="">UPSTREAM.md</a> を参照）。移植元の v4.0.0 で加わったホスト型 wiki は、info-hive には含めていない。</p>
+<p>ここでは、移植元 llm-wiki-plugin の変更点と、以前の版からのアップグレード手順を説明します。版は、とくに断らない限り移植元のものです。info-hive は移植元の v4.0.1 を起点にしています。詳しくは<a href="upstream.html" class="fui-Link" data-inline="">移植元の記録</a>を参照してください。info-hive で作った wiki には、<a href="howto-upgrade-wiki.html" class="fui-Link" data-inline="">規約とテンプレートの更新手順</a>を使います。移植元の v4.0.0 で加わったホスト型 wiki は、info-hive には含めていません。</p>
 <h2 id="移植元の-v400-で変わった点" class="fui-Subtitle1">移植元の v4.0.0 で変わった点</h2>
-<p>v4.0.0 では、オプションの判定レイヤーが加わった。ローカルの wiki、ページの形式、ローカルの検索、すべてのコマンドは、これまでどおり動く。メジャーバージョンを上げたのは、Paperclip 連携を削除したためである。</p>
+<p>v4.0.0 では、オプションの判定レイヤーが加わりました。ローカルの wiki、ページの形式、ローカルの検索、すべてのコマンドは、これまでどおり動きます。メジャーバージョンを上げたのは、Paperclip 連携を削除したためです。</p>
 <ul>
-<li><strong>ローカルの wiki に移行作業は要らない。</strong> <code>wiki/</code> の下は何も変わらない。ローカルの検索、lint、グラフ、改善のスクリプトも同じである。</li>
-<li><strong>判定モデル（オプション、既定では無効）。</strong> 小さなモデルを使って、検索結果を関連度でふるい分けたり、グラフの証拠を確かめたり、信頼できないテキストを選別したりできる。<a href="decisions.html" class="fui-Link" data-inline="">判定モデル</a>を参照。</li>
-<li><strong>Paperclip 連携の削除。</strong> <code>integrations/paperclip/</code> のプラグインとそのドキュメントはなくなった。npm パッケージは一度もレジストリに公開していないので、レジストリ側での対応は不要である。Paperclip が必要なら、移植元の v3.2.x を使い続ける。v3.2.0 のドキュメントは、移植元のリポジトリの <span><code>docs/v3</code></span> にある。</li>
+<li><strong>ローカルの wiki に移行作業は要りません。</strong> <code>wiki/</code> の下は何も変わりません。ローカルの検索、lint、グラフ、改善のスクリプトも同じです。</li>
+<li><strong>判定モデル（オプション、既定では無効）。</strong> 小さなモデルを使って、検索結果を関連度でふるい分けたり、グラフの証拠を確かめたり、信頼できないテキストを選別したりできます。詳しくは<a href="decisions.html" class="fui-Link" data-inline="">判定モデル</a>を参照してください。</li>
+<li><strong>Paperclip 連携の削除。</strong> <code>integrations/paperclip/</code> のプラグインとそのドキュメントはなくなりました。npm パッケージは一度もレジストリに公開していないので、レジストリ側での対応は不要です。Paperclip が必要なら、移植元の v3.2.x を使い続けます。v3.2.0 のドキュメントは、移植元のリポジトリの <span><code>docs/v3</code></span> にあります。</li>
 </ul>
 <h2 id="アップグレードの手順" class="fui-Subtitle1">アップグレードの手順</h2>
 <ol>
-<li>インストールしたときと同じ方法で、<strong>プラグインまたはスキルを更新する</strong>。Claude Code では、マーケットプレイスからのインストールをもう一度実行する。スキルだけを使うエージェントでは、<code>npx skills add</code> をもう一度実行する。</li>
-<li>wiki に対して <strong><code>/wiki:upgrade</code> を実行する</strong>。v3.2 と同じ、何度実行しても同じ結果になるファイル操作と、実行環境のチェックを行う。移植元の v4.0.0 では、<code>SCHEMA.md</code> に新しく加えるべきセクションはない。info-hive の 0.8.0 では、ソースの要約ページの主張と行き先の表を記した <code>## Claim destinations</code> のセクションが加わったので、<code>/wiki:upgrade</code> がそのマージを案内する。</li>
+<li>インストールしたときと同じ方法で、**プラグインまたはスキルを更新します。**Claude Code では、マーケットプレイスからのインストールをもう一度実行します。スキルだけを使うエージェントでは、<code>npx skills add</code> をもう一度実行します。</li>
+<li>wiki に対して **<code>/wiki:upgrade</code> を実行します。**v3.2 と同じ、何度実行しても同じ結果になるファイル操作と、実行環境のチェックを行います。移植元の v4.0.0 では、<code>SCHEMA.md</code> に新しく加えるべきセクションはありません。info-hive の 0.8.0 では、ソースの要約ページの主張と行き先の表を記した <code>## Claim destinations</code> のセクションが加わったので、<code>/wiki:upgrade</code> がそのマージを案内します。</li>
 </ol>
 <h2 id="v32-より前からのアップグレード" class="fui-Subtitle1">v3.2 より前からのアップグレード</h2>
-<p>v3.2.0 では、オプションの経験の記録と、評価済みのスキルの改善が加わった。既存の wiki、frontmatter、CLI のフラグは、引き続き互換性がある。バックグラウンドで動く最適化の仕組みが有効になることはない。</p>
-<p>設定した wiki に対して <code>/wiki:upgrade</code> を実行する。既存の実行環境のセットアップは、引き続き必須である。アップグレードでは、<code>.experience-template.json</code>、<code>.pattern-template.md</code>、<code>.evolution/README.md</code> を、ない場合にだけ追加する。カスタマイズしたファイルと SCHEMA.md は保持される。レビュー用に、オプションの <code>## Skill evolution</code> スキーマセクションを提案する。</p>
-<p>検証済みのタスクの経験には <code>/wiki:learn</code> を、根拠にもとづく改善案と、測定にもとづく採用には <code>/wiki:evolve</code> を使う。アップグレードの間に評価やスキルの置き換えが行われることはない。<code>.evolution/</code> は、いつでも作り直せる <code>.wiki-cache/</code> と違い、消えては困る履歴なのでバックアップしておく。ランナーの仕様、パイロットスイート、推論の予算、ロールバックについては<a href="evolution.html" class="fui-Link" data-inline="">経験の記録とスキルの改善</a>を参照。</p>
+<p>v3.2.0 では、オプションの経験の記録と、評価済みのスキルの改善が加わりました。既存の wiki、frontmatter、CLI のフラグは、引き続き互換性があります。バックグラウンドで動く最適化の仕組みが有効になることはありません。</p>
+<p>設定した wiki に対して <code>/wiki:upgrade</code> を実行します。既存の実行環境のセットアップは、引き続き必須です。アップグレードでは、<code>.experience-template.json</code>、<code>.pattern-template.md</code>、<code>.evolution/README.md</code> を、ない場合にだけ追加します。カスタマイズしたファイルと SCHEMA.md は保持されます。レビュー用に、オプションの <code>## Skill evolution</code> スキーマセクションを提案します。</p>
+<p>検証済みのタスクの経験には <code>/wiki:learn</code> を、根拠にもとづく改善案と、測定にもとづく採用には <code>/wiki:evolve</code> を使います。アップグレードの間に評価やスキルの置き換えが行われることはありません。<code>.evolution/</code> は、いつでも作り直せる <code>.wiki-cache/</code> と違い、消えては困る履歴なのでバックアップしておきます。ランナーの仕様、パイロットスイート、推論の予算、ロールバックについては<a href="evolution.html" class="fui-Link" data-inline="">経験の記録とスキルの改善</a>を参照してください。</p>
 <h2 id="v30-より前からのアップグレード" class="fui-Subtitle1">v3.0 より前からのアップグレード</h2>
-<p>v3.0.0 では、プロバイダーを使った埋め込みが、既定のローカルの FastEmbed と sqlite-vec による検索に置き換わった。既存の Markdown には手を付けず、変わるのはいつでも作り直せるベクトルインデックスだけである。</p>
+<p>v3.0.0 では、プロバイダーを使った埋め込みが、既定のローカルの FastEmbed と sqlite-vec による検索に置き換わりました。既存の Markdown には手を付けず、変わるのはいつでも作り直せるベクトルインデックスだけです。</p>
 <blockquote>
 <p><strong>コンテンツの移行は不要</strong></p>
-<p>ページと frontmatter の形式は変わっていない。古い <code>embeddings.jsonl</code> キャッシュは無視されるので、削除してかまわない。<code>/wiki:upgrade</code> が <code>embeddings.sqlite</code> をローカルに作り、現在あるすべてのセクションを同期する。</p>
+<p>ページと frontmatter の形式は変わっていません。古い <code>embeddings.jsonl</code> キャッシュは無視されるので、削除してかまいません。<code>/wiki:upgrade</code> が <code>embeddings.sqlite</code> をローカルに作り、現在あるすべてのセクションを同期します。</p>
 </blockquote>
 <pre><code class="language-mermaid">flowchart TD
   pull[&quot;v3.0.0 を pull&quot;] --&gt; run[&quot;/wiki:upgrade を実行&quot;]
@@ -63,17 +63,17 @@
   pages[&quot;既存のページ&quot;] -.-&gt; unchanged[&quot;変更なし: コンテンツの移行は不要&quot;]
 </code></pre>
 <h2 id="メジャーバージョンを上げた理由" class="fui-Subtitle1">メジャーバージョンを上げた理由</h2>
-<p>既定のセクション検索は、プロバイダーを設定しない限り語彙ベースのままだったが、ローカルのモデルと sqlite-vec のインデックスを初期化するようになった。データはローカルの外に出なくなり、プロバイダー用の古い環境変数と承認フラグは削除された。<code>python wiki_search.py &quot;&lt;query&gt;&quot; --no-embed</code> で直接実行すれば、依存パッケージを使わない BM25 を引き続き使える。</p>
+<p>既定のセクション検索は、プロバイダーを設定しない限り語彙ベースのままだったが、ローカルのモデルと sqlite-vec のインデックスを初期化するようになりました。データはローカルの外に出なくなり、プロバイダー用の古い環境変数と承認フラグは削除されました。<code>python wiki_search.py &quot;&lt;query&gt;&quot; --no-embed</code> で直接実行すれば、依存パッケージを使わない BM25 を引き続き使えます。</p>
 <h2 id="アップグレードの手順-1" class="fui-Subtitle1">アップグレードの手順</h2>
 <ol>
 <li>
-<p><strong>現在のリリースを取得する。</strong> インストールしたときと同じ方法でプラグインを更新する。Claude Code では、マーケットプレイスからのインストールをもう一度実行する。スキルだけを使うエージェントでは、<code>npx skills add</code> をもう一度実行する。</p>
+<p><strong>現在のリリースを取得します。</strong> インストールしたときと同じ方法でプラグインを更新します。Claude Code では、マーケットプレイスからのインストールをもう一度実行します。スキルだけを使うエージェントでは、<code>npx skills add</code> をもう一度実行します。</p>
 </li>
 <li>
-<p><strong>アップグレードを実行する。</strong> Claude Code では次のとおり。</p>
+<p><strong>アップグレードを実行します。</strong> Claude Code では次のコマンドを実行します。</p>
 <pre><code class="language-bash">/wiki:upgrade
 </code></pre>
-<p>直接実行する場合は、インストール済みのスクリプトと、選んだベースディレクトリを別々に渡す。プロジェクトの wiki の場合:</p>
+<p>直接実行する場合は、インストール済みのスクリプトと、選んだベースディレクトリを別々に渡します。プロジェクトの wiki の場合:</p>
 <pre><code class="language-bash">python &quot;${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/init_wiki.py&quot; &quot;&lt;absolute-project-root&gt;&quot; --upgrade
 </code></pre>
 <p>ユーザースコープの標準の構成の場合:</p>
@@ -82,27 +82,27 @@
 <p>以前の既定（<code>~/wiki/</code> と <code>~/wiki/raw/</code>）で作った wiki は移動せず、ベースディレクトリとサブディレクトリをそのまま指定する:</p>
 <pre><code class="language-bash">python &quot;${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/init_wiki.py&quot; &quot;&lt;absolute-home-directory&gt;&quot; --wiki-dir wiki --raw-dir wiki/raw --upgrade
 </code></pre>
-<p>スキルだけをインストールしている場合は、<code>${CLAUDE_PLUGIN_ROOT}/skills/info-hive</code> を、そのエージェントにインストールされた <code>info-hive</code> スキルのディレクトリに置き換える。プラグインやスキルのディレクトリを、ベースディレクトリとして使ってはならない。</p>
+<p>スキルだけをインストールしている場合は、<code>${CLAUDE_PLUGIN_ROOT}/skills/info-hive</code> を、そのエージェントにインストールされた <code>info-hive</code> スキルのディレクトリに置き換えます。プラグインやスキルのディレクトリを、ベースディレクトリとして使ってはなりません。</p>
 <blockquote>
-<p><strong>期待される動作</strong>: 何度実行しても同じ結果になるファイル操作なので、既存のページには手が付かない。続いて実行環境のセットアップが <code>&quot;status&quot;: &quot;ready&quot;</code> を返し、固定した依存パッケージのバージョン、モデル、ページ数、セクション数、ベクトルインデックスのパスを報告する。そのあとで、コマンドが SCHEMA に欠けているマーカーを報告する。</p>
+<p><strong>期待される動作</strong>: 何度実行しても同じ結果になるファイル操作なので、既存のページには手が付きません。続いて実行環境のセットアップが <code>&quot;status&quot;: &quot;ready&quot;</code> を返し、固定した依存パッケージのバージョン、モデル、ページ数、セクション数、ベクトルインデックスのパスを報告します。そのあとで、コマンドが SCHEMA に欠けているマーカーを報告します。</p>
 </blockquote>
 </li>
 <li>
-<p><strong>SCHEMA.md のマージを承認する。</strong> 現在のテンプレートにあるローカルのセマンティック検索のバックエンドについての行を、既存の <code>## Retrieval</code> セクションに追加する。SCHEMA.md はユーザーと一緒に改訂してきたものなので、黙って変更されることはない。</p>
+<p><strong>SCHEMA.md のマージを承認します。</strong> 現在のテンプレートにあるローカルのセマンティック検索のバックエンドについての行を、既存の <code>## Retrieval</code> セクションに追加します。SCHEMA.md はユーザーと一緒に改訂してきたものなので、黙って変更されることはありません。</p>
 </li>
 </ol>
-<p>アップグレードは何度実行しても同じ結果になる。既存のコンテンツは変わらず、依存パッケージとモデルを確かめ、変わったベクトルと欠けているベクトルだけを作る。</p>
+<p>アップグレードは何度実行しても同じ結果になります。既存のコンテンツは変わらず、依存パッケージとモデルを確かめ、変わったベクトルと欠けているベクトルだけを作ります。</p>
 <h2 id="変わる点" class="fui-Subtitle1">変わる点</h2>
 <ul>
-<li><strong>既存のページは変更不要。</strong> <code>wiki/</code> の下にある正本は何も書き換えられない。</li>
-<li><strong>セクション検索の既定は、ローカルのハイブリッド検索になった。</strong> FastEmbed と sqlite-vec によるセマンティックな順位を、BM25 の結果と統合する。依存パッケージを使わない語彙ベースの検索にするには、スクリプトを Python で直接実行して <code>--no-embed</code> を付ける。ページ単位で順位を付けるには <code>--granularity page</code> を使う。</li>
-<li><strong>アップグレードがすべてをインストールする。</strong> このコマンドは、<code>uv</code> を通じてバージョンを固定した FastEmbed、sqlite-vec、PyYAML を解決し、固定したモデルがなければダウンロードし、パースキャッシュを作り、現在あるすべてのセクションをベクトル化する。</li>
-<li><strong><code>wiki/.wiki-cache/</code> は作り直せる。</strong> <code>search-index.json</code> と <code>embeddings.sqlite</code> は gitignore の対象で、削除してかまわない。旧来の <code>embeddings.jsonl</code> は無視される。</li>
-<li><strong>プロバイダーの設定はもう要らない。</strong> API キー、エンドポイント、データ転送の承認、クエリごとの課金は一切ない。</li>
+<li><strong>既存のページは変更不要。</strong> <code>wiki/</code> の下にある正本は何も書き換えられません。</li>
+<li><strong>セクション検索の既定は、ローカルのハイブリッド検索になりました。</strong> FastEmbed と sqlite-vec によるセマンティックな順位を、BM25 の結果と統合します。依存パッケージを使わない語彙ベースの検索にするには、スクリプトを Python で直接実行して <code>--no-embed</code> を付けます。ページ単位で順位を付けるには <code>--granularity page</code> を使います。</li>
+<li><strong>アップグレードがすべてをインストールします。</strong> このコマンドは、<code>uv</code> を通じてバージョンを固定した FastEmbed、sqlite-vec、PyYAML を解決し、固定したモデルがなければダウンロードし、パースキャッシュを作り、現在あるすべてのセクションをベクトル化します。</li>
+<li><strong><code>wiki/.wiki-cache/</code> は作り直せます。</strong> <code>search-index.json</code> と <code>embeddings.sqlite</code> は gitignore の対象で、削除してかまいません。旧来の <code>embeddings.jsonl</code> は無視されます。</li>
+<li><strong>プロバイダーの設定はもう要りません。</strong> API キー、エンドポイント、データ転送の承認、クエリごとの課金は一切ありません。</li>
 </ul>
 <blockquote>
 <p><strong>注意</strong></p>
-<p>まだ wiki がない（wiki のディレクトリに <code>SCHEMA.md</code> がない）場合は、アップグレードするものがない。<code>init_wiki.py --upgrade</code> も、何も作らずに止まる。代わりに <a href="tutorial-first-wiki.html" class="fui-Link" data-inline=""><code>/wiki:init</code></a> を実行する。</p>
+<p>まだ wiki がない（wiki のディレクトリに <code>SCHEMA.md</code> がない）場合は、アップグレードするものがありません。<code>init_wiki.py --upgrade</code> も、何も作らずに止まります。代わりに <a href="tutorial-first-wiki.html" class="fui-Link" data-inline=""><code>/wiki:init</code></a> を実行します。</p>
 </blockquote>
     </main>
   </div>

@@ -20,7 +20,7 @@
     </nav>
     <main class="page-content readme-content" id="main" tabindex="-1">
 <h1 id="エージェント" class="fui-Title1">エージェント</h1>
-<p><code>info-hive</code> スキルは標準の <span>agentskills.io</span> 形式なので、以下のどのエージェントでも動く。wiki の操作は、インストールしたスキルを通じて使える。対象は、init と実行環境のセットアップ、ハイブリッド検索または語彙ベースの検索、構造の lint、統計、グラフの lint、グラフの抽出、グラフのクエリである。依存パッケージを必要とするスクリプトは、<code>uv run --script</code> を通じて、バージョンを固定した PEP 723 の環境で動く。</p>
+<p><code>info-hive</code> は <span>agentskills.io</span> 形式のスキルです。下の表にあるエージェントで使えます。スキルで使える操作は、wiki と実行環境の初期化、ハイブリッド検索または語彙検索、構造の点検（lint）、統計、グラフの点検・抽出・問い合わせです。依存パッケージが必要なスクリプトは、<code>uv run --script</code> で実行します。パッケージのバージョンは PEP 723 の形式で固定しています。</p>
 <h2 id="対応表" class="fui-Subtitle1">対応表</h2>
 <div class="table-scroll" role="region" aria-label="表" tabindex="0">
 <table class="fui-Table">
@@ -90,11 +90,11 @@
 </tbody>
 </table>
 </div>
-<p>OpenCode は <code>.claude/skills/</code> と <code>~/.claude/skills/</code> も読むので、Claude Code 向けにインストールしてあれば、改めてインストールしなくても使える。</p>
+<p>OpenCode は <code>.claude/skills/</code> と <code>~/.claude/skills/</code> も読むので、Claude Code 向けにインストールしてあれば、改めてインストールしなくても使えます。</p>
 <h2 id="インストールのコマンド例" class="fui-Subtitle1">インストールのコマンド例</h2>
-<p>最初に <a href="howto-prepare.html#uv" class="fui-Link" data-inline=""><code>uv</code></a> をインストールする。どのエージェントも、バージョンを固定した同じローカルの実行環境を呼び出すので、エージェントごとの Python 環境は要らない。</p>
+<p>最初に <a href="howto-prepare.html#uv" class="fui-Link" data-inline=""><code>uv</code></a> をインストールします。どのエージェントも、バージョンを固定した同じローカルの実行環境を呼び出すので、エージェントごとの Python 環境は要りません。</p>
 <h3 id="claude-code-cli" class="fui-Subtitle2">Claude Code CLI</h3>
-<p>Claude Code には、プラグイン一式（スキルとスラッシュコマンド）が入る。マーケットプレイスは <span>to884/info-hive-marketplace</span> にある。</p>
+<p>Claude Code には、プラグイン一式（スキルとスラッシュコマンド）が入ります。マーケットプレイスは <span>to884/info-hive-marketplace</span> にあります。</p>
 <pre><code class="language-bash">/plugin marketplace add to884/info-hive-marketplace
 /plugin install wiki@info-hive
 </code></pre>
@@ -104,13 +104,13 @@
 codex plugin add wiki@info-hive
 </code></pre>
 <p>導入後は新しい Codex のチャットで <code>$wiki:info-hive init</code>、<code>$wiki:info-hive ingest &lt;ソース&gt;</code>、<code>$wiki:info-hive query &lt;質問&gt;</code> の形で使います。<code>$wiki:info-hive help</code> で操作の一覧を表示し、<code>$wiki:info-hive help query</code> で個別のヘルプを表示します。MCP は自動登録されます。初回の依存とモデルの取得には数分かかることがあります。社内ネットワークの証明書の設定は <a href="mcp-server.html" class="fui-Link" data-inline="">MCP サーバー</a>を参照してください。</p>
-<p>Claude Code の <code>/wiki:*</code> は Codex のスラッシュコマンドにはならない。Web の raw は Codex 自身が作り、Claude CLI は不要である。<code>$wiki:info-hive ingest session</code> で実行中の Codex の会話を、<code>$wiki:info-hive ingest session:&lt;ID&gt;</code> で指定した会話を取り込める。従来の JSONL とデータベースの履歴の両方を、Codex の読み取り API で取得する。取り込みを依頼したターンを除外し、伏せ字と保存前の確認を行う。rag の Codex 対応は含まない。</p>
-<p>開発用の <code>info-hive-dev</code> のチェックアウトを試すときは、親リポジトリのルートで次を実行する。ローカルのカタログは、チェックアウトした <code>info-hive-wiki</code> を指す。</p>
+<p>Claude Code の <code>/wiki:*</code> は Codex のスラッシュコマンドにはなりません。Web の raw は Codex 自身が作り、Claude CLI は不要です。<code>$wiki:info-hive ingest session</code> で実行中の Codex の会話を、<code>$wiki:info-hive ingest session:&lt;ID&gt;</code> で指定した会話を取り込めます。従来の JSONL とデータベースの履歴の両方を、Codex の読み取り API で取得します。取り込みを依頼したターンを除外し、伏せ字と保存前の確認を行います。rag の Codex 対応は含みません。</p>
+<p>開発用の <code>info-hive-dev</code> のチェックアウトを試すときは、親リポジトリのルートで次を実行します。ローカルのカタログは、チェックアウトした <code>info-hive-wiki</code> を指します。</p>
 <pre><code class="language-bash">codex plugin marketplace add .
 codex plugin add wiki@info-hive-dev
 </code></pre>
 <h3 id="codex-のスキル単体とその他のエージェント" class="fui-Subtitle2">Codex のスキル単体とその他のエージェント</h3>
-<p><strong>Codex のスキルだけを使う場合、および Cursor、Gemini CLI、OpenCode、OpenClaw、Pi</strong> では、<code>skills</code> CLI でスキルをインストールする。対応表の <code>--agent</code> の値に置き換えて使う。スキルだけの場合は、MCP の自動登録とプラグインの <code>commands/</code> は含まれない。同梱の CLI とリファレンスを使い、Codex の呼び出し名は <code>$info-hive</code> になる。</p>
+<p><strong>Codex のスキルだけを使う場合、および Cursor、Gemini CLI、OpenCode、OpenClaw、Pi</strong> では、<code>skills</code> CLI でスキルをインストールします。対応表の <code>--agent</code> の値に置き換えて使います。スキルだけの場合は、MCP の自動登録とプラグインの <code>commands/</code> は含まれません。同梱の CLI とリファレンスを使い、Codex の呼び出し名は <code>$info-hive</code> になります。</p>
 <pre><code class="language-bash">npx skills add to884/info-hive-wiki -a codex -g
 npx skills add to884/info-hive-wiki -a cursor -g
 npx skills add to884/info-hive-wiki -a gemini-cli -g
@@ -118,15 +118,15 @@ npx skills add to884/info-hive-wiki -a opencode -g
 npx skills add to884/info-hive-wiki -a openclaw -g
 npx skills add to884/info-hive-wiki -a pi -g
 </code></pre>
-<p>現在のプロジェクトだけにインストールするには、<code>-g</code> を外す。</p>
-<p><strong>OMP (&quot;Oh My Pi&quot;)</strong> と <strong>Hermes Agent</strong> は、まだ <code>npx skills</code> のレジストリに載っていない。リポジトリをクローンし、エージェントのスキル用ディレクトリにスキルへのシンボリックリンクを張る。OMP は、管理対象のスキルとユーザーのスキルを <code>~/.omp/agent/skills/</code> から読み込み、<code>skill://</code> で公開する。</p>
+<p>現在のプロジェクトだけにインストールするには、<code>-g</code> を外します。</p>
+<p><strong>OMP (&quot;Oh My Pi&quot;)</strong> と <strong>Hermes Agent</strong> は、まだ <code>npx skills</code> のレジストリに載っていません。リポジトリをクローンし、エージェントのスキル用ディレクトリにスキルへのシンボリックリンクを張ります。OMP は、管理対象のスキルとユーザーのスキルを <code>~/.omp/agent/skills/</code> から読み込み、<code>skill://</code> で公開します。</p>
 <pre><code class="language-bash">git clone https://github.com/to884/info-hive-wiki.git
 mkdir -p ~/.omp/agent/skills ~/.hermes/skills
 ln -s &quot;$(pwd)/info-hive-wiki/skills/info-hive&quot; ~/.omp/agent/skills/info-hive
 ln -s &quot;$(pwd)/info-hive-wiki/skills/info-hive&quot; ~/.hermes/skills/info-hive
 </code></pre>
 <h2 id="エージェントのメモリファイル" class="fui-Subtitle1">エージェントのメモリファイル</h2>
-<p>wiki を作ったら、エージェントがその場所を覚えておけるように、短い記述を追加する。プロジェクトをまたいで使うユーザースコープの wiki なら、<code>~/info-hive/wiki/</code> のようなユーザーレベルの固定パスをエージェントのグローバルな指示に書く。プロジェクト専用の wiki なら、相対パスをプロジェクトのメモリファイルに書く。ファイル名はエージェントによって違う。</p>
+<p>wiki を作ったら、エージェントがその場所を覚えておけるように、短い記述を追加します。プロジェクトをまたいで使うユーザースコープの wiki なら、<code>~/info-hive/wiki/</code> のようなユーザーレベルの固定パスをエージェントのグローバルな指示に書きます。プロジェクト専用の wiki なら、相対パスをプロジェクトのメモリファイルに書きます。ファイル名はエージェントによって違います。</p>
 <div class="table-scroll" role="region" aria-label="表" tabindex="0">
 <table class="fui-Table">
 <thead class="fui-TableHeader">
@@ -171,12 +171,12 @@ ln -s &quot;$(pwd)/info-hive-wiki/skills/info-hive&quot; ~/.hermes/skills/info-h
 </tbody>
 </table>
 </div>
-<p>複数のエージェントを使う場合は、対応しているエージェントでは <code>AGENTS.md</code> を正本にし、<code>CLAUDE.md</code> をそこへのシンボリックリンクにするのがよい。スキルが、ユーザーの承認なしにメモリファイルに書き込むことはない。ユーザースコープ用とプロジェクト用の記述の例は、<code>skills/info-hive/references/agent-memory-integration.md</code> にある。</p>
+<p>複数のエージェントを使う場合は、対応しているエージェントでは <code>AGENTS.md</code> を正本にし、<code>CLAUDE.md</code> はそのシンボリックリンクにできます。スキルが、ユーザーの承認なしにメモリファイルに書き込むことはありません。ユーザースコープ用とプロジェクト用の記述の例は、<code>skills/info-hive/references/agent-memory-integration.md</code> にあります。</p>
 <blockquote>
-<p>スラッシュコマンドは Claude Code 専用である。ほかのエージェントでは、「この論文を wiki に追加して」「X について wiki には何と書いてある？」「wiki に lint をかけて」のように、自然言語でスキルを呼び出す。wiki そのものは特定のエージェントに依存しないので、あるエージェントで取り込み、別のエージェントでクエリすることもできる。</p>
+<p>スラッシュコマンドは Claude Code 専用です。ほかのエージェントでは、「この論文を wiki に追加して」「X について wiki には何と書いてある？」「wiki に lint をかけて」のように、自然言語でスキルを呼び出します。wiki そのものは特定のエージェントに依存しないので、あるエージェントで取り込み、別のエージェントでクエリすることもできます。</p>
 </blockquote>
 <h2 id="経験の記録と手順の改善" class="fui-Subtitle1">経験の記録と手順の改善</h2>
-<p>一覧にあるスキル対応のエージェントはどれも、インストールされた <code>references/evolution-workflow.md</code> と <code>scripts/wiki_evolve.py</code> を使い、自然言語で <code>/wiki:learn</code> と <code>/wiki:evolve</code> のワークフローを実行できる。スラッシュコマンドそのものがあるのは Claude Code だけである。記録とライフサイクル管理のツールは、Python の標準ライブラリだけを使う。共通の評価用アダプターは、9つのホストすべてに対応している。ただし、ホストごとに、インストールされているバージョン、認証、使えるツール、報告される使用量の集計が異なる。改善ワークフローの実行要件と、実地検証のレポートを参照。教訓を記録するために、新しくエージェントとの連携を作る必要はない。<a href="evolution.html" class="fui-Link" data-inline="">経験の記録とスキルの改善</a>を参照。</p>
+<p>一覧にあるスキル対応のエージェントはどれも、インストールされた <code>references/evolution-workflow.md</code> と <code>scripts/wiki_evolve.py</code> を使い、自然言語で <code>/wiki:learn</code> と <code>/wiki:evolve</code> のワークフローを実行できます。スラッシュコマンドそのものがあるのは Claude Code だけです。記録とライフサイクル管理のツールは、Python の標準ライブラリだけを使います。共通の評価用アダプターは、9つのホストすべてに対応しています。ただし、ホストごとに、インストールされているバージョン、認証、使えるツール、報告される使用量の集計が異なります。教訓を記録するために、新しくエージェントとの連携を作る必要はありません。<a href="evolution.html" class="fui-Link" data-inline="">経験の記録とスキルの改善</a>で、実行要件と実地検証の結果を確認できます。</p>
     </main>
   </div>
 </body>
