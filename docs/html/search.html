@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="ja" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>検索と取得 | info-hive</title>
+  <link rel="stylesheet" href="assets/fluent2.css">
+  <link rel="stylesheet" href="assets/manual.css">
+  <link rel="stylesheet" href="assets/manual-print.css" media="print">
+</head>
+<body class="fui-FluentProvider">
+  <a class="skip-link fui-Link" href="#main">本文へ移動</a>
+  <header class="site-header">
+    <div class="shell"><a class="site-name fui-Link" href="index.html">info-hive</a></div>
+  </header>
+  <div class="shell reading-layout">
+    <nav class="contents" aria-label="目次">
+      <a class="fui-Link" href="index.html#toc">文書の目次へ戻る</a>
+    </nav>
+    <main class="page-content readme-content" id="main" tabindex="-1">
+<p>&lt;!-- Source: v3 local hybrid design: FastEmbed, sqlite-vec, BM25/RRF, JSON evidence, and incremental caches. --&gt;</p>
+<h1 id="検索と取得" class="fui-Title1">検索と取得</h1>
+<p>v3.0.0 では、セクション単位のハイブリッド検索がローカルで動く既定の検索になった。FastEmbed がセマンティックなベクトルを生成し、sqlite-vec がそれを保存して順位を付け、BM25 が語の完全一致による精度を保ち、RRF が両方の結果リストを統合する。構造化された <code>--json</code> の証拠行と、内容のハッシュで管理する差分更新のキャッシュは、これまでと変わらない。</p>
+<p>検索スクリプトは、インデックスの1行の要約から適切な候補が見つからないときの代わりの手段である（<a href="workflows.html#wiki-にクエリする" class="fui-Link" data-inline="">クエリのワークフロー</a>を参照）。リポジトリのルートで実行する。</p>
+<pre><code class="language-bash">uv run --script skills/info-hive/scripts/wiki_search.py &quot;attention mechanism&quot; --wiki wiki --json
+</code></pre>
+<pre><code class="language-mermaid">flowchart LR
+  pages[&quot;wiki のページ&quot;] --&gt; split[&quot;ATX 見出しで分割&quot;]
+  split --&gt; sections[&quot;セクション&quot;]
+  query[&quot;クエリ&quot;] --&gt; bm25[&quot;BM25 による順位付け&quot;]
+  sections --&gt; bm25
+  query -. ハイブリッド .-&gt; qemb[&quot;クエリの埋め込み&quot;]
+  sections -. ハイブリッド .-&gt; semb[&quot;セクションの埋め込み&quot;]
+  qemb --&gt; cosine[&quot;コサイン類似度&quot;]
+  semb --&gt; cosine
+  bm25 --&gt; rrf[&quot;RRF による統合 (k=60)&quot;]
+  cosine -. ハイブリッド .-&gt; rrf
+  rrf --&gt; cap[&quot;ページごとの上限&quot;]
+  cap --&gt; results[&quot;順位付きの結果&quot;]
+  cachef[&quot;.wiki-cache (パース + ベクトル)&quot;] -. 高速化 .-&gt; split
+</code></pre>
+<h2 id="セクション単位の結果" class="fui-Subtitle1">セクション単位の結果</h2>
+<p>既定（<code>--granularity section</code>）では、スクリプトは各ページを ATX 見出しで分割し、得られたセクションに BM25 で順位を付ける。1ページから採るセクションは最大 <code>--per-page</code> 件（既定は 2）までとし、<code>--top</code> 件の結果が集まるまで続ける。各セクションのスコアは、タイトル、見出しのパス、本文を対象に計算する。これは、長いページの中での一致をより正確にするための、文脈つき BM25 のプレフィックスである。</p>
+<p>順位付けの定数は v1 から変わっていない（BM25 で <code>k1=1.5</code>、<code>b=0.75</code>）。</p>
+<h2 id="json-の証拠行" class="fui-Subtitle1">JSON の証拠行</h2>
+<p><code>--json</code> フラグを付けると、機械可読なオブジェクトを1つ標準出力に出す。エージェントやほかのツールに渡すのに向いている。</p>
+<pre><code class="language-json">{
+  &quot;query&quot;: &quot;attention mechanism&quot;,
+  &quot;wiki&quot;: &quot;wiki&quot;,
+  &quot;granularity&quot;: &quot;section&quot;,
+  &quot;mode&quot;: &quot;lexical&quot;,
+  &quot;results&quot;: [
+    {
+      &quot;slug&quot;: &quot;attention-mechanism&quot;,
+      &quot;rel_path&quot;: &quot;concepts/attention-mechanism.md&quot;,
+      &quot;type&quot;: &quot;concept&quot;,
+      &quot;title&quot;: &quot;Attention Mechanism&quot;,
+      &quot;heading_path&quot;: [&quot;Attention Mechanism&quot;, &quot;Variants&quot;],
+      &quot;section_index&quot;: 2,
+      &quot;score&quot;: 8.42,
+      &quot;retrievers&quot;: [&quot;bm25&quot;],
+      &quot;snippet&quot;: &quot;...&quot;,
+      &quot;updated&quot;: &quot;2026-01-20&quot;,
+      &quot;tags&quot;: [&quot;attention&quot;],
+      &quot;sources&quot;: [&quot;attention-paper&quot;],
+      &quot;neighbors&quot;: {&quot;prev&quot;: &quot;Scaled dot-product&quot;, &quot;next&quot;: &quot;Cross-attention&quot;}
+    }
+  ]
+}
+</code></pre>
+<div class="table-scroll" role="region" aria-label="表" tabindex="0">
+<table class="fui-Table">
+<thead class="fui-TableHeader">
+<tr class="fui-TableRow">
+<th class="fui-TableHeaderCell" scope="col">フィールド</th>
+<th class="fui-TableHeaderCell" scope="col">意味</th>
+</tr>
+</thead>
+<tbody class="fui-TableBody">
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>title</code></td>
+<td class="fui-TableCell">いつも文字。frontmatter の <code>title</code> を配列で書いたもの（<code>title: [WIP]</code>）は、空でない要素を「, 」でつなぐ。ない場合や値が空の場合は、ページのスラッグ。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>heading_path</code></td>
+<td class="fui-TableCell">一致したセクションの見出しの階層（祖先の見出しから順に並び、このセクションの見出しで終わる）。ページ単位では空。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>section_index</code></td>
+<td class="fui-TableCell">ページ内でのセクションの位置。ページ単位では <code>null</code>。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>score</code></td>
+<td class="fui-TableCell">BM25 のスコア（ハイブリッドモードでは RRF のスコア）。小数点以下 4 桁に丸める。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>retrievers</code></td>
+<td class="fui-TableCell">この行を見つけた検索器: <code>[&quot;bm25&quot;]</code>、<code>[&quot;embedding&quot;]</code>、またはその両方。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>snippet</code></td>
+<td class="fui-TableCell">セクションの本文。空白をまとめたうえで、先頭 400 文字。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>type</code>、<code>updated</code></td>
+<td class="fui-TableCell">文字か <code>null</code>。文字はそのまま使う。frontmatter に配列で書いたもの（<code>type: [concept]</code>、<code>updated: [2026-03-01]</code>）は、空でない要素を「, 」でつなぐ。<code>type</code> の要素は、日本語の別名（<code>概念</code> など）を英語に直す。ない場合や空の配列は <code>null</code>。<code>--type</code> と <code>--since</code> の絞り込みも、この値で比べる。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>tags</code>、<code>sources</code></td>
+<td class="fui-TableCell">いつも文字の配列。frontmatter に値を 1 つだけ書いたもの（<code>tags: 検索</code>）は 1 要素の配列にし、要素の前後の空白と空の要素は除く。ない場合や値が空の場合は <code>[]</code>。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>neighbors</code></td>
+<td class="fui-TableCell">同じページで隣り合うセクションの見出し（ページの先頭や末尾では <code>null</code>）。</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>セマンティック検索の候補は、RRF の前に、控えめに設定したコサイン類似度の下限も超える必要がある。これにより、無関係なベクトルの近傍のせいで、wiki の範囲外の質問に、いかにも確かそうな結果が返ることを防ぐ。BM25 の完全一致には影響しない。</p>
+<p><code>--json</code> を付けなければ、結果はこれまでどおりの人が読む形式で出力される。セクションが一致した行には、見出しのパスを示す <code>§</code> の行が付く。</p>
+<h2 id="ページ全体の順位付け" class="fui-Subtitle1">ページ全体の順位付け</h2>
+<p><code>--granularity page</code> を指定すると、v1 とまったく同じ方法でページ全体に順位を付ける。v2 より前の動作をバイト単位で再現する。ページ単位の行は、<code>heading_path</code> が空で <code>section_index</code> が <code>null</code> になり、常に語彙ベースの検索になる（埋め込みはセクション単位でだけ使われる）。</p>
+<pre><code class="language-bash">python skills/info-hive/scripts/wiki_search.py &quot;attention mechanism&quot; --wiki wiki --granularity page --no-embed --json
+</code></pre>
+<h2 id="フィルター" class="fui-Subtitle1">フィルター</h2>
+<p>frontmatter のフィルターで結果を絞り込める。フィルターはすべて組み合わせられる。</p>
+<pre><code class="language-bash">uv run --script skills/info-hive/scripts/wiki_search.py &quot;diffusion&quot; --wiki wiki \
+  --type concept --tag generative --since 2026-01-01 --top 10 --per-page 3
+</code></pre>
+<p>リンクを対象にした2つのモードは、v1 のテキスト出力のままである。<code>--backlinks &lt;slug&gt;</code> は被リンクを、<code>--top-linked N</code> は wiki のハブページを見つける。</p>
+<h2 id="パースキャッシュ" class="fui-Subtitle1">パースキャッシュ</h2>
+<p><code>--cache</code> フラグを付けると、差分更新のパースキャッシュを使う。これにより、大きな wiki でも検索のたびに全ページをパースし直さずに済む。値を省略すると <code>wiki/.wiki-cache/search-index.json</code> を使い、パスを指定すればその場所を使う。</p>
+<pre><code class="language-bash"># 既定のキャッシュの場所を使う
+uv run --script skills/info-hive/scripts/wiki_search.py &quot;attention&quot; --wiki wiki --json --cache
+
+# またはパスを明示する
+uv run --script skills/info-hive/scripts/wiki_search.py &quot;attention&quot; --wiki wiki --json --cache /tmp/idx.json
+</code></pre>
+<p>各ファイルは、生のバイト列の SHA-256 をキーにして管理する。変わっていないファイルはキャッシュを再利用し、変わったファイルはパースし直し、削除されたファイルはキャッシュから除く。キャッシュがない、パースできない、古いスキーマのものである、といった場合は一から作り直し、標準エラー出力に <code>パースキャッシュを作り直す（&lt;理由&gt;）</code> を1行出す。キャッシュはアトミックに書き込まれる。</p>
+<p>リンクなどでキャッシュの経路や書き込みが拒まれた場合は、記事を読み直して検索を続ける。場所と理由を JSON の <code>link_warnings</code> と標準エラーに出す。</p>
+<blockquote>
+<p><strong>結果が同じであることを保証</strong></p>
+<p>同じクエリなら、<code>--cache</code> の有無にかかわらず結果の順位と内容は同じになる。キャッシュの警告がなければ <code>--json</code> の出力もバイト単位で一致する。この不変条件は、評価用のハーネスで確かめている。</p>
+</blockquote>
+<h2 id="既定のローカルのハイブリッド検索" class="fui-Subtitle1">既定のローカルのハイブリッド検索</h2>
+<p>セクションの検索では、FastEmbed で多言語モデルの <code>intfloat/multilingual-e5-small</code>（fp16 の ONNX、ダウンロードは約 0.25 GB）を使い、その 384 次元のベクトルを sqlite-vec の仮想テーブルに保存する。e5 系のモデルは <code>query: </code> と <code>passage: </code> の接頭辞を前提に学習しているので、クエリとセクションにそれぞれ付けてから埋め込む。コサイン距離が 0.193 を超えるセクションは、埋め込み検索の結果に含めない。BM25 とセマンティック検索の順位は、Reciprocal Rank Fusion（RRF、<code>k=60</code>、重みは等しい）で統合する。API キーや外部のサービスは使わず、wiki のセクションとクエリのテキストがマシンの外に出ることはない。</p>
+<p>スクリプトは、バージョンを固定した <span>PEP 723</span> の依存関係を宣言している。<code>uv</code> で実行すれば、プロジェクトの環境を変えずに、それらのパッケージを使える。</p>
+<pre><code class="language-bash">uv run --script skills/info-hive/scripts/wiki_search.py \
+  &quot;how does self-attention weigh tokens&quot; --wiki wiki --json --top 5
+</code></pre>
+<p>初期化とアップグレードのたびに <code>setup_wiki.py</code> が実行される。FastEmbed のモデルのファイルは <code>~/.cache/info-hive/fastembed/</code> にキャッシュされ（<code>FASTEMBED_CACHE_PATH</code> で変更できる）、現在のすべてのセクションが <code>wiki/.wiki-cache/embeddings.sqlite</code> に同期される。以降の検索とアップグレードでは、新しいセクションや変更されたセクションだけをベクトル化し、削除されたセクションは取り除く。</p>
+<p>ハイブリッドモードでは、JSON の <code>mode</code> が <code>&quot;hybrid&quot;</code> になり、各行の <code>retrievers</code> フィールドで、BM25、埋め込み、その両方のどれがその行を見つけたかが分かる。</p>
+<blockquote>
+<p><strong>失敗しても検索は壊れない</strong></p>
+<p>FastEmbed が使えない、モデルの初期化に失敗した、sqlite-vec を読み込めない、といった場合、コマンドは機密情報を含まない警告を標準エラー出力に出し、BM25 に切り替え、<code>mode: &quot;lexical&quot;</code> で終了コード 0 で終わる。依存パッケージを使わない方法を明示的に選ぶには、PEP 723 による解決を経由せずに <code>python skills/info-hive/scripts/wiki_search.py &quot;&lt;query&gt;&quot; --no-embed</code> を実行する。</p>
+</blockquote>
+<h3 id="埋め込みモデルを切り替える" class="fui-Subtitle2">埋め込みモデルを切り替える</h3>
+<p>環境変数 <code>INFO_HIVE_EMBED_MODEL</code> で埋め込みモデルを選べる。選べるのは <code>wiki_search.py</code> の <code>EMBED_MODELS</code> に載っているモデルだけで、載っていない名前を指定すると、警告を出して語彙ベースの検索に切り替わる。モデルを変えると、<code>embeddings.sqlite</code> は次の検索で自動的に作り直される。英語専用のモデルは置いていない。</p>
+<p><code>embeddings.sqlite</code> と SQLite の付随ファイルへの経路を検査し、リンクや権限などで索引を書けない場合は、警告を出して BM25 の語彙検索を返す。初期化やアップグレード時のセットアップが同じ理由で索引を準備できなければ、<code>status: lexical</code> を返す。</p>
+<div class="table-scroll" role="region" aria-label="表" tabindex="0">
+<table class="fui-Table">
+<thead class="fui-TableHeader">
+<tr class="fui-TableRow">
+<th class="fui-TableHeaderCell" scope="col">モデル</th>
+<th class="fui-TableHeaderCell" scope="col">ダウンロード</th>
+<th class="fui-TableHeaderCell" scope="col">次元数</th>
+<th class="fui-TableHeaderCell" scope="col">距離の上限</th>
+<th class="fui-TableHeaderCell" scope="col">評価セットでの recall@10（日本語 / 英語）</th>
+</tr>
+</thead>
+<tbody class="fui-TableBody">
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>intfloat/multilingual-e5-small</code>（既定）</td>
+<td class="fui-TableCell">約 0.25 GB</td>
+<td class="fui-TableCell">384</td>
+<td class="fui-TableCell">0.193</td>
+<td class="fui-TableCell">1.000 / 0.926</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>intfloat/multilingual-e5-large</code></td>
+<td class="fui-TableCell">約 2.24 GB</td>
+<td class="fui-TableCell">1024</td>
+<td class="fui-TableCell">0.19</td>
+<td class="fui-TableCell">1.000 / 0.815</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><code>multilingual-e5-large</code> は、評価セットでは日本語の MRR が既定のモデルより少し高い（0.975 と 0.954）が、英語の recall@10 は低く、セクションの埋め込みは 7 倍ほど時間がかかる。重みを <code>model.onnx_data</code> に分けて配布しているので、<code>wiki_search.py</code> は fastembed を読み込む前に <code>HF_HUB_DISABLE_SHARED_BLOBS=1</code> を設定する。huggingface_hub 1.33 の既定では、大きいファイルの実体をキャッシュ全体で共有する置き場所に置くため、onnxruntime 1.31 が <code>model.onnx_data</code> を「モデルのディレクトリの外にある」として読み込めない。この設定の前にダウンロードしたモデルで読み込みに失敗するときは、<code>~/.cache/info-hive/fastembed/</code> からそのモデルのディレクトリを消して、ダウンロードし直す。</p>
+<h2 id="日本語のトークン化" class="fui-Subtitle1">日本語のトークン化</h2>
+<p>BM25 のトークンは、テキストを NFKC で正規化して小文字にしたあと、文字種（英数字、漢字、ひらがな、カタカナ）の境界で区切って作る。</p>
+<ul>
+<li>英数字は語単位で切り出す。英数字だけのテキストのトークンは、移植元の llm-wiki と変わらない。</li>
+<li>かなと漢字は、2 文字ずつ重ねて切り出す（文字 bigram）。1 文字だけの並びは 1 文字のトークンにする。</li>
+<li>漢字は 1 文字単位のトークンも加える。そのため、「税」のような単漢字のクエリが「消費税」を含むページに当たる。</li>
+<li>全角の英数字と半角のカタカナは、NFKC で半角の英数字と全角のカタカナにそろえる。</li>
+</ul>
+<p>文字 bigram は、関係のないページとも偶然に一致しやすい。そこで、日本語のトークンを含むクエリでは、クエリのトークンのうちページに現れるものの割合（IDF で重みを付けた被覆率）が 0.25 に満たないページを、語彙ベースの結果から外す。英数字だけのクエリには、この制限をかけない。形態素解析（SudachiPy など）は使わない。評価セットで比べたところ、文字 bigram より明らかに良いとはいえなかった。</p>
+<p>語彙側のトークンが 1 つもないクエリ（記号だけのクエリなど）でも、ハイブリッド検索では埋め込み検索を行う。<code>--no-embed</code> やページ単位の検索では、空の結果を返す。</p>
+<h2 id="キャッシュディレクトリ" class="fui-Subtitle1">キャッシュディレクトリ</h2>
+<p><code>wiki/.wiki-cache/</code> には、互いに独立していて、いつでも完全に再生成できる2つのインデックスがある。</p>
+<div class="table-scroll" role="region" aria-label="表" tabindex="0">
+<table class="fui-Table">
+<thead class="fui-TableHeader">
+<tr class="fui-TableRow">
+<th class="fui-TableHeaderCell" scope="col">ファイル</th>
+<th class="fui-TableHeaderCell" scope="col">用途</th>
+</tr>
+</thead>
+<tbody class="fui-TableBody">
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>search-index.json</code></td>
+<td class="fui-TableCell"><code>--cache</code> が使う、パース済みのページとセクションのキャッシュ。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>embeddings.sqlite</code></td>
+<td class="fui-TableCell">セクションの位置情報、内容のハッシュ、sqlite-vec のベクトル。</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>どちらも gitignore の対象で、削除してかまわない。次のクエリで、ないものが作り直される。モデル、次元数、ベクトルのスキーマが変わったときも、<code>embeddings.sqlite</code> は自動的に作り直される。プロバイダーを使っていた旧来の <code>embeddings.jsonl</code> キャッシュは無視されるので、削除してよい。</p>
+<h2 id="任意の関連度ゲート" class="fui-Subtitle1">任意の関連度ゲート</h2>
+<p>任意の<a href="decisions.html" class="fui-Link" data-inline="">判定レイヤー</a>を有効にしていれば、<code>--decide</code> を付けると、上位 20 のセクションのそれぞれがクエリに答える役に立つかを、小さな判定モデルに問い合わせる。閾値を下回る行は除かれる。その結果が空なら、wiki にはおそらく答えがないということである。</p>
+<pre><code class="language-bash">uv run --script skills/info-hive/scripts/wiki_search.py &quot;query&quot; --wiki wiki --json --decide
+</code></pre>
+<p>JSON には、トップレベルの <code>decision</code> ブロック（バックエンド、モデル、閾値、候補の数、残した数、除いた数、<code>failed_open</code>、レイテンシー）と、各行の <code>decision</code> フィールドが加わる。バックエンドが失敗した場合、検索は <code>failed_open: true</code> を付けて通常の行を返す。<code>--decide</code> を付けなければ、出力は変わらない。</p>
+    </main>
+  </div>
+</body>
+</html>

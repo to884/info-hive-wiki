@@ -24,21 +24,25 @@ OpenCode は `.claude/skills/` と `~/.claude/skills/` も読むので、Claude 
 最初に [`uv`](https://docs.astral.sh/uv/getting-started/installation/) をインストールする。どのエージェントも、バージョンを固定した同じローカルの実行環境を呼び出すので、エージェントごとの Python 環境は要らない。
 
 
-**Claude Code** には、プラグイン一式（スキルとスラッシュコマンド）が入る。マーケットプレイスは [to884/info-hive-marketplace](https://github.com/to884/info-hive-marketplace) にある。
+### Claude Code CLI
+
+Claude Code には、プラグイン一式（スキルとスラッシュコマンド）が入る。マーケットプレイスは [to884/info-hive-marketplace](https://github.com/to884/info-hive-marketplace) にある。
 
 ```bash
 /plugin marketplace add to884/info-hive-marketplace
 /plugin install wiki@info-hive
 ```
 
-**Codex** には、スキルと MCP をまとめたプラグインを導入できる（Codex CLI 0.166.0 で確認）。
+### Codex CLI
+
+Codex CLI と [`uv`](https://docs.astral.sh/uv/getting-started/installation/) が使えるターミナルで次を実行します。スキルと MCP サーバーをまとめて導入できます（Codex CLI 0.166.0 で確認）。
 
 ```bash
 codex plugin marketplace add to884/info-hive-marketplace
 codex plugin add wiki@info-hive
 ```
 
-導入後は新しいチャットで `$wiki:info-hive init`、`$wiki:info-hive ingest <ソース>`、`$wiki:info-hive query <質問>` の形で使う。`$wiki:info-hive help` で 11 種類の操作を表示し、`$wiki:info-hive help query` で個別のヘルプを表示する。MCP は自動登録される。初回の依存とモデルの取得には数分かかることがある。社内ネットワークの証明書の設定は [MCP サーバー](../skills/info-hive/references/mcp-server.md)を参照。
+導入後は新しい Codex のチャットで `$wiki:info-hive init`、`$wiki:info-hive ingest <ソース>`、`$wiki:info-hive query <質問>` の形で使います。`$wiki:info-hive help` で操作の一覧を表示し、`$wiki:info-hive help query` で個別のヘルプを表示します。MCP は自動登録されます。初回の依存とモデルの取得には数分かかることがあります。社内ネットワークの証明書の設定は [MCP サーバー](../skills/info-hive/references/mcp-server.md)を参照してください。
 
 Claude Code の `/wiki:*` は Codex のスラッシュコマンドにはならない。Web の raw は Codex 自身が作り、Claude CLI は不要である。`$wiki:info-hive ingest session` で実行中の Codex の会話を、`$wiki:info-hive ingest session:<ID>` で指定した会話を取り込める。従来の JSONL とデータベースの履歴の両方を、Codex の読み取り API で取得する。取り込みを依頼したターンを除外し、伏せ字と保存前の確認を行う。rag の Codex 対応は含まない。
 
@@ -48,6 +52,8 @@ Claude Code の `/wiki:*` は Codex のスラッシュコマンドにはなら�
 codex plugin marketplace add .
 codex plugin add wiki@info-hive-dev
 ```
+
+### Codex のスキル単体とその他のエージェント
 
 **Codex のスキルだけを使う場合、および Cursor、Gemini CLI、OpenCode、OpenClaw、Pi** では、`skills` CLI でスキルをインストールする。対応表の `--agent` の値に置き換えて使う。スキルだけの場合は、MCP の自動登録とプラグインの `commands/` は含まれない。同梱の CLI とリファレンスを使い、Codex の呼び出し名は `$info-hive` になる。
 

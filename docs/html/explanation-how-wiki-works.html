@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ja" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>資料から出典付きの答えが返るまで | info-hive</title>
+  <link rel="stylesheet" href="assets/fluent2.css">
+  <link rel="stylesheet" href="assets/manual.css">
+  <link rel="stylesheet" href="assets/manual-print.css" media="print">
+</head>
+<body class="fui-FluentProvider">
+  <a class="skip-link fui-Link" href="#main">本文へ移動</a>
+  <header class="site-header">
+    <div class="shell"><a class="fui-Link site-name" href="index.html">info-hive</a></div>
+  </header>
+  <main class="shell reading-layout" id="main" tabindex="-1">
+    <nav class="contents" aria-label="このページの目次">
+      <h2>目次</h2>
+      <ul>
+        <li><a class="fui-Link" data-inline href="#source-and-pages">原本と wiki のページ</a></li>
+        <li><a class="fui-Link" data-inline href="#lookup">索引と検索の役割</a></li>
+        <li><a class="fui-Link" data-inline href="#review">点検で確かめること</a></li>
+        <li><a class="fui-Link" data-inline href="#rag">rag との関係</a></li>
+      </ul>
+    </nav>
+    <article class="page-content" aria-labelledby="page-title">
+      <header class="intro">
+        <h1 class="fui-Title1" id="page-title">資料から出典付きの答えが返るまで</h1>
+        <p>原本と wiki のページの役割を知ると、答えの根拠をたどりやすくなります。</p>
+      </header>
+      <section id="source-and-pages">
+        <h2 class="fui-Subtitle1">原本と wiki のページ</h2>
+        <p>長期の調査、会議で決めたこと、繰り返し尋ねられる質問など、別のセッションでも使う知識を wiki に残せます。同じフォルダーを使う複数のエージェントでページを読み継げます。</p>
+        <p>原本は <code>raw/</code> に置きます。要約や関係するページは <code>wiki/</code> に置き、どの資料を根拠にしたかを記します。要約を見直すときは、原本までたどれます。</p>
+        <p>フォルダーの <code>CLAUDE.md</code> に wiki の場所が書いてあれば、新しい Code セッションからもその場所を探せます。</p>
+      </section>
+
+      <section id="lookup">
+        <h2 class="fui-Subtitle1">索引と検索の役割</h2>
+        <p>質問を受けると、エージェントは索引とページを読みます。索引で候補が見つからないときは、検索で候補を探します。</p>
+        <p>RAG は質問に合わせて資料を検索し、見つかった箇所を回答に使います。info-hive の wiki は取り込みの時点で要約や資料同士の関係をページに書き、次の質問でも使えるようにします。</p>
+        <p>初期化では e5 を取得します。MCP が初めて意味検索用の索引を作るときは、wiki が ruri を取得します。取得している間は語彙検索の結果を返すことがあります。</p>
+      </section>
+
+      <section id="review">
+        <h2 class="fui-Subtitle1">点検で確かめること</h2>
+        <p>構造の点検ではリンク切れや孤立ページを確認します。内容の点検では、古い記述、文書間の矛盾、原本で裏づけられる範囲を確認します。修正案を承認すると、該当するページを更新できます。</p>
+      </section>
+
+      <section id="rag">
+        <h2 class="fui-Subtitle1">rag との関係</h2>
+        <p>rag プラグインは PDF の抽出と索引化を受け持ちます。wiki は抽出した資料を参照し、要約とページのつながりを残します。</p>
+      </section>
+
+      <nav class="page-navigation" aria-label="関連ページ">
+        <a class="fui-Link" href="tutorial-first-wiki.html">練習用 wiki を作る</a>
+        <a class="fui-Link" href="commands.html">コマンドを調べる</a>
+      </nav>
+    </article>
+  </main>
+</body>
+</html>

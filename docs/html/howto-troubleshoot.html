@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ja" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>起動や接続の障害を調べる | info-hive</title>
+  <link rel="stylesheet" href="assets/fluent2.css">
+  <link rel="stylesheet" href="assets/manual.css">
+  <link rel="stylesheet" href="assets/manual-print.css" media="print">
+</head>
+<body class="fui-FluentProvider">
+  <a class="skip-link fui-Link" href="#main">本文へ移動</a>
+  <header class="site-header">
+    <div class="shell"><a class="fui-Link site-name" href="index.html">info-hive</a></div>
+  </header>
+  <main class="shell reading-layout" id="main" tabindex="-1">
+    <nav class="contents" aria-label="このページの目次">
+      <h2>目次</h2>
+      <ul>
+        <li><a class="fui-Link" data-inline href="#help">コマンド一覧が出ないとき</a></li>
+        <li><a class="fui-Link" data-inline href="#reconnect">wiki に再接続する</a></li>
+        <li><a class="fui-Link" data-inline href="#diagnostic">Windows で起動の診断を実行する</a></li>
+        <li><a class="fui-Link" data-inline href="#dll">DLL または証明書のエラーを確認する</a></li>
+      </ul>
+    </nav>
+    <article class="page-content" aria-labelledby="page-title">
+      <header class="intro">
+        <h1 class="fui-Title1" id="page-title">起動や接続の障害を調べる</h1>
+        <p>Code タブで wiki が接続されないときや、初期化の実行環境が準備できないときに使います。</p>
+      </header>
+      <section id="help">
+        <h2 class="fui-Subtitle1">コマンド一覧が出ないとき</h2>
+        <p>PowerShell で <code>python --version</code> を実行します。Microsoft Store の案内が出た場合は、<a class="fui-Link" data-inline href="tutorial-install.html#tools">Python 3.12 を入れる手順</a>に戻ります。</p>
+        <p>版が表示されたら、<a class="fui-Link" data-inline href="tutorial-install.html#restart">アプリを起動し直す手順</a>を行い、<code>/wiki:help</code> をもう一度送ります。</p>
+      </section>
+
+      <section id="reconnect">
+        <h2 class="fui-Subtitle1">wiki に再接続する</h2>
+        <ol>
+          <li>Code タブで /mcp を送ります。<pre><code>/mcp</code></pre></li>
+          <li>一覧の「wiki」を開きます。</li>
+          <li>「再接続」を押します。</li>
+          <li>接続済みに戻り、wiki のツールが表示されることを確かめます。</li>
+        </ol>
+      </section>
+
+      <section id="diagnostic">
+        <h2 class="fui-Subtitle1">Windows で起動の診断を実行する</h2>
+        <p>新しい PowerShell で次を実行します。<code>0.39.1</code> は導入済みの版に合わせます。最後の行が <code>0</code> なら起動診断は成功です。</p>
+        <pre><code>$version = '0.39.1'
+$launcher = Join-Path $env:USERPROFILE ".claude\plugins\cache\info-hive\wiki\$version\skills\info-hive\scripts\wiki_mcp_launch.py"
+uv run --quiet --script $launcher --ensure
+$LASTEXITCODE</code></pre>
+        <p>診断が失敗した場合は、開始時刻、終了コード、表示されたエラー、使用した版を控えます。</p>
+        <p>エクスプローラーで <code>%LOCALAPPDATA%\info-hive\logs\</code> を開きます。<code>server.log</code> や <code>launch.log</code> があれば、実行時刻に近い行を確認します。</p>
+      </section>
+
+      <section id="dll">
+        <h2 class="fui-Subtitle1">DLL または証明書のエラーを確認する</h2>
+        <p>Visual C++ ランタイムの不足が出た場合、Windows x64 では次を実行します。</p>
+        <pre><code>winget install --id Microsoft.VCRedist.2015+.x64 -e --source winget</code></pre>
+        <p>証明書の検証で失敗した場合は、<a class="fui-Link" data-inline href="howto-prepare.html#certificates">組織の証明書を使う手順</a>を確認します。</p>
+        <p>初期化で <code>"status": "ready"</code> が出ていない場合は、原因を解消してから <code>/wiki:init</code> をもう一度送ります。</p>
+      </section>
+
+      <nav class="page-navigation" aria-label="関連ページ">
+        <a class="fui-Link" rel="prev" href="tutorial-install.html">導入手順へ戻る</a>
+        <a class="fui-Link" rel="next" href="commands.html">コマンド一覧を開く</a>
+      </nav>
+    </article>
+  </main>
+</body>
+</html>

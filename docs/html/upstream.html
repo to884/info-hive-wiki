@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ja" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>移植元の記録 | info-hive</title>
+  <link rel="stylesheet" href="assets/fluent2.css">
+  <link rel="stylesheet" href="assets/manual.css">
+  <link rel="stylesheet" href="assets/manual-print.css" media="print">
+</head>
+<body class="fui-FluentProvider">
+  <a class="skip-link fui-Link" href="#main">本文へ移動</a>
+  <header class="site-header">
+    <div class="shell"><a class="site-name fui-Link" href="index.html">info-hive</a></div>
+  </header>
+  <div class="shell reading-layout">
+    <nav class="contents" aria-label="目次">
+      <a class="fui-Link" href="index.html#toc">文書の目次へ戻る</a>
+    </nav>
+    <main class="page-content readme-content" id="main" tabindex="-1">
+<h1 id="移植元の記録" class="fui-Title1">移植元の記録</h1>
+<p>info-hive は、<span>praneybehl/llm-wiki-plugin</span>（MIT ライセンス、作者 Praney Behl）を日本語向けに移植したものである。移植元の履歴は取り込まず、ファイルをコピーして独立させた（<span>移植計画</span>の方針 A）。</p>
+<h2 id="起点" class="fui-Subtitle1">起点</h2>
+<div class="table-scroll" role="region" aria-label="表" tabindex="0">
+<table class="fui-Table">
+<thead class="fui-TableHeader">
+<tr class="fui-TableRow">
+<th class="fui-TableHeaderCell" scope="col">項目</th>
+<th class="fui-TableHeaderCell" scope="col">値</th>
+</tr>
+</thead>
+<tbody class="fui-TableBody">
+<tr class="fui-TableRow">
+<td class="fui-TableCell">リポジトリ</td>
+<td class="fui-TableCell">https://github.com/praneybehl/llm-wiki-plugin</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">バージョン</td>
+<td class="fui-TableCell">v4.0.1</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">コミット</td>
+<td class="fui-TableCell"><code>2d24ccfbbd46e77a431ddf2b1b54042d18576217</code></td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">取り込んだ日</td>
+<td class="fui-TableCell">2026-11-02</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>起点のコミットに、手元のフォーク（<code>to884/llm-wiki-plugin</code>）にあった未コミットの日本語訳 94 ファイルを重ねた状態を取り込んだ。訳を入れた各ファイルの SHA-256 は 開発用のリポジトリの <span>docs/upstream/translation-hashes.txt</span> に残してある。</p>
+<h2 id="取り込まなかったもの" class="fui-Subtitle1">取り込まなかったもの</h2>
+<div class="table-scroll" role="region" aria-label="表" tabindex="0">
+<table class="fui-Table">
+<thead class="fui-TableHeader">
+<tr class="fui-TableRow">
+<th class="fui-TableHeaderCell" scope="col">移植元のパス</th>
+<th class="fui-TableHeaderCell" scope="col">理由</th>
+</tr>
+</thead>
+<tbody class="fui-TableBody">
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>server/</code></td>
+<td class="fui-TableCell">ホスト型 wiki を提供しないため（方針 G）</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>skills/llm-wiki/scripts/wiki_remote.py</code>、<code>skills/llm-wiki/references/hosted-mode.md</code>、<code>commands/wiki/migrate.md</code>、<code>eval/remote/</code>、<code>docs/hosted.md</code></td>
+<td class="fui-TableCell">同上</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>docs/.vitepress/</code>、<code>docs/public/</code>、<code>docs/v3/</code>、<code>package.json</code>、<code>pnpm-lock.yaml</code>、<code>.github/workflows/deploy-docs.yml</code></td>
+<td class="fui-TableCell">docs サイトを持たず、<code>docs/</code> の Markdown だけを残すため</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>research/</code></td>
+<td class="fui-TableCell">移植元の調査メモで、移植版には当てはまらないため</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>eval/decisions/results-fake.json</code>、<code>eval/decisions/results-local-d1-2b.json</code></td>
+<td class="fui-TableCell">移植元の英語の評価セットでの測定記録。判定レイヤーのしきい値の根拠として移植元で参照できる</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>eval/evolution/workflows/build_suite.py</code>、<code>eval/evolution/workflows/frozen-runtime.patch</code></td>
+<td class="fui-TableCell">移植元の固定コミットを <code>git show</code> で読むツールとその入力。スイートを作り直すときは移植元の起点のコミットで実行する</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>AGENTS.md</code></td>
+<td class="fui-TableCell">開発の指示は開発用のリポジトリ（to884/info-hive-dev）に置くため</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h2 id="取り込み後の主な変更" class="fui-Subtitle1">取り込み後の主な変更</h2>
+<ul>
+<li>プラグイン名を <code>wiki</code>、マーケットプレイス名とスキル名を <code>info-hive</code> にした。マーケットプレイスの定義は、別のリポジトリ <span>to884/info-hive-marketplace</span> に置く。コマンドは <code>commands/</code> の直下に移し、<code>/wiki:query</code> の形で起動する。</li>
+<li>スキルのディレクトリを <code>skills/llm-wiki/</code> から <code>skills/info-hive/</code> に改名した。</li>
+<li>判定レイヤーの環境変数を <code>LLM_WIKI_DECISIONS*</code> から <code>INFO_HIVE_DECISIONS*</code> に、モデルのキャッシュを <code>~/.cache/llm-wiki/</code> から <code>~/.cache/info-hive/</code> に変えた。</li>
+</ul>
+<p>日本語への対応の内容は <span>移植計画</span> と <code>CHANGELOG.md</code> にまとめる。移植元の v0.1.0 から v4.0.1 までの変更履歴の日本語訳は <span>docs/upstream-changelog.md</span> に残している。</p>
+<h2 id="移植元の修正を取り込む手順" class="fui-Subtitle1">移植元の修正を取り込む手順</h2>
+<p>移植元に役立つ修正が入ったら、必要なものだけを取り込む。履歴を共有していないので、パスの違い（<code>skills/llm-wiki/</code> と <code>skills/info-hive/</code>、<code>commands/wiki/</code> と <code>commands/</code>）に注意する。</p>
+<pre><code class="language-bash">git remote add upstream https://github.com/praneybehl/llm-wiki-plugin.git   # 初回だけ
+git fetch upstream
+git log --oneline 2d24ccf..upstream/main
+git cherry-pick &lt;コミット&gt;   # 衝突したら、パスを読み替えて手で直す
+</code></pre>
+<p>取り込んだら、下の表に 1 行追加する。</p>
+<h2 id="取り込んだ移植元の修正" class="fui-Subtitle1">取り込んだ移植元の修正</h2>
+<div class="table-scroll" role="region" aria-label="表" tabindex="0">
+<table class="fui-Table">
+<thead class="fui-TableHeader">
+<tr class="fui-TableRow">
+<th class="fui-TableHeaderCell" scope="col">日付</th>
+<th class="fui-TableHeaderCell" scope="col">移植元のコミット</th>
+<th class="fui-TableHeaderCell" scope="col">内容</th>
+<th class="fui-TableHeaderCell" scope="col">info-hive のコミット</th>
+</tr>
+</thead>
+<tbody class="fui-TableBody">
+<tr class="fui-TableRow">
+<td class="fui-TableCell">（まだない）</td>
+<td class="fui-TableCell"></td>
+<td class="fui-TableCell"></td>
+<td class="fui-TableCell"></td>
+</tr>
+</tbody>
+</table>
+</div>
+    </main>
+  </div>
+</body>
+</html>

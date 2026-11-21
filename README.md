@@ -85,7 +85,7 @@ Claude Code と Codex では、`ingest session` で実行中の会話を取り�
 
 ## ドキュメント
 
-[ドキュメントの一覧](docs/index.md)から、使い方と仕組みを参照できる。
+手元の [docs/html/index.html](docs/html/index.html) をブラウザーで開くと、図解と目次から使い方を参照できる。
 
 | 文書 | 内容 |
 | --- | --- |

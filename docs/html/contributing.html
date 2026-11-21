@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="ja" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>コントリビュートの手引き | info-hive</title>
+  <link rel="stylesheet" href="assets/fluent2.css">
+  <link rel="stylesheet" href="assets/manual.css">
+  <link rel="stylesheet" href="assets/manual-print.css" media="print">
+</head>
+<body class="fui-FluentProvider">
+  <a class="skip-link fui-Link" href="#main">本文へ移動</a>
+  <header class="site-header">
+    <div class="shell"><a class="site-name fui-Link" href="index.html">info-hive</a></div>
+  </header>
+  <div class="shell reading-layout">
+    <nav class="contents" aria-label="目次">
+      <a class="fui-Link" href="index.html#toc">文書の目次へ戻る</a>
+    </nav>
+    <main class="page-content readme-content" id="main" tabindex="-1">
+<h1 id="コントリビュートの手引き" class="fui-Title1">コントリビュートの手引き</h1>
+<p>このプラグインの改善に関心を持ってくれたことに感謝する。以下の取り決めは、コントリビュートを滞りなく取り込むためのもので、参加を制限するためのものではない。小さな PR も歓迎する。</p>
+<p>info-hive は、Praney Behl の <span>llm-wiki-plugin</span> v4.0.1 を日本語向けに移植したものである。移植元とは独立して開発しており、info-hive への修正を移植元に送ることはしない。起点のコミットと取り込んだ修正は <a href="upstream.html" class="fui-Link" data-inline="">UPSTREAM.md</a> に記録する。</p>
+<h2 id="受け付けやすいコントリビュート" class="fui-Subtitle1">受け付けやすいコントリビュート</h2>
+<p>コントリビュートを受け付けやすい場所は4つある。スキル本体（<code>skills/info-hive/SKILL.md</code> と references）、同梱のスクリプト（<code>skills/info-hive/scripts/</code>）、スラッシュコマンド（<code>commands/</code>）、ドキュメント（README、CHANGELOG、<code>docs/</code>、このファイル）である。どれについても、不具合の修正と小さな改善はそのまま受け入れやすい。</p>
+<p>大きな変更（初期化で作るページの種類の追加、lint のチェックの追加、references の構成の変更、既定のスキーマの変更など）は、コードを書く前に issue を立てて、変更の形を相談してほしい。このスキルは意図して特定の設計を選んでいる。アトミックなページ、インデックスを先に読むナビゲーション、設定としてのスキーマなどである。「改善」のつもりの変更が、意図したトレードオフを崩すこともあるので、先に issue で話しておけば手戻りが減る。</p>
+<p>合わないと思われるのは、Markdown を正本とする方針から離れる機能や、ローカルのフォルダーで動くモードを外部のサービスに依存させる機能である。別の正本のデータベースや、2つ目のサービスが必要な案は、このリポジトリへの PR より、別のプロジェクトとして進めるほうが向いている。その方向を探るなら、README で紹介している実装（OmegaWiki、Synthadoc など）が参考になる。</p>
+<h2 id="開発環境の準備" class="fui-Subtitle1">開発環境の準備</h2>
+<p>フォークをクローンし、ローカルのチェックアウトから Claude Code のセッションにプラグインを読み込む。</p>
+<pre><code class="language-bash">git clone https://github.com/&lt;your-fork&gt;/info-hive-wiki
+cd info-hive-wiki
+</code></pre>
+<p>続いて、<code>--plugin-dir</code> にチェックアウトの絶対パスを渡して Claude Code を起動する。プラグインはそのセッションだけ読み込まれ、コミットしていない変更もそのまま使われる。コマンドは <code>/wiki:*</code> で起動する。<code>wiki@info-hive</code> をインストールしてあっても、そのセッションでは <code>--plugin-dir</code> で読み込んだほうが使われる。</p>
+<pre><code class="language-bash">claude --plugin-dir /absolute/path/to/info-hive-wiki
+</code></pre>
+<p>このリポジトリには、マーケットプレイスの定義はない。マーケットプレイスは <span>to884/info-hive-marketplace</span> にあり、GitHub の main を配るので、ローカルの変更を試すのには使えない。</p>
+<p>変更したら、<code>/reload-plugins</code> で読み込み直す。ビルドの手順はない。スキル、コマンド、スクリプトは、ファイルシステムにあるものがそのまま動く。</p>
+<p>同梱の Python スクリプトは Python 3.12 以上を対象にする。uv で動くスクリプトの PEP 723 の <code>requires-python</code> は、どれも CI（<code>.github/workflows/wiki-tests.yml</code>）で試す版の範囲にそろえ、上限を付ける（今は <code>&quot;&gt;=3.12,&lt;3.15&quot;</code>）。上限がないと、Python のない PC で uv がいちばん新しい版を取り、依存の配布物がその版にまだないと起動しない。CI の行列に新しい版を足したら、すべての宣言の上限を一緒に上げる（info-hive-dev の <code>tests/wiki/test_python_version.py</code> が、宣言と行列が合うかを確かめる）。wiki のモジュールを読み込む入口は、最初に読み込まれる <code>wiki_text.py</code> で版を確かめ、今までの対象だった 3.10 と 3.11 では理由を書いて止まる。そのため、<code>wiki_text.py</code> を読み込むまでに読むファイル（入口のスクリプト、<code>wiki_text.py</code>、その前に読み込むモジュール）には 3.10 にない構文（PEP 695 の型の宣言、PEP 701 の f 文字列の書き方など）を使わず、<code>wiki_text</code> より前に 3.10 にない標準ライブラリ（<code>tomllib</code> など）を読み込まない。版の確かめより先に、別の誤りで止まるからである。改善のワークフロー、語彙ベースの検索、lint、stats、グラフのクエリは標準ライブラリだけを使う。実行環境のセットアップ、ハイブリッド検索、グラフのコンパイル、PDF の文字の層の取り出し（<code>wiki_pdf.py</code>）、YouTube の字幕の取得（<code>wiki_youtube.py</code> の yt-dlp）は、uv を通じて、バージョンを固定した PEP 723 の依存パッケージを使う。yt-dlp は、YouTube の変更に追いつく作業を標準ライブラリで作り直せないので入れた例外で、<code>wiki_youtube.py</code> だけに閉じる。字幕の照合と lint が使う <code>wiki_captions.py</code> は標準ライブラリだけで書く（info-hive-dev の ADR-0027）。新しい補助の処理には標準ライブラリを優先し、改善のワークフローには依存パッケージを加えない。</p>
+<h2 id="変更を確かめる" class="fui-Subtitle1">変更を確かめる</h2>
+<p>提出する前に、関係するリポジトリ内のテストを実行し、変更したワークフローを使い捨ての wiki で試す。</p>
+<pre><code class="language-bash">uv run --with fastembed==0.8.0 --with sqlite-vec==0.1.9 --with PyYAML==6.0.3 python -m unittest discover -s eval/retrieval -p 'test_*.py'
+python -m unittest discover -s eval/scripts -p 'test_*.py'
+python skills/info-hive/scripts/test_link_resolution.py
+python eval/evolution/test_evolution.py
+python eval/evolution/test_loop.py
+python eval/evolution/test_adapters.py
+python eval/retrieval/run_eval.py --gate --baseline
+python eval/retrieval/run_eval.py --set ja --gate --baseline
+python eval/decisions/test_decisions.py
+</code></pre>
+<p>検索の変更では、<code>eval/retrieval/baselines/</code> に保存した基準値とも比べる。<code>--gate</code> は方式どうしの相対比較しかしないので、英語の成績が全体に下がっても通る。<code>--baseline</code> を付けると、recall@10 と MRR が基準値から 0.05 を超えて下がるか、偽陽性率が 0.05 を超えて上がったときに失敗する。検索の品質を意図して変えたときは、変えた理由を記録したうえで基準値を取り直す。基準値を取り直すときは、ハイブリッド検索の依存パッケージを入れて <code>--save</code> を付ける。</p>
+<pre><code class="language-bash">uv run --with fastembed==0.8.0 --with sqlite-vec==0.1.9 --with PyYAML==6.0.3 python eval/retrieval/run_eval.py --save eval/retrieval/baselines/en.json
+uv run --with fastembed==0.8.0 --with sqlite-vec==0.1.9 --with PyYAML==6.0.3 python eval/retrieval/run_eval.py --set ja --save eval/retrieval/baselines/ja.json
+</code></pre>
+<p>判定レイヤーのテストは偽のバックエンドを使う。非公開の wiki のテキストを、外部の判定バックエンドに送ってはならない。</p>
+<p>改善のワークフローのテストは、決まった結果を返すランナーでライフサイクルの動作を確かめるもので、モデルの品質が上がったことを確かめるものではない。実際のモデルを使う試験には、ランナーとモデルを明示して選び、推論の予算を決める必要がある。その結果は別に記録する。</p>
+<p>手作業で行う最小限のスモークテストは次のとおり。</p>
+<pre><code class="language-bash">mkdir /tmp/test-wiki &amp;&amp; cd /tmp/test-wiki
+python /path/to/info-hive-wiki/skills/info-hive/scripts/init_wiki.py .
+# wiki/sources/ や wiki/concepts/ などの下に、Markdown のページを手でいくつか作る
+# わざと問題を入れておく（孤立ページ、リンク切れの [[wikilink]]、frontmatter の欠落）
+python /path/to/info-hive-wiki/skills/info-hive/scripts/wiki_lint.py wiki/
+python /path/to/info-hive-wiki/skills/info-hive/scripts/wiki_stats.py wiki/
+python /path/to/info-hive-wiki/skills/info-hive/scripts/wiki_search.py &quot;your query terms&quot;
+</code></pre>
+<p>スキル本体（<code>SKILL.md</code> や references）を変えたときにもっとも役立つのは、実際に取り込んでみることである。テスト用のプロジェクトの <code>raw/</code> に論文や記事を置き、<code>/wiki:ingest &lt;path&gt;</code> を実行し、できあがったものを読む。ワークフローがずれて出力の質が落ちているなら、スキルを直す必要がある。</p>
+<p>スラッシュコマンドを変えたときは、新しいプロジェクトにプラグインをインストールし、コマンドを最初から最後まで実行して確かめる。引数のあるコマンドを足したり変えたりしたときは、frontmatter の <code>argument-hint</code> と <code>argument-description</code> もそろえて書き、<code>/wiki:help</code>（<code>python skills/info-hive/scripts/wiki_help.py</code>）の出力を確かめる。コマンドを足したときは、<code>docs/commands.md</code> に <code>## `/wiki:&lt;名前&gt; ...`</code> の節も書き、<code>/wiki:help &lt;名前&gt;</code>（<code>python skills/info-hive/scripts/wiki_help.py --command=&lt;名前&gt;</code>）の出力を確かめる。この節が個別のヘルプの「詳細」になる。節のリンクはインラインの形（<code>[文字](./workflows.md)</code>）で書く。スクリプトがリンクを GitHub の URL に書き換えられない書き方（参照の形のリンク、リストの中のコードフェンスのリンクなど）があると、書き換えずに節をそのまま出して警告する。</p>
+<h2 id="スキルの文章の書き方" class="fui-Subtitle1">スキルの文章の書き方</h2>
+<p>スキル本体と references は、一定の文体と構成で書いている。新しく書く文章も、既存の文章にそろえる。</p>
+<p>references のファイルは、箇条書きを最小限にした文章で書く。ばらばらの要点を並べるのではなく、理由でつないで説明する。これは意図した選択である。スキルを読む LLM にとっては、箇条書きの断定より、つながった説明のほうが役に立つ。箇条書きが3つか4つより多く続くようなら、文章で書いたほうがよくないかを考え直す。</p>
+<p>指示は命令の形で書き（「ソースを読む」「先にスキーマを確かめる」）、理由は説明の形で書く（「大きさに上限を設ける理由は……」）。本当に譲れない制約でない限り、大文字の MUST や NEVER のような強い言い方は避け、制約がある理由を説明する。</p>
+<p>まだ確かめられていない主張は、言い切らない。「このパターンは、積み重なっていく文章の調査には向いているが、関係の多いデータには向かない」は、根拠を示せる主張である。「このパターンは最良の知識管理の方法である」はそうではない。</p>
+<h2 id="スクリプトの書き方" class="fui-Subtitle1">スクリプトの書き方</h2>
+<p>同梱のスクリプトには、守っておきたい共通の取り決めがある。</p>
+<p>どのスクリプトも、先頭の docstring に目的、使い方、実行例を書く。新しいスクリプトも同じ形にし、<code>python script.py --help</code> で役に立つ説明が出るようにする。</p>
+<p>出力は、既定では人が読む形にし、プログラムから使うための <code>--json</code> を任意で付けられるようにする（今は <code>wiki_lint.py</code> にある。ほかのスクリプトにも必要に応じて加えてよい）。</p>
+<p>診断用のスクリプトは、検出結果を報告するだけで、修正は適用しない。初期化とセットアップ、明示的に呼び出す改善のライフサイクルは、ドキュメントに書いた成果物を書き込む。改善の候補は、合格してレビューを済ませた変更を明示的に適用するまで隔離しておく。スナップショットと測定結果は、あとから確認できる状態で残す。</p>
+<p>ライフサイクルの新しい補助の処理は、標準ライブラリで書く。依存パッケージが必要な検索とグラフの処理には、バージョンを固定した既存の実行環境を使い回す。</p>
+<h2 id="スキーマの変更と互換性のない変更" class="fui-Subtitle1">スキーマの変更と互換性のない変更</h2>
+<p>変更によっては、ユーザーがすでに作った wiki に影響する。必須の frontmatter のフィールドを加える、既定のページの種類の名前を変える、インデックスの形式を変える、といった変更である。これらは互換性のない変更であり、次のものが必要になる。</p>
+<p>PR に移行の手順を書く（スクリプト、手作業の手順、またはその両方）。</p>
+<p><code>CHANGELOG.md</code> の <code>### Changed</code> か <code>### Breaking</code> の見出しの下に、はっきり書く。</p>
+<p>SemVer に沿ってバージョンを上げる。古い wiki と互換性があればマイナー、なければメジャーを上げる。</p>
+<p>互換性を保てる変更（妥当な既定値を持つ任意の frontmatter のフィールドを加えるなど）にできるなら、互換性のない形より、そちらを選ぶ。</p>
+<h2 id="pr-のチェックリスト" class="fui-Subtitle1">PR のチェックリスト</h2>
+<p>PR を出す前に、次を確かめる。</p>
+<ul>
+<li>[ ] 影響を受ける同梱のスクリプトと、既存の回帰テストが、小さなテスト用の wiki で通る。</li>
+<li>[ ] <code>python -c &quot;import json; json.load(open('.claude-plugin/plugin.json', encoding='utf-8'))&quot;</code> が成功する。</li>
+<li>[ ] Claude Code でプラグインを読み込める（<code>claude --plugin-dir &lt;local-path&gt;</code> で起動し、エラーが出ない）。</li>
+<li>[ ] <code>CHANGELOG.md</code> の <code>[Unreleased]</code> に変更を書いた。この PR でバージョンを準備する場合は、そのリリースの見出しの下に書いた。</li>
+<li>[ ] <code>SKILL.md</code> の frontmatter や <code>plugin.json</code> の説明文を変えた場合、1024 文字未満に収まっている。</li>
+<li>[ ] SKILL.md の説明文を変えた場合、スキルが呼び出される範囲がはっきり良くなっている（関係する言い回しが増える、呼び出されるべきときに呼び出されないことが減る）。説明文は、Claude がスキルを使うかどうかを決める主な手がかりなので、言葉の選び方が大事である。</li>
+</ul>
+<h2 id="issue" class="fui-Subtitle1">issue</h2>
+<p>不具合の報告でもっとも役に立つのは、問題を起こしたコマンドや自然言語の依頼、関係する wiki の一部（共有してよければ、数ページかディレクトリ全体）、期待した結果と実際の結果である。スクリプトの不具合なら、正確なコマンドラインと出力（またはスタックトレース）も添える。</p>
+<p>機能の要望では、求める機能だけでなく、その背景にある使い方も書いてほしい。要望された機能そのものより、同じ問題への別のやり方のほうが合っていることもある。</p>
+<h2 id="リリースメンテナー向け" class="fui-Subtitle1">リリース（メンテナー向け）</h2>
+<h3 id="バージョンを書く場所" class="fui-Subtitle2">バージョンを書く場所</h3>
+<p>リリースのバージョンは、<code>plugin.json</code> の <code>version</code> と、CHANGELOG の見出しに書く。<strong>2つを一緒に上げる</strong>。</p>
+<div class="table-scroll" role="region" aria-label="表" tabindex="0">
+<table class="fui-Table">
+<thead class="fui-TableHeader">
+<tr class="fui-TableRow">
+<th class="fui-TableHeaderCell" scope="col">場所</th>
+<th class="fui-TableHeaderCell" scope="col">フィールド</th>
+<th class="fui-TableHeaderCell" scope="col">備考</th>
+</tr>
+</thead>
+<tbody class="fui-TableBody">
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>.claude-plugin/plugin.json</code></td>
+<td class="fui-TableCell"><code>version</code></td>
+<td class="fui-TableCell">正本。Claude Code は、インストールしたバージョンをここから読む。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>CHANGELOG.md</code></td>
+<td class="fui-TableCell"><code>## [X.Y.Z] - YYYY-MM-DD</code> の見出しと、<code>[X.Y.Z]: …/releases/tag/vX.Y.Z</code> のリンクの行</td>
+<td class="fui-TableCell">人が読むための記録。</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>マーケットプレイス（<span>to884/info-hive-marketplace</span>）の <code>wiki</code> の項目には、<code>version</code> を書かない。両方に書くと、2つのリポジトリで同じ値を管理することになる。別のリポジトリを指す項目では、<code>claude plugin validate</code> も食い違いを見つけられない。項目に <code>version</code> がなければ、Claude Code は <code>plugin.json</code> の <code>version</code> を使う。</p>
+<p>マーケットプレイスは、このリポジトリの main を配る。Claude Code は <code>version</code> が変わったかどうかで更新を判定するので、<code>plugin.json</code> の <code>version</code> を上げない限り、main に push しても利用者には更新が届かない。<code>version</code> を上げたコミットが main に入った時点で、それが利用者に配られる。</p>
+<p><code>skills/info-hive/SKILL.md</code> には、バージョンのフィールドを<strong>置かない</strong>。スキルのバージョンは、それを含むプラグインの <code>plugin.json</code> で決まる。<code>name</code> か <code>description</code> を変えるとき以外は、SKILL.md の frontmatter に手を付けない。</p>
+<p>同梱のスクリプトとスラッシュコマンドにも、バージョンの情報はない。プラグインのバージョンがそれらも表す。</p>
+<h3 id="semver-の方針" class="fui-Subtitle2">SemVer の方針</h3>
+<ul>
+<li><strong>メジャー</strong>（<code>1.0.0</code> → <code>2.0.0</code>）: wiki の構造、frontmatter のスキーマ、スクリプトのコマンドラインのフラグに対する互換性のない変更で、既存の wiki を手作業で移行しないと使えなくなるもの。</li>
+<li><strong>マイナー</strong>（<code>0.3.0</code> → <code>0.4.0</code>）: 既存の wiki が無視できる機能の追加（新しいコマンド、任意の frontmatter、新しいスクリプト）。古い wiki を使っている人が、カスタマイズを失わずに新しいファイルを冪等に取り込めるよう、必ず <code>--upgrade</code> の流れを用意する（または <code>init_wiki.py</code> の既存の流れを広げる）。</li>
+<li><strong>パッチ</strong>（<code>0.3.0</code> → <code>0.3.1</code>）: 不具合の修正、ドキュメントだけの変更、外から見た動作が変わらない内部の整理。</li>
+</ul>
+<p>互換性を保てる形（妥当な既定値を持つ新しい frontmatter のフィールドなど）にできるなら、互換性のない変更より、そちらを選ぶ。</p>
+<h3 id="リリースの手順" class="fui-Subtitle2">リリースの手順</h3>
+<ol>
+<li><code>CHANGELOG.md</code> の <strong><code>[Unreleased]</code> の項目を</strong>、新しい <code>## [X.Y.Z] - YYYY-MM-DD</code> の見出しの下に<strong>移す</strong>。末尾に <code>[X.Y.Z]: https://github.com/to884/info-hive-wiki/releases/tag/vX.Y.Z</code> の行を加え、<code>[Unreleased]: https://github.com/to884/info-hive-wiki/compare/vX.Y.Z...HEAD</code> に更新する。</li>
+<li><code>.claude-plugin/plugin.json</code> の <strong><code>version</code> を <code>X.Y.Z</code> に上げる</strong>。マーケットプレイスは直さない。</li>
+<li>古い wiki を使っている人が取り逃がす<strong>ファイルやスキーマのセクションをリリースで加える場合</strong>は、<code>skills/info-hive/scripts/init_wiki.py</code> を広げる。
+<ul>
+<li>新しいテンプレートのファイルを <code>template_map</code> に加える（冪等である。<code>init_wiki.py</code> は、すでにあるファイルを飛ばす）。</li>
+<li>SCHEMA.md に新しいセクションを加えるなら、<code>SCHEMA_SECTION_MARKERS</code> に目印を加え、<code>--upgrade</code> が手作業のマージとして示すようにする。</li>
+<li>手作業の手順が変わるなら、<code>/wiki:upgrade</code> のスラッシュコマンドを更新する。</li>
+</ul>
+</li>
+<li><strong>マニフェストを検証する</strong>（スキーマの誤りを見つける）。<pre><code class="language-bash">claude plugin validate .
+</code></pre>
+<code>✔ Validation passed</code> と表示されればよい。</li>
+<li>一時的なフィクスチャで、同梱のスクリプトの<strong>スモークテストを行う</strong>（<code>init_wiki.py</code> で一時ディレクトリに wiki を作り、ページをいくつか置き、lint、extract、query を実行する）。グラフを変えた場合は、検出結果の種類ごとにそれを起こすフィクスチャのページを用意し、lint のすべての分岐を通す。</li>
+<li><strong>2つに分けてコミットする</strong>。<pre><code class="language-bash">git commit -m &quot;feat: &lt;1行の要約&gt;&quot;      # 中身の変更
+git commit -m &quot;release: vX.Y.Z&quot;        # バージョンの更新と CHANGELOG
+</code></pre>
+</li>
+<li><strong>push してタグを付ける</strong>。<pre><code class="language-bash">git push origin main
+git tag -a vX.Y.Z -m &quot;vX.Y.Z: &lt;1行の要約&gt;&quot;
+git push origin vX.Y.Z
+</code></pre>
+タグは単純な <code>vX.Y.Z</code> の形にする。<code>claude plugin tag</code> コマンドを使うと <code>wiki--vX.Y.Z</code> の形のタグができる。これでも Claude Code からのインストールには使えるが、このリポジトリでは <code>vX.Y.Z</code> にそろえる。</li>
+<li><strong>GitHub のリリースを作る</strong>。<pre><code class="language-bash">gh release create vX.Y.Z --repo to884/info-hive-wiki --title &quot;vX.Y.Z: &lt;要約&gt;&quot; \
+  --notes &quot;$(cat &lt;&lt;'EOF'
+  &lt;リリースノート。ふつうは CHANGELOG の項目を短くしたもの&gt;
+  EOF
+  )&quot;
+</code></pre>
+</li>
+</ol>
+<h3 id="利用者が新しいバージョンを取り込む方法" class="fui-Subtitle2">利用者が新しいバージョンを取り込む方法</h3>
+<ul>
+<li><strong>Claude Code:</strong> <code>/plugin marketplace update</code> のあとに <code>/plugin install wiki@info-hive</code> を実行する。Claude Code は、解決した <code>version</code> をキャッシュしているものと比べ、違っていれば更新する。</li>
+<li><strong><code>npx skills add</code> でインストールしたほかのエージェント:</strong> <code>npx skills update info-hive</code> を実行するか、最初に使った <code>npx skills add to884/info-hive-wiki -a &lt;agent&gt;</code> をもう一度実行する。</li>
+<li><strong>以前のバージョンで作った既存の wiki:</strong> <code>/wiki:upgrade</code> を実行する（コマンドラインからなら <code>python /path/to/info-hive-wiki/skills/info-hive/scripts/init_wiki.py /absolute/path/to/project --upgrade</code>）。スクリプトのパスと対象のプロジェクトは別にしておく。アップグレードは、ファイルについては冪等で、SCHEMA.md のマージは手順を追って確認しながら進める。</li>
+</ul>
+<h3 id="リリースのたびに変えなくてよいもの" class="fui-Subtitle2">リリースのたびに変えなくてよいもの</h3>
+<ul>
+<li><code>skills/info-hive/SKILL.md</code> の frontmatter（バージョンのフィールドはない）</li>
+<li><code>commands/</code> のスラッシュコマンドのファイル（バージョンのフィールドはない）</li>
+<li><code>skills/info-hive/references/</code> のリファレンス（新しい内容を加える変更でない限り）</li>
+<li><code>skills/info-hive/assets/</code> のテンプレート（新しいテンプレートを加える変更でない限り）</li>
+<li><code>LICENSE</code>、<code>README.md</code>（利用者向けの概要が変わらない限り）</li>
+</ul>
+<h2 id="ライセンス" class="fui-Subtitle1">ライセンス</h2>
+<p>コントリビュートした内容は、このプロジェクトの <a href="licenses.html#project-license" class="fui-Link" data-inline="">MIT ライセンス</a>で提供することに同意したものとする。</p>
+    </main>
+  </div>
+</body>
+</html>

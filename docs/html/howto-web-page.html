@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ja" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Web ページを wiki に取り込む | info-hive</title>
+  <link rel="stylesheet" href="assets/fluent2.css">
+  <link rel="stylesheet" href="assets/manual.css">
+  <link rel="stylesheet" href="assets/manual-print.css" media="print">
+</head>
+<body class="fui-FluentProvider">
+  <a class="skip-link fui-Link" href="#main">本文へ移動</a>
+  <header class="site-header">
+    <div class="shell"><a class="fui-Link site-name" href="index.html">info-hive</a></div>
+  </header>
+  <main class="shell reading-layout" id="main" tabindex="-1">
+    <nav class="contents" aria-label="このページの目次">
+      <h2>目次</h2>
+      <ul>
+        <li><a class="fui-Link" data-inline href="#send">ページの URL を渡す</a></li>
+        <li><a class="fui-Link" data-inline href="#warnings">翻訳や取得の確認を求められた場合</a></li>
+        <li><a class="fui-Link" data-inline href="#verify">保存されたファイルを確認する</a></li>
+      </ul>
+    </nav>
+    <article class="page-content" aria-labelledby="page-title">
+      <header class="intro">
+        <h1 class="fui-Title1" id="page-title">Web ページを wiki に取り込む</h1>
+        <p>初期化したプロジェクト wiki に Web ページを追加し、取り込まれた原本と要約を確かめます。</p>
+      </header>
+      <section id="send">
+        <h2 class="fui-Subtitle1">ページの URL を渡す</h2>
+        <ol>
+          <li>対象の wiki を開いた Code タブで URL を指定します。<pre><code>/wiki:ingest https://www.iana.org/help/example-domains</code></pre></li>
+          <li><code>wiki:web-raw</code> を使う場合は、原本の取得と検査が終わるのを待ちます。</li>
+          <li>要点を確認します。</li>
+          <li>差分が示されたら、取り込む変更を承認します。</li>
+        </ol>
+      </section>
+
+      <section id="warnings">
+        <h2 class="fui-Subtitle1">翻訳や取得の確認を求められた場合</h2>
+        <p>翻訳の警告が残る場合は、警告の箇所と理由を確認します。受け入れるときは理由をログへ記録する案を承認します。<code>completed: true</code> が原本の検査完了を示します。</p>
+        <p>ブラウザーでの取得を求められたら、対象ページを普段の Chrome または Edge で開きます。接続画面で対象のタブだけを選びます。接続方式では Node.js 20 以上と npm が必要です。</p>
+      </section>
+
+      <section id="verify">
+        <h2 class="fui-Subtitle1">保存されたファイルを確認する</h2>
+        <p>取り込み後に <code>raw/</code> と <code>wiki/sources/</code> を開き、原本とその要約がそれぞれあることを確かめます。<code>wiki/log.md</code> には取り込みの記録が加わります。</p>
+      </section>
+
+      <nav class="page-navigation" aria-label="関連ページ">
+        <a class="fui-Link" href="commands.html#wikiingest">/wiki:ingest の対象と引数を確認する</a>
+      </nav>
+    </article>
+  </main>
+</body>
+</html>
