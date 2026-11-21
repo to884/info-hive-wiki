@@ -117,26 +117,28 @@ def refuse_youtube(url: str, where: str) -> None:
 # 取得
 # ---------------------------------------------------------------------------
 
-def is_private_host(host: str) -> bool:
+def is_private_host(host: str, *, unresolved_is_private: bool = False) -> bool:
     """ホストがループバック、プライベート、リンクローカルなどの内部のアドレスに解決されるか。
 
-    名前を解決できないときは False を返す（取得そのものが失敗する）。
+    名前を解決できないときは unresolved_is_private を返す。
     """
     if not host:
-        return False
+        return unresolved_is_private
     try:
         infos = socket.getaddrinfo(host, None)
     except (socket.gaierror, UnicodeError, OSError):
-        return False
+        return unresolved_is_private
+    resolved = False
     for info in infos:
         try:
             addr = ipaddress.ip_address(info[4][0].split("%", 1)[0])
         except ValueError:
             continue
+        resolved = True
         if (addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved
                 or addr.is_multicast or addr.is_unspecified):
             return True
-    return False
+    return unresolved_is_private and not resolved
 
 
 class _SafeRedirect(urllib.request.HTTPRedirectHandler):
