@@ -1,14 +1,20 @@
-/* 普段のブラウザで許可された対象タブを読み取る。ページの移動や Cookie の書き出しはしない。 */
+/* 普段のブラウザの空の接続タブで対象 URL を開き、DOM を読み取る。 */
 'use strict';
 
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
+const { setTimeout: pause } = require('node:timers/promises');
 const CORE_VERSION = '1.66.0-alpha-2026-11-09';
+const EXTENSION_TOKEN = 'PLAYWRIGHT_MCP_EXTENSION_TOKEN';
 
 class SessionError extends Error {
-  constructor(code, message) { super(message); this.code = code; }
+  constructor(code, message, url) {
+    super(message);
+    this.code = code;
+    this.url = url;
+  }
 }
 
 function runtimeTools() {
@@ -32,11 +38,12 @@ function canonicalURL(value) {
   return url.href;
 }
 
-async function selectImageTargets(request, html) {
-  if (!request.max_images) return [];
+async function runBrowserHelper(request, operation, payload) {
   return await new Promise((resolve, reject) => {
-    const child = spawn(request.python_executable, [request.selector_script, '--image-targets'],
-      { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true, shell: false });
+    const env = { ...process.env };
+    delete env[EXTENSION_TOKEN];
+    const child = spawn(request.python_executable, [request.selector_script, operation],
+      { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true, shell: false, env });
     let output = '';
     const alarm = setTimeout(() => { child.kill(); reject(new Error('selector_timeout')); }, request.timeout * 1000);
     child.stdout.setEncoding('utf8');
@@ -48,25 +55,78 @@ async function selectImageTargets(request, html) {
       catch (error) { reject(error); }
     });
     child.stdin.on('error', () => {});
-    child.stdin.end(JSON.stringify({ html, url: canonicalURL(request.url), max_images: request.max_images }));
+    child.stdin.end(JSON.stringify(payload));
   });
 }
 
-async function readPage(browser, request, imageSelector = selectImageTargets) {
+function inspectDOM(request, html, url) {
+  return runBrowserHelper(request, '--inspect-dom', { html, url, max_images: request.max_images });
+}
+
+function validateDestination(request, url) {
+  return runBrowserHelper(request, '--validate-browser-url', { url, block_private: request.block_private !== false });
+}
+
+function matchesURL(page, expected) {
+  try { return canonicalURL(page.url()) === expected; } catch { return false; }
+}
+
+async function readDOM(page, request, expected, deadline, inspect) {
+  let previousHTML, analysis, lastChange;
+  while (true) {
+    if (!matchesURL(page, expected))
+      throw new SessionError('tab_changed', '対象タブの URL が変わった。取り込むページのアドレスを確かめてやり直す');
+    const html = await page.content();
+    if (Buffer.byteLength(html, 'utf8') > request.max_bytes)
+      throw new SessionError('too_large', '対象タブの DOM が大きさの上限を超えた');
+    if ((deadline || request.max_images) && html !== previousHTML) {
+      const next = await inspect(request, html, expected);
+      if (next.body_sha256 !== analysis?.body_sha256) lastChange = performance.now();
+      analysis = next;
+      previousHTML = html;
+    }
+    const now = performance.now();
+    // 新しく開いたページでは、load 後に JavaScript が描く本文も待つ。
+    if (!deadline || now >= deadline || (!analysis.short && now - lastChange >= 1000))
+      return { html, targets: analysis?.images ?? [] };
+    await pause(Math.min(250, deadline - now));
+  }
+}
+
+async function readPage(browser, request, inspect = inspectDOM, validate = validateDestination) {
   const expected = canonicalURL(request.url);
-  const pages = browser.contexts().flatMap(context => context.pages()).filter(page => {
-    try { return canonicalURL(page.url()) === expected; } catch { return false; }
-  });
-  if (pages.length !== 1)
-    throw new SessionError('tab_not_unique', '対象 URL のタブをブラウザで開き、Playwright の接続画面でそのタブを 1 つだけ選ぶ');
-  const page = pages[0];
-  await page.waitForLoadState('domcontentloaded', { timeout: request.timeout * 1000 });
-  if (canonicalURL(page.url()) !== expected)
-    throw new SessionError('tab_changed', '読み取り中に対象タブの URL が変わった。目的のページを表示してやり直す');
-  const html = await page.content();
-  if (Buffer.byteLength(html, 'utf8') > request.max_bytes)
-    throw new SessionError('too_large', '対象タブの DOM が大きさの上限を超えた');
-  const targets = await imageSelector(request, html);
+  const timeout = request.timeout * 1000;
+  const pages = browser.contexts().flatMap(context => context.pages());
+  const matching = pages.filter(page => matchesURL(page, expected));
+  let page, deadline, finalURL = expected;
+  if (matching.length === 1) {
+    page = matching[0];
+    await page.waitForLoadState('domcontentloaded', { timeout });
+  } else if (pages.length === 1 && pages[0].url() === 'about:blank') {
+    // 拡張はトークン認証時、またはタブを選ばずに許可したときに空のタブを割り当てる。
+    page = pages[0];
+    deadline = performance.now() + timeout;
+    let response;
+    try {
+      response = await page.goto(expected, { waitUntil: 'domcontentloaded', timeout });
+    } catch {
+      throw new SessionError('navigation_failed', '取り込み URL をブラウザで開けなかった。ブラウザの表示を確かめる');
+    }
+    if (response && response.status() >= 400)
+      throw new SessionError('http_error', `ブラウザでも HTTP ${response.status()} を受け取った`);
+    finalURL = canonicalURL(page.url());
+    // HTTP の応答 URL にフラグメントは含まれない。表示中の URL がこの移動の応答に対応することを確かめる。
+    const responseURL = response ? canonicalURL(response.url()) : expected;
+    if (response ? finalURL.split('#', 1)[0] !== responseURL.split('#', 1)[0] : finalURL !== expected)
+      throw new SessionError('tab_changed', '対象タブの URL が変わった。取り込むページのアドレスを確かめてやり直す');
+    if (finalURL !== expected) {
+      const refusal = await validate(request, finalURL);
+      if (refusal.error) throw new SessionError(refusal.kind, refusal.error, refusal.url);
+    }
+  } else {
+    throw new SessionError('tab_not_unique', 'Playwright の接続画面でタブを選ばずに許可するか、対象 URL のタブを 1 つだけ選ぶ');
+  }
+  const { html, targets } = await readDOM(page, request, finalURL, deadline, inspect);
   // 本文内で既に読み込まれた画像を使う。fetch、画像の再読み込み、Cookie の読み取りは行わない。
   const capture = targets.length ? await page.evaluate(({ maxBytes, targets }) => {
     const images = [];
@@ -98,9 +158,9 @@ async function readPage(browser, request, imageSelector = selectImageTargets) {
     }
     return { images, warnings };
   }, { maxBytes: request.max_bytes, targets }) : { images: [], warnings: [] };
-  if (canonicalURL(page.url()) !== expected)
+  if (!matchesURL(page, finalURL))
     throw new SessionError('tab_changed', '読み取り中に対象タブの URL が変わった。目的のページを表示してやり直す');
-  return { ...capture, html, final_url: expected, request_url: request.url, matched_url: expected,
+  return { ...capture, html, final_url: finalURL, request_url: request.url, matched_url: finalURL,
     browser: request.channel, browser_session: 'existing' };
 }
 
@@ -116,7 +176,12 @@ async function connectAndRead(request, tools = runtimeTools()) {
       { title: 'info-hive-ingest-' + crypto.randomUUID(), workspaceDir: process.cwd() });
     if (connection.ownership !== 'attached')
       throw new SessionError('not_attached', '普段のブラウザへの接続ではないため読み取りを中止した');
-    return await readPage(connection.browser, request);
+    try {
+      return await readPage(connection.browser, request);
+    } catch (error) {
+      if (error instanceof SessionError) throw error;
+      throw new SessionError('read_failed', '対象タブを読み取れなかった。ページの読み込みが終わってからやり直す');
+    }
   } finally {
     if (connection) {
       await connection.browser.unbind().catch(() => {});
@@ -136,7 +201,7 @@ async function main() {
   });
   const request = JSON.parse(input);
   const alarm = setTimeout(async () => {
-    await writeResult({ error: 'ブラウザの接続確認が終わらなかった。対象タブを開き、Playwright の接続を許可してやり直す', kind: 'connection_timeout' });
+    await writeResult({ error: 'ブラウザの接続確認が終わらなかった。Playwright の接続画面で許可してやり直す', kind: 'connection_timeout' });
     process.exit(2);
   }, (request.timeout + 120) * 1000);
   try {
@@ -149,12 +214,14 @@ async function writeResult(result) {
   await new Promise((resolve, reject) => process.stdout.write(JSON.stringify(result) + '\n', error => error ? reject(error) : resolve()));
 }
 
-module.exports = { CORE_VERSION, canonicalURL, readPage, connectAndRead, selectImageTargets, writeResult };
+module.exports = { CORE_VERSION, canonicalURL, readPage, connectAndRead, writeResult };
 if (require.main === module) {
   main().then(() => process.exit(0), async error => {
     const message = error instanceof SessionError ? error.message
-      : 'Playwright の公式拡張に接続できなかった。ブラウザで対象ページを開き、拡張の接続を確認する';
-    await writeResult({ error: message, kind: error.code || 'connection_failed' }).catch(() => {});
+      : process.env[EXTENSION_TOKEN]
+        ? 'Playwright の公式拡張に接続できなかった。拡張の導入と PLAYWRIGHT_MCP_EXTENSION_TOKEN がブラウザのプロファイルに対応しているかを確かめる'
+        : 'Playwright の公式拡張に接続できなかった。ブラウザで拡張の導入と接続を確かめる';
+    await writeResult({ error: message, kind: error.code || 'connection_failed', url: error instanceof SessionError ? error.url : undefined }).catch(() => {});
     process.exit(2);
   });
 }

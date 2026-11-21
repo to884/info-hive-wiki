@@ -6,6 +6,18 @@
 
 ## [Unreleased]
 
+## [0.40.1] - 2026-11-21
+
+### 修正
+
+- `/wiki:ingest` が拡張の空タブで URL を開いたとき、別ドメインへの HTTP リダイレクト先の本文を取り込めるようにした。元の URL と転送先を raw に記録する。
+
+## [0.40.0] - 2026-11-21
+
+### 追加
+
+- `/wiki:ingest` が Playwright の公式拡張に接続したとき、指定 URL を普段の Edge または Chrome の新しいタブで開き、描画後の本文を取得する。プロセス環境または Windows のユーザー環境変数の `PLAYWRIGHT_MCP_EXTENSION_TOKEN` を拡張接続に渡す。接続画面が出たら、タブを選ばずに「Allow」を押すと指定 URL を開ける。
+
 ## [0.39.1] - 2026-11-20
 
 ### 修正
@@ -975,7 +987,9 @@ Web ページの取得（`wiki_fetch.py`）が、Medium の記事の図とコー
 [0.2.0]: https://github.com/to884/info-hive-wiki/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/to884/info-hive-wiki/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.1.0
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.38.1...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.40.1...HEAD
+[0.40.1]: https://github.com/to884/info-hive-wiki/releases/tag/v0.40.1
+[0.40.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.40.0
 [0.38.1]: https://github.com/to884/info-hive-wiki/releases/tag/v0.38.1
 [0.38.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.38.0
 [0.37.0]: https://github.com/to884/info-hive-wiki/compare/v0.36.0...v0.37.0

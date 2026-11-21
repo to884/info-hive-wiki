@@ -6,7 +6,7 @@
 """Playwright で描画した DOM を、wiki_fetch.py に UTF-8 の JSON で返す。
 
 uv run --script wiki_fetch_browser.py <URL> [--browser system|chromium|chrome|msedge]
-raw や HTML の一時ファイルは書かない。既定では、Windows の既定ブラウザで開いた許可済みタブを読む。
+raw や HTML の一時ファイルは書かない。既定では、Windows の既定ブラウザに公式拡張で接続して対象 URL を開く。
 ログイン状態はブラウザ内で使い、Cookie やプロファイルは書き出さない。
 --browser-session isolated は独立したブラウザで取得し、普段のログイン状態は使わない。
 isolated で Chromium を明示したときだけ、必要なら Chromium を導入する。
@@ -14,6 +14,7 @@ isolated で Chromium を明示したときだけ、必要なら Chromium を導
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -32,7 +33,7 @@ EXTENSION_CORE_VERSION = "1.66.0-alpha-2026-11-09"
 
 def capture_existing(url: str, timeout: float, max_bytes: int, block_private: bool,
                      selected: str, max_images: int) -> dict:
-    """許可された既存タブを読む。認証情報の取り出しやページの移動はしない。"""
+    """公式拡張で空の接続タブまたは許可済みの対象タブを使う。"""
     allowed_url(url, block_private, navigation=True)
     options = browser_launch_options(url, selected)
     if options["channel"] not in ("chrome", "msedge"):
@@ -42,13 +43,13 @@ def capture_existing(url: str, timeout: float, max_bytes: int, block_private: bo
     if npm is None or shutil.which("node") is None:
         raise wiki_fetch.FetchError("普段のブラウザへの接続には Node.js 20 以上と npm が必要である")
     request = {"url": url, "timeout": timeout, "max_bytes": max_bytes, "max_images": max_images,
-               "channel": options["channel"], "executable_path": options.get("executable_path"),
+               "block_private": block_private, "channel": options["channel"], "executable_path": options.get("executable_path"),
                "python_executable": sys.executable, "selector_script": str(Path(__file__).resolve())}
     command = [npm, "exec", "--yes", f"--package=playwright-core@{EXTENSION_CORE_VERSION}", "--", "node",
                str(Path(__file__).with_name("wiki_browser_session.cjs"))]
     done = subprocess.run(command, input=json.dumps(request, ensure_ascii=False), capture_output=True,
                           text=True, encoding="utf-8", errors="replace", check=False, timeout=timeout + 180,
-                          env={**wiki_fetch.browser_environment(), "PYTHONIOENCODING": "utf-8"})
+                          env={**wiki_fetch.browser_environment(extension=True), "PYTHONIOENCODING": "utf-8"})
     try:
         result = json.loads(done.stdout)
         if not isinstance(result, dict):
@@ -56,6 +57,8 @@ def capture_existing(url: str, timeout: float, max_bytes: int, block_private: bo
     except ValueError:
         raise wiki_fetch.FetchError("普段のブラウザから読み取りの結果を得られなかった。Node.js、npm、Playwright 拡張を確かめる") from None
     if done.returncode != 0 or "error" in result:
+        if result.get("kind") == "youtube":
+            raise wiki_fetch.YouTubeRefused(result["url"], "ブラウザの移動先 ")
         raise wiki_fetch.FetchError(str(result.get("error", "普段のブラウザに接続できなかった")))
     return result
 
@@ -249,9 +252,8 @@ def capture_isolated(url: str, timeout: float, max_bytes: int, block_private: bo
             browser.close()
 
 
-def select_image_urls(html: str, url: str, maximum: int) -> list[str]:
-    """表示中の DOM を通常と同じ本文の推定で読み、本文内の画像だけを選ぶ。"""
-    page = wiki_fetch.prepare_page(html.encode("utf-8"), "text/html; charset=utf-8", url, False)
+def article_image_urls(page: wiki_fetch.PageContent, url: str, maximum: int) -> list[str]:
+    """変換器が選んだ本文の画像から、対象ページと同じ origin の候補を返す。"""
     origin = urllib.parse.urlsplit(url)
     found = []
     for image in page.images:
@@ -268,10 +270,35 @@ def select_image_urls(html: str, url: str, maximum: int) -> list[str]:
     return found
 
 
+def inspect_dom(html: str, url: str, maximum: int) -> dict:
+    """表示中の DOM に、通常の本文の長さの判定と画像選択を適用する。"""
+    page = wiki_fetch.prepare_page(html.encode("utf-8"), "text/html; charset=utf-8", url, False)
+    body = "\n\n".join(page.blocks).encode("utf-8")
+    return {"short": page.is_short(), "body_sha256": hashlib.sha256(body).hexdigest(),
+            "images": article_image_urls(page, url, maximum)}
+
+
 def main(argv: list[str] | None = None) -> int:
-    if (sys.argv[1:] if argv is None else argv) == ["--image-targets"]:
+    arguments = sys.argv[1:] if argv is None else argv
+    if arguments == ["--validate-browser-url"]:
         request = json.load(sys.stdin)
-        print(json.dumps(select_image_urls(request["html"], request["url"], request["max_images"]), ensure_ascii=False))
+        result = {}
+        try:
+            url = request["url"]
+            allowed_url(url, False, navigation=True)
+            host = urllib.parse.urlsplit(url).hostname or ""
+            # ブラウザと Python が異なる経路で名前を解決する場合を考慮する。
+            if request["block_private"] and wiki_fetch.is_private_host(host, unresolved_is_private=True):
+                raise wiki_fetch.FetchError(f"内部のアドレスや名前を解決できない転送先は取得しない: {url}")
+        except wiki_fetch.YouTubeRefused as exc:
+            result = {"kind": "youtube", "url": exc.url, "error": str(exc)}
+        except (ValueError, wiki_fetch.FetchError) as exc:
+            result = {"kind": "invalid_redirect", "error": str(exc)}
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
+    if arguments == ["--inspect-dom"]:
+        request = json.load(sys.stdin)
+        print(json.dumps(inspect_dom(request["html"], request["url"], request["max_images"]), ensure_ascii=False))
         return 0
     parser = wiki_fetch.localize_argparse(argparse.ArgumentParser(description=__doc__))
     parser.add_argument("url", help="描画するページの URL")
@@ -281,9 +308,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--browser", choices=BROWSERS, default="system",
                         help="使うブラウザ（既定: system。Windows の URL の既定アプリを使う）")
     parser.add_argument("--browser-session", choices=("existing", "isolated"), default="existing",
-                        help="既定は普段のブラウザで開いた許可済みタブを読む。isolated は独立したブラウザで取得する")
+                        help="既定は普段のブラウザに公式拡張で接続する。isolated は独立したブラウザで取得する")
     parser.add_argument("--max-images", type=int, default=50, help="既存タブから読む画像数の上限")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(arguments)
     try:
         result = capture_page(args.url, args.timeout, args.max_bytes, args.block_private, args.browser,
                               args.browser_session, args.max_images)
