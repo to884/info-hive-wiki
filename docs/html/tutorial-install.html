@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ja" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Code タブに wiki を入れる | info-hive</title>
+  <link rel="stylesheet" href="assets/fluent2.css">
+  <link rel="stylesheet" href="assets/manual.css">
+  <link rel="stylesheet" href="assets/manual-print.css" media="print">
+  <script defer src="assets/manual-code.js"></script>
+</head>
+<body class="fui-FluentProvider">
+  <a class="skip-link fui-Link" href="#main">本文へ移動</a>
+  <header class="site-header">
+    <div class="shell"><a class="fui-Link site-name" href="index.html">info-hive</a></div>
+  </header>
+  <main class="shell reading-layout" id="main" tabindex="-1">
+    <nav class="contents" aria-label="このページの目次">
+      <h2>目次</h2>
+      <ul>
+        <li><a class="fui-Link" data-inline href="#desktop">Claude デスクトップアプリを用意する</a></li>
+        <li><a class="fui-Link" data-inline href="#tools">1. 必要なソフトウェアを入れる</a></li>
+        <li><a class="fui-Link" data-inline href="#restart">2. 新しい環境でアプリを起動する</a></li>
+        <li><a class="fui-Link" data-inline href="#marketplace">3. マーケットプレイスを追加する</a></li>
+        <li><a class="fui-Link" data-inline href="#plugin">4. Wiki を追加する</a></li>
+        <li><a class="fui-Link" data-inline href="#verify">5. コマンドの一覧を表示する</a></li>
+      </ul>
+    </nav>
+    <article class="page-content" aria-labelledby="page-title">
+      <header class="intro">
+        <h1 class="fui-Title1" id="page-title">Code タブに wiki を入れる</h1>
+<!-- page-summary:start -->
+<figure class="page-summary page-summary-flow">
+  <ol role="list" aria-label="概要">
+    <li><strong>事前準備</strong><span>Claude と必要なツール</span></li>
+    <li><strong>Wiki を追加</strong><span>Code のマーケットプレイス</span></li>
+    <li><strong>導入を確認</strong><span>/wiki:help で一覧を表示</span></li>
+  </ol>
+</figure>
+<!-- page-summary:end -->
+        <p>Windows 11 の x64 PC で、Claude デスクトップアプリの Code タブに wiki を導入します。</p>
+        <p>Windows 11 の VM で、Claude 5.11492.5 に wiki 0.39.1 を導入できることを確認しました。手順に載せた画面の表記は Claude 6.6395 で確認しています。</p>
+      </header>
+      <section id="desktop">
+        <h2 class="fui-Subtitle1">Claude デスクトップアプリを用意する</h2>
+        <p>Claude にサインイン済みなら、「必要なソフトウェアを入れる」へ進みます。</p>
+        <ol>
+          <li>Anthropic の公式パッケージ <a class="fui-Link" data-inline href="https://claude.ai/api/desktop/win32/x64/msix/latest/redirect">Claude MSIX（Windows x64）</a>をダウンロードします。</li>
+          <li>スタートメニューの「Windows PowerShell」を「管理者として実行」で開きます。</li>
+          <li>次のコマンドの「ダウンロードした MSIX のパス」を、ファイルのフルパスに置き換えて実行します。<pre><code>Add-AppxPackage -Path "ダウンロードした MSIX のパス"</code></pre></li>
+        </ol>
+        <p>スタートメニューから Claude を開いてサインインします。</p>
+      </section>
+
+      <section id="tools">
+        <h2 class="fui-Subtitle1">1. 必要なソフトウェアを入れる</h2>
+        <p>PowerShell を開いて、次の操作を順に行います。</p>
+        <ol>
+          <li>Git for Windows を入れます。<pre><code>winget install --id Git.Git -e --source winget</code></pre></li>
+          <li>Astral の uv インストーラーをダウンロードします。<pre><code>Invoke-WebRequest -UseBasicParsing -Uri 'https://astral.sh/uv/install.ps1' -OutFile "$env:TEMP\uv-install.ps1"</code></pre></li>
+          <li>ダウンロードしたスクリプトを実行します。<pre><code>powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\uv-install.ps1"</code></pre></li>
+          <li>Python 3.12 を入れます。<pre><code>winget install --id Python.Python.3.12 -e --source winget</code></pre></li>
+          <li>Microsoft Visual C++ 再頒布可能パッケージを入れます。<pre><code>winget install --id Microsoft.VCRedist.2015+.x64 -e --source winget</code></pre></li>
+        </ol>
+        <p>winget で配布元やパッケージの規約が表示された場合は、内容を確認し、同意できれば <code>Y</code> を入力して続けます。</p>
+        <p>社内の証明書で通信を検査する環境では、<a class="fui-Link" data-inline href="howto-prepare.html#certificates">事前準備の証明書設定</a>を確認します。</p>
+      </section>
+
+      <section id="restart">
+        <h2 class="fui-Subtitle1">2. 新しい環境でアプリを起動する</h2>
+        <ol>
+          <li>PowerShell を閉じます。</li>
+          <li>通知領域の Claude アイコンからアプリを終了します。</li>
+          <li>Claude デスクトップアプリを開きます。</li>
+          <li>新しい PowerShell を開きます。</li>
+          <li>各コマンドを実行し、それぞれ版が出ることを確かめます。<pre><code>git --version
+uv --version
+python --version</code></pre></li>
+        </ol>
+      </section>
+
+      <section id="marketplace">
+        <h2 class="fui-Subtitle1">3. マーケットプレイスを追加する</h2>
+        <p>Code タブで「プラグイン」を開きます。以前の版では「カスタマイズ」から「プラグイン」を開きます。</p>
+        <ol>
+          <li>「追加」を押します。</li>
+          <li>「マーケットプレイスを追加」を選びます。</li>
+          <li>「リポジトリから追加」を選びます。</li>
+          <li>「URL」欄に <code>to884/info-hive-marketplace</code> を入力します。</li>
+          <li>「同期」を押します。</li>
+        </ol>
+      </section>
+
+      <section id="plugin">
+        <h2 class="fui-Subtitle1">4. Wiki を追加する</h2>
+        <p>「探索」を押してディレクトリを開きます。</p>
+        <ol>
+          <li>「プラグイン」の「Code」を選びます。</li>
+          <li>「info-hive」の一覧を表示します。</li>
+          <li>「Wiki」の「+」を押します。</li>
+          <li>ローカル MCP サーバーの確認画面で「続ける」を選びます。</li>
+          <li>設定画面が出たら、既定値で進めます。</li>
+        </ol>
+        <p>設定の「プラグイン」で Wiki が「ローカルにインストール済み」と表示されることを確かめます。</p>
+      </section>
+
+      <section id="verify">
+        <h2 class="fui-Subtitle1">5. コマンドの一覧を表示する</h2>
+        <ol>
+          <li>通知領域から Claude デスクトップアプリを終了します。</li>
+          <li>Claude デスクトップアプリを起動します。</li>
+          <li>新しい Code セッションで空のフォルダーを開きます。<a class="fui-Link" data-inline href="tutorial-first-wiki.html#folder">練習用フォルダーを開く手順</a>も使えます。</li>
+          <li>次のコマンドを送ります。<pre><code>/wiki:help</code></pre></li>
+          <li><code>/wiki:overview</code> を含む 12 本のコマンドが表示されることを確かめます。</li>
+        </ol>
+        <p>コマンド一覧が出なければ、<a class="fui-Link" data-inline href="howto-troubleshoot.html#help">コマンド一覧が出ないときの手順</a>に進みます。</p>
+        <p>MCP サーバーの依存がそろったかを確認する場合は、<a class="fui-Link" data-inline href="howto-troubleshoot.html#diagnostic">Windows で起動の診断を実行する</a>の手順を使います。</p>
+      </section>
+
+      <nav class="page-navigation" aria-label="関連ページ">
+        <a class="fui-Link" rel="prev" href="index.html">前へ　info-hive の入口</a>
+        <a class="fui-Link" rel="next" href="tutorial-first-wiki.html">次へ　はじめての wiki を作る</a>
+      </nav>
+    </article>
+  </main>
+</body>
+</html>

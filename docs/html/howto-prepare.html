@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ja" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>事前準備を確認する | info-hive</title>
+  <link rel="stylesheet" href="assets/fluent2.css">
+  <link rel="stylesheet" href="assets/manual.css">
+  <link rel="stylesheet" href="assets/manual-print.css" media="print">
+  <script defer src="assets/manual-code.js"></script>
+</head>
+<body class="fui-FluentProvider">
+  <a class="skip-link fui-Link" href="#main">本文へ移動</a>
+  <header class="site-header">
+    <div class="shell"><a class="fui-Link site-name" href="index.html">info-hive</a></div>
+  </header>
+  <main class="shell reading-layout" id="main" tabindex="-1">
+    <nav class="contents" aria-label="このページの目次">
+      <h2>目次</h2>
+      <ul>
+        <li><a class="fui-Link" data-inline href="#versions">ソフトウェアを確認する</a></li>
+        <li><a class="fui-Link" data-inline href="#uv">uv を入れる</a></li>
+        <li><a class="fui-Link" data-inline href="#certificates">組織の証明書を使う</a></li>
+      </ul>
+    </nav>
+    <article class="page-content" aria-labelledby="page-title">
+      <header class="intro">
+        <h1 class="fui-Title1" id="page-title">事前準備を確認する</h1>
+<!-- page-summary:start -->
+<figure class="page-summary page-summary-groups">
+  <ul role="list" aria-label="概要">
+    <li><strong>コマンドを確認</strong><span>Git・uv・Python</span></li>
+    <li><strong>uv を入れる</strong><span>使う OS の手順を選ぶ</span></li>
+    <li><strong>通信を整える</strong><span>組織の証明書を使う</span></li>
+  </ul>
+</figure>
+<!-- page-summary:end -->
+        <p>wiki を入れる前に、必要なコマンドが使えるか確認します。組織の証明書を使う場合は、通信の設定も確認します。</p>
+      </header>
+      <section id="versions">
+        <h2 class="fui-Subtitle1">ソフトウェアを確認する</h2>
+        <p>新しい PowerShell で次を実行します。<code>python --version</code> が Microsoft Store の案内を出す場合は、<a class="fui-Link" data-inline href="tutorial-install.html#tools">Python 3.12 を導入する手順</a>に進みます。</p>
+        <pre><code>git --version
+uv --version
+python --version</code></pre>
+        <p>DLL を読み込めない場合は、<a class="fui-Link" data-inline href="howto-troubleshoot.html#dll">Visual C++ ランタイムの確認</a>に進みます。</p>
+      </section>
+
+      <section id="uv">
+        <h2 class="fui-Subtitle1">uv を入れる</h2>
+        <h3>Windows</h3>
+        <ol>
+          <li>PowerShell で Astral のインストーラーをダウンロードします。<pre><code>Invoke-WebRequest -UseBasicParsing -Uri 'https://astral.sh/uv/install.ps1' -OutFile "$env:TEMP\uv-install.ps1"</code></pre></li>
+          <li>ダウンロードしたスクリプトを実行します。<pre><code>powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\uv-install.ps1"</code></pre></li>
+          <li>新しい PowerShell を開きます。</li>
+          <li><code>uv --version</code> でバージョンが表示されることを確かめます。</li>
+        </ol>
+        <h3>macOS・Linux</h3>
+        <ol>
+          <li>ターミナルで Astral のインストーラーを実行します。<pre><code>curl -LsSf https://astral.sh/uv/install.sh | sh</code></pre></li>
+          <li>新しいターミナルを開きます。</li>
+          <li><code>uv --version</code> でバージョンが表示されることを確かめます。</li>
+        </ol>
+      </section>
+
+      <section id="certificates">
+        <h2 class="fui-Subtitle1">組織の証明書を使う</h2>
+        <p>社内プロキシで TLS の検証に失敗する場合は、組織が配布した証明書が Windows の証明書ストアにあるか、管理者に確認します。</p>
+        <ol>
+          <li>次を実行し、uv が <code>UV_SYSTEM_CERTS</code> に対応することを確認します。<pre><code>uv sync --help | Select-String "UV_SYSTEM_CERTS"</code></pre></li>
+          <li>対応していれば、Windows のユーザー環境変数を設定します。<pre><code class="language-powershell">[Environment]::SetEnvironmentVariable('UV_SYSTEM_CERTS', 'true', 'User')</code></pre></li>
+          <li>Claude デスクトップアプリを通知領域から終了します。</li>
+          <li>Claude デスクトップアプリを起動し直します。</li>
+        </ol>
+        <p>新しい PowerShell で <code>$env:UV_SYSTEM_CERTS</code> が <code>true</code> と表示されることを確認します。</p>
+      </section>
+
+      <nav class="page-navigation" aria-label="関連ページ">
+        <a class="fui-Link" rel="prev" href="tutorial-install.html">Code タブに wiki を入れる</a>
+        <a class="fui-Link" rel="next" href="howto-troubleshoot.html">起動や接続の障害を調べる</a>
+      </nav>
+    </article>
+  </main>
+</body>
+</html>

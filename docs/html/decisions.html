@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="ja" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>判定モデル | info-hive</title>
+  <link rel="stylesheet" href="assets/fluent2.css">
+  <link rel="stylesheet" href="assets/manual.css">
+  <link rel="stylesheet" href="assets/manual-print.css" media="print">
+  <script defer src="assets/manual-code.js"></script>
+</head>
+<body class="fui-FluentProvider">
+  <a class="skip-link fui-Link" href="#main">本文へ移動</a>
+  <header class="site-header">
+    <div class="shell"><a class="site-name fui-Link" href="index.html">info-hive</a></div>
+  </header>
+  <div class="shell reading-layout">
+    <nav class="contents" aria-label="目次">
+      <a class="fui-Link" href="index.html#toc">文書の目次へ戻る</a>
+    </nav>
+    <main class="page-content readme-content" id="main" tabindex="-1">
+<h1 id="判定モデル" class="fui-Title1">判定モデル</h1>
+<p>判定モデルは、決められた選択肢から答えを選ぶ小さなモデルです。コードが選択肢を用意し、モデルが 1 つ選んで確率を返します。LLM Wiki では、5 つのチェックに使えます。</p>
+<blockquote>
+<p><strong>既定では無効</strong></p>
+<p>判定レイヤーは任意で、既定では無効です。判定レイヤーがなくても、wiki は同じように動きます。判定バックエンドを有効にするまで、どこにも何も送られません。</p>
+</blockquote>
+<h2 id="規則" class="fui-Subtitle1">規則</h2>
+<ul>
+<li>判定モデルがページを書くことはなく、書き込みを止めることもありません。書き込み時のチェックは、lint の検出結果かレビューフラグを追加するだけです。</li>
+<li>読み取りの処理はフェイルオープンで動きます。エラー、タイムアウト、無効な回答のときは、<code>failed_open: true</code> を付けた通常の結果が返ります。</li>
+<li>ページの執筆、マージ、要約と、質問への回答は、引き続きメインのエージェントが行います。frontmatter、型、日付のチェックも、引き続きコードが行います。</li>
+<li>すべての出力に、バックエンド、モデル、レイテンシー、閾値が記録されます。</li>
+<li>評価（eval）に合格していないチェックは実験的なものです。その結果はヒントとして扱います。</li>
+</ul>
+<h2 id="5つのチェック" class="fui-Subtitle1">5つのチェック</h2>
+<div class="table-scroll" role="region" aria-label="表" tabindex="0">
+<table class="fui-Table">
+<thead class="fui-TableHeader">
+<tr class="fui-TableRow">
+<th class="fui-TableHeaderCell" scope="col">チェック</th>
+<th class="fui-TableHeaderCell" scope="col">使われる場所</th>
+<th class="fui-TableHeaderCell" scope="col">問い</th>
+<th class="fui-TableHeaderCell" scope="col">得られるもの</th>
+</tr>
+</thead>
+<tbody class="fui-TableBody">
+<tr class="fui-TableRow">
+<td class="fui-TableCell">D1 関連度ゲート</td>
+<td class="fui-TableCell">検索</td>
+<td class="fui-TableCell">上位 20 行のそれぞれについて、このセクションはクエリに答える役に立つか、それとも単語が共通しているだけか</td>
+<td class="fui-TableCell">閾値を下回る行が除かれます。結果が空なら、wiki に答えがないことがエージェントに伝わります。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">D2 証拠チェック</td>
+<td class="fui-TableCell">グラフの lint</td>
+<td class="fui-TableCell">記録された証拠がソースページに見つからない場合、型付きエッジを裏づける文があるか。あればどの文か</td>
+<td class="fui-TableCell">lint の検出結果 <code>evidence_unsupported</code></td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">D3 矛盾のスクリーニング</td>
+<td class="fui-TableCell"><code>wiki_decide.py contradictions</code></td>
+<td class="fui-TableCell">同じエンティティについての2つのセクションは、互いを裏づけるか、矛盾するか、詳細を補うか、無関係か</td>
+<td class="fui-TableCell">エージェントが読むべきペア</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">D4 取り込み時の候補絞り込み</td>
+<td class="fui-TableCell"><code>wiki_decide.py shortlist</code></td>
+<td class="fui-TableCell">検索の各候補について、このソースはそのページに情報を加えるか、内容を変えるか</td>
+<td class="fui-TableCell">先に読むべきページの順位付きリスト</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">D5 信頼できないテキストのスクリーニング</td>
+<td class="fui-TableCell"><code>wiki_decide.py screen</code></td>
+<td class="fui-TableCell">このテキストは AI システムへの指示を含んでいるか</td>
+<td class="fui-TableCell">閾値を超えると <code>flagged: true</code> になります。ファイルは変更しません。</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h2 id="バックエンド" class="fui-Subtitle1">バックエンド</h2>
+<div class="table-scroll" role="region" aria-label="表" tabindex="0">
+<table class="fui-Table">
+<thead class="fui-TableHeader">
+<tr class="fui-TableRow">
+<th class="fui-TableHeaderCell" scope="col">バックエンド</th>
+<th class="fui-TableHeaderCell" scope="col">実行場所</th>
+<th class="fui-TableHeaderCell" scope="col">モデル</th>
+<th class="fui-TableHeaderCell" scope="col">キー</th>
+<th class="fui-TableHeaderCell" scope="col">データの送り先</th>
+</tr>
+</thead>
+<tbody class="fui-TableBody">
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>local</code></td>
+<td class="fui-TableCell">手元のマシンの <code>llama-server</code></td>
+<td class="fui-TableCell">Liquid <code>d1-2B</code>（GGUF）</td>
+<td class="fui-TableCell">不要</td>
+<td class="fui-TableCell">手元のマシンから出ない</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>typesafe</code></td>
+<td class="fui-TableCell">TypeSafe API</td>
+<td class="fui-TableCell"><code>jev-1.14.0</code></td>
+<td class="fui-TableCell"><code>TYPESAFE_API_KEY</code></td>
+<td class="fui-TableCell">TypeSafe に送られる</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>openrouter</code></td>
+<td class="fui-TableCell">OpenRouter</td>
+<td class="fui-TableCell"><code>typesafe/jev-1.14</code></td>
+<td class="fui-TableCell"><code>OPENROUTER_API_KEY</code></td>
+<td class="fui-TableCell">OpenRouter と TypeSafe に送られる</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>liquid</code></td>
+<td class="fui-TableCell">Liquid API</td>
+<td class="fui-TableCell"><code>d1.1</code></td>
+<td class="fui-TableCell"><code>LIQUID_API_KEY</code></td>
+<td class="fui-TableCell">Liquid に送られる</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h2 id="プライバシーライセンスコスト" class="fui-Subtitle1">プライバシー、ライセンス、コスト</h2>
+<p>各チェックがバックエンドに送る内容は次のとおりです。</p>
+<div class="table-scroll" role="region" aria-label="表" tabindex="0">
+<table class="fui-Table">
+<thead class="fui-TableHeader">
+<tr class="fui-TableRow">
+<th class="fui-TableHeaderCell" scope="col">チェック</th>
+<th class="fui-TableHeaderCell" scope="col">送られるテキスト</th>
+</tr>
+</thead>
+<tbody class="fui-TableBody">
+<tr class="fui-TableRow">
+<td class="fui-TableCell">D1</td>
+<td class="fui-TableCell">クエリと、候補の各セクションのタイトル、見出し、先頭から最大 1,500 文字</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">D2</td>
+<td class="fui-TableCell">エッジと、ソースページの最大 60 文</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">D3</td>
+<td class="fui-TableCell">2つのセクション</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">D4</td>
+<td class="fui-TableCell">ソースと候補の各セクションの、先頭 2,000 文字</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">D5</td>
+<td class="fui-TableCell">ページのテキスト</td>
+</tr>
+</tbody>
+</table>
+</div>
+<ul>
+<li>TypeSafe: 顧客のデータを学習に使いません。データを保持しない設定は、エンタープライズプランでのみ使えます。</li>
+<li>Liquid API: API のトラフィックをどれだけ保持するかは明示されていません。</li>
+<li>ローカルの <code>llama-server</code>: テキストが手元のマシンから出ることはありません。<code>127.0.0.1</code> だけにバインドしてください。</li>
+</ul>
+<p>ライセンス: Liquid d1 のモデルには LFM Open License v1.0 が適用されます。無料で使えるのは、年間売上高が 1,000 万ドル未満の組織に限られます。それを超える場合は、Liquid から商用ライセンスを取得します。</p>
+<p>料金（ベンダー公表値、2026年10月時点）:</p>
+<div class="table-scroll" role="region" aria-label="表" tabindex="0">
+<table class="fui-Table">
+<thead class="fui-TableHeader">
+<tr class="fui-TableRow">
+<th class="fui-TableHeaderCell" scope="col">バックエンド</th>
+<th class="fui-TableHeaderCell" scope="col">料金</th>
+</tr>
+</thead>
+<tbody class="fui-TableBody">
+<tr class="fui-TableRow">
+<td class="fui-TableCell">Jev（TypeSafe、OpenRouter）</td>
+<td class="fui-TableCell">入力 100 万トークンあたり $0.042</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">Liquid API <code>d1.1</code></td>
+<td class="fui-TableCell">入力 100 万トークンあたり $0.02</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">ローカルの <code>d1-2B</code></td>
+<td class="fui-TableCell">無料</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>ふるい分けを行う検索1回で、約 20 件のリクエストが送られます。各リクエストには1つのセクションが入るので、検索1回で数千トークンの入力を使います。</p>
+<h2 id="ローカルで有効にする" class="fui-Subtitle1">ローカルで有効にする</h2>
+<p>ローカルのバックエンドを起動します。キーは不要で、データは手元のマシンから外に出ません。</p>
+<pre><code class="language-bash">llama-server -hf LiquidAI/d1-2B-GGUF --host 127.0.0.1 --port 8080
+export INFO_HIVE_DECISIONS=local
+python skills/info-hive/scripts/wiki_decide.py check
+</code></pre>
+<p>または、外部の API のバックエンドを選びます。</p>
+<pre><code class="language-bash">export INFO_HIVE_DECISIONS=typesafe        # off | local | typesafe | openrouter | liquid
+export TYPESAFE_API_KEY=...
+</code></pre>
+<p>任意: <code>INFO_HIVE_DECISIONS_URL</code> でベース URL を、<code>INFO_HIVE_DECISIONS_MODEL</code> でモデルを変えられます。<code>wiki_decide.py</code> のフラグ <code>--backend</code>、<code>--model</code>、<code>--url</code>、<code>--timeout</code> は、環境変数より優先されます。</p>
+<p>チェックを使います。</p>
+<pre><code class="language-bash">uv run --script skills/info-hive/scripts/wiki_search.py &quot;query&quot; --json --decide
+uv run --script skills/info-hive/scripts/wiki_graph_lint.py wiki/ --decide
+python skills/info-hive/scripts/wiki_decide.py contradictions --wiki wiki/
+python skills/info-hive/scripts/wiki_decide.py shortlist raw/new-source.md --wiki wiki/
+python skills/info-hive/scripts/wiki_decide.py screen raw/new-clipping.md
+</code></pre>
+<p><code>--decide</code> を付けなければ、検索とグラフの lint の出力は変わりません。</p>
+<h2 id="先に評価する" class="fui-Subtitle1">先に評価する</h2>
+<p>評価には、<code>eval/decisions/</code> 以下の合成フィクスチャだけを使います。テストのために、非公開の wiki のテキストを外部のバックエンドに送ってはなりません。</p>
+<pre><code class="language-bash">python eval/decisions/run_eval.py --backend fake                  # ネットワークを使わない
+python eval/decisions/run_eval.py --backend local --out results.json
+</code></pre>
+<p>各バックエンドを、単純なベースライン（ふるい分けなし、またはテキストの完全一致）と比べます。閾値は、評価用に取り分けたデータ（held-out split）だけをもとに決めます。自分のクエリでテストするときは、<code>local</code> バックエンドを使います。</p>
+<h3 id="測定結果2026-10-29" class="fui-Subtitle2">測定結果（2026-10-29）</h3>
+<p>既定の閾値は、<code>local</code> バックエンドで合成の評価を1回実際に実行した結果から決めました。構成は llama.cpp b11976 と <code>LiquidAI/d1-2B-GGUF:Q8_0</code>、語彙ベースの検索で、リクエストは 1,179 件、エラーは 0 件でした。生の数値は移植元のリポジトリのコミット <code>2d24ccf</code> にある <code>eval/decisions/results-local-d1-2b.json</code> に記録されています。測定結果のファイルは、このリポジトリには含まれていません。詳しくは <a href="upstream.html" class="fui-Link" data-inline="">UPSTREAM.md</a> を参照してください。</p>
+<div class="table-scroll" role="region" aria-label="表" tabindex="0">
+<table class="fui-Table">
+<thead class="fui-TableHeader">
+<tr class="fui-TableRow">
+<th class="fui-TableHeaderCell" scope="col">チェック</th>
+<th class="fui-TableHeaderCell" scope="col">閾値</th>
+<th class="fui-TableHeaderCell" scope="col">取り分けた半分での結果</th>
+</tr>
+</thead>
+<tbody class="fui-TableBody">
+<tr class="fui-TableRow">
+<td class="fui-TableCell">D1 関連度ゲート</td>
+<td class="fui-TableCell">0.65</td>
+<td class="fui-TableCell">答えのないクエリで行が返る割合: 100% から 0% に。Recall@5: 1.0 から 1.0 に。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">D2 証拠チェック</td>
+<td class="fui-TableCell">0.55</td>
+<td class="fui-TableCell">適合率 1.0、再現率 1.0</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">D3 矛盾</td>
+<td class="fui-TableCell">0.5</td>
+<td class="fui-TableCell">適合率 1.0、再現率 1.0</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">D5 信頼できないテキスト</td>
+<td class="fui-TableCell">0.7</td>
+<td class="fui-TableCell">適合率 1.0、再現率 1.0</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>フィクスチャが小さいので、これらの数値は楽観的です。Jev は、実行時に有料のクレジットがなかったため測定していません。チェックを有効にする前に、使うバックエンドで評価を実行してください。</p>
+    </main>
+  </div>
+</body>
+</html>

@@ -2,11 +2,11 @@
 
 # グラフ層
 
-グラフは、markdown の wiki をもとにコンパイルする任意のインデックスである。出典つきの型付きの関係をプログラムからクエリできるようにしつつ、正本はあくまで markdown のままにする。グラフはいつでもページから作り直せる。
+wiki の Markdown から、必要に応じてグラフを作れます。グラフがあると、関係の種類と出典を持つ「型付きエッジ」を、プログラムから調べられます。正本は Markdown です。グラフはページから作り直せます。
 
-> グラフ層はオプトイン方式である。`wiki/graph/ontology.yaml` がなければ、その wiki はグラフ層を導入する前の状態である。extract、lint、query のスクリプトは、どれも何も書き出さずに終了コード 1 で止まる。オントロジーのファイルをでっち上げてはならない。先にグラフ層を初期化する（[`/wiki:graph`](./commands.md#wikigraph-action) または [`/wiki:init`](./commands.md#wikiinit) を使う）か、グラフ層なしで進める。
+> グラフ層はオプトイン方式です。`wiki/graph/ontology.yaml` がなければ、その wiki はグラフ層を導入する前の状態です。extract、lint、query のスクリプトは、どれも何も書き出さずに終了コード 1 で止まります。オントロジーのファイルをでっち上げてはなりません。先にグラフ層を初期化する（[`/wiki:graph`](./commands.md#wikigraph-action) または [`/wiki:init`](./commands.md#wikiinit) を使う）か、グラフ層なしで進めます。
 
-正本は markdown のページであり、下の図の成果物はすべて生成物なので、いつでも削除して作り直せる。
+正本は Markdown のページです。次の図にある生成物は、いつでも削除して作り直せます。
 
 ```mermaid
 flowchart LR
@@ -25,15 +25,15 @@ flowchart LR
 
 ## グラフが表すもの
 
-extract を実行すると、次の3種類のエッジができる。
+extract を実行すると、次の3種類のエッジができます。
 
-1. **型付きの意味のエッジ。** ページの frontmatter の `graph.relationships[]` で宣言したもの（`founded`、`proposed`、`depends_on` など）。どのエッジも、明示的な `source`（ソースページのスラッグ）、`evidence` の引用、`confidence`（high/medium/low）、`status`（current/historical/proposed/disputed/superseded）を持つ。抽出スクリプトがこれらを勝手に作ることはない。
-2. **`mentions` エッジ。** 本文の `[[wikilink]]` 1つにつき1本で、ページ内の重複はまとめられ、確信度は `low` になる。目的のページを早く見つけるためのもので、型付きの関係の証拠にはならない。
-3. **`sourced_from` と `summarizes_raw` のエッジ。** 前者はソースページ以外のページの `sources:` リストからソースページへ、後者はソースページの `raw:` フィールドから raw ファイルへ張られる。
+1. **型付きの意味のエッジ。** ページの frontmatter の `graph.relationships[]` で宣言したもの（`founded`、`proposed`、`depends_on` など）。どのエッジも、明示的な `source`（ソースページのスラッグ）、`evidence` の引用、`confidence`（high/medium/low）、`status`（current/historical/proposed/disputed/superseded）を持ちます。抽出スクリプトがこれらを勝手に作ることはありません。
+2. **`mentions` エッジ。** 本文の `[[wikilink]]` 1つにつき1本で、ページ内の重複はまとめられ、確信度は `low` になります。目的のページを早く見つけるためのもので、型付きの関係の証拠にはなりません。
+3. **`sourced_from` と `summarizes_raw` のエッジ。** 前者はソースページ以外のページの `sources:` リストからソースページへ、後者はソースページの `raw:` フィールドから raw ファイルへ張られます。
 
 ## frontmatter のスキーマ
 
-型付きの関係は、ページの frontmatter に書く。
+型付きの関係は、ページの frontmatter に書きます。
 
 ```yaml
 graph:
@@ -50,15 +50,15 @@ graph:
       status: current
 ```
 
-関係に必須のフィールドは `predicate`、`object`、`source`、`evidence`、`confidence`、`status` である。`node_id` は `<node_type>:<slug>` の形をとる。
+関係に必須のフィールドは `predicate`、`object`、`source`、`evidence`、`confidence`、`status` です。`node_id` は `<node_type>:<slug>` の形をとります。
 
 ## オントロジー
 
-`wiki/graph/ontology.yaml` は、グラフの仕様を決めるファイルである。`node_types[*].maps_from`（ページの `type` や `kind` をどのノード種別に対応させるか）と、`predicates[*]`（使える述語と、その `subject_types`、`object_types`、`requires_evidence`）を宣言する。`"*"` はワイルドカードである。分野固有の述語を追加するときはオントロジーを編集し、lint を再実行して、既存のエッジがオントロジーに合っているかを検証する。
+`wiki/graph/ontology.yaml` は、グラフの仕様を決めるファイルです。`node_types[*].maps_from`（ページの `type` や `kind` をどのノード種別に対応させるか）と、`predicates[*]`（使える述語と、その `subject_types`、`object_types`、`requires_evidence`）を宣言します。`"*"` はワイルドカードです。分野固有の述語を追加するときはオントロジーを編集し、lint を再実行して、既存のエッジがオントロジーに合っているかを検証します。
 
 ## 型付きエッジと通常の wikilink の使い分け
 
-特定のソースが関係をはっきり述べていて、証拠を引用でき、その述語が後のクエリで意味を持つなら、**型付きエッジ**を追加する。関係が暗黙的なもの、1つの引用に結びつけられないもの、`mentions` エッジにしかならないものには、通常の **`[[wikilink]]`** を使う。迷ったら wikilink を書けばよい。lint は証拠の欠落を指摘するが、関係を控えめに書いたことを問題にはしない。
+特定のソースが関係をはっきり述べていて、証拠を引用でき、その述語が後のクエリで意味を持つなら、**型付きエッジ**を追加します。関係が暗黙的なもの、1つの引用に結びつけられないもの、`mentions` エッジにしかならないものには、通常の **`[[wikilink]]`** を使います。迷ったら wikilink を使います。lint は証拠の欠落を指摘するが、関係を控えめに書いたことを問題にはしません。
 
 ## extract、lint、query
 
@@ -76,16 +76,16 @@ python skills/info-hive/scripts/wiki_graph_query.py wiki/ path     --from person
 python skills/info-hive/scripts/wiki_graph_query.py wiki/ facts    --about product:konvy
 ```
 
-`--json` は lint と query のどちらのコマンドでも使える。同じ操作は、スラッシュコマンドの [`/wiki:graph`](./commands.md#wikigraph-action) からも実行できる。回答では、必ず wiki ページとその raw ソースを出典として示す。グラフはどのページを読めばよいかを教えるものであり、グラフそのものは証拠ではない。
+`--json` は lint と query のどちらのコマンドでも使えます。同じ操作は、スラッシュコマンドの [`/wiki:graph`](./commands.md#wikigraph-action) からも実行できます。回答では、必ず wiki ページとその raw ソースを出典として示します。グラフは読むページを探すために使い、根拠は該当するページとその原本で確認します。
 
 ## 生成物の扱い
 
 | ファイル | 正本か | 既定の管理方法 |
 | --- | --- | --- |
-| `ontology.yaml` | 正本。手で編集する | git で管理する |
-| `nodes.jsonl` | 生成物 | 任意。PR でグラフの差分を見たいなら git で管理する |
+| `ontology.yaml` | 正本です。手で編集します。 | git で管理します。 |
+| `nodes.jsonl` | 生成物 | 任意。PR でグラフの差分を確認したい場合は、git で管理します。 |
 | `edges.jsonl` | 生成物 | 任意。上と同じ |
 | `graph.sqlite` | 生成物 | 既定で gitignore する（大きいバイナリのため） |
 | `graph.graphml` | 生成物 | 既定で gitignore する |
 
-> グラフの lint と抽出は、PyYAML 6.0.3 にバージョンを固定したメタデータを持ち、`uv run --script` で実行される。手作業での `pip install` は不要である。グラフのクエリは Python の標準ライブラリだけを使う。
+> グラフの lint と抽出は、PyYAML 6.0.3 にバージョンを固定したメタデータを持ち、`uv run --script` で実行されます。手作業での `pip install` は不要です。グラフのクエリは Python の標準ライブラリだけを使います。

@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ja" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>アップグレード | info-hive</title>
+  <link rel="stylesheet" href="assets/fluent2.css">
+  <link rel="stylesheet" href="assets/manual.css">
+  <link rel="stylesheet" href="assets/manual-print.css" media="print">
+  <script defer src="assets/manual-code.js"></script>
+</head>
+<body class="fui-FluentProvider">
+  <a class="skip-link fui-Link" href="#main">本文へ移動</a>
+  <header class="site-header">
+    <div class="shell"><a class="site-name fui-Link" href="index.html">info-hive</a></div>
+  </header>
+  <div class="shell reading-layout">
+    <nav class="contents" aria-label="目次">
+      <a class="fui-Link" href="index.html#toc">文書の目次へ戻る</a>
+    </nav>
+    <main class="page-content readme-content" id="main" tabindex="-1">
+<h1 id="アップグレード" class="fui-Title1">アップグレード</h1>
+<!-- page-summary:start -->
+<figure class="page-summary page-summary-flow">
+  <ol role="list" aria-label="概要">
+    <li><strong>対象を確認</strong><span>移植元の版と保存先</span></li>
+    <li><strong>更新を実行</strong><span>必要なファイルを追加</span></li>
+    <li><strong>差分を確認</strong><span>既存の規約を確認して反映</span></li>
+  </ol>
+</figure>
+<!-- page-summary:end -->
+<p>ここでは、移植元 llm-wiki-plugin の変更点と、以前の版からのアップグレード手順を説明します。版は、とくに断らない限り移植元のものです。info-hive は移植元の v4.0.1 を起点にしています。詳しくは<a href="upstream.html" class="fui-Link" data-inline="">移植元の記録</a>を参照してください。info-hive で作った wiki には、<a href="howto-upgrade-wiki.html" class="fui-Link" data-inline="">規約とテンプレートの更新手順</a>を使います。移植元の v4.0.0 で加わったホスト型 wiki は、info-hive には含めていません。</p>
+<h2 id="移植元の-v400-で変わった点" class="fui-Subtitle1">移植元の v4.0.0 で変わった点</h2>
+<p>v4.0.0 では、オプションの判定レイヤーが加わりました。ローカルの wiki、ページの形式、ローカルの検索、すべてのコマンドは、これまでどおり動きます。メジャーバージョンを上げたのは、Paperclip 連携を削除したためです。</p>
+<ul>
+<li><strong>ローカルの wiki に移行作業は要りません。</strong> <code>wiki/</code> の下は何も変わりません。ローカルの検索、lint、グラフ、改善のスクリプトも同じです。</li>
+<li><strong>判定モデル（オプション、既定では無効）。</strong> 小さなモデルを使って、検索結果を関連度でふるい分けたり、グラフの証拠を確かめたり、信頼できないテキストを選別したりできます。詳しくは<a href="decisions.html" class="fui-Link" data-inline="">判定モデル</a>を参照してください。</li>
+<li><strong>Paperclip 連携の削除。</strong> <code>integrations/paperclip/</code> のプラグインとそのドキュメントはなくなりました。npm パッケージは一度もレジストリに公開していないので、レジストリ側での対応は不要です。Paperclip が必要なら、移植元の v3.2.x を使い続けます。v3.2.0 のドキュメントは、移植元のリポジトリの <span><code>docs/v3</code></span> にあります。</li>
+</ul>
+<h2 id="アップグレードの手順" class="fui-Subtitle1">アップグレードの手順</h2>
+<ol>
+<li>インストールしたときと同じ方法で、**プラグインまたはスキルを更新します。**Claude Code では、マーケットプレイスからのインストールをもう一度実行します。スキルだけを使うエージェントでは、<code>npx skills add</code> をもう一度実行します。</li>
+<li>wiki に対して **<code>/wiki:upgrade</code> を実行します。**v3.2 と同じ、何度実行しても同じ結果になるファイル操作と、実行環境のチェックを行います。移植元の v4.0.0 では、<code>SCHEMA.md</code> に新しく加えるべきセクションはありません。info-hive の 0.8.0 では、ソースの要約ページの主張と行き先の表を記した <code>## Claim destinations</code> のセクションが加わったので、<code>/wiki:upgrade</code> がそのマージを案内します。</li>
+</ol>
+<h2 id="v32-より前からのアップグレード" class="fui-Subtitle1">v3.2 より前からのアップグレード</h2>
+<p>v3.2.0 では、オプションの経験の記録と、評価済みのスキルの改善が加わりました。既存の wiki、frontmatter、CLI のフラグは、引き続き互換性があります。バックグラウンドで動く最適化の仕組みが有効になることはありません。</p>
+<p>設定した wiki に対して <code>/wiki:upgrade</code> を実行します。既存の実行環境のセットアップは、引き続き必須です。アップグレードでは、<code>.experience-template.json</code>、<code>.pattern-template.md</code>、<code>.evolution/README.md</code> を、ない場合にだけ追加します。カスタマイズしたファイルと SCHEMA.md は保持されます。レビュー用に、オプションの <code>## Skill evolution</code> スキーマセクションを提案します。</p>
+<p>検証済みのタスクの経験には <code>/wiki:learn</code> を、根拠にもとづく改善案と、測定にもとづく採用には <code>/wiki:evolve</code> を使います。アップグレードの間に評価やスキルの置き換えが行われることはありません。<code>.evolution/</code> は、いつでも作り直せる <code>.wiki-cache/</code> と違い、消えては困る履歴なのでバックアップしておきます。ランナーの仕様、パイロットスイート、推論の予算、ロールバックについては<a href="evolution.html" class="fui-Link" data-inline="">経験の記録とスキルの改善</a>を参照してください。</p>
+<h2 id="v30-より前からのアップグレード" class="fui-Subtitle1">v3.0 より前からのアップグレード</h2>
+<p>v3.0.0 では、プロバイダーを使った埋め込みが、既定のローカルの FastEmbed と sqlite-vec による検索に置き換わりました。既存の Markdown には手を付けず、変わるのはいつでも作り直せるベクトルインデックスだけです。</p>
+<blockquote>
+<p><strong>コンテンツの移行は不要</strong></p>
+<p>ページと frontmatter の形式は変わっていません。古い <code>embeddings.jsonl</code> キャッシュは無視されるので、削除してかまいません。<code>/wiki:upgrade</code> が <code>embeddings.sqlite</code> をローカルに作り、現在あるすべてのセクションを同期します。</p>
+</blockquote>
+<pre><code class="language-mermaid">flowchart TD
+  pull[&quot;v3.0.0 を pull&quot;] --&gt; run[&quot;/wiki:upgrade を実行&quot;]
+  run --&gt; files[&quot;何度実行しても同じ結果になるファイル操作&quot;]
+  files --&gt; runtime[&quot;バージョン固定の実行環境とモデルをインストール&quot;]
+  runtime --&gt; embed[&quot;すべてのセクションを同期&quot;]
+  embed --&gt; schema[&quot;ローカル検索用の SCHEMA マーカーを提案&quot;]
+  schema --&gt; approve[&quot;ユーザーが承認&quot;]
+  approve --&gt; ready[&quot;v3 の準備完了&quot;]
+  pages[&quot;既存のページ&quot;] -.-&gt; unchanged[&quot;変更なし: コンテンツの移行は不要&quot;]
+</code></pre>
+<h2 id="メジャーバージョンを上げた理由" class="fui-Subtitle1">メジャーバージョンを上げた理由</h2>
+<p>既定のセクション検索は、プロバイダーを設定しない限り語彙ベースのままだったが、ローカルのモデルと sqlite-vec のインデックスを初期化するようになりました。データはローカルの外に出なくなり、プロバイダー用の古い環境変数と承認フラグは削除されました。<code>python wiki_search.py &quot;&lt;query&gt;&quot; --no-embed</code> で直接実行すれば、依存パッケージを使わない BM25 を引き続き使えます。</p>
+<h2 id="アップグレードの手順-1" class="fui-Subtitle1">アップグレードの手順</h2>
+<ol>
+<li>
+<p><strong>現在のリリースを取得します。</strong> インストールしたときと同じ方法でプラグインを更新します。Claude Code では、マーケットプレイスからのインストールをもう一度実行します。スキルだけを使うエージェントでは、<code>npx skills add</code> をもう一度実行します。</p>
+</li>
+<li>
+<p><strong>アップグレードを実行します。</strong> Claude Code では次のコマンドを実行します。</p>
+<pre><code class="language-bash">/wiki:upgrade
+</code></pre>
+<p>直接実行する場合は、インストール済みのスクリプトと、選んだベースディレクトリを別々に渡します。プロジェクトの wiki の場合:</p>
+<pre><code class="language-bash">python &quot;${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/init_wiki.py&quot; &quot;&lt;absolute-project-root&gt;&quot; --upgrade
+</code></pre>
+<p>ユーザースコープの標準の構成の場合:</p>
+<pre><code class="language-bash">python &quot;${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/init_wiki.py&quot; &quot;&lt;absolute-home-directory&gt;/info-hive&quot; --upgrade
+</code></pre>
+<p>以前の既定（<code>~/wiki/</code> と <code>~/wiki/raw/</code>）で作った wiki は移動せず、ベースディレクトリとサブディレクトリをそのまま指定する:</p>
+<pre><code class="language-bash">python &quot;${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/init_wiki.py&quot; &quot;&lt;absolute-home-directory&gt;&quot; --wiki-dir wiki --raw-dir wiki/raw --upgrade
+</code></pre>
+<p>スキルだけをインストールしている場合は、<code>${CLAUDE_PLUGIN_ROOT}/skills/info-hive</code> を、そのエージェントにインストールされた <code>info-hive</code> スキルのディレクトリに置き換えます。プラグインやスキルのディレクトリを、ベースディレクトリとして使ってはなりません。</p>
+<blockquote>
+<p><strong>期待される動作</strong>: 何度実行しても同じ結果になるファイル操作なので、既存のページには手が付きません。続いて実行環境のセットアップが <code>&quot;status&quot;: &quot;ready&quot;</code> を返し、固定した依存パッケージのバージョン、モデル、ページ数、セクション数、ベクトルインデックスのパスを報告します。そのあとで、コマンドが SCHEMA に欠けているマーカーを報告します。</p>
+</blockquote>
+</li>
+<li>
+<p><strong>SCHEMA.md のマージを承認します。</strong> 現在のテンプレートにあるローカルのセマンティック検索のバックエンドについての行を、既存の <code>## Retrieval</code> セクションに追加します。SCHEMA.md はユーザーと一緒に改訂してきたものなので、黙って変更されることはありません。</p>
+</li>
+</ol>
+<p>アップグレードは何度実行しても同じ結果になります。既存のコンテンツは変わらず、依存パッケージとモデルを確かめ、変わったベクトルと欠けているベクトルだけを作ります。</p>
+<h2 id="変わる点" class="fui-Subtitle1">変わる点</h2>
+<ul>
+<li><strong>既存のページは変更不要。</strong> <code>wiki/</code> の下にある正本は何も書き換えられません。</li>
+<li><strong>セクション検索の既定は、ローカルのハイブリッド検索になりました。</strong> FastEmbed と sqlite-vec によるセマンティックな順位を、BM25 の結果と統合します。依存パッケージを使わない語彙ベースの検索にするには、スクリプトを Python で直接実行して <code>--no-embed</code> を付けます。ページ単位で順位を付けるには <code>--granularity page</code> を使います。</li>
+<li><strong>アップグレードがすべてをインストールします。</strong> このコマンドは、<code>uv</code> を通じてバージョンを固定した FastEmbed、sqlite-vec、PyYAML を解決し、固定したモデルがなければダウンロードし、パースキャッシュを作り、現在あるすべてのセクションをベクトル化します。</li>
+<li><strong><code>wiki/.wiki-cache/</code> は作り直せます。</strong> <code>search-index.json</code> と <code>embeddings.sqlite</code> は gitignore の対象で、削除してかまいません。旧来の <code>embeddings.jsonl</code> は無視されます。</li>
+<li><strong>プロバイダーの設定はもう要りません。</strong> API キー、エンドポイント、データ転送の承認、クエリごとの課金は一切ありません。</li>
+</ul>
+<blockquote>
+<p><strong>注意</strong></p>
+<p>まだ wiki がない（wiki のディレクトリに <code>SCHEMA.md</code> がない）場合は、アップグレードするものがありません。<code>init_wiki.py --upgrade</code> も、何も作らずに止まります。代わりに <a href="tutorial-first-wiki.html" class="fui-Link" data-inline=""><code>/wiki:init</code></a> を実行します。</p>
+</blockquote>
+    </main>
+  </div>
+</body>
+</html>

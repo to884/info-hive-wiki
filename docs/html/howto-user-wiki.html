@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ja" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>複数の作業フォルダーから使う wiki を作る | info-hive</title>
+  <link rel="stylesheet" href="assets/fluent2.css">
+  <link rel="stylesheet" href="assets/manual.css">
+  <link rel="stylesheet" href="assets/manual-print.css" media="print">
+  <script defer src="assets/manual-code.js"></script>
+</head>
+<body class="fui-FluentProvider">
+  <a class="skip-link fui-Link" href="#main">本文へ移動</a>
+  <header class="site-header">
+    <div class="shell"><a class="fui-Link site-name" href="index.html">info-hive</a></div>
+  </header>
+  <main class="shell reading-layout" id="main" tabindex="-1">
+    <nav class="contents" aria-label="このページの目次">
+      <h2>目次</h2>
+      <ul>
+        <li><a class="fui-Link" data-inline href="#init-user">ユーザー wiki を初期化する</a></li>
+        <li><a class="fui-Link" data-inline href="#memory">新しいセッションが wiki の場所を知るようにする</a></li>
+      </ul>
+    </nav>
+    <article class="page-content" aria-labelledby="page-title">
+      <header class="intro">
+        <h1 class="fui-Title1" id="page-title">複数の作業フォルダーから使う wiki を作る</h1>
+<!-- page-summary:start -->
+<figure class="page-summary page-summary-flow">
+  <ol role="list" aria-label="概要">
+    <li><strong>保存先を作る</strong><span>/wiki:init --user</span></li>
+    <li><strong>場所を伝える</strong><span>アプリの指示に追記</span></li>
+    <li><strong>別の作業から使う</strong><span>同じ wiki を参照</span></li>
+  </ol>
+</figure>
+<!-- page-summary:end -->
+        <p>複数の作業フォルダーから使える wiki を、Windows のユーザーごとに 1 つ作ります。Code タブの新しいセッションには、その wiki の場所を伝えます。</p>
+      </header>
+      <section id="init-user">
+        <h2 class="fui-Subtitle1">ユーザー wiki を初期化する</h2>
+        <ol>
+          <li>Code タブで新しいローカルセッションを開きます。</li>
+          <li>次のコマンドを送ります。<pre><code>/wiki:init --user</code></pre></li>
+          <li>既定の場所で進めます。</li>
+          <li>初期化したツールの出力で <code>"status": "ready"</code> を確かめます。</li>
+        </ol>
+        <p>既定の場所は <code>%USERPROFILE%\info-hive\wiki\</code> と <code>%USERPROFILE%\info-hive\raw\</code> です。</p>
+      </section>
+
+      <section id="memory">
+        <h2 class="fui-Subtitle1">新しいセッションが wiki の場所を知るようにする</h2>
+        <ol>
+          <li>グローバルな指示の追記案を読みます。</li>
+          <li>案に実際のユーザー wiki の場所があることを確かめます。</li>
+          <li>提案を承認します。</li>
+          <li><code>%USERPROFILE%\.claude\CLAUDE.md</code> に案が入ったことを確かめます。</li>
+        </ol>
+        <p>コマンドを手入力して検索する場合は、検索例の <code>--wiki wiki/</code> を実際のユーザー wiki の絶対パスに変えます。</p>
+      </section>
+
+      <nav class="page-navigation" aria-label="関連ページ">
+        <a class="fui-Link" href="commands.html#wikiinit">/wiki:init の引数を確認する</a>
+      </nav>
+    </article>
+  </main>
+</body>
+</html>

@@ -1,8 +1,8 @@
 # info-hive
 
-日本語の PDF、Web 記事、文字起こし、メモを、AI エージェントが整理・検索する Markdown の wiki に変える。蓄積した知識から出典つきの回答を得て、次の作業にも使えるように保存できる。
+AI エージェントが、日本語の PDF、Web 記事、文字起こし、メモを Markdown の wiki に整理します。あとから質問すると、wiki の内容をもとに、出典つきで答えます。得られた知識は、次の作業でも使えるように保存できます。
 
-Claude Code と Codex では `wiki@info-hive` プラグインとして、ほかの対応エージェントでは `info-hive` スキルとして使う。スキルは [Agent Skills](https://agentskills.io) 形式である。
+Claude Code と Codex では `wiki@info-hive` プラグインとして、ほかの対応エージェントでは `info-hive` スキルとして使います。スキルは [Agent Skills](https://agentskills.io) 形式です。
 
 ## インストール
 
@@ -44,7 +44,7 @@ npx skills add to884/info-hive-wiki -a cursor -g
 
 ## クイックスタート
 
-以下は、プロジェクトをまたいで使うユーザースコープの wiki を作る例である。まず `init` を実行し、保存先を確認して初期化する。続いて最初の資料を `~/info-hive/raw/your-source.pdf` に置き、`ingest`、`query` の順に実行する。資料のパスと質問は、使いたいものに置き換える。
+プロジェクトをまたいで使える wiki を作ります。まず `init` を実行し、保存先を確認して初期化します。最初の資料を `~/info-hive/raw/your-source.pdf` に置いたら、`ingest` で取り込み、`query` で質問します。例のパスと質問は、使いたい資料と質問に置き換えてください。
 
 ### Claude Code
 
@@ -62,30 +62,30 @@ $wiki:info-hive ingest ~/info-hive/raw/your-source.pdf
 $wiki:info-hive query この資料の要点は？
 ```
 
-プロジェクト専用の wiki を作る場合は、`init` の `--user` を外す。既定では、そのプロジェクトの `wiki/` と `raw/` を使う。プラグインやスキルをインストールする範囲と、wiki を保存する範囲は別に選べる。
+プロジェクト専用の wiki を作る場合は、`init` の `--user` を外します。既定では、そのプロジェクトの `wiki/` と `raw/` を使います。プラグインやスキルを入れる範囲と、wiki の保存範囲は別々に選べます。
 
-定期的な点検には、Claude Code では `/wiki:lint`、Codex では `$wiki:info-hive lint` を使う。検出した問題は修正案として示し、黙って wiki を書き換えることはない。
+定期的な点検には、Claude Code では `/wiki:lint`、Codex では `$wiki:info-hive lint` を使います。検出した問題は修正案として示し、黙って wiki を書き換えることはありません。
 
 ## できること
 
-- 資料を要約し、関連するページ、リンク、インデックスを更新する。
-- 日本語の語彙検索と意味検索を組み合わせ、出典つきで質問に答える。
-- リンク切れ、孤立ページ、frontmatter の欠落、大きすぎるページを点検する。
-- ページ間の関係をグラフで調べ、wiki をブラウザで閲覧する。
-- `/wiki:overview <ページ>` で、図を中心にした概要を本文と別に保存し、`/wiki:browse` で表示する（元のページが更新されると警告し、概要を折りたたむ）。
-- 検証済みのタスクの経験を記録し、スキルの変更を提案・評価する。
+- 資料を要約し、関連するページ、リンク、インデックスを更新します。
+- 日本語の語彙検索と意味検索を組み合わせ、出典つきで質問に答えます。
+- リンク切れ、孤立ページ、frontmatter の欠落、大きすぎるページを点検します。
+- ページ間の関係をグラフで調べ、wiki をブラウザーで閲覧します。
+- `/wiki:overview <ページ>` で、図を中心にした概要を本文と別に保存し、`/wiki:browse` で表示します。元のページが更新されると、警告を表示して概要を折りたたみます。
+- 検証済みのタスクの経験を記録し、スキルの変更を提案・評価します。
 
-正本はローカルの Markdown であり、複数のエージェントで同じ wiki を使える。検索の埋め込みと索引もローカルで処理し、外部のベクトルデータベースや埋め込み API は使わない。
+wiki の正本は手元の Markdown です。同じ wiki を複数のエージェントで使えます。検索の埋め込みと索引もローカルで処理し、外部のベクトルデータベースや埋め込み API は使いません。
 
-Claude Code では、任意の [rag@info-hive](https://github.com/to884/info-hive-rag) を有効にすると、PDF の抽出・OCR・索引化を永続ジョブとして処理できる。受付済みの `queued` は索引化完了を意味しない。rag がなくても PDF は取り込める。rag の Codex 対応は含まない。
+Claude Code では、任意の [rag@info-hive](https://github.com/to884/info-hive-rag) を有効にすると、PDF の抽出・OCR・索引化を永続ジョブとして処理できます。`queued` は、依頼を受け付けた段階です。この時点では、PDF の索引化は完了していません。rag がなくても PDF は取り込めます。rag の Codex 対応は含みません。
 
-Claude Code と Codex では、`ingest session` で実行中の会話を取り込める。Codex の呼び出し方は `$wiki:info-hive ingest session`、指定した会話を取り込む場合は `$wiki:info-hive ingest session:<ID>` である。保存する範囲と伏せ字を確認してから wiki に取り込む。
+Claude Code と Codex では、`ingest session` で実行中の会話を取り込めます。Codex の呼び出し方は `$wiki:info-hive ingest session`、指定した会話を取り込む場合は `$wiki:info-hive ingest session:<ID>` です。保存する範囲と伏せ字を確認してから、会話を wiki に取り込みます。
 
-スキルの改善は任意のワークフローである。移植元の調査では品質の向上は示されていない。[仕組みと検証の限界](docs/evolution.md#研究上の根拠と取り入れ方)を参照。
+スキルの改善は任意のワークフローです。移植元の調査では品質の向上は示されていません。[仕組みと検証の限界](docs/evolution.md#研究上の根拠と取り入れ方)で、調査結果の詳細を確認できます。
 
 ## ドキュメント
 
-[ドキュメントの一覧](docs/index.md)から、使い方と仕組みを参照できる。
+手元の [docs/html/index.html](docs/html/index.html) をブラウザーで開くと、図解と目次から使い方を参照できます。
 
 | 文書 | 内容 |
 | --- | --- |
@@ -100,20 +100,20 @@ Claude Code と Codex では、`ingest session` で実行中の会話を取り�
 
 ## 移植元とクレジット
 
-Praney Behl の [llm-wiki-plugin](https://github.com/praneybehl/llm-wiki-plugin) v4.0.1（コミット `2d24ccf`、MIT ライセンス）を日本語向けに移植した。起点と取り込んだ修正は [UPSTREAM.md](UPSTREAM.md) に記録している。移植元のホスト型 wiki は含めていない。
+Praney Behl の [llm-wiki-plugin](https://github.com/praneybehl/llm-wiki-plugin) v4.0.1（コミット `2d24ccf`、MIT ライセンス）を日本語向けに移植しました。起点と取り込んだ修正は [UPSTREAM.md](UPSTREAM.md) に記録しています。移植元のホスト型 wiki は含めていません。
 
-LLM Wiki のパターンは Andrej Karpathy の [llm-wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) にもとづく。移植元の検索は Cerebras の [How We Built Our Knowledge Base](https://www.cerebras.ai/blog/how-we-built-our-knowledge-base) を参考にし、ローカル検索への移行時には [Basic Memory](https://github.com/basicmachines-co/basic-memory) と比較している。スキルの改善のワークフローは [WikiSkill](https://arxiv.org/html/2608.27454v1) を応用している。
+LLM Wiki のパターンは Andrej Karpathy の [llm-wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) にもとづきます。移植元の検索は Cerebras の [How We Built Our Knowledge Base](https://www.cerebras.ai/blog/how-we-built-our-knowledge-base) を参考にし、ローカル検索への移行時には [Basic Memory](https://github.com/basicmachines-co/basic-memory) と比較しています。スキルの改善のワークフローは [WikiSkill](https://arxiv.org/html/2608.27454v1) を応用しています。
 
 ## ライセンス
 
-MIT。[LICENSE](LICENSE) に、移植元の Praney Behl と to884 の著作権表示・許諾文を記載している。
+MIT。[LICENSE](LICENSE) に、移植元の Praney Behl と to884 の著作権表示・許諾文を記載しています。
 
-同梱のライブラリと素材の取得元、版、ライセンスは次を参照。
+同梱するライブラリと素材の入手元、バージョン、ライセンスは次の文書で確認できます。
 
 - Markdown 解析器の markdown-it-py と mdurl: [_vendor/README.md](skills/info-hive/scripts/_vendor/README.md)、[ライセンス](skills/info-hive/scripts/_vendor/licenses/)
 - 閲覧画面の Fluent 2 の CSS、アイコン、Mermaid とその依存: [browse_assets/README.md](skills/info-hive/scripts/browse_assets/README.md)、[ライセンスと第三者の表示](skills/info-hive/scripts/browse_assets/licenses/)
 
-info-hive は Microsoft の製品ではなく、Microsoft の提携、推薦、承認を受けたものでもない。Fluent、Microsoft、Segoe は Microsoft Corporation の商標である。書体は同梱しない。
+info-hive は Microsoft の製品ではなく、Microsoft の提携、推薦、承認を受けたものでもありません。Fluent、Microsoft、Segoe は Microsoft Corporation の商標です。書体は同梱しません。
 
 ## 開発への参加
 

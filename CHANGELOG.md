@@ -6,6 +6,13 @@
 
 ## [Unreleased]
 
+## [0.40.2] - 2026-11-21
+
+### 追加
+
+- 導入、最初の wiki の作成、取り込み、検索を案内する利用者向け HTML マニュアルを docs/html/ に追加した。概要図、コード例のコピー、印刷用スタイルを同梱する。
+- Web 取り込みガイドのブラウザー接続を現行の Playwright 拡張の手順に合わせた。
+
 ## [0.40.1] - 2026-11-21
 
 ### 修正
@@ -987,7 +994,8 @@ Web ページの取得（`wiki_fetch.py`）が、Medium の記事の図とコー
 [0.2.0]: https://github.com/to884/info-hive-wiki/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/to884/info-hive-wiki/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.1.0
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.40.1...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.40.2...HEAD
+[0.40.2]: https://github.com/to884/info-hive-wiki/releases/tag/v0.40.2
 [0.40.1]: https://github.com/to884/info-hive-wiki/releases/tag/v0.40.1
 [0.40.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.40.0
 [0.38.1]: https://github.com/to884/info-hive-wiki/releases/tag/v0.38.1

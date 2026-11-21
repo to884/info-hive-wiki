@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="ja" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>wiki コマンドのリファレンス | info-hive</title>
+  <link rel="stylesheet" href="assets/fluent2.css">
+  <link rel="stylesheet" href="assets/manual.css">
+  <link rel="stylesheet" href="assets/manual-print.css" media="print">
+  <script defer src="assets/manual-code.js"></script>
+</head>
+<body class="fui-FluentProvider">
+  <a class="skip-link fui-Link" href="#main">本文へ移動</a>
+  <header class="site-header">
+    <div class="shell"><a class="fui-Link site-name" href="index.html">info-hive</a></div>
+  </header>
+  <main class="shell reading-layout" id="main" tabindex="-1">
+    <nav class="contents" aria-label="このページの目次">
+      <h2>目次</h2>
+      <ul>
+        <li><a class="fui-Link" data-inline href="#wikiinit">/wiki:init　wiki を初期化する</a></li>
+        <li><a class="fui-Link" data-inline href="#wikiingest">/wiki:ingest　資料を取り込む</a></li>
+        <li><a class="fui-Link" data-inline href="#wikiquery">/wiki:query　出典付きの答えを得る</a></li>
+        <li><a class="fui-Link" data-inline href="#wikilint">/wiki:lint　構造と内容を点検する</a></li>
+        <li><a class="fui-Link" data-inline href="#wikistats">/wiki:stats　wiki の統計を表示する</a></li>
+        <li><a class="fui-Link" data-inline href="#wikigraph">/wiki:graph　型付きの関係を調べる</a></li>
+        <li><a class="fui-Link" data-inline href="#wikibrowse">/wiki:browse　wiki をブラウザーで開く</a></li>
+        <li><a class="fui-Link" data-inline href="#wikioverview">/wiki:overview　ページの概要図を作る</a></li>
+        <li><a class="fui-Link" data-inline href="#wikiupgrade">/wiki:upgrade　既存の wiki をアップグレードする</a></li>
+        <li><a class="fui-Link" data-inline href="#wikilearn">/wiki:learn　作業の経験を記録する</a></li>
+        <li><a class="fui-Link" data-inline href="#wikievolve">/wiki:evolve　スキルの改善案を評価する</a></li>
+        <li><a class="fui-Link" data-inline href="#wikihelp">/wiki:help　アプリでコマンドの一覧を出す</a></li>
+      </ul>
+    </nav>
+    <article class="page-content" aria-labelledby="page-title">
+      <header class="intro">
+        <h1 class="fui-Title1" id="page-title">wiki コマンドのリファレンス</h1>
+<!-- page-summary:start -->
+<figure class="page-summary page-summary-groups">
+  <ul role="list" aria-label="概要">
+    <li><strong>作る・取り込む</strong><span>init・ingest</span></li>
+    <li><strong>調べる・点検する</strong><span>query・browse・lint など</span></li>
+    <li><strong>保つ・改善する</strong><span>upgrade・learn・evolve</span></li>
+  </ul>
+</figure>
+<!-- page-summary:end -->
+        <p>wiki 0.39.1 の Claude Code 向けコマンド 12 本の書式、引数、結果を確認できます。初期化とヘルプ以外は、対象の wiki に SCHEMA.md が必要です。</p>
+      </header>
+      <section id="wikiinit">
+        <h2 class="fui-Subtitle1">/wiki:init　wiki を初期化する</h2>
+        <p>引数を省略するとプロジェクトの wiki を作ります。<code>--user</code> はユーザースコープで、<code>--wiki-dir</code> と <code>--raw-dir</code> はディレクトリ名を指定します。完了時は実行環境に <code>"status": "ready"</code> が出ます。</p>
+        <pre><code>/wiki:init [--user] [--wiki-dir &lt;name&gt;] [--raw-dir &lt;name&gt;]</code></pre>
+        <p>例 <code>/wiki:init --user</code></p>
+        <p><a class="fui-Link" data-inline href="howto-user-wiki.html">ユーザー wiki の初期化と指示の設定</a></p>
+      </section>
+
+      <section id="wikiingest">
+        <h2 class="fui-Subtitle1">/wiki:ingest　資料を取り込む</h2>
+        <p>資料を指定すると、原本と要約を準備します。提案された変更を確認し、承認すると wiki に反映されます。</p>
+        <pre><code>/wiki:ingest &lt;ソースのパス、URL、session、または説明&gt;</code></pre>
+        <h3 id="wikiingest-formats">取り込める形式</h3>
+        <ul>
+          <li><strong>Markdown・テキスト</strong>（<code>.md</code>、<code>.txt</code>）。メモや文字起こしをファイルのパスで指定します。例 <code>/wiki:ingest raw/味噌.md</code></li>
+          <li><strong>PDF</strong>（<code>.pdf</code>）。例 <code>/wiki:ingest raw/論文.pdf</code>。通常の取り込みでは PDF の文字の層を読みます。Claude Code で <code>rag@info-hive</code> の OCR が有効なら、スキャンのページも文字にできます。</li>
+          <li><strong>Web ページ</strong>（HTTP・HTTPS の URL）。本文を Markdown に変換して取り込みます。例 <code>/wiki:ingest https://example.com/article</code>。<a class="fui-Link" data-inline href="howto-web-page.html">Web ページの取り込み方</a>も参照できます。</li>
+          <li><strong>YouTube 動画の字幕</strong>。ログインや年齢確認なしで視聴できる、字幕つきの動画を 1 本指定します。例 <code>/wiki:ingest https://www.youtube.com/watch?v=&lt;動画のID&gt;</code></li>
+          <li><strong>Claude Code・Codex の会話</strong>。現在の会話には <code>session</code>、同じアプリの別の会話には <code>session:&lt;ID&gt;</code> を使います。Claude Code の記録ファイルは <code>session:&lt;パス&gt;</code> または <code>.jsonl</code> のパスで指定できます。Claude Code から Codex の会話を取り込むときは <code>codex:&lt;ID&gt;</code> を指定します。例 <code>/wiki:ingest session</code>、<code>$wiki:info-hive ingest session</code></li>
+        </ul>
+        <p>ローカルのフォルダーも資料として指定できます。ファイルにしていないメモは、本文をチャットに貼り付けて取り込みを依頼できます。</p>
+      </section>
+
+      <section id="wikiquery">
+        <h2 class="fui-Subtitle1">/wiki:query　出典付きの答えを得る</h2>
+        <p>質問を指定すると、wiki のページをもとに、出典と確信度を添えて答えます。答えの一部で根拠が足りない場合は、どこが足りないかを伝えます。必要に応じて検索します。</p>
+        <pre><code>/wiki:query &lt;質問&gt;</code></pre>
+        <p>例 <code>/wiki:query 味噌の原料は？</code></p>
+        <p><a class="fui-Link" data-inline href="explanation-how-wiki-works.html#lookup">索引と検索の仕組み</a></p>
+      </section>
+
+      <section id="wikilint">
+        <h2 class="fui-Subtitle1">/wiki:lint　構造と内容を点検する</h2>
+        <p>リンク切れ、孤立ページ、読み込みエラーなどを調べます。記述の矛盾や不足も確認します。<code>--suggest-pages</code> を付けると独立ページの候補も示します。</p>
+        <pre><code>/wiki:lint [--suggest-pages]</code></pre>
+        <p>例 <code>/wiki:lint</code></p>
+        <p><a class="fui-Link" data-inline href="tutorial-second-source.html#lint">点検結果の見方</a></p>
+      </section>
+
+      <section id="wikistats">
+        <h2 class="fui-Subtitle1">/wiki:stats　wiki の統計を表示する</h2>
+        <p>引数は不要です。ページ数、リンク密度、索引の構成や検索索引の状態を調べます。ページがまだなければ、ページ数は 0 になります。</p>
+        <pre><code>/wiki:stats</code></pre>
+        <p>例 <code>/wiki:stats</code></p>
+      </section>
+
+      <section id="wikigraph">
+        <h2 class="fui-Subtitle1">/wiki:graph　型付きの関係を調べる</h2>
+        <p><code>extract</code> はグラフを生成し、<code>lint</code> は型付き関係を点検します。<code>neighbors</code> は近くのノード、<code>edges</code> は関係、<code>path</code> は経路、<code>facts</code> は対象についての事実を調べます。<code>edges</code> の <code>--predicate</code> は関係の種類、<code>path</code> の <code>--max-depth</code> はたどる関係の最大数を指定します。</p>
+        <pre><code>/wiki:graph extract | lint | neighbors --node &lt;id&gt; | edges --subject &lt;id&gt; | path --from &lt;id&gt; --to &lt;id&gt; | facts --about &lt;id&gt;</code></pre>
+        <p>例 <code>/wiki:graph lint</code></p>
+      </section>
+
+      <section id="wikibrowse">
+        <h2 class="fui-Subtitle1">/wiki:browse　wiki をブラウザーで開く</h2>
+        <p>引数を省略すると閲覧画面を開きます。ページのスラッグを指定すると、そのページを開きます。<code>--stop</code> で閲覧用サーバーを止めます。</p>
+        <pre><code>/wiki:browse [slug] | --stop</code></pre>
+        <p>例 <code>/wiki:browse</code></p>
+        <p><a class="fui-Link" data-inline href="tutorial-second-source.html#browse">Index と被リンクの見方</a></p>
+      </section>
+
+      <section id="wikioverview">
+        <h2 class="fui-Subtitle1">/wiki:overview　ページの概要図を作る</h2>
+        <p>対象ページの概要を本文と別に保存します。<code>--refresh</code> は概要を作り直します。<code>--status</code> はページごとの概要の状態を一覧にします。<code>--remove</code> は指定したページの概要を削除します。</p>
+        <pre><code>/wiki:overview &lt;page&gt; [--refresh] | --status | --remove &lt;page&gt;</code></pre>
+        <p>例 <code>/wiki:overview --status</code></p>
+      </section>
+
+      <section id="wikiupgrade">
+        <h2 class="fui-Subtitle1">/wiki:upgrade　既存の wiki をアップグレードする</h2>
+        <p>引数を省略すると現在のプロジェクトが対象になります。<code>--user</code> はユーザー wiki を選びます。<code>--wiki-dir</code> と <code>--raw-dir</code> は現在の保存場所を指定します。過去に使用した原本フォルダーは <code>--previous-raw-root</code> で登録でき、複数ある場合は繰り返し指定できます。</p>
+        <pre><code>/wiki:upgrade [--user] [--wiki-dir &lt;path&gt;] [--raw-dir &lt;path&gt;] [--previous-raw-root &lt;path&gt; ...]</code></pre>
+        <p>例 <code>/wiki:upgrade</code></p>
+        <p><a class="fui-Link" data-inline href="howto-upgrade-wiki.html">規約の差分と実行環境の確認</a></p>
+      </section>
+
+      <section id="wikilearn">
+        <h2 class="fui-Subtitle1">/wiki:learn　作業の経験を記録する</h2>
+        <p>成果物や検証済みの経験を指定します。経験から得た教訓をまとめ、保存の候補を示します。</p>
+        <pre><code>/wiki:learn &lt;タスクの成果物、または経験の記録&gt;</code></pre>
+        <p>例 <code>/wiki:learn この取り込みで検証した手順を記録してください</code></p>
+      </section>
+
+      <section id="wikievolve">
+        <h2 class="fui-Subtitle1">/wiki:evolve　スキルの改善案を評価する</h2>
+        <p>スキルと改善の目的を指定します。<code>history</code> は履歴、<code>show &lt;実験 ID&gt;</code> は詳細を表示します。<code>apply &lt;実験 ID&gt;</code> は評価と承認を済ませた案を適用し、<code>rollback &lt;実験 ID&gt;</code> はその変更を元に戻します。</p>
+        <pre><code>/wiki:evolve &lt;スキルと改善の目的 | history | show/apply/rollback 実験 ID&gt;</code></pre>
+        <p>例 <code>/wiki:evolve history</code></p>
+      </section>
+
+      <section id="wikihelp">
+        <h2 class="fui-Subtitle1">/wiki:help　アプリでコマンドの一覧を出す</h2>
+        <p>引数を省略するとコマンドが一覧になります。コマンド名を指定すると、そのコマンドのヘルプが表示されます。操作に必要な引数と手順は、この HTML から確認できます。</p>
+        <pre><code>/wiki:help [command]</code></pre>
+        <p>例 <code>/wiki:help</code></p>
+      </section>
+
+      <nav class="page-navigation" aria-label="関連ページ">
+        <a class="fui-Link" href="glossary.html">wiki の用語を調べる</a>
+        <a class="fui-Link" href="tutorial-install.html">Code タブに wiki を入れる</a>
+      </nav>
+    </article>
+  </main>
+</body>
+</html>
