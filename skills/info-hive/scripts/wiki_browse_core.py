@@ -29,7 +29,7 @@ import urllib.parse
 from collections import defaultdict
 from dataclasses import dataclass, field
 from itertools import chain
-from pathlib import PurePosixPath
+from pathlib import PurePath, PurePosixPath
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -743,7 +743,7 @@ def _snapshot_raw_targets(inputs: list, root, raw_root) -> dict:
                 continue
             if absolute:
                 path = os.path.expanduser(value)
-                if not os.path.isabs(path):
+                if not PurePath(path).is_absolute():
                     continue
                 candidates = (path,)
             else:
@@ -752,7 +752,7 @@ def _snapshot_raw_targets(inputs: list, root, raw_root) -> dict:
             for path in candidates:
                 try:
                     target = "raw/" + posix_rel(os.path.relpath(path, raw_root))
-                except (OSError, ValueError):
+                except ValueError:
                     continue
                 if target in raw_hashes:
                     targets.add(target)
