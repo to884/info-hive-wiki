@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [0.40.1] - 2026-11-21
+
 ### 修正
 
 - `/wiki:ingest` が拡張の空タブで URL を開いたとき、別ドメインへの HTTP リダイレクト先の本文を取り込めるようにした。元の URL と転送先を raw に記録する。
@@ -985,7 +987,8 @@ Web ページの取得（`wiki_fetch.py`）が、Medium の記事の図とコー
 [0.2.0]: https://github.com/to884/info-hive-wiki/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/to884/info-hive-wiki/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.1.0
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.40.0...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.40.1...HEAD
+[0.40.1]: https://github.com/to884/info-hive-wiki/releases/tag/v0.40.1
 [0.40.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.40.0
 [0.38.1]: https://github.com/to884/info-hive-wiki/releases/tag/v0.38.1
 [0.38.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.38.0
