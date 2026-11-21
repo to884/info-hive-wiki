@@ -1362,11 +1362,32 @@ def prepare_page(data: bytes, content_type: str, final_url: str, keep_noise: boo
     return PageContent(encoding, lang, how, title, blocks, conv.images, removed, warnings)
 
 
-def browser_environment() -> dict[str, str]:
-    """ブラウザの診断ログへ本文や認証値を書き出す環境を子に渡さない。"""
-    return {key: value for key, value in os.environ.items()
-            if key.upper() not in ("DEBUG", "DEBUG_FILE", "NODE_OPTIONS", "PWDEBUG")
-            and not key.upper().startswith(("PWTEST_", "PW_LOG", "PW_TRACE", "PW_PROFILE", "PW_INSTRUMENT"))}
+EXTENSION_TOKEN = "PLAYWRIGHT_MCP_EXTENSION_TOKEN"
+
+
+def windows_user_extension_token() -> str | None:
+    """起動済みの Windows アプリから、後で設定されたユーザー環境変数を読む。"""
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            value, _ = winreg.QueryValueEx(key, EXTENSION_TOKEN)
+    except OSError:
+        return None
+    return value if isinstance(value, str) else None
+
+
+def browser_environment(*, extension: bool = False) -> dict[str, str]:
+    """診断用の変数を除き、拡張のトークンは接続する経路にだけ渡す。"""
+    env = {key: value for key, value in os.environ.items()
+           if key.upper() not in ("DEBUG", "DEBUG_FILE", "NODE_OPTIONS", "PWDEBUG")
+           and (extension or key.upper() != EXTENSION_TOKEN)
+           and not key.upper().startswith(("PWTEST_", "PW_LOG", "PW_TRACE", "PW_PROFILE", "PW_INSTRUMENT"))}
+    if extension and sys.platform == "win32" and EXTENSION_TOKEN not in env:
+        token = windows_user_extension_token()
+        if token is not None:
+            env[EXTENSION_TOKEN] = token
+    return env
 
 
 def fetch_browser(url: str, timeout: float, max_bytes: int, block_private: bool, *, browser: str = "system",
@@ -1381,7 +1402,7 @@ def fetch_browser(url: str, timeout: float, max_bytes: int, block_private: bool,
                "--browser-session", browser_session, "--max-images", str(max_images), "--browser", browser]
     if block_private:
         command.append("--block-private")
-    env = {**browser_environment(), "PYTHONIOENCODING": "utf-8"}
+    env = {**browser_environment(extension=browser_session == "existing"), "PYTHONIOENCODING": "utf-8"}
     try:
         done = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", env=env,
                               timeout=timeout + 360, check=False)
