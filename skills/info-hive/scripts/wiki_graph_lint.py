@@ -525,7 +525,7 @@ def main():
                         help="ソースページからの引用になっていないエッジの証拠を、判定モデルでチェックする。"
                              "使うには INFO_HIVE_DECISIONS の設定が必要")
     parser.add_argument("--decide-threshold", type=float, default=None,
-                        help="裏づけの文として認めるのに必要な確信度"
+                        help="裏づけの文として認めるのに必要な信頼度"
                              f"（既定: {decision_default_threshold('evidence')}）")
     localize_argparse(parser)
     args = parser.parse_args()

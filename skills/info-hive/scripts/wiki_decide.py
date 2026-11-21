@@ -227,7 +227,7 @@ def read_choice(answers: dict, name: str, keys: list[str]) -> dict:
     if confidence is not None:
         confidence = number(confidence)
         if confidence is None or not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
-            raise DecisionError("invalid_answer", f"{name} の回答の確信度が 0 から 1 の範囲にない: {answer.get('confidence')!r}")
+            raise DecisionError("invalid_answer", f"{name} の回答の信頼度が 0 から 1 の範囲にない: {answer.get('confidence')!r}")
     if not probs:
         if confidence is None:
             raise DecisionError("invalid_answer", f"{name} の回答に確率がない")
