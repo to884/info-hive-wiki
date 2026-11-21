@@ -6,6 +6,16 @@
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-11-22
+
+### 追加
+
+- `/wiki:browse` で選んだタグと種類をブラウザーに保存し、同じ wiki を開き直したときに復元する。
+
+### 変更
+
+- `confidence` の日本語表記を「信頼度」に統一した。回答を集計するときは、新しい「信頼度（confidence）」と従来の「確信度（confidence）」の両方を対象にする。frontmatter の従来の別名も読める。
+
 ## [0.40.3] - 2026-11-22
 
 ### 追加
@@ -1004,7 +1014,8 @@ Web ページの取得（`wiki_fetch.py`）が、Medium の記事の図とコー
 [0.2.0]: https://github.com/to884/info-hive-wiki/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/to884/info-hive-wiki/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.1.0
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.40.3...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.41.0...HEAD
+[0.41.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.41.0
 [0.40.3]: https://github.com/to884/info-hive-wiki/releases/tag/v0.40.3
 [0.40.2]: https://github.com/to884/info-hive-wiki/releases/tag/v0.40.2
 [0.40.1]: https://github.com/to884/info-hive-wiki/releases/tag/v0.40.1

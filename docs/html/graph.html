@@ -51,7 +51,7 @@
 <p>extract を実行すると、次の3種類のエッジができます。</p>
 <ol>
 <li><strong>型付きの意味のエッジ。</strong> ページの frontmatter の <code>graph.relationships[]</code> で宣言したもの（<code>founded</code>、<code>proposed</code>、<code>depends_on</code> など）。どのエッジも、明示的な <code>source</code>（ソースページのスラッグ）、<code>evidence</code> の引用、<code>confidence</code>（high/medium/low）、<code>status</code>（current/historical/proposed/disputed/superseded）を持ちます。抽出スクリプトがこれらを勝手に作ることはありません。</li>
-<li><strong><code>mentions</code> エッジ。</strong> 本文の <code>[[wikilink]]</code> 1つにつき1本で、ページ内の重複はまとめられ、確信度は <code>low</code> になります。目的のページを早く見つけるためのもので、型付きの関係の証拠にはなりません。</li>
+<li><strong><code>mentions</code> エッジ。</strong> 本文の <code>[[wikilink]]</code> 1つにつき1本で、ページ内の重複はまとめられ、信頼度は <code>low</code> になります。目的のページを早く見つけるためのもので、型付きの関係の証拠にはなりません。</li>
 <li><strong><code>sourced_from</code> と <code>summarizes_raw</code> のエッジ。</strong> 前者はソースページ以外のページの <code>sources:</code> リストからソースページへ、後者はソースページの <code>raw:</code> フィールドから raw ファイルへ張られます。</li>
 </ol>
 <h2 id="frontmatter-のスキーマ" class="fui-Subtitle1">frontmatter のスキーマ</h2>

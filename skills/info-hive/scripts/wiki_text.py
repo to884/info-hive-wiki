@@ -49,6 +49,8 @@ KEY_ALIASES: dict[str, str] = {
     "取り込み日": "ingested",
     "質問": "question",
     "参照した出典": "sources_consulted",
+    "信頼度": "confidence",
+    "確信度": "confidence",
     "確かさ": "confidence",
 }
 

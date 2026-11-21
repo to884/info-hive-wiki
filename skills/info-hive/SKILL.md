@@ -62,7 +62,7 @@ uv run --quiet --script "<skill-root>/scripts/wiki_codex.py" <操作>
 
 ## グラフ層（コンパイルで生成する任意の層）
 
-ページの frontmatter には、型付きの `graph:` メタデータを書ける。付属の抽出スクリプトが、すべてのページを `wiki/graph/` の `nodes.jsonl`、`edges.jsonl`、`graph.sqlite`、`graph.graphml` にコンパイルする。**正本は Markdown である。**グラフは作り直せるインデックスにすぎない。`graph:` のないページも、`type` と `kind` から導いたノードとして現れ、本文の wikilink から確信度の低い `mentions` エッジを生む。型付きの意味的なエッジ（`founded`、`proposed`、`depends_on` など）には、明示的なソースと証拠となる引用が必要である。学習データから推測したエッジを書いてはならない。
+ページの frontmatter には、型付きの `graph:` メタデータを書ける。付属の抽出スクリプトが、すべてのページを `wiki/graph/` の `nodes.jsonl`、`edges.jsonl`、`graph.sqlite`、`graph.graphml` にコンパイルする。**正本は Markdown である。**グラフは作り直せるインデックスにすぎない。`graph:` のないページも、`type` と `kind` から導いたノードとして現れ、本文の wikilink から信頼度の低い `mentions` エッジを生む。型付きの意味的なエッジ（`founded`、`proposed`、`depends_on` など）には、明示的なソースと証拠となる引用が必要である。学習データから推測したエッジを書いてはならない。
 
 グラフ層の規約（述語の語彙、ノード ID の形式、必須のフィールド）は `wiki/graph/ontology.yaml` にある。有効化、更新、検査、問い合わせ、作り直しの手順の正本は `references/graph-workflow.md` である。ページを作るか書き換えたら、型付きの関係に触れていなくても extract を実行する。
 
@@ -190,7 +190,7 @@ Web の取り込みでは、日本語以外の本文を日本語の raw にし�
 
 ## クエリのワークフロー（概要）
 
-詳しい内容は `references/query-workflow.md` にある。wiki をもとにクエリに答えるには、最初に `index.md`（または該当する分割済みのファイル）を読み、1行の要約から候補のページを見つけ、そのページ（と、そこに挙がっている被リンクのうち関係がありそうなもの）を読み、使ったページへの `[[wikilink]]` を出典として付けて回答をまとめる。回答の終わりには、wiki がどれだけ裏づけているかを確信度（confidence）の「高」「中」「低」と理由で示し、「中」か「低」なら上げる方法を提案する（決め方は `references/query-confidence.md` にあり、確信度を書く前に必ず読む）。wiki に関係する内容がないときは確信度を付けず、wiki の外の知識で答えを添えることもしない。「低」の回答は保存を提案しない。今後のクエリで役立つように、まとめた回答を `synthesis/` に保存することを提案する。インデックスから適切な候補が見つからない場合は、MCP のツール `query` に `wiki=<wiki の絶対パス>` と検索語を渡して、ローカルのハイブリッド検索で順位付けした結果を得る。ツールが使えないときは、`uv run --script "<skill-root>/scripts/wiki_search.py" "検索語" --wiki <absolute-wiki-root> --json` を実行する。依存パッケージを使わない語彙ベースの BM25 にしたいときだけ、`python` で直接実行して `--no-embed` を付ける。インストールしたスキルのパスと、対象の wiki のパスは明示する。wiki にその話題の内容が足りないようなら、話をでっち上げず、そうはっきり伝え、取り込むべき候補として挙げる。
+詳しい内容は `references/query-workflow.md` にある。wiki をもとにクエリに答えるには、最初に `index.md`（または該当する分割済みのファイル）を読み、1行の要約から候補のページを見つけ、そのページ（と、そこに挙がっている被リンクのうち関係がありそうなもの）を読み、使ったページへの `[[wikilink]]` を出典として付けて回答をまとめる。回答の終わりには、wiki がどれだけ裏づけているかを信頼度（confidence）の「高」「中」「低」と理由で示し、「中」か「低」なら上げる方法を提案する（決め方は `references/query-confidence.md` にあり、信頼度を書く前に必ず読む）。wiki に関係する内容がないときは信頼度を付けず、wiki の外の知識で答えを添えることもしない。「低」の回答は保存を提案しない。今後のクエリで役立つように、まとめた回答を `synthesis/` に保存することを提案する。インデックスから適切な候補が見つからない場合は、MCP のツール `query` に `wiki=<wiki の絶対パス>` と検索語を渡して、ローカルのハイブリッド検索で順位付けした結果を得る。ツールが使えないときは、`uv run --script "<skill-root>/scripts/wiki_search.py" "検索語" --wiki <absolute-wiki-root> --json` を実行する。依存パッケージを使わない語彙ベースの BM25 にしたいときだけ、`python` で直接実行して `--no-embed` を付ける。インストールしたスキルのパスと、対象の wiki のパスは明示する。wiki にその話題の内容が足りないようなら、話をでっち上げず、そうはっきり伝え、取り込むべき候補として挙げる。
 
 ## lint のワークフロー（概要）
 
@@ -214,7 +214,7 @@ gist をめぐるコミュニティの議論で、このパターンがうまく
 
 - `references/architecture.md`: 3つの層と3つの操作の詳しい説明。ページの形式の例と、各設計の理由
 - `references/ingest-workflow.md`: 取り込みの手順。大きいソースの分割読み込みと、ページの種類ごとのテンプレートを含む
-- `references/query-confidence.md`: クエリの回答に付ける確信度（confidence）の決め方（前提の出発点、結論の導き方、上限）、書き方、上げる方法
+- `references/query-confidence.md`: クエリの回答に付ける信頼度（confidence）の決め方（前提の出発点、結論の導き方、上限）、書き方、上げる方法
 - `references/query-workflow.md`: インデックス → ページ → 被リンクとたどる方法、検索スクリプトに切り替えるタイミング、回答をシンセシスのページとして保存する方法
 - `references/lint-workflow.md`: 何をチェックするか、検出結果の示し方、頻度
 - `references/page-conventions.md`: frontmatter のスキーマと日本語の別名、ページの命名（日本語のスラッグ）、リンクの書き方、ページの種類の定義、大きさの規則、引用と留保の書き方

@@ -21,7 +21,7 @@
 extract で得られるエッジは、次の3種類である。
 
 1. ページの frontmatter の `graph.relationships[]` で宣言した型付きの意味のエッジ。例: `founded`、`proposed`、`depends_on`。それぞれ、明示的な `source`（ソースページのスラッグ）、`evidence` の引用、`confidence`（high/medium/low）、`status`（current/historical/proposed/disputed/superseded）を持つ。extract がこれらを作り出すことはない。
-2. `mentions` エッジ。本文の `[[wikilink]]` 1つにつき1本できる（ページごとに重複は除く）。確信度は `low` である。目的のページを早く見つけるのには役立つが、型付きの関係の証拠として引用してはならない。
+2. `mentions` エッジ。本文の `[[wikilink]]` 1つにつき1本できる（ページごとに重複は除く）。信頼度は `low` である。目的のページを早く見つけるのには役立つが、型付きの関係の証拠として引用してはならない。
 3. `sourced_from` エッジと `summarizes_raw` エッジ。`sourced_from` は、ソースページ以外のページの frontmatter にある `sources:` リストの値1つにつき1本でき、ソースページを指す。値は、wikilink と同じ規則で、スラッグ（`paper`）、パス（`sources/paper`）、`[[sources/paper]]` のどれで書いてもよい。読み方は wiki の lint の `unresolved_sources` と同じで、lint が source でないページを指すと挙げる値からも、ページが 1 つなら `sourced_from` ができる。`summarizes_raw` は、ソースページの `raw:` フィールド1つにつき1本でき、raw ファイルのパスを（文字列リテラルの）目的語とする。
 
 どのエッジも、主語はそれを書いたページ自身のノードであり、エッジの `page` はそのページである。別のページに同じ内容の関係を書けば、別のエッジになる（エッジの ID に、ディスク上のページのパスが入る）。`graph.relationships` の項目のうち、`predicate` と `object` があり、目的語が曖昧でない（下の段落）もの 1 つからは、必ず 1 本のエッジができる。同じページで `status` や `valid_to` だけが違う 2 件も、まったく同じ 2 件も、別のエッジになる。`contradicts` と `supersedes` に書いたエッジの ID は、エッジの ID の計算に入れないので、互いのエッジの ID を書いても、それぞれの ID は変わらない。エッジの ID を書いた参照か未知の欄だけが違う 2 件は、ページの中の順番で ID が決まり、並べ替えると入れ替わりうるので、グラフの lint が `order_dependent_edge_ids` に挙げる。`contradicts` と `supersedes` の値は、ノード ID、ソースページのスラッグ、抽出したエッジの ID のどれかに当たればよく、どれにも当たらなければ、グラフの lint が `broken_contradicts` と `broken_supersedes` に挙げる。エッジの ID は、16 進 24 桁の形をしていても、抽出したエッジにない値なら挙がる。
@@ -160,7 +160,7 @@ python "<skill-root>/scripts/wiki_graph_query.py" wiki/ facts    --about company
 1. いつもどおりインデックスを読む。
 2. `graph.sqlite` が古い（`log.md` にある最新の `## [YYYY-MM-DD] ingest |` の行より前に作られた）なら、先に extract で作り直す。
 3. 候補のページの周りにある型付きエッジを問い合わせる。`neighbors`、`edges`、`facts` がもっとも役に立つ。
-4. 関係するノードやエッジの元になっている wiki ページを読む。重要な主張については、グラフの行だけをもとに答えてはならない。`evidence` フィールドは手がかりであって、正本ではない。`/wiki:query` の回答で、ソースの要約ページの本文で関係を確かめられなかったときの扱いと回答の確信度は、`references/query-confidence.md` の「グラフのエッジの上限」に従う。
+4. 関係するノードやエッジの元になっている wiki ページを読む。重要な主張については、グラフの行だけをもとに答えてはならない。`evidence` フィールドは手がかりであって、正本ではない。`/wiki:query` の回答で、ソースの要約ページの本文で関係を確かめられなかったときの扱いと回答の信頼度は、`references/query-confidence.md` の「グラフのエッジの上限」に従う。
 5. 引用には、グラフの行ではなく wiki ページへの `[[wikilinks]]` を使う。
 
 ### 有効化

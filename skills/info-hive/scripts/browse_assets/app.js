@@ -669,6 +669,43 @@
     var bar = document.getElementById("_filters");
     var countEl = document.getElementById("_count");
     var filt = { q: "", type: null, tag: null, group: "" };
+    // serve は再起動でポートが変わる。サーバーが渡した識別子で分けて、タグと種類を別々の cookie に保存する。
+    // 静的 HTML は書き出した世代で分けて localStorage に保存する。
+    var filterKeys = JSON.parse(bar.getAttribute("data-filter-keys") || "{}");
+    var filterKey = /^[0-9a-f]{32}$/;
+    var serverView = filterKeys.server === true;
+    var storageEnabled = filterKey.test(filterKeys.scope)
+                         && (!serverView || (location.protocol === "http:" && location.hostname === "127.0.0.1"));
+    var filterPrefix = "info-hive-browse-filter-" + filterKeys.scope + "-";
+    function readFilter(name) {
+      if (!storageEnabled) { return null; }
+      var key = filterPrefix + name;
+      try {
+        var value;
+        if (serverView) {
+          var prefix = key + "=";
+          var cookie = document.cookie.split(/;\s*/).find(function (part) { return part.startsWith(prefix); });
+          value = cookie && cookie.slice(prefix.length);
+        } else {
+          value = window.localStorage.getItem(key);
+        }
+        return filterKey.test(value || "") ? value : null;
+      } catch (e) { return null; }
+    }
+    function saveFilter(name, value) {
+      if (!storageEnabled) { return; }
+      var key = filterPrefix + name;
+      var saved = filterKey.test(value || "") ? value : "";
+      try {
+        if (serverView) {
+          document.cookie = key + "=" + saved + "; Path=/; Max-Age=" + (saved ? 31536000 : 0) + "; SameSite=Strict";
+        } else if (saved) {
+          window.localStorage.setItem(key, saved);
+        } else {
+          window.localStorage.removeItem(key);
+        }
+      } catch (e) { /* 保存できなくても、この索引の絞り込みは続ける。 */ }
+    }
     var noscript = bar.querySelector("noscript");
     if (noscript) { bar.removeChild(noscript); }
 
@@ -682,6 +719,7 @@
 
     // 種類のボタン。種類は Map で集める（__proto__ のような値も、ふつうの種類として扱う）
     var types = new Map();
+    var typeKeys = new Map(Object.entries(filterKeys.type || {}));
     rows.forEach(function (r) { var t = r.getAttribute("data-type") || ""; types.set(t, (types.get(t) || 0) + 1); });
     var chips = el("div", "chips");
     chips.setAttribute("role", "group");
@@ -698,6 +736,7 @@
       b.setAttribute("aria-pressed", value === null ? "true" : "false");
       b.addEventListener("click", function () {
         filt.type = value;
+        saveFilter("type", typeKeys.get(value));
         pressType(value);
         // 種類とグループは、あとから選んだほうだけを効かせる（種類とグループの設計の 2 節）。
         // 「すべて」でない種類を選んだら、グループの絞り込みを外す。断片は replaceState で消すので hashchange は起きない
@@ -711,10 +750,16 @@
       chips.appendChild(b);
     }
     chip("すべて", null);
-    types.forEach(function (_n, t) { chip(typeLabel(t), t); });
+    var savedType = readFilter("type");
+    types.forEach(function (_n, t) {
+      chip(typeLabel(t), t);
+      if (savedType && savedType === typeKeys.get(t)) { filt.type = t; }
+    });
+    pressType(filt.type);
 
     // タグの選択。タグは行の span.tag の文字から読み、Map で数える
     var tagCount = new Map();
+    var tagKeys = new Map(Object.entries(filterKeys.tag || {}));
     rows.forEach(function (r) {
       var seen = new Set();
       Array.prototype.forEach.call(r.querySelectorAll("span.tag"), function (s) {
@@ -732,12 +777,21 @@
     optAll.value = "";
     tagSel.appendChild(optAll);
     var tagNames = Array.from(tagCount.keys()).sort(function (a, b) { return a < b ? -1 : (a > b ? 1 : 0); });
+    var savedTag = readFilter("tag");
     tagNames.forEach(function (t, k) {
       var o = el("option", "", t + "（" + tagCount.get(t) + "）");
       o.value = String(k + 1);
       tagSel.appendChild(o);
+      if (savedTag && savedTag === tagKeys.get(t)) {
+        filt.tag = t;
+        tagSel.value = o.value;
+      }
     });
-    tagSel.addEventListener("change", function () { filt.tag = tagSel.value ? tagNames[Number(tagSel.value) - 1] : null; apply(); });
+    tagSel.addEventListener("change", function () {
+      filt.tag = tagSel.value ? tagNames[Number(tagSel.value) - 1] : null;
+      saveFilter("tag", tagKeys.get(filt.tag));
+      apply();
+    });
     var tagIc = el("span", "fui-Select__icon");
     tagIc.appendChild(icon("chevron", "1em"));
     tagBox.appendChild(tagSel);

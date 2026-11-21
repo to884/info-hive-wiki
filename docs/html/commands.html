@@ -71,7 +71,7 @@
 
       <section id="wikiquery">
         <h2 class="fui-Subtitle1">/wiki:query　出典付きの答えを得る</h2>
-        <p>質問を指定すると、wiki のページをもとに、出典と確信度を添えて答えます。答えの一部で根拠が足りない場合は、どこが足りないかを伝えます。必要に応じて検索します。</p>
+        <p>質問を指定すると、wiki のページをもとに、出典と信頼度を添えて答えます。答えの一部で根拠が足りない場合は、どこが足りないかを伝えます。必要に応じて検索します。</p>
         <pre><code>/wiki:query &lt;質問&gt;</code></pre>
         <p>例 <code>/wiki:query 味噌の原料は？</code></p>
         <p><a class="fui-Link" data-inline href="explanation-how-wiki-works.html#lookup">索引と検索の仕組み</a></p>
@@ -102,6 +102,7 @@
       <section id="wikibrowse">
         <h2 class="fui-Subtitle1">/wiki:browse　wiki をブラウザーで開く</h2>
         <p>引数を省略すると閲覧画面を開きます。ページのスラッグを指定すると、そのページを開きます。<code>--stop</code> で閲覧用サーバーを止めます。</p>
+        <p>Index で選んだタグと種類は、同じブラウザーで同じ wiki を開き直すと復元されます。絞り込みを解除するには、タグと種類で「すべて」を選びます。</p>
         <pre><code>/wiki:browse [slug] | --stop</code></pre>
         <p>例 <code>/wiki:browse</code></p>
         <p><a class="fui-Link" data-inline href="tutorial-second-source.html#browse">Index と被リンクの見方</a></p>

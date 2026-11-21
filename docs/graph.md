@@ -28,7 +28,7 @@ flowchart LR
 extract を実行すると、次の3種類のエッジができます。
 
 1. **型付きの意味のエッジ。** ページの frontmatter の `graph.relationships[]` で宣言したもの（`founded`、`proposed`、`depends_on` など）。どのエッジも、明示的な `source`（ソースページのスラッグ）、`evidence` の引用、`confidence`（high/medium/low）、`status`（current/historical/proposed/disputed/superseded）を持ちます。抽出スクリプトがこれらを勝手に作ることはありません。
-2. **`mentions` エッジ。** 本文の `[[wikilink]]` 1つにつき1本で、ページ内の重複はまとめられ、確信度は `low` になります。目的のページを早く見つけるためのもので、型付きの関係の証拠にはなりません。
+2. **`mentions` エッジ。** 本文の `[[wikilink]]` 1つにつき1本で、ページ内の重複はまとめられ、信頼度は `low` になります。目的のページを早く見つけるためのもので、型付きの関係の証拠にはなりません。
 3. **`sourced_from` と `summarizes_raw` のエッジ。** 前者はソースページ以外のページの `sources:` リストからソースページへ、後者はソースページの `raw:` フィールドから raw ファイルへ張られます。
 
 ## frontmatter のスキーマ

@@ -105,7 +105,7 @@ frontmatter のキーと、`type`・`kind` の値は、日本語の別名でも�
 | `取り込み日` | `ingested` |
 | `質問` | `question` |
 | `参照した出典` | `sources_consulted` |
-| `確かさ` | `confidence` |
+| `信頼度`、`確信度`、`確かさ` | `confidence` |
 
 | `type` の値の別名 | 英語の値 |
 |---|---|

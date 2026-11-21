@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import html
+import hmac
 import json
 import os
 import posixpath
@@ -50,7 +51,7 @@ except (ImportError, SystemExit):
     wiki_graph_extract = None
 
 PROTOCOL_VERSION = 2   # 探しやすさの設計の 2.3、6（nav.js の形とグループの並びが変わった）
-CORE_VERSION = "browse-core-8"   # 8: 「原本」欄のリンクと raw のタグ分類。
+CORE_VERSION = "browse-core-9"   # 9: 索引の絞り込みに保存用の識別子を付ける。
 NAME_LIMIT = 200
 # frame-src 'self' は、figures.js が作る Mermaid の図の枠のため（図の描画の設計の 7.3）
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src 'self'; "
@@ -1980,7 +1981,7 @@ class Core:
                 rows.append('<tr class="fui-TableRow">'
                             + "".join(f'<td class="fui-TableCell">{c}</td>' for c in cells) + "</tr>")
         cols = "".join(f'<th class="fui-TableHeaderCell" scope="col">{h}</th>'
-                       for h in ("向き", "述語", "相手", "状態", "開始", "終了", "確信度", "出典", "証拠"))
+                       for h in ("向き", "述語", "相手", "状態", "開始", "終了", "信頼度", "出典", "証拠"))
         # 9 列の表は狭い幅で本文からはみ出すので、表だけを横に送る入れ物で包む（Fluent 2 の設計の 5）。
         # 入れ物はキーボードでも送れるように、フォーカスできる領域にする
         return (f'<section id="_relations">{head}{self._incomplete_html()}'
@@ -2171,7 +2172,26 @@ class Core:
         return ('<section id="_index_unresolved"><h2 class="fui-Subtitle2">ページに決まらない Index の行</h2>'
                 f'<ul>{"".join(lis)}</ul></section>\n')
 
-    def render_index(self, stale: "str | None" = None) -> str:
+    def _index_filter_keys(self, secret: bytes | None) -> str:
+        # cookie はほかのポートにも届くので、索引のトークンで守られた画面だけが知る識別子を使う。
+        # 静的 HTML は書き出した世代で分け、ファイルのパスをブラウザーに保存しない。
+        server = secret is not None
+        key = secret if server else self.generation.encode("utf-8")
+        if not key:
+            return html.escape(json.dumps({"server": server}))
+
+        def identify(kind: str, value: str = "") -> str:
+            data = f"browse-filter\0{kind}\0{value}".encode("utf-8")
+            return hmac.digest(key, data, "sha256")[:16].hex()
+
+        types = {self.page_type(pid) for pid in self.page_order}
+        tags = {tag for pid in self.page_order for tag in self.page_tags(pid)}
+        data = {"server": server, "scope": identify("scope"),
+                "type": {value: identify("type", value) for value in types},
+                "tag": {value: identify("tag", value) for value in tags}}
+        return html.escape(json.dumps(data, sort_keys=True, separators=(",", ":")))
+
+    def render_index(self, stale: "str | None" = None, *, filter_secret: bytes | None = None) -> str:
         path = "index.html"
         diags = list(self.diagnostics)
         if stale:
@@ -2187,7 +2207,8 @@ class Core:
         return (self._head(path, "Index", stale)
                 + f'<header id="_ixhead"><h1 class="fui-Title2">Index</h1>'
                   f'<p class="ix-stats fui-Caption1">{total} ページ</p></header>\n{nav_note}'
-                + '<div id="_filters" class="fx-bar"><noscript><p class="state fui-Caption1">絞り込みと検索には '
+                + f'<div id="_filters" class="fx-bar" data-filter-keys="{self._index_filter_keys(filter_secret)}">'
+                  '<noscript><p class="state fui-Caption1">絞り込みと検索には '
                   'JavaScript が要る。一覧は Index の順に並んでいる。</p></noscript></div>\n'
                 + f'<p id="_count" class="fx-count fui-Caption1" aria-live="polite">{total} 件</p>\n'
                 + f'<ul id="_index" class="fx-list">{rows}</ul>\n'
@@ -2268,14 +2289,14 @@ class Core:
         raise KeyError(name)
 
     def render(self, name: str, raw_mode: str = "text", generated_at: str = "",
-               stale: "str | None" = None, *, allow_figures: bool = True) -> str:
+               stale: "str | None" = None, *, allow_figures: bool = True, filter_secret: bytes | None = None) -> str:
         """出力の名前 1 つを描く。中核が知らない名前なら KeyError。ほかの要求と同時に呼んでよい。"""
         with self._render_lock:
+            if name == "index.html":
+                return self.render_index(stale, filter_secret=filter_secret)
             return self._render(name, raw_mode, generated_at, stale, allow_figures)
 
     def _render(self, name: str, raw_mode: str, generated_at: str, stale: "str | None", allow_figures: bool) -> str:
-        if name == "index.html":
-            return self.render_index(stale)
         if name in DATA_FILES:
             return self.render_data(name, generated_at, stale)
         pid = self.name_to_id[name]
