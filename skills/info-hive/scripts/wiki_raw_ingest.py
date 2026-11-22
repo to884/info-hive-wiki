@@ -102,6 +102,15 @@ def _copy_tree(source: Path, stage: Path, wiki: Path, roots: list[Path],
 
 
 def save(wiki: Path, raw: Path, source: Path, name: str | None) -> dict:
+    from wiki_restore_raw import writing_raw
+
+    with writing_raw(wiki, raw) as archive:
+        result = _save(wiki, raw, source, name)
+        archive(result)
+        return result
+
+
+def _save(wiki: Path, raw: Path, source: Path, name: str | None) -> dict:
     guard = WriteGuard(raw)
     roots = list(_spellings(raw))
     current = _containing(source, roots)
@@ -145,6 +154,17 @@ def save(wiki: Path, raw: Path, source: Path, name: str | None) -> dict:
 
 
 def encoding(wiki: Path, raw: Path, source: Path, expected: str, name: str | None) -> dict:
+    if name is None:
+        return _encoding(wiki, raw, source, expected, name)
+    from wiki_restore_raw import writing_raw
+
+    with writing_raw(wiki, raw) as archive:
+        result = _encoding(wiki, raw, source, expected, name)
+        archive(result)
+        return result
+
+
+def _encoding(wiki: Path, raw: Path, source: Path, expected: str, name: str | None) -> dict:
     origin = _containing(source, _spellings(raw))
     if origin is None or source == origin:
         raise ValueError(f"保存済みの raw ファイルを指定する: {source}")
