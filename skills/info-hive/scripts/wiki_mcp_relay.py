@@ -3,7 +3,6 @@
 # requires-python = ">=3.12,<3.15"
 # dependencies = [
 #   "mcp==1.30.0",
-#   "filelock==4.2.9",
 #   "psutil==7.2.2",
 # ]
 # ///
@@ -27,7 +26,9 @@ CLAUDE_PLUGIN_ROOT を持たないホスト（Codex など）は、wiki_mcp_laun
 """
 from __future__ import annotations
 
+import math
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -47,6 +48,9 @@ START_TIMEOUT = 300
 # 環境の用意は、ロックの外の uv sync と、ロックの中の uv sync、確かめ、入れ直し、確かめ直しの 5 回まで
 # PREPARE_TIMEOUT ずつかかりうる。サーバーの起動し直しの分も含めて待つ。
 LOCK_TIMEOUT = 5 * PREPARE_TIMEOUT + 2 * START_TIMEOUT + 60
+PYTHON_EXECUTABLE = re.compile(r"python(?:3(?:\.\d+t?)?)?(?:\.exe)?", re.IGNORECASE)
+PYTHON_OPTION = re.compile(r"-(?:[bBdEiIOPqRsSuvx]+|[WX].+)|--check-hash-based-pycs=.+")
+SERVER_SCRIPT_SUFFIX = Path("skills/info-hive/scripts/wiki_mcp_server.py")
 
 
 def log(message: str) -> None:
@@ -75,11 +79,12 @@ def server_python(log_file, force: bool = False) -> str:
     return common.prepare_script(SERVER_SCRIPT, output=log_file, timeout=PREPARE_TIMEOUT, log=log, force=force)
 
 
-def spawn_server(python: str, log_file) -> subprocess.Popen:
+def spawn_server(python: str, log_file, *, start_id: str) -> subprocess.Popen:
     args = [python, "-X", "utf8", str(SERVER_SCRIPT)]
-    env = {**os.environ, "PYTHONUTF8": "1"}
+    data = common.data_dir().absolute()
+    env = {**os.environ, "PYTHONUTF8": "1", common.DATA_DIR_ENV: str(data), common.START_ID_ENV: start_id}
     common_kwargs = {"stdin": subprocess.DEVNULL, "stdout": log_file, "stderr": log_file, "env": env,
-                     "cwd": str(common.data_dir()), "close_fds": True}
+                     "cwd": str(data), "close_fds": True}
     # Windows では窓のない自分のコンソール（server_creationflags、info-hive-wiki#36）、POSIX では新しいセッションにする。
     process = subprocess.Popen(args, creationflags=common.server_creationflags(), start_new_session=os.name != "nt",
                                **common_kwargs)
@@ -89,58 +94,169 @@ def spawn_server(python: str, log_file) -> subprocess.Popen:
     return process
 
 
-def stop_server(info: dict) -> None:
-    """版の違う古いサーバーを止める。索引は次のサーバーが開くときに、ロックで書き終わりを待つ。"""
+def running_script(process) -> Path | None:
+    """Python が実行するファイルを確認する。ファイル以外を実行する -c、-m、- は対象外。"""
     import psutil
     try:
-        process = psutil.Process(int(info["pid"]))
+        executable = Path(process.exe()).name
+    except psutil.AccessDenied:
+        # システムサービスなどは実行ファイルのパスを読めなくても名前を取得できる。
+        name = process.name()
+        if name and not PYTHON_EXECUTABLE.fullmatch(name):
+            return None
+        raise
+    if not PYTHON_EXECUTABLE.fullmatch(executable):
+        return None
+    args = iter(process.cmdline()[1:])
+    for arg in args:
+        if arg == "--":
+            arg = next(args, "")
+            break
+        if not arg.startswith("-"):
+            break
+        if arg in ("-W", "-X", "--check-hash-based-pycs"):
+            next(args, None)
+        elif not PYTHON_OPTION.fullmatch(arg):
+            return None
+    else:
+        return None
+    if not arg or arg == "-":
+        return None
+    script = Path(arg)
+    if not script.is_absolute():
+        script = Path(process.cwd()) / script
+    return script.resolve()
+
+
+def refused_connection(port: int) -> bool:
+    """接続拒否を確認する。時間切れとほかの通信エラーでは待ち受けの有無を判定しない。"""
+    try:
+        # Windows ではループバックでも、接続拒否を返すまで約 2 秒かかる場合がある。
+        with socket.create_connection(("127.0.0.1", port), timeout=3):
+            return False
+    except ConnectionRefusedError:
+        return True
+    except OSError:
+        return False
+
+
+def recorded_process(info: dict, root: Path):
+    """本人のプロセスを返す。終了済みの記録は None、帰属が不明な記録はエラーにする。"""
+    import psutil
+    pid = info["pid"]
+    try:
+        process = psutil.Process(pid)
+        script = running_script(process)
+        if script is None or Path(*script.parts[-4:]) != SERVER_SCRIPT_SUFFIX:
+            if refused_connection(info["port"]):
+                return None  # PID は別のプログラムが使っており、記録の待ち受けも閉じている。
+            raise RuntimeError(f"pid {pid} が記録のサーバーと確認できない: {root}")
+        environ = process.environ()
+        start_id = info.get("start_id")
+        if "start_id" in info or common.START_ID_ENV in environ:
+            if not isinstance(start_id, str) or not start_id:
+                raise RuntimeError(f"pid {pid} の起動識別子を確認できない: {root}")
+            if environ.get(common.START_ID_ENV) != start_id:
+                raise RuntimeError(f"pid {pid} の起動識別子が記録と一致しない: {root}")
+        else:
+            started = info.get("started")
+            if type(started) not in (int, float) or isinstance(started, float) and not math.isfinite(started):
+                raise RuntimeError(f"pid {pid} の起動時刻が記録にない: {root}")
+            if process.create_time() > started:
+                raise RuntimeError(f"pid {pid} の生成時刻が公開時刻より後で、記録のサーバーと確認できない: {root}")
+        data = common.data_dir(environ)
+        if not data.is_absolute():
+            data = Path(process.cwd()) / data
+        if not data.samefile(root):
+            raise RuntimeError(f"pid {pid} は別のデータの場所で動いている: {root}")
+        # 異なるインストール先の旧版には起動識別子がない。記録の接続先を所有することまで確かめる。
+        if start_id is None and script != SERVER_SCRIPT:
+            address = ("127.0.0.1", info["port"])
+            if not any(c.status == psutil.CONN_LISTEN and c.laddr == address for c in process.net_connections("tcp")):
+                raise RuntimeError(f"pid {pid} が記録の接続先を所有していると確認できない: {root}")
+        return process
+    except psutil.NoSuchProcess:
+        return None
+    except (psutil.Error, OSError, ValueError) as exc:
+        raise RuntimeError(f"pid {pid} が記録のサーバーと確認できない。{exc}") from exc
+
+
+def stop_server(process) -> None:
+    """旧サーバーの終了が確認できるまで待つ。"""
+    import psutil
+    try:
         process.terminate()
         process.wait(timeout=30)
-    except (psutil.Error, ValueError, TypeError):
-        pass
+    except psutil.NoSuchProcess:
+        return
+    except psutil.Error as exc:
+        raise RuntimeError(f"pid {process.pid} の停止を確認できなかった。{exc}") from exc
 
 
 def ensure_server() -> tuple[dict, bool]:
     """生きているサーバーの server.json を返す。なければ起動する。2 つ目は今起動したかどうか。"""
-    from filelock import FileLock
+    try:
+        return _ensure_server()
+    except (OSError, ValueError) as exc:
+        message = f"wiki の MCP サーバーの起動ファイルを使えない。{exc}"
+        log(message)
+        raise RuntimeError(message) from exc
+    except RuntimeError as exc:
+        log(str(exc))
+        raise
 
-    data = common.data_dir()
-    data.mkdir(parents=True, exist_ok=True)
-    common.logs_dir().mkdir(parents=True, exist_ok=True)
+
+def _ensure_server() -> tuple[dict, bool]:
+    files = common.ServerFiles()
     version = common.code_version()
-    with FileLock(str(common.server_lock_path()), timeout=LOCK_TIMEOUT):
-        info = common.read_server_info()
-        if alive(info):
-            if info.get("version") == version:
-                return info, False
-            log(f"版の違うサーバー（pid {info['pid']}）を止めて起動し直す")
-            stop_server(info)
-        # 起動の前にロックの中で server.json を消す。新しく現れた server.json は、今起動したサーバーのものである。
-        # Windows の venv の python.exe は本体を子プロセスとして起動するので、Popen の pid では確かめない。
-        common.server_json_path().unlink(missing_ok=True)
-        with open(common.logs_dir() / "server.log", "ab") as log_file:
-            python = server_python(log_file)
-            process = spawn_server(python, log_file)
-            repaired = False
+    with files.startup_lock(timeout=LOCK_TIMEOUT):
+        info = files.read_info()
+        if info is not None:
+            try:
+                process = recorded_process(info, files.root)
+            except RuntimeError as exc:
+                raise RuntimeError(f"{exc}。記録の場所: {files.record}。"
+                                   "以前のサーバーが停止済みと確認できた場合は、記録を退避してからやり直す。") from exc
+            if process is not None:
+                if alive(info) and info.get("version") == version:
+                    return info, False
+                log(f"古いサーバー（pid {info['pid']}）を止めて起動し直す")
+                stop_server(process)
+        with files.open_log("server.log") as log_file:
+            start_id = files.reserve_start(info)
+            try:
+                return _start_server(files, start_id, log_file), True
+            finally:
+                files.release_start(start_id)
+
+
+def _start_server(files: common.ServerFiles, start_id: str, log_file) -> dict:
+    log_path = files.root / "logs" / "server.log"
+    python = server_python(log_file)
+    process = spawn_server(python, log_file, start_id=start_id)
+    repaired = False
+    ends = time.monotonic() + START_TIMEOUT
+    while time.monotonic() < ends:
+        info = files.read_info()
+        if info and info.get("start_id") == start_id and alive(info):
+            return info
+        code = process.poll()
+        if code == common.RUNTIME_LIB_EXIT:
+            # Visual C++ 再頒布可能パッケージがない。入れ直しても直らないので、対処を伝えて止まる。
+            common.raise_vc_runtime_error("wiki の MCP サーバーが依存の DLL を読み込めない。")
+        if code == common.BROKEN_ENV_EXIT and not repaired:
+            # サーバーが依存を import できなかった。環境を確かめて入れ直し、1 回だけ起動し直す。
+            log("サーバーが依存を import できなかったので、環境を入れ直して起動し直す")
+            repaired = True
+            python = server_python(log_file, force=True)
+            process = spawn_server(python, log_file, start_id=start_id)
             ends = time.monotonic() + START_TIMEOUT
-            while time.monotonic() < ends:
-                info = common.read_server_info()
-                if info and alive(info):
-                    return info, True
-                code = process.poll()
-                if code == common.BROKEN_ENV_EXIT and not repaired:
-                    # サーバーが依存を import できなかった。環境を確かめて入れ直し、1 回だけ起動し直す。
-                    log("サーバーが依存を import できなかったので、環境を入れ直して起動し直す")
-                    repaired = True
-                    python = server_python(log_file, force=True)
-                    process = spawn_server(python, log_file)
-                    ends = time.monotonic() + START_TIMEOUT
-                    continue
-                if code not in (None, 0):
-                    raise RuntimeError(f"wiki の MCP サーバーが終了コード {code} で止まった。"
-                                       f"{common.logs_dir() / 'server.log'} を見る")
-                time.sleep(0.05)
-        raise RuntimeError(f"wiki の MCP サーバーが {START_TIMEOUT} 秒以内に起動しなかった")
+            continue
+        if code is not None:
+            raise RuntimeError(f"wiki の MCP サーバーが終了コード {code} で止まった。"
+                               f"{log_path} を見る")
+        time.sleep(0.05)
+    raise RuntimeError(f"wiki の MCP サーバーが {START_TIMEOUT} 秒以内に起動しなかった。{log_path} を見る")
 
 
 def flatten(exc: BaseException) -> list[BaseException]:
@@ -178,16 +294,24 @@ class Upstream:
         self._info = None
         self._lock = anyio.Lock()
         self.started_server = None
+        self._runtime_error = None  # VcRuntimeError。確認済みなら保持する（_connect）
         self._last_ok = 0.0
         self._pending: set = set()  # 今の接続で待っている呼び出しの取り消しの範囲
 
     async def _connect(self):
+        if self._runtime_error is not None:
+            # VC++ ランタイムがない間は、要求のたびに uv sync とサーバーの起動を繰り返さない。案内は記録済み。
+            raise self._runtime_error
         import httpx
         from mcp import ClientSession
         from mcp.client.streamable_http import streamable_http_client
 
         anyio = self._anyio
-        info, started = await anyio.to_thread.run_sync(ensure_server)
+        try:
+            info, started = await anyio.to_thread.run_sync(ensure_server)
+        except common.VcRuntimeError as exc:
+            self._runtime_error = exc  # 利用者が入れて、Claude Code を再起動するまで変わらない
+            raise
         self.started_server = started
         ready = anyio.Event()
         closed = anyio.Event()
@@ -313,7 +437,7 @@ def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "--ensure":
         # 診断用: サーバーを確かめ（なければ起動し）、server.json の中身からトークンを除いて表示する。
         info, started = ensure_server()
-        shown = {k: v for k, v in info.items() if k != "token"}
+        shown = {k: v for k, v in info.items() if k not in ("token", "start_id")}
         print({"started_now": started, **shown})
         return
     anyio.run(serve)

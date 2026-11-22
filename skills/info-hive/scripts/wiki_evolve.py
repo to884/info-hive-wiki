@@ -38,6 +38,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wiki_text import localize_argparse, normalize_quote  # noqa: E402
 import wiki_initialized  # noqa: E402
 import wiki_workspace  # noqa: E402
+import wiki_pages  # noqa: E402
+from wiki_fsguard import WriteGuard  # noqa: E402
+from wiki_raw_roots import record_raw_root  # noqa: E402
 
 IGNORED = {'.git', '__pycache__', '.wiki-cache', '.evolution', 'node_modules', '.wiki-evolve-lock'}
 # wiki を使わない操作。ほかの操作はどれも、振り分けの前に wiki の判定を通る。
@@ -49,8 +52,8 @@ def require(condition, message):
         raise ValueError(message)
 
 
-def read_json(path):
-    return json.loads(Path(path).read_text(encoding='utf-8'))
+def read_json(path, wiki_root=None):
+    return json.loads(wiki_pages.read_user_file(path, wiki_root, encoding='utf-8'))
 
 
 def encode(value):
@@ -106,11 +109,18 @@ def atomic(path, data, mode=None):
         Path(name).unlink(missing_ok=True)
 
 
-def tree(root):
+def tree(root, wiki_root=None):
+    """木のハッシュ。利用者の wiki 内の木には wiki_root を渡し、記事の読み取りを共通の口に通す。"""
+    root = wiki_pages.user_directory_path(wiki_pages.absolute_user_path(root), wiki_root)
     require(root.is_dir() and not root.is_symlink(), f'通常のディレクトリではない: {root}')
     result = {}
-    for directory, dirs, files in os.walk(root, followlinks=False):
+    def unreadable(error):
+        # 一覧できない木を、空の木や完全な写しとして扱わない。CLI もこの例外を理由付きで伝える。
+        raise error
+    for directory, dirs, files in os.walk(root, followlinks=False, onerror=unreadable):
         dirs[:] = sorted(d for d in dirs if d not in IGNORED)
+        for name in dirs:
+            wiki_pages.user_directory_path(Path(directory) / name, wiki_root)
         for name in dirs + sorted(files):
             path = Path(directory) / name
             require(not path.is_symlink(), f'シンボリックリンクは使えない: {path}')
@@ -118,18 +128,19 @@ def tree(root):
             path = Path(directory) / name
             require(path.is_file(), f'通常のファイルではない: {path}')
             result[path.relative_to(root).as_posix()] = {
-                'sha256': digest(path.read_bytes()), 'mode': path.stat().st_mode & 0o777,
+                'sha256': digest(wiki_pages.read_user_bytes(path, wiki_root)), 'mode': path.stat().st_mode & 0o777,
             }
     return result
 
 
-def copy_tree(source, dest):
-    files = tree(source)
+def copy_tree(source, dest, wiki_root=None):
+    source = wiki_pages.user_directory_path(wiki_pages.absolute_user_path(source), wiki_root)
+    files = tree(source, wiki_root)
     dest.mkdir(parents=True, exist_ok=True)
     for name in files:
         target = dest / name
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source / name, target)
+        shutil.copy2(wiki_pages.user_file_path(source / name, wiki_root), target)
     return files
 
 
@@ -167,7 +178,13 @@ def manifest(exp):
 
 
 def capture(args):
-    record = read_json(args.record)
+    # 渡されたパスで初期化を確認し、根の別名を通る入力も記事として検査する。
+    wiki = wiki_initialized.require(args.wiki)
+    return capture_record(wiki, args.raw, read_json(args.record, wiki))
+
+
+def capture_record(wiki, raw, record):
+    wiki = wiki_pages.absolute_user_path(wiki_initialized.require(wiki))
     slug(record.get('id'))
     for key in ('task', 'verification', 'model', 'tools', 'scope'):
         require(isinstance(record.get(key), str) and record[key].strip(), f'{key} がない')
@@ -176,59 +193,74 @@ def capture(args):
             and all(isinstance(x, str) and x.strip() for x in record['actions']), 'actions がない')
     for key in ('hypothesis', 'counterexamples'):
         require(isinstance(record.get(key, ''), str), f'{key} は文字列にする')
-    raw = args.raw.resolve()
+    raw = wiki_pages.absolute_user_path(raw)
     # raw のディレクトリは作らない。初期化（init_wiki.py）が作る。
     require(raw.is_dir(), f'raw のディレクトリがない: {raw}。--raw が正しいかを確かめる。'
                           '初期化した wiki の raw をなくしたときは、/wiki:upgrade で作り直せる')
+    guard = WriteGuard(raw)
     folder = raw / 'experiences'
-    require(not folder.is_symlink(), 'experiences のディレクトリをシンボリックリンクにはできない')
-    folder.mkdir(exist_ok=True)
     path = folder / (record['id'] + '.json')
     data = encode(record).encode('utf-8')
-    if path.exists():
-        require(not path.is_symlink(), 'この ID の経験はすでに記録されていて、変更できない')
+    exists = guard.file_info(path) is not None
+    record_raw_root(wiki, raw, writer="wiki_evolve")
+    if not exists:
+        guard.ensure_directory(folder)
+        try:
+            guard.write_bytes(path, data)
+        except FileExistsError:
+            exists = True  # 並行実行が先に置いた記録も、内容を照合してから使う
+    if exists:
+        if guard.file_info(path) is None:
+            raise FileNotFoundError(path)
         stored = path.read_bytes()
         # 0.19.1 までは文字のモードで書いたので、Windows の記録はすべての改行が CRLF になっている。
         # 中身が同じなら受け入れ、raw は変更不可なので書き直さない。返す値は、実際のバイト列の SHA-256 にする。
         # encode() は文字列の中の改行を \n とエスケープするので、改行はどれも JSON の行の区切りである。
         require(stored in (data, data.replace(b'\n', b'\r\n')), 'この ID の経験はすでに記録されていて、変更できない')
     else:
-        create(path, data)
         stored = data
-    return {'raw': str(path), 'sha256': digest(stored), 'next': 'Ingest as a source; consolidate supported patterns'}
+    sha256 = digest(stored)
+    legacy = raw.resolve(strict=True) / path.relative_to(raw)
+    return {'raw': str(legacy), 'sha256': sha256, 'raw_ref': path.as_posix(), 'raw_sha256': sha256,
+            'next': 'Ingest as a source; consolidate supported patterns'}
 
 
 def propose(args, state):
     exp = state / slug(args.id)
     require(not exp.exists(), 'この実験の ID はすでにある。新しい ID を使う')
-    source = args.skill.resolve()
-    directory = args.candidate.is_dir()
+    source = wiki_pages.absolute_user_path(args.skill)
+    candidate = wiki_pages.absolute_user_path(args.candidate)
+    directory = candidate.is_dir()
     require(directory or args.target, 'ファイル単位の提案には --target が必要である')
     require(not args.skill.is_symlink(), 'スキルをシンボリックリンクにはできない')
     require(source.is_dir() or directory, '新しいスキルには候補のディレクトリが必要である')
-    require(not source.is_relative_to(state.resolve()), 'インストール先を実験の記録の中にはできない')
+    require(not source.resolve().is_relative_to(state.resolve()), 'インストール先を実験の記録の中にはできない')
     if source.exists():
-        require((source / 'SKILL.md').is_file() or not tree(source), 'スキルのディレクトリには SKILL.md が必要である（空のディレクトリならよい）')
+        require((source / 'SKILL.md').is_file() or not tree(source, args.wiki), 'スキルのディレクトリには SKILL.md が必要である（空のディレクトリならよい）')
     if directory:
-        require((args.candidate / 'SKILL.md').is_file(), '候補に SKILL.md がない')
+        require((candidate / 'SKILL.md').is_file(), '候補に SKILL.md がない')
     else:
         target = inside(source, args.target)
         require(target.is_file(), '--target には、このスキルにある既存のファイルを指定する')
         # 候補は渡されたバイト列のまま写す。文字として読み書きすると、Windows では改行が CRLF に変わる。
-        after = args.candidate.read_bytes()
+        after = wiki_pages.read_user_bytes(candidate, args.wiki)
         require(after.decode('utf-8').strip(), '候補が空である')
     require(args.reason.strip(), '提案の理由（--reason）が空である')
     evidence = {}
     for name in args.evidence:
         path = inside(args.wiki, name)
         require(path.suffix == '.md' and path.is_file(), '根拠には、wiki にある既存の Markdown のページを指定する')
-        evidence[name] = path.read_text(encoding='utf-8')
+        # 記事は、記事を読む口を通して読む。記事か記事までの道がリンクなら読まない（info-hive-dev の ADR-0029）
+        opened = wiki_pages.article_path(args.wiki, path.relative_to(args.wiki).as_posix(), native=True)
+        require(opened.state != 'link', f'根拠のページがリンクなので読まない: {opened.link[0] if opened.link else name}')
+        require(opened.state == 'ok', f'根拠のページを読めない: {name}（{opened.state}）')
+        evidence[name] = opened.path.read_text(encoding='utf-8')
     require(evidence, '根拠のページが少なくとも 1 つ必要である')
     with tempfile.TemporaryDirectory(prefix='.staging-', dir=state) as tmp:
         staging = Path(tmp) / 'experiment'
         (staging / 'baseline').mkdir(parents=True)
-        baseline = copy_tree(source, staging / 'baseline') if source.exists() else {}
-        copy_tree(args.candidate if directory else source, staging / 'candidate')
+        baseline = copy_tree(source, staging / 'baseline', args.wiki) if source.exists() else {}
+        copy_tree(candidate if directory else source, staging / 'candidate', args.wiki)
         if not directory:
             (staging / 'candidate' / args.target).write_bytes(after)
         require(tree(staging / 'candidate') != baseline, '候補がベースラインと同じである')
@@ -356,14 +388,17 @@ def run_runner(argv, request, cwd, timeout):
 
 
 def evaluate(args, exp):
+    wiki_root = getattr(args, 'wiki', None)
     value = manifest(exp)
     require(not list(exp.glob('evaluation-*.json')) and not list(exp.glob('inputs-*.json')),
             '評価はすでに記録されたか、始まっている。新しく試すときは新しい提案を作る')
     require(not (exp / 'transition.json').exists(), '適用した実験は評価できない')
-    suite_path = args.suite.resolve()
-    suite = read_json(suite_path)
-    corpus = (suite_path.parent / relative(suite['corpus'])).resolve()
-    runner = read_json(args.runner)
+    suite_path = wiki_pages.user_file_path(args.suite, wiki_root).resolve()
+    suite = read_json(suite_path, wiki_root)
+    corpus = suite_path.parent / relative(suite['corpus'])
+    corpus_root = wiki_pages.source_wiki_root(corpus, wiki_root)
+    tree(corpus, corpus_root)
+    runner = read_json(args.runner, wiki_root)
     require(isinstance(runner, list) and runner and all(isinstance(x, str) and x for x in runner),
             'ランナーのファイルには、空でない argv の JSON 配列を書く（シェルは使わない）')
     finite(args.timeout, 'timeout')
@@ -374,7 +409,7 @@ def evaluate(args, exp):
     event(exp, 'inputs', {'suite': suite, 'model': args.model, 'tools': args.tools,
                           'runner': runner, 'repeats': args.repeats, 'timeout': args.timeout,
                           'proposal_sha256': digest((exp / 'proposal.json').read_bytes())})
-    corpus_hash = copy_tree(corpus, exp / 'corpus')
+    corpus_hash = copy_tree(corpus, exp / 'corpus', corpus_root)
     # 実行のたびに、アーカイブした入力の新しいコピーを渡す。
     with tempfile.TemporaryDirectory(prefix='wiki-evaluation-') as tmp:
         workspace = Path(tmp)
@@ -434,7 +469,7 @@ def evaluate(args, exp):
             raise
 
 
-def transition(exp, rollback=False):
+def transition(exp, rollback=False, wiki_root=None):
     value = manifest(exp)
     source = Path(value['skill'])
     source.mkdir(parents=True, exist_ok=True)
@@ -444,12 +479,12 @@ def transition(exp, rollback=False):
     except FileExistsError:
         raise ValueError(f'スキルを別の処理が使用中である。そのプロセスが終了しているなら、確かめてから {lock} を削除する')
     try:
-        return promote(exp, value, rollback)
+        return promote(exp, value, rollback, wiki_root)
     finally:
         lock.rmdir()
 
 
-def promote(exp, value, rollback):
+def promote(exp, value, rollback, wiki_root=None):
     source = Path(value['skill'])
     records = list(exp.glob('evaluation-*.json'))
     require(len(records) == 1, '完了した評価が必要である')
@@ -465,7 +500,7 @@ def promote(exp, value, rollback):
     else:
         require(current['status'] in ('proposed', 'applying', 'accepted'), 'ロールバックした実験は再び適用できない')
         before, after, pending, done = 'baseline', 'candidate', 'applying', 'accepted'
-    actual = tree(source)
+    actual = tree(source, wiki_root)
     if current['status'] in (pending, done) and actual == value[after]:
         atomic(journal, encode({'status': done}).encode())
         return {'id': value['id'], 'status': done}
@@ -486,7 +521,7 @@ def promote(exp, value, rollback):
             atomic(target, (exp / after / name).read_bytes(), value[after][name]['mode'])
         else:
             target.unlink(missing_ok=True)
-    require(tree(source) == value[after], '切り替えたあとのスキルがスナップショットと一致しない')
+    require(tree(source, wiki_root) == value[after], '切り替えたあとのスキルがスナップショットと一致しない')
     atomic(journal, encode({'status': done}).encode())
     event(exp, done, {'skill': str(source)})
     return {'id': value['id'], 'status': done}
@@ -583,9 +618,8 @@ def main():
     if args.wiki is None and uses_wiki:
         args.wiki = wiki_workspace.default_wiki_or_exit()
     try:
-        if uses_wiki:
-            # 振り分けより前の 1 か所で、判定してから同じパスを解決する（ADR-0019）。capture の記録も、あとで
-            # この wiki にソースとして取り込むので、SCHEMA.md のない wiki には書かない。
+        if uses_wiki and args.action != 'capture':
+            # capture は入力を読むときに根の綴りを使う。他の操作は初期化の判定後にパスを解決する（ADR-0019）。
             args.wiki = wiki_initialized.resolve(args.wiki)
         if args.action == 'verify-bundle':
             result = verify_bundle(args.path)
@@ -612,7 +646,7 @@ def main():
                         result = {'proposal': manifest(exp), 'inputs': [read_json(p) for p in exp.glob('inputs-*.json')], 'diff': (exp / 'change.diff').read_text(encoding='utf-8'),
                                   'evaluations': [read_json(p) for p in exp.glob('evaluation-*.json')]}
                     else:
-                        result = transition(exp, rollback=args.action == 'rollback')
+                        result = transition(exp, rollback=args.action == 'rollback', wiki_root=args.wiki)
         print(encode(result), end='')
         if args.action == 'evaluate' and result.get('status') == 'rejected':
             return 2

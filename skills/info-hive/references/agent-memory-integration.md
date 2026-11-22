@@ -30,7 +30,7 @@ wiki を初期化したら、AI エージェントが次のセッション以降
 
 このプロジェクトでは、Andrej Karpathy の「LLM Wiki」のパターン（https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f）に従い、LLM が管理する wiki を `wiki/` に置いている。
 
-このプロジェクトで蓄積した知識をもとに答える質問では、先に `wiki/index.md`（インデックスを分割した wiki では、`wiki/indexes/` の該当するファイル）を読み、1行の要約から必要なページを探す。引用には `[[wikilinks]]` を使う。インデックスからよい候補が見つからなければ、`info-hive` スキルの `wiki_search.py` でローカルのハイブリッド検索をする。依存パッケージを使わない BM25 にするには `--no-embed` を付ける。
+このプロジェクトで蓄積した知識をもとに答える質問では、先に `wiki/index.md`（インデックスを分割した wiki では、`wiki/indexes/` の該当するファイル）を読み、1行の要約から必要なページを探す。引用には `[[wikilinks]]` を使う。インデックスからよい候補が見つからなければ、`info-hive` スキルの `wiki_search.py` でローカルのハイブリッド検索をする。依存パッケージを使わない BM25 にするには `--no-embed` を付ける。指示の文脈に `［wiki の候補］` で始まる一覧が足されていたら、関係するときだけ、その「読み方」の行のとおりに読む（R1 と R2 では、Agent ツールを書かれた `subagent_type`、`model`、`effort` で呼ぶ）。
 
 新しいソースを加えるときは、`info-hive` スキルの取り込みのワークフローに従う。`wiki/sources/`、`wiki/entities/`、`wiki/concepts/`、`wiki/synthesis/` のどこに置くかを決め、影響するページを洗い出し、ページを書き直さずに `str_replace` で必要な箇所だけを更新する。インデックスを更新し、`wiki/log.md` に1行の記録を追記する。
 

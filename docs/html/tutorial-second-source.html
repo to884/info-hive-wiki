@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ja" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>醤油を取り込み、wiki を点検する | info-hive</title>
+  <link rel="stylesheet" href="assets/fluent2.css">
+  <link rel="stylesheet" href="assets/manual.css">
+  <link rel="stylesheet" href="assets/manual-print.css" media="print">
+  <script defer src="assets/manual-code.js"></script>
+</head>
+<body class="fui-FluentProvider">
+  <a class="skip-link fui-Link" href="#main">本文へ移動</a>
+  <header class="site-header">
+    <div class="shell"><a class="fui-Link site-name" href="index.html">info-hive</a></div>
+  </header>
+  <main class="shell reading-layout" id="main" tabindex="-1">
+    <nav class="contents" aria-label="このページの目次">
+      <h2>目次</h2>
+      <ul>
+        <li><a class="fui-Link" data-inline href="#second-source">1. 醤油の資料を取り込む</a></li>
+        <li><a class="fui-Link" data-inline href="#browse">2. 資料どうしのつながりを見る</a></li>
+        <li><a class="fui-Link" data-inline href="#lint">3. wiki を点検する</a></li>
+      </ul>
+    </nav>
+    <article class="page-content" aria-labelledby="page-title">
+      <header class="intro">
+        <h1 class="fui-Title1" id="page-title">醤油を取り込み、wiki を点検する</h1>
+<!-- page-summary:start -->
+<figure class="page-summary page-summary-flow">
+  <ol role="list" aria-label="概要">
+    <li><strong>醤油を取り込む</strong><span>2 本目の資料を追加</span></li>
+    <li><strong>つながりを見る</strong><span>麹から両方の資料へ</span></li>
+    <li><strong>wiki を点検</strong><span>リンク切れや孤立を確認</span></li>
+  </ol>
+</figure>
+<!-- page-summary:end -->
+        <p>味噌を取り込んだ練習用 wiki に醤油の資料を追加します。「麹」のページで味噌と醤油のつながりを確認し、最後に wiki を点検します。</p>
+      </header>
+      <section id="second-source">
+        <h2 class="fui-Subtitle1">1. 醤油の資料を取り込む</h2>
+        <ol>
+          <li>次の資料をメモ帳にコピーします。<pre><code># 醤油
+
+醤油は、大豆と小麦を主な原料にした、日本の発酵調味料である。
+
+蒸した大豆と、炒って砕いた小麦を混ぜ、麹菌を育てて麹を作る。この麹に食塩水を加えて「もろみ」にし、数か月から 1 年ほどかけて、発酵させ、熟成させる。熟成したもろみを搾った液体が、醤油になる。
+
+味噌と同じく、原料に大豆、麹、塩を使う。味噌は麹と大豆を固まりのまま熟成させるが、醤油はもろみを搾って液体にする。
+
+日本農林規格（JAS）は、醤油を、濃口、淡口、たまり、再仕込み、白の 5 種類に分けている。</code></pre></li>
+          <li>「名前を付けて保存」で <code>%USERPROFILE%\info-hive-practice\raw\醤油.md</code> に保存します。「すべてのファイル」と UTF-8 を選びます。</li>
+          <li>前のチュートリアルと同じ練習用フォルダーを開いた Code タブで、次のコマンドを送ります。<pre><code>/wiki:ingest raw/醤油.md</code></pre></li>
+          <li>要点を示されたら「『麹』のページに、醤油のことも書き足してください」と返します。</li>
+          <li>提案された変更を確認し、適用を承認します。</li>
+        </ol>
+        <aside class="check"><h3>取り込みの目印</h3>
+        <p><code>wiki/sources/醤油.md</code> ができ、索引に醤油の要約へのリンクが加わります。<code>wiki/log.md</code> には取り込みの記録が 1 件加わります。</p>
+        </aside>
+      </section>
+
+      <section id="browse">
+        <h2 class="fui-Subtitle1">2. 資料どうしのつながりを見る</h2>
+        <ol>
+          <li>次のコマンドを送ります。<pre><code>/wiki:browse</code></pre></li>
+          <li>返答の「Index · プロジェクト」のカードで「開く」を押します。</li>
+          <li>ブラウザーペインの「Index」を開きます。</li>
+          <li>一覧に味噌と醤油の要約があることを確かめます。</li>
+          <li>「麹」のページを開きます。</li>
+        </ol>
+        <p>「麹」のページの被リンクに、味噌と醤油の要約があることを確かめます。</p>
+        <p>ブラウザーペインが開かなければ、Code タブに、返答にある <code>http://127.0.0.1:</code> で始まる URL をペインで開くよう頼みます。</p>
+        <p>「麹」に醤油の記述がなければ、そのページに醤油のことを書き足すようもう一度頼みます。</p>
+      </section>
+
+      <section id="lint">
+        <h2 class="fui-Subtitle1">3. wiki を点検する</h2>
+        <ol>
+          <li>次のコマンドを送ります。<pre><code>/wiki:lint</code></pre></li>
+          <li>点検のツール呼び出しを開きます。</li>
+          <li>調べたページが 2 件以上で、孤立ページ、リンク切れ、読み込みエラーがないことを確かめます。</li>
+        </ol>
+        <p>MCP の出力では <code>total_pages</code> がページ数です。<code>orphans</code>、<code>broken_links</code>、<code>read_errors</code> が空かを見ます。CLI の出力では「調べたページ数」と同じ 3 種類の指摘の有無を見ます。</p>
+        <p>練習では <code>tags</code> の空欄や、原本より強い表現を指摘されることがあります。指摘を確認したら、次へ進めます。修正する場合は、提案された差分を確認してから承認します。</p>
+      </section>
+
+      <nav class="page-navigation" aria-label="関連ページ">
+        <a class="fui-Link" rel="prev" href="tutorial-first-wiki.html">前へ　はじめての wiki を作る</a>
+        <a class="fui-Link" rel="next" href="commands.html">次へ　wiki コマンドのリファレンス</a>
+      </nav>
+    </article>
+  </main>
+</body>
+</html>

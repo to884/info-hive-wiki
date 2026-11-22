@@ -12,7 +12,7 @@ browse のファイルの入出力は、すべてこのモジュールを通す�
   領分の外では、自分が作ったものだけを置き換え、消す（守ること 1。ADR-0017）。
 - 静的の書き出し（build。設計の 6.3、6.4）と、サーバーの記録（設計の 7.1）。
 
-標準ライブラリと wiki_pages（走査と識別子の関数）だけで書き、単独では実行しない。
+走査、概要、公開版の確認には wiki 内の共通処理を使う。単独では実行しない。
 """
 
 from __future__ import annotations
@@ -21,18 +21,21 @@ import errno
 import hashlib
 import json
 import os
+import secrets
 import stat
 import sys
 import time
 
 import wiki_pages
+import wiki_overview
 
 WORK_MARKER = ".browse-work"
 SERVER_MARKER = ".browse-server"
 MANIFEST = ".browse-generation"
 MARKERS = (WORK_MARKER, SERVER_MARKER, MANIFEST)
 LEGACY = ("seq", "build-report.json")       # 0.10.0 が作業用のディレクトリに書いたもの。消す
-STATE_KNOWN = ("server.lock", "server.json", "server.json.new", SERVER_MARKER + ".new")
+FILTER_KEY_FILE = "filters.key"
+STATE_KNOWN = ("server.lock", "server.json", "server.json.new", SERVER_MARKER + ".new", FILTER_KEY_FILE)
 O_BINARY = getattr(os, "O_BINARY", 0)
 NT = os.name == "nt"
 COMMON_LOCK_WAIT = 60.0
@@ -80,7 +83,7 @@ _WIN = None
 
 
 def _win():
-    """CreateFileW と GetFileInformationByHandle（ctypes）。1 度だけ用意する。"""
+    """ファイル操作に使う Windows API（ctypes）。1 度だけ用意する。"""
     global _WIN
     if _WIN is None:
         import ctypes
@@ -93,6 +96,8 @@ def _win():
                                     wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
         k32.CloseHandle.argtypes = [wintypes.HANDLE]
         k32.CloseHandle.restype = wintypes.BOOL
+        k32.MoveFileExW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
+        k32.MoveFileExW.restype = wintypes.BOOL
 
         class Info(ctypes.Structure):
             _fields_ = [("attrs", wintypes.DWORD), ("c", wintypes.FILETIME), ("a", wintypes.FILETIME),
@@ -112,10 +117,10 @@ def _win():
 _SHARE_ALL = 0x7
 
 
-def _win_handle(path, access, disposition, flags):
-    """CreateFileW を、共有 _SHARE_ALL で呼び、ハンドルを返す。失敗は、winerror を持つ OSError にする。"""
+def _win_handle(path, access, disposition, flags, *, share=_SHARE_ALL):
+    """CreateFileW のハンドルを返す。失敗は、winerror を持つ OSError にする。"""
     ctypes, msvcrt, wintypes, k32, Info = _win()
-    handle = k32.CreateFileW(os.fspath(path), access, _SHARE_ALL, None, disposition, flags, None)
+    handle = k32.CreateFileW(os.fspath(path), access, share, None, disposition, flags, None)
     if handle in (None, wintypes.HANDLE(-1).value):
         code = ctypes.get_last_error()
         raise OSError(None, ctypes.FormatError(code).strip(), os.fspath(path), code)
@@ -137,7 +142,7 @@ def _win_open_read(path):
         raise
 
 
-def _win_open(path, disposition, flags):
+def _win_open(path, disposition, flags, *, share=_SHARE_ALL):
     """Windows で、最後の名前の再解析点をたどらずに、ファイルを作るか開く。開いたものが通常のファイルでなければ失敗する。
 
     CreateFileW に FILE_FLAG_OPEN_REPARSE_POINT を付ける。名前がリンクなら、リンクそのものを開くので、先は作らない
@@ -145,9 +150,13 @@ def _win_open(path, disposition, flags):
     再解析点とディレクトリを拒む（名前を調べてから開く形にしない。設計の 3.2）。
     """
     ctypes, msvcrt, wintypes, k32, Info = _win()
-    access = 0x40000000 | (0x80000000 if flags == os.O_RDWR else 0)      # GENERIC_WRITE と GENERIC_READ
+    if flags & os.O_APPEND:
+        access = 0x4  # FILE_APPEND_DATA。ハンドルを引き継ぐ子プロセスも末尾に書く。
+    else:
+        access = {os.O_RDONLY: 0x80000000, os.O_WRONLY: 0x40000000,
+                  os.O_RDWR: 0xC0000000}[flags]  # GENERIC_READ / GENERIC_WRITE
     # FILE_ATTRIBUTE_NORMAL、FILE_FLAG_OPEN_REPARSE_POINT
-    handle = _win_handle(path, access, disposition, 0x80 | 0x00200000)
+    handle = _win_handle(path, access, disposition, 0x80 | 0x00200000, share=share)
     try:
         info = Info()
         if not k32.GetFileInformationByHandle(handle, ctypes.byref(info)):
@@ -166,6 +175,11 @@ class Os:
 
     def lstat(self, path):
         return os.lstat(path)
+
+    def publication(self, path, release_id):
+        from wiki_apply import resolve_publication
+
+        return resolve_publication(path, release_id)
 
     def stat(self, path):
         return os.stat(path)
@@ -208,12 +222,25 @@ class Os:
             return _win_open_read(path)
         return os.open(path, os.O_RDONLY | O_BINARY)       # 対照（read_without_share_delete）は、Windows でもこの形
 
-    def open_lock(self, path, create=True):
+    def open_plain_read(self, path):
+        """最後の名前のリンクをたどらずに、検査に使う読み取り用のハンドルを開く。"""
+        if NT:
+            return _win_open(path, _OPEN_EXISTING, os.O_RDONLY)
+        return os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+
+    def open_append(self, path, mode):
+        """最後の名前のリンクをたどらずに、追記用に開く。"""
+        if NT:
+            return _win_open(path, _OPEN_ALWAYS, os.O_WRONLY | os.O_APPEND)
+        return os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, mode)
+
+    def open_lock(self, path, create=True, *, share_delete=True):
         """ロックのファイルを開く。create なら、なければ作る。最後の名前がリンクなら、たどらずに失敗する。"""
         if "follow_on_open" in MUTANTS:
             return os.open(path, os.O_RDWR | (os.O_CREAT if create else 0) | O_BINARY, 0o600)  # 対照: 6 版目の形
         if NT:
-            return _win_open(path, _OPEN_ALWAYS if create else _OPEN_EXISTING, os.O_RDWR)
+            return _win_open(path, _OPEN_ALWAYS if create else _OPEN_EXISTING, os.O_RDWR,
+                             share=_SHARE_ALL if share_delete else 0x3)
         fd = os.open(path, os.O_RDWR | (os.O_CREAT if create else 0) | os.O_NOFOLLOW, 0o600)
         try:
             if not stat.S_ISREG(os.fstat(fd).st_mode):
@@ -237,6 +264,15 @@ class Os:
 
     def replace(self, src, dst):
         os.replace(src, dst)
+
+    def move_write_through(self, src, dst, *, replace=False):
+        """Windows で、同一ボリューム内の名前の付け替えを同期して返す。"""
+        ctypes, _, _, k32, _ = _win()
+        # MOVEFILE_WRITE_THROUGH。置き換え時だけ MOVEFILE_REPLACE_EXISTING を加える。
+        flags = 0x8 | (0x1 if replace else 0)
+        if not k32.MoveFileExW(os.fspath(src), os.fspath(dst), flags):
+            code = ctypes.get_last_error()
+            raise OSError(None, ctypes.FormatError(code).strip(), os.fspath(src), code, os.fspath(dst))
 
     def unlink(self, path):
         os.unlink(path)
@@ -307,6 +343,14 @@ def x(name, *args):
         return getattr(X, name)(*args)
     except OSError as e:
         raise failure(classify(e), f"{name}: {type(e).__name__}", path, type(e)) from None
+
+
+def publication(root, release_id=None):
+    """公開の記録を照合し、整合性のエラーを閲覧の停止として伝える。"""
+    try:
+        return x("publication", root, release_id)
+    except ValueError as e:
+        raise Stop(str(e)) from e
 
 
 def listdir(path):
@@ -1314,6 +1358,27 @@ def read_record(state_dir) -> "dict | None":
     return data if isinstance(data, dict) else None
 
 
+def browse_filter_secret(state_dir) -> bytes | None:
+    """状態のディレクトリのロックを持つ起動処理だけが、絞り込み用の鍵を読むか作る。"""
+    path = os.path.join(state_dir, FILTER_KEY_FILE)
+    try:
+        found = kind(path)
+        if found == "file":
+            try:
+                key = read_file_capped(path, 32)
+            except TooLarge:
+                key = b""
+            if len(key) == 32:
+                return key
+        elif found != "absent":
+            return None
+        key = secrets.token_bytes(32)
+        replace_file(path, key, 0o600)
+        return key
+    except (Absent, Unknown):
+        return None
+
+
 def _record_while_locked(state_dir):
     """ロックが取られているときに記録を読む。(記録か None, 読めなかった Unknown か None) を返す。
 
@@ -1432,10 +1497,11 @@ def remove_record(root, browse_root, state_dir, owner, instance) -> None:
 # 読む側（設計の 4、5）
 # ---------------------------------------------------------------------------
 
-def walk_inputs(root):
+def walk_inputs(root, raw_root=None):
     """入力の一覧（設計の 4）。(entries, problem) を返す。
 
-    entries は (種類, ディスク上の / 区切りの相対パス, 大きさ, 更新時刻) の並びで、ページ、索引、オントロジーの順。
+    entries は (種類, ディスク上の / 区切りの相対パス, 大きさ, 更新時刻) の並びで、ページ、索引、リンク、オントロジーの順。
+    リンク（種類 "link"）は、走査がリンクなので読まなかった記事と記事までの道で、大きさは None、4 つ目はリンクの種類である。
     ページと索引の集合は、lint と同じ走査の関数（wiki_pages.walk_pages、walk_index_files）が決める。オントロジーは、
     層の stat で種類、大きさ、更新時刻を得る（ないなら入れない。調べられなければ、大きさと更新時刻を None にする）。
     problem は、名前の集合が分からないとき（走査が送出した、一覧を作れない場所、種類を調べられない項目）に、
@@ -1456,6 +1522,8 @@ def walk_inputs(root):
             return [], "種類を調べられない項目がある"
     entries = [("page", f.rel, f.size, f.mtime_ns) for f in pages.files]
     entries += [("index", f.rel, f.size, f.mtime_ns) for f in indexes.files]
+    # 記事か記事までの道がリンクなので、走査が読まなかったもの（ADR-0029）。読まず、診断に出す。4 つ目は種類
+    entries += [("link", item["path"], None, item["kind"]) for item in wiki_pages.link_warnings(pages, indexes)]
     if "drop_ontology" not in MUTANTS:
         onto = wiki_pages.ONTOLOGY_REL if hasattr(wiki_pages, "ONTOLOGY_REL") else "graph/ontology.yaml"
         try:
@@ -1481,7 +1549,75 @@ def walk_inputs(root):
     found = [("asset", f.rel, f.size, f.mtime_ns) for f in assets.files]
     found += [("asset", rel, None, None) for rel in assets.unknown if rel != wiki_pages.ASSETS_DIR]
     entries += sorted(found, key=lambda e: wiki_pages._sort_key(e[1]))
+    overviews = wiki_overview.walk_sidecars(root)
+    if overviews.directory_state in ("unreadable", "unsafe"):
+        entries.append(("overview_dir", "assets/overview", None, overviews.directory_state))
+    entries += [("overview", item.disk_rel, item.size, f"unsafe:{item.mtime_ns}" if item.unsafe else item.mtime_ns)
+                for item in overviews.files]
+    entries += [("overview_entry", item.disk_rel, item.size, item.mtime_ns) for item in overviews.unexpected]
+    if raw_root is not None:
+        entries.extend(_walk_raw_inputs(raw_root))
     return entries, None
+
+
+def read_overview(root, rel):
+    """概要の読み取りも、生成側と同じ道の検査と上限を通す。"""
+    name = rel.rsplit("/", 1)[-1]
+    match = wiki_overview.SIDECAR.fullmatch(name)
+    if match is None or rel != f"assets/overview/{name}":
+        return wiki_overview.Sidecar("unreadable", reason="invalid_name")
+    return wiki_overview.read_sidecar(root, match[1])
+
+
+def _walk_raw_inputs(root):
+    """設定された raw の根を読み、Markdown の相対パスを raw/ 名前空間に載せる。"""
+    entries = []
+    directories = [(os.fspath(root), "raw")]
+    while directories:
+        directory, prefix = directories.pop()
+        try:
+            names = listdir(directory)
+        except Absent:
+            continue
+        except Unknown:
+            entries.append(("raw_dir", prefix, None, None))
+            continue
+        for name in names:
+            if name.startswith(".") or (prefix == "raw" and name.casefold() == "assets"):
+                continue
+            path = os.path.join(directory, name)
+            rel = f"{prefix}/{name}"
+            is_markdown = name.lower().endswith(".md")
+            try:
+                st = x("lstat", path)
+            except Absent:
+                continue
+            except Unknown:
+                entries.append(("raw" if is_markdown else "raw_dir", rel, None, None))
+                continue
+            if stat.S_ISLNK(st.st_mode) or getattr(st, "st_file_attributes", 0) & 0x400:
+                entries.append(("raw_link", rel, None, None))
+            elif stat.S_ISDIR(st.st_mode):
+                directories.append((path, rel))
+            elif is_markdown and stat.S_ISREG(st.st_mode):
+                if st.st_nlink > 1:
+                    entries.append(("raw_link", rel, None, None))
+                else:
+                    entries.append(("raw", rel, st.st_size, st.st_mtime_ns))
+    return sorted(entries, key=lambda entry: wiki_pages._sort_key(entry[1]))
+
+
+def read_raw_input(root, rel):
+    """raw の根より下のリンクを拒み、一覧に載った Markdown を読む。"""
+    parts = rel.split("/")[1:]  # 先頭の raw/ は閲覧用の名前空間
+    for pos in range(1, len(parts)):
+        if kind(os.path.join(root, *parts[:pos])) != "dir":
+            raise Absent(rel)
+    path = os.path.join(root, *parts)
+    st = x("lstat", path)
+    if not stat.S_ISREG(st.st_mode) or getattr(st, "st_file_attributes", 0) & 0x400 or st.st_nlink > 1:
+        raise Absent(rel)
+    return read_file(path)
 
 
 def read_input(root, rel) -> bytes:

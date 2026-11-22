@@ -55,7 +55,7 @@ import urllib.parse
 import sys
 from collections import Counter, defaultdict
 from datetime import date, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 # 同じディレクトリの wiki_text を import する。スクリプトとして実行したときも、
 # テストから import したときも見つかるようにする。
@@ -92,16 +92,21 @@ from wiki_pages import (  # noqa: E402
     WIKILINK_RE,
     case_only_duplicates,
     clean_link_target,
+    refused_link,
     extract_wikilinks,
     build_page_index,
     classify_source_ref,
     iter_page_files,
     ref_values,
     resolve_link,
+    article_path,
+    is_page_path,
+    walk_pages,
     scalar_value,
     text_value,
     type_value,
     walk_index_files,
+    resolve_raw,
 )
 
 
@@ -213,34 +218,10 @@ def _exists(path: Path) -> bool:
 
 
 def missing_raw(meta: dict, md_path: Path, wiki_root: Path) -> list[dict]:
-    """source ページの `raw:` のうち、原本がないものを返す。source 以外のページは見ない。
-
-    URL（https:、file: など）は見ない。絶対パス（rag が返す `C:/Books/x.pdf`、`/home/x/y.pdf`、`~/x`）は
-    そのまま確かめる。相対パスの基準は wiki によって違う。実際の wiki は wiki のルートから
-    `../raw/x.md`、`../W1_Raw/x.md` と書き、取り込みの手順のひな形は wiki の親から `raw/x.md` と書く。
-    そこで、wiki のルート、wiki の親、ページのディレクトリのどれかを基準にして見つかれば、原本があるとする。
-    複数の部分からなるソースはディレクトリにするので、ファイルでもディレクトリでもよい。
-    """
-    if type_value(meta.get("type")) != "source":
-        return []
-    found = []
-    for raw in _ref_values(meta.get("raw")):
-        if DRIVE_PATH_RE.match(raw) or raw.startswith(("/", "\\", "~")):
-            try:
-                candidates = [Path(raw).expanduser()]
-            except RuntimeError:
-                # ホームを決められない環境の ~。見つからないものとして報告する。
-                candidates = []
-            absolute = True
-        elif URL_SCHEME_RE.match(raw):
-            continue
-        else:
-            candidates = [wiki_root / raw, wiki_root.parent / raw, md_path.parent / raw]
-            absolute = False
-        if any(_exists(c) for c in candidates):
-            continue
-        found.append({"raw": raw, "absolute": absolute})
-    return found
+    """共通の raw 解決で missing になった値だけを返す。拒否や曖昧さを「ない」に変えない。"""
+    return [{"raw": item.raw, "absolute": bool(DRIVE_PATH_RE.match(item.raw)
+             or item.raw.startswith(("/", "\\", "~")))}
+            for item in resolve_raw(meta, md_path, wiki_root) if item.state == "missing"]
 
 
 def _inside(path: Path, root: Path) -> bool:
@@ -342,8 +323,42 @@ def parse_frontmatter_raw(text: str) -> "tuple[dict, str | None, str, bool]":
     return parse_frontmatter_text(fm_text), fm_text, body, False
 
 
+def link_report(wiki_root: Path) -> dict:
+    """wiki の側の記事と記事までの道のリンク（info-hive-dev の ADR-0029）。何も書かず、直さない。
+
+    走査（walk_pages、walk_index_files）が拒んだ項目と、最上位の SCHEMA.md と log.md を読む口（article_path）が
+    拒んだものを、{"path", "kind"} で返す。走査の知らせ（一覧を作れなかったディレクトリと、種類を調べられなかった
+    項目）は unchecked に入れる。raw の側（source ページの raw: が指すもの）は、この版では調べない。
+    """
+    root = Path(wiki_root)
+    pages, index = walk_pages(root), walk_index_files(root)
+    seen, links = set(), []
+    for walk in (pages, index):
+        for rel, kind in walk.links:
+            if rel not in seen:
+                seen.add(rel)
+                links.append({"path": rel, "kind": kind})
+    unchecked = set(pages.unlistable) | set(pages.unknown) | set(index.unlistable) | set(index.unknown)
+    for name in ("SCHEMA.md", "log.md"):
+        found = article_path(root, name)
+        if found.state == "link" and found.link[0] not in seen:
+            seen.add(found.link[0])
+            links.append({"path": found.link[0], "kind": found.link[1]})
+        elif found.state == "denied":
+            unchecked.add(name)
+    links.sort(key=lambda item: (posix_rel(item["path"]), item["path"]))
+    return {"links": links, "unchecked": [{"path": rel} for rel in sorted(unchecked, key=lambda r: (posix_rel(r), r))]}
+
+
+class LintPages(list):
+    """原本をまだ読まず、raw の解決の基準だけを集計まで保つ。"""
+    def __init__(self, wiki_root):
+        super().__init__()
+        self.wiki_root = wiki_root
+
+
 def collect_pages(wiki_root: Path) -> list[dict]:
-    pages = []
+    pages = LintPages(wiki_root)
     for md_path in iter_page_files(wiki_root):
         rel = md_path.relative_to(wiki_root)
         # 比べるときは NFC にそろえた / 区切りのパスを使う。ディスク上の名前のままのパスも残し、
@@ -386,7 +401,6 @@ def collect_pages(wiki_root: Path) -> list[dict]:
             "ideographic_comma_keys": ideographic_comma_values(raw_meta),
             "unquoted_keys": unquoted_string_keys(fm_text) if fm_text else [],
             "missing_assets": missing_assets(body, md_path, wiki_root),
-            "missing_raw": missing_raw(meta, md_path, wiki_root),
         })
     return pages
 
@@ -408,7 +422,8 @@ DEFAULT_REQUIRED_FM = ("type", "title", "tags", "created", "updated")
 
 def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str], suggest_pages: bool, suggest_min: int,
          soft_char_cap: int = 10000, hard_char_cap: int = 25000, index_entries: "list[dict] | None" = None,
-         allowed_tags: "list[str] | None" = None, wiki_root: "Path | None" = None) -> dict:
+         allowed_tags: "list[str] | None" = None, wiki_root: "Path | None" = None,
+         raw_root: "Path | None" = None, wiki_root_given: "Path | None" = None) -> dict:
     """検出結果を返す。
 
     wiki_root を渡すと、YouTube の字幕の訂正と留保の印と定義、confidence を raw と照らす
@@ -423,6 +438,7 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         allowed = set(normalize_tags(allowed_tags)) - {""}
         if not allowed:
             allowed = None
+    raw_wiki_root = wiki_root if wiki_root is not None else getattr(pages, "wiki_root", None)
     findings = {
         "orphans": [],
         "broken_links": [],
@@ -446,16 +462,47 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         "missing_raw": [],
         "unknown_tags": [],
         "caption_corrections": [],
+        "overview_stale": None,
+        "overview_problems": None,
+        "links": [],
+        "links_unchecked": [],
+        "raw_ambiguous": [],
+        "raw_unknown": [],
+        "raw_version_unverified": [],
+        "raw_paths_unchecked": [],
+        "raw_outside": [],
+        "link_warnings": [],
         "suggested_pages": [],
         "summary": {},
     }
+
+    # 記事と記事までの道のリンク（ADR-0029）。走査はリンクの記事を読まないので、ページの集合に入らない。
+    # そのページへの wikilink は、リンク切れではなく、ここで挙げる（拒んだことを「ない」に変えない。I4）。
+    if wiki_root is not None:
+        report = link_report(Path(wiki_root))
+        findings["links"] = report["links"]
+        findings["links_unchecked"] = report["unchecked"]
+        # どの読む側の結果にも、同じ名前の欄で知らせる（MCP の query、get_page などと同じ形）
+        findings["link_warnings"] = list(report["links"])
+
+    raw_roots = [raw_root] if raw_root is not None else []
+    recorded_raw_roots = []
+    if raw_wiki_root is not None:
+        from wiki_raw_roots import read_raw_roots
+        recorded_raw_roots, unchecked = read_raw_roots(Path(raw_wiki_root))
+        findings["links_unchecked"].extend({**item, "scope": "raw_roots"} for item in unchecked)
 
     # YouTube の字幕の訂正と留保（ADR-0027）。ページは照合のモジュールが読み直す（印の行の番号をファイルの
     # 行で示すため）。動画の raw を持たない wiki では、印のあるページだけを見る。
     if wiki_root is not None:
         import wiki_captions
-        result = wiki_captions.check_wiki(Path(wiki_root))
+        result = wiki_captions.check_wiki(Path(wiki_root), raw_roots=raw_roots, recorded_raw_roots=recorded_raw_roots,
+                                          wiki_root_given=wiki_root_given)
         findings["caption_corrections"] = [f.as_dict() for f in result.findings]
+        import wiki_overview
+        overviews = wiki_overview.inspect_wiki(Path(wiki_root))
+        findings["overview_stale"] = overviews["overview_stale"]
+        findings["overview_problems"] = overviews["overview_problems"]
 
     # 読み込みのエラー
     for p in pages:
@@ -489,6 +536,11 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
     # 解決用のインデックス。パスを付けたリンクには wiki からの完全な相対パス（.md なし）を、
     # パスのないリンクにはステムだけを使う。
     by_slug = all_slugs
+    def resolve_available(link):
+        if refused_link(link, findings["links"]) is not None:
+            return None
+        return resolve_link(link, by_path, by_slug)
+
     by_path = {}
     for p in pages:
         rel = p["rel_path"].replace("\\", "/")
@@ -498,7 +550,7 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
 
     for p in pages:
         for link in p["links"]:
-            resolved = resolve_link(link, by_path, by_slug)
+            resolved = resolve_available(link)
             if resolved:
                 inbound[resolved].add(p["slug"])
 
@@ -516,7 +568,7 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
     # 索引の見出しとページの type の食い違い。リンク切れの項目と type のないページは見ない
     # （分割した索引の index.md は indexes/ のファイルを指し、type の欠落は missing_frontmatter で挙がる）。
     for entry in index_entries or []:
-        resolved = resolve_link(entry["link"], by_path, by_slug)
+        resolved = resolve_available(entry["link"])
         if resolved is None:
             continue
         types = types_of(resolved)
@@ -538,9 +590,9 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         if not inbound.get(p["slug"]):
             findings["orphans"].append({"slug": p["slug"], "path": p["rel_path"]})
 
-        # リンク切れ
+        # リンク切れ。リンクなので読まなかったページを指すものは、links で挙げるので、ここでは数えない
         for link in p["links"]:
-            if resolve_link(link, by_path, by_slug) is None:
+            if refused_link(link, findings["links"]) is None and resolve_available(link) is None:
                 findings["broken_links"].append({
                     "from": p["slug"],
                     "from_path": p["rel_path"],
@@ -591,7 +643,8 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         # sources: は source ページを指す。ページがないか、source でないページを指すものを挙げる。
         # 分け方はグラフの抽出（sourced_from）と同じ wiki_pages.classify_source_ref に任せる。
         for ref in _ref_values(p["meta"].get("sources")):
-            status, _found, wrong_type = classify_source_ref(ref, src_by_path, src_by_slug, page_type)
+            status, _found, wrong_type = classify_source_ref(ref, src_by_path, src_by_slug, page_type,
+                                                           link_warnings=findings["links"])
             if status == "missing":
                 findings["unresolved_sources"].append({"path": p["rel_path"], "source": ref, "reason": "missing"})
             elif status == "not_source":
@@ -599,8 +652,39 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
                                                        "type": wrong_type})
 
         # source ページの raw: の原本がない。
-        for item in p.get("missing_raw", []):
-            findings["missing_raw"].append({"path": p["rel_path"], **item})
+        if raw_wiki_root is not None:
+            raw_results = resolve_raw(p["meta"], p["path"], raw_wiki_root, wiki_root_given,
+                                      raw_roots=raw_roots, recorded_raw_roots=recorded_raw_roots)
+            for item in raw_results:
+                location = {"path": p["rel_path"], "raw": item.raw}
+                if item.state == "missing":
+                    notice = {**location, "absolute": bool(DRIVE_PATH_RE.match(item.raw)
+                              or item.raw.startswith(("/", "\\", "~")))}
+                    if item.mismatches:
+                        notice["mismatches"] = item.mismatches
+                    findings["missing_raw"].append(notice)
+                elif item.state in ("ambiguous", "unknown"):
+                    key = "raw_ambiguous" if item.state == "ambiguous" else "raw_unknown"
+                    findings[key].append({**location, "candidates": item.candidates, "reason": item.reason})
+                elif item.state == "outside" and item.candidates:
+                    findings["raw_outside"].append({**location, "candidates": item.candidates, "reason": item.reason,
+                                                    "mismatches": item.mismatches})
+                if item.version_unverified and item.state == "resolved" and not item.external:
+                    findings["raw_version_unverified"].append(location)
+                for path in item.parents_unchecked:
+                    findings["raw_paths_unchecked"].append({**location, "candidate": path})
+                if item.state == "resolved" and item.scope_unverified:
+                    findings["raw_paths_unchecked"].append({**location, "candidate": str(item.path),
+                        "reason": "raw の根が未指定のため、外の原本かは未確認", "scope_unverified": True})
+                for link in item.links:
+                    notice = {**link, "scope": "raw", "source": p["rel_path"], "raw": item.raw}
+                    findings["links"].append(notice)
+                    findings["link_warnings"].append(notice)
+                for unchecked in item.unchecked:
+                    findings["links_unchecked"].append({**unchecked, "scope": "raw", "source": p["rel_path"], "raw": item.raw})
+        else:
+            for item in p.get("missing_raw", []):
+                findings["missing_raw"].append({"path": p["rel_path"], **item})
 
         # タグの体系にないタグ。
         if allowed is not None:
@@ -695,9 +779,27 @@ def lint(pages: list[dict], soft_cap: int, hard_cap: int, required_fm: list[str]
         # タグの体系を渡さなかったときは、検査していないことを 0 と区別できるよう None にする。
         "unknown_tags": len(findings["unknown_tags"]) if allowed is not None else None,
         "caption_corrections": len(findings["caption_corrections"]) if wiki_root is not None else None,
+        "overview_stale": len(findings["overview_stale"]) if findings["overview_stale"] is not None else None,
+        "overview_problems": len(findings["overview_problems"]) if findings["overview_problems"] is not None else None,
+        # wiki の根を渡さなかったときは、リンクを調べていない。
+        "links": len(findings["links"]) if raw_wiki_root is not None else None,
+        "links_wiki": sum(f.get("scope") != "raw" for f in findings["links"]) if wiki_root is not None else None,
+        "links_unchecked": len(findings["links_unchecked"]) if raw_wiki_root is not None else None,
+        "links_unchecked_wiki": sum(f.get("scope") not in ("raw", "raw_roots") for f in findings["links_unchecked"]) if wiki_root is not None else None,
+        "links_unchecked_raw": sum(f.get("scope") in ("raw", "raw_roots") for f in findings["links_unchecked"]) if raw_wiki_root is not None else None,
+        "links_raw": sum(f.get("scope") == "raw" for f in findings["links"]) if raw_wiki_root is not None else None,
+        "raw_ambiguous": len(findings["raw_ambiguous"]) if raw_wiki_root is not None else None,
+        "raw_unknown": len(findings["raw_unknown"]) if raw_wiki_root is not None else None,
+        "raw_version_unverified": len(findings["raw_version_unverified"]) if raw_wiki_root is not None else None,
+        "raw_paths_unchecked": len(findings["raw_paths_unchecked"]) if raw_wiki_root is not None else None,
+        "raw_outside": len(findings["raw_outside"]) if raw_wiki_root is not None else None,
         "suggested_pages": len(findings["suggested_pages"]),
     }
     return findings
+
+
+LINK_KIND_LABELS = {"symlink": "シンボリックリンク", "junction": "ジャンクション", "reparse": "名前の代理のリパースポイント",
+                    "hardlink": "ハードリンク"}
 
 
 def size_text(f: dict) -> str:
@@ -744,11 +846,30 @@ def render_text(findings: dict) -> str:
         ("unresolved_sources", "sources: が source ページを指していない",
          lambda f: f"  - {f['path']}  {f['source']}: "
          + ("ページがない" if f["reason"] == "missing" else f"type が {f.get('type')} のページを指している")),
-        ("missing_raw", "source ページの raw: の原本がない",
-         lambda f: f"  - {f['path']}  raw: {f['raw']}"),
+        ("missing_raw", "source ページの raw: に一致する原本がない（版・身元の不一致を含む）",
+         lambda f: f"  - {f['path']}  raw: {f['raw']}" +
+                   ("  不一致: " + "、".join(x["path"] + "（" + x["reason"] + "）" for x in f["mismatches"]) if f.get("mismatches") else "")),
         ("unknown_tags", "タグの体系にないタグ", lambda f: f"  - {f['path']}  {', '.join(f['tags'])}"),
         ("caption_corrections", "YouTube の字幕の訂正と留保の印、定義、confidence の食い違い",
          lambda f: f"  - {f['path']}:{f['line']}  {f['message']}"),
+        ("overview_stale", "元のページが変わった概要（/wiki:overview <ページ> --refresh で作り直す）",
+         lambda f: f"  - {f['page']}  （{f['sidecar']}）"),
+        ("overview_problems", "概要の破損、元のページの不在、読み取りの問題",
+         lambda f: f"  - {f['path']}  {f['message']}"),
+        ("links", "記事か記事までの道のリンク（読まずに飛ばした。プラグインは直さない。直し方は lint の手順の文書にある）",
+         lambda f: f"  - {f['path']}  （{LINK_KIND_LABELS.get(f['kind'], f['kind'])}）"),
+        ("links_unchecked", "リンクかを調べられなかった項目や確認できなかった raw の根の記録",
+         lambda f: f"  - {f['path']}" + (f"  {f['reason']}" if f.get("reason") else "")),
+        ("raw_ambiguous", "raw: の候補が複数ある（自動で選ばず、書き換えない）",
+         lambda f: f"  - {f['path']}  raw: {f['raw']}  候補: {', '.join(f['candidates'])}"),
+        ("raw_unknown", "raw: を確かめられない", lambda f: f"  - {f['path']}  raw: {f['raw']}  {f['reason']}"),
+        ("raw_outside", "raw: が記事の対象外を指す（読まずに飛ばした）",
+         lambda f: f"  - {f['path']}  raw: {f['raw']}  {f['reason']}" +
+                   ("  不一致: " + "、".join(x["path"] + "（" + x["reason"] + "）" for x in f["mismatches"]) if f.get("mismatches") else "")),
+        ("raw_version_unverified", "raw の版を確かめていない（raw_sha256 がないか値の数・形が合わない）",
+         lambda f: f"  - {f['path']}  raw: {f['raw']}"),
+        ("raw_paths_unchecked", "raw の範囲か途中の道を調べていない（--raw-root で根を指定する）",
+         lambda f: f"  - {f['path']}  raw: {f['raw']}  候補: {f['candidate']}" + ("  " + f["reason"] if f.get("reason") else "")),
     ]
 
     for key, label, formatter in sections:
@@ -773,6 +894,17 @@ def render_text(findings: dict) -> str:
         out.append("タグの検査はしていない（--allowed-tags にタグの体系を渡すと、体系にないタグを報告する）。")
         out.append("")
 
+    if findings["overview_problems"] is None:
+        out.append("概要の検査は完了していない（wiki のルートが渡されていないか、概要の一覧を作れない）。")
+        out.append("")
+
+    if s.get("links_raw") is None:
+        out.append("wiki の根を渡していないため、raw の側のリンクを調べていない。")
+        out.append("")
+    if s.get("links_wiki") is None:
+        out.append("wiki の側のリンクは調べていない。links は、検査できた範囲の知らせの件数である。")
+        out.append("")
+
     # None は検査していない項目なので、問題がないものとして扱う。
     if all(not v for k, v in s.items() if k != "total_pages"):
         out.append("問題は見つからなかった。")
@@ -794,11 +926,23 @@ def main():
                         help="タグの体系（SCHEMA.md の「タグの体系」に並ぶタグ）。カンマで区切る。渡すと、ここにないタグを報告する。"
                              "渡さないか空にすると、タグの検査はしない")
     parser.add_argument("--json", action="store_true", help="テキストの代わりに JSON を出力する。キーは英語のまま")
+    parser.add_argument("--raw-root", type=Path, help="利用者が決めた raw の根。そこから原本までの道も検査する")
+    parser.add_argument("--release-id", help="検査する公開版")
     args = parser.parse_args()
     if args.wiki is None:
         args.wiki = wiki_workspace.default_wiki_or_exit()
     # SCHEMA.md のないディレクトリ（ほかの用途の wiki/ など）は、初期化された wiki とみなさない（ADR-0019）。
     wiki_initialized.require_or_exit(args.wiki)
+    from wiki_apply import resolve_publication
+
+    try:
+        release = resolve_publication(args.wiki, args.release_id)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    if release:
+        if args.raw_root is not None:
+            parser.error("公開版の lint にライブの raw は指定できません")
+        args.wiki = release.root
 
     pages = collect_pages(args.wiki)
     required_fm = [f.strip() for f in args.required_fm.split(",") if f.strip()]
@@ -807,8 +951,11 @@ def main():
         allowed_tags = [t.strip() for t in args.allowed_tags.split(",") if t.strip()] or None
     findings = lint(pages, args.soft_cap, args.hard_cap, required_fm, args.suggest_pages, args.suggest_min,
                     args.soft_char_cap, args.hard_char_cap, index_entries=collect_index_entries(args.wiki),
-                    allowed_tags=allowed_tags, wiki_root=args.wiki)
+                    allowed_tags=allowed_tags, wiki_root=args.wiki, raw_root=args.raw_root, wiki_root_given=args.wiki)
 
+    if release:
+        resolve_publication(release.wiki, release.release_id)
+        findings["release_id"] = release.release_id
     if args.json:
         print(json.dumps(findings, indent=2, default=str, ensure_ascii=False))
     else:

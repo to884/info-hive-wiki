@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ja" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>グラフ層 | info-hive</title>
+  <link rel="stylesheet" href="assets/fluent2.css">
+  <link rel="stylesheet" href="assets/manual.css">
+  <link rel="stylesheet" href="assets/manual-print.css" media="print">
+  <script defer src="assets/manual-code.js"></script>
+</head>
+<body class="fui-FluentProvider">
+  <a class="skip-link fui-Link" href="#main">本文へ移動</a>
+  <header class="site-header">
+    <div class="shell"><a class="site-name fui-Link" href="index.html">info-hive</a></div>
+  </header>
+  <div class="shell reading-layout">
+    <nav class="contents" aria-label="目次">
+      <a class="fui-Link" href="index.html#toc">文書の目次へ戻る</a>
+    </nav>
+    <main class="page-content readme-content" id="main" tabindex="-1">
+<h1 id="グラフ層" class="fui-Title1">グラフ層</h1>
+<!-- page-summary:start -->
+<figure class="page-summary page-summary-flow">
+  <ol role="list" aria-label="概要">
+    <li><strong>ページの関係</strong><span>種類と根拠を記録</span></li>
+    <li><strong>グラフを作る</strong><span>点検して抽出</span></li>
+    <li><strong>関係を調べる</strong><span>つながりや経路を確認</span></li>
+  </ol>
+</figure>
+<!-- page-summary:end -->
+<p>wiki の Markdown から、必要に応じてグラフを作れます。グラフがあると、関係の種類と出典を持つ「型付きエッジ」を、プログラムから調べられます。正本は Markdown です。グラフはページから作り直せます。</p>
+<blockquote>
+<p>グラフ層はオプトイン方式です。<code>wiki/graph/ontology.yaml</code> がなければ、その wiki はグラフ層を導入する前の状態です。extract、lint、query のスクリプトは、どれも何も書き出さずに終了コード 1 で止まります。オントロジーのファイルをでっち上げてはなりません。先にグラフ層を初期化する（<a href="commands.html#wikigraph" class="fui-Link" data-inline=""><code>/wiki:graph</code></a> または <a href="commands.html#wikiinit" class="fui-Link" data-inline=""><code>/wiki:init</code></a> を使う）か、グラフ層なしで進めます。</p>
+</blockquote>
+<p>正本は Markdown のページです。次の図にある生成物は、いつでも削除して作り直せます。</p>
+<pre><code class="language-mermaid">flowchart LR
+  md[&quot;markdown pages + frontmatter + wikilinks&quot;] --&gt; lintg[&quot;wiki_graph_lint.py&quot;]
+  md --&gt; extract[&quot;wiki_graph_extract.py&quot;]
+  lintg -. validates .-&gt; extract
+  extract --&gt; nodes[&quot;nodes.jsonl&quot;]
+  extract --&gt; edges[&quot;edges.jsonl&quot;]
+  extract --&gt; sqlite[&quot;graph.sqlite&quot;]
+  extract --&gt; graphml[&quot;graph.graphml&quot;]
+  nodes --&gt; queryg[&quot;wiki_graph_query.py&quot;]
+  edges --&gt; queryg
+  sqlite --&gt; queryg
+  queryg --&gt; out[&quot;neighbors / edges / path / facts&quot;]
+</code></pre>
+<h2 id="グラフが表すもの" class="fui-Subtitle1">グラフが表すもの</h2>
+<p>extract を実行すると、次の3種類のエッジができます。</p>
+<ol>
+<li><strong>型付きの意味のエッジ。</strong> ページの frontmatter の <code>graph.relationships[]</code> で宣言したもの（<code>founded</code>、<code>proposed</code>、<code>depends_on</code> など）。どのエッジも、明示的な <code>source</code>（ソースページのスラッグ）、<code>evidence</code> の引用、<code>confidence</code>（high/medium/low）、<code>status</code>（current/historical/proposed/disputed/superseded）を持ちます。抽出スクリプトがこれらを勝手に作ることはありません。</li>
+<li><strong><code>mentions</code> エッジ。</strong> 本文の <code>[[wikilink]]</code> 1つにつき1本で、ページ内の重複はまとめられ、信頼度は <code>low</code> になります。目的のページを早く見つけるためのもので、型付きの関係の証拠にはなりません。</li>
+<li><strong><code>sourced_from</code> と <code>summarizes_raw</code> のエッジ。</strong> 前者はソースページ以外のページの <code>sources:</code> リストからソースページへ、後者はソースページの <code>raw:</code> フィールドから raw ファイルへ張られます。</li>
+</ol>
+<h2 id="frontmatter-のスキーマ" class="fui-Subtitle1">frontmatter のスキーマ</h2>
+<p>型付きの関係は、ページの frontmatter に書きます。</p>
+<pre><code class="language-yaml">graph:
+  node_id: person:praney-behl       # 任意。既定は &lt;node_type&gt;:&lt;slug&gt;
+  node_type: person                 # 任意。既定はオントロジーの対応付けで決まる
+  canonical: true                   # 複数のスラッグが1つのエンティティの別名になっている場合
+  aliases: [Praney, praney@example.com]
+  relationships:
+    - predicate: founded
+      object: company:seedblocks
+      source: praney-founder-context-dump
+      evidence: &quot;Solo technical founder and sole director...&quot;
+      confidence: high
+      status: current
+</code></pre>
+<p>関係に必須のフィールドは <code>predicate</code>、<code>object</code>、<code>source</code>、<code>evidence</code>、<code>confidence</code>、<code>status</code> です。<code>node_id</code> は <code>&lt;node_type&gt;:&lt;slug&gt;</code> の形をとります。</p>
+<h2 id="オントロジー" class="fui-Subtitle1">オントロジー</h2>
+<p><code>wiki/graph/ontology.yaml</code> は、グラフの仕様を決めるファイルです。<code>node_types[*].maps_from</code>（ページの <code>type</code> や <code>kind</code> をどのノード種別に対応させるか）と、<code>predicates[*]</code>（使える述語と、その <code>subject_types</code>、<code>object_types</code>、<code>requires_evidence</code>）を宣言します。<code>&quot;*&quot;</code> はワイルドカードです。分野固有の述語を追加するときはオントロジーを編集し、lint を再実行して、既存のエッジがオントロジーに合っているかを検証します。</p>
+<h2 id="型付きエッジと通常の-wikilink-の使い分け" class="fui-Subtitle1">型付きエッジと通常の wikilink の使い分け</h2>
+<p>特定のソースが関係をはっきり述べていて、証拠を引用でき、その述語が後のクエリで意味を持つなら、<strong>型付きエッジ</strong>を追加します。関係が暗黙的なもの、1つの引用に結びつけられないもの、<code>mentions</code> エッジにしかならないものには、通常の <strong><code>[[wikilink]]</code></strong> を使います。迷ったら wikilink を使います。lint は証拠の欠落を指摘するが、関係を控えめに書いたことを問題にはしません。</p>
+<h2 id="extractlintquery" class="fui-Subtitle1">extract、lint、query</h2>
+<pre><code class="language-bash"># まず型付きメタデータを検証する。lint はファイルを編集しない。
+uv run --script skills/info-hive/scripts/wiki_graph_lint.py wiki/
+
+# nodes.jsonl、edges.jsonl、graph.sqlite、graph.graphml にコンパイルする。
+uv run --script skills/info-hive/scripts/wiki_graph_extract.py wiki/
+
+# グラフをたどる。
+python skills/info-hive/scripts/wiki_graph_query.py wiki/ neighbors --node product:konvy
+python skills/info-hive/scripts/wiki_graph_query.py wiki/ edges    --subject person:stephanie-emmanouel
+python skills/info-hive/scripts/wiki_graph_query.py wiki/ path     --from person:praney-behl --to product:konvy
+python skills/info-hive/scripts/wiki_graph_query.py wiki/ facts    --about product:konvy
+</code></pre>
+<p><code>--json</code> は lint と query のどちらのコマンドでも使えます。同じ操作は、スラッシュコマンドの <a href="commands.html#wikigraph" class="fui-Link" data-inline=""><code>/wiki:graph</code></a> からも実行できます。回答では、必ず wiki ページとその raw ソースを出典として示します。グラフは読むページを探すために使い、根拠は該当するページとその原本で確認します。</p>
+<h2 id="生成物の扱い" class="fui-Subtitle1">生成物の扱い</h2>
+<div class="table-scroll" role="region" aria-label="表" tabindex="0">
+<table class="fui-Table">
+<thead class="fui-TableHeader">
+<tr class="fui-TableRow">
+<th class="fui-TableHeaderCell" scope="col">ファイル</th>
+<th class="fui-TableHeaderCell" scope="col">正本か</th>
+<th class="fui-TableHeaderCell" scope="col">既定の管理方法</th>
+</tr>
+</thead>
+<tbody class="fui-TableBody">
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>ontology.yaml</code></td>
+<td class="fui-TableCell">正本です。手で編集します。</td>
+<td class="fui-TableCell">git で管理します。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>nodes.jsonl</code></td>
+<td class="fui-TableCell">生成物</td>
+<td class="fui-TableCell">任意。PR でグラフの差分を確認したい場合は、git で管理します。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>edges.jsonl</code></td>
+<td class="fui-TableCell">生成物</td>
+<td class="fui-TableCell">任意。上と同じ</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>graph.sqlite</code></td>
+<td class="fui-TableCell">生成物</td>
+<td class="fui-TableCell">既定で gitignore する（大きいバイナリのため）</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>graph.graphml</code></td>
+<td class="fui-TableCell">生成物</td>
+<td class="fui-TableCell">既定で gitignore する</td>
+</tr>
+</tbody>
+</table>
+</div>
+<blockquote>
+<p>グラフの lint と抽出は、PyYAML 6.0.3 にバージョンを固定したメタデータを持ち、<code>uv run --script</code> で実行されます。手作業での <code>pip install</code> は不要です。グラフのクエリは Python の標準ライブラリだけを使います。</p>
+</blockquote>
+    </main>
+  </div>
+</body>
+</html>

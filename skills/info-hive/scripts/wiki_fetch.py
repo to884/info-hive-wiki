@@ -36,22 +36,26 @@ Markdown への変換、画像のダウンロード、frontmatter の出力を�
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import http.client
 import ipaddress
 import json
 import os
 import re
+import shutil
 import socket
 import struct
+import subprocess
 import sys
-import tempfile
 import time
 import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import nullcontext
 from datetime import datetime
+from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -61,6 +65,8 @@ import wiki_initialized  # noqa: E402
 import wiki_pages  # noqa: E402
 import wiki_rawcheck  # noqa: E402
 import wiki_youtube_url  # noqa: E402
+from wiki_fsguard import WriteGuard  # noqa: E402
+from wiki_raw_roots import record_raw_root  # noqa: E402
 
 FETCHED_BY = "wiki_fetch.py 0.1"
 USER_AGENT = "Mozilla/5.0 (compatible; info-hive-wiki-fetch/0.1; +https://github.com/to884/info-hive-wiki)"
@@ -71,6 +77,10 @@ FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
 class FetchError(Exception):
     """取得に失敗した。終了コード 2 になる。"""
+
+    def __init__(self, message: str, *, http_status: int | None = None):
+        super().__init__(message)
+        self.http_status = http_status
 
 
 class YouTubeRefused(Exception):
@@ -107,26 +117,28 @@ def refuse_youtube(url: str, where: str) -> None:
 # 取得
 # ---------------------------------------------------------------------------
 
-def is_private_host(host: str) -> bool:
+def is_private_host(host: str, *, unresolved_is_private: bool = False) -> bool:
     """ホストがループバック、プライベート、リンクローカルなどの内部のアドレスに解決されるか。
 
-    名前を解決できないときは False を返す（取得そのものが失敗する）。
+    名前を解決できないときは unresolved_is_private を返す。
     """
     if not host:
-        return False
+        return unresolved_is_private
     try:
         infos = socket.getaddrinfo(host, None)
     except (socket.gaierror, UnicodeError, OSError):
-        return False
+        return unresolved_is_private
+    resolved = False
     for info in infos:
         try:
             addr = ipaddress.ip_address(info[4][0].split("%", 1)[0])
         except ValueError:
             continue
+        resolved = True
         if (addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved
                 or addr.is_multicast or addr.is_unspecified):
             return True
-    return False
+    return unresolved_is_private and not resolved
 
 
 class _SafeRedirect(urllib.request.HTTPRedirectHandler):
@@ -199,7 +211,7 @@ def fetch(url: str, timeout: float, max_bytes: int, accept: str = "text/html,app
                 chunks.append(chunk)
             return b"".join(chunks), resp.geturl(), resp.headers.get("Content-Type", "")
     except urllib.error.HTTPError as exc:
-        raise FetchError(f"HTTP {exc.code}: {url}") from None
+        raise FetchError(f"HTTP {exc.code}: {url}", http_status=exc.code) from None
     except http.client.HTTPException as exc:
         raise FetchError(f"応答が壊れている: {url}（{exc!r}）") from None
     except (TimeoutError, OSError) as exc:
@@ -1148,14 +1160,6 @@ def check_slug(slug: str) -> None:
         raise ValueError(f"スラッグに Windows の予約された名前は使えない: {slug!r}")
 
 
-def inside(root: Path, path: Path) -> bool:
-    try:
-        path.resolve().relative_to(root.resolve())
-        return True
-    except ValueError:
-        return False
-
-
 def existing_sha(path: Path) -> str | None:
     text = path.read_text(encoding="utf-8-sig")
     m = FRONTMATTER_RE.match(text)
@@ -1180,13 +1184,13 @@ _REPLACE_RETRY_DELAYS = (0.05, 0.1, 0.15, 0.2, 0.25, 0.25)
 _RETRY_REPLACE_ON_WINDOWS = os.name == "nt"
 
 
-def replace_with_retry(src: Path, dst: Path) -> None:
-    """os.replace(src, dst) を行う。Windows で PermissionError になったときだけ、間を置いて試し直す。
+def replace_delays() -> tuple[float, ...]:
+    return _REPLACE_RETRY_DELAYS if _RETRY_REPLACE_ON_WINDOWS else ()
 
-    ほかの例外は試し直さずに上げる。試し直しても失敗したら、最後の PermissionError を上げる。
-    ファイルは消さない。失敗したときの後始末は呼び出し側が行う。
-    """
-    for delay in _REPLACE_RETRY_DELAYS if _RETRY_REPLACE_ON_WINDOWS else ():
+
+def replace_with_retry(src: Path, dst: Path) -> None:
+    """作業用のファイルの名前を変える。Windows の一時的なアクセス拒否は再試行する。"""
+    for delay in replace_delays():
         try:
             os.replace(src, dst)
             return
@@ -1195,88 +1199,76 @@ def replace_with_retry(src: Path, dst: Path) -> None:
     os.replace(src, dst)
 
 
-def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text: str,
-                  images: list[tuple[str, bytes]]) -> None:
-    """本文と画像を書く。途中で失敗したら、前の本文と画像をそのまま残す。
+def raw_version(info: os.stat_result | None) -> tuple | None:
+    if info is None:
+        return None
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_mode
 
-    新しい本文と画像は一時の場所に書き、古い画像を退避してから、新しい画像と本文を置く。
-    どこかで失敗したら、置いた新しい画像を消して、退避した古い画像を戻す。
-    名前の変更（退避、配置、本文の置き換え、戻し）は replace_with_retry で行う。
-    退避の場所は呼び出しごとに新しく作り、前の呼び出しが残した退避の場所は使わない。
-    退避した古い画像を消すのは、本文を置き換えたあとだけである。戻しきれなかった古い画像は、
-    ただ 1 つの写しなので退避の場所に残し、その場所を例外の注記（add_note）で知らせる。
-    書き込み先はすべて RAW_ROOT の中に限り、シンボリックリンクを通して外に書かない。
-    RAW_ROOT そのものは作らない。初期化（init_wiki.py）が作る（ADR-0019）。
-    """
-    if not raw_root.is_dir():
-        raise FileNotFoundError(f"raw のルートがない: {raw_root}")
-    pid = os.getpid()
-    tmp = raw_root / f".{slug}.md.{pid}.tmp"
-    staging = asset_dir.parent / f".{slug}.{pid}.new"
-    # 退避の場所（.<スラッグ>.<プロセス ID>.<乱数>.old）は、古い画像があるときに mkdtemp で作る。
-    backup: Path | None = None
-    if target.is_symlink():
-        raise ValueError(f"保存先がシンボリックリンクになっている: {target}")
-    for path in [tmp, asset_dir] + [asset_dir / name for name, _ in images]:
-        if path.is_symlink():
-            if path == asset_dir:
-                raise ValueError(f"保存先がシンボリックリンクになっている: {path}")
-            path.unlink()
-        if not inside(raw_root, path):
-            raise ValueError(f"保存先が RAW_ROOT の外になる: {path}")
-    old_files = sorted(asset_dir.glob(f"{slug}-*")) if asset_dir.is_dir() else []
-    placed: list[Path] = []
+
+def check_outputs(guard: WriteGuard, target: Path, asset_dir: Path, slug: str,
+                  images: list[tuple[str, bytes]]) -> list[Path]:
+    guard.file_info(target)
+    old_files = sorted(asset_dir.glob(f"{slug}-*")) if guard.directory_info(asset_dir) else []
+    for old in old_files:
+        guard.file_info(old)
+    for name, _ in images:
+        if Path(name).name != name:
+            raise ValueError(f"画像の名前にディレクトリを指定できない: {name}")
+        guard.file_info(asset_dir / name)
+    return old_files
+
+
+def write_outputs(raw_root: Path, target: Path, asset_dir: Path, slug: str, text: str,
+                  images: list[tuple[str, bytes]], *, guard: WriteGuard | None = None) -> None:
+    """本文と画像を保存する。失敗時は退避した画像を戻す。"""
+    guard = guard or WriteGuard(raw_root)
+    old_files = check_outputs(guard, target, asset_dir, slug, images)
+    delays = replace_delays()
+    staging = backup = None
     moved: list[tuple[Path, Path]] = []
+    placed: list[tuple[Path, Path]] = []
     replaced = False
     try:
-        with tmp.open("w", encoding="utf-8", newline="") as f:
-            f.write(text)
         if images:
-            staging.mkdir(parents=True, exist_ok=True)
+            guard.ensure_directory(asset_dir)
+            staging = guard.temporary_directory(asset_dir.parent, prefix=f".{slug}.", suffix=".new")
             for name, data in images:
-                (staging / name).write_bytes(data)
+                guard.write_bytes(staging / name, data)
         if old_files:
-            # 前の呼び出しが戻しきれずに残した退避の場所（同じプロセス ID のこともある）を使い回すと、
-            # そこにある古い画像を上書きするか、後始末で消す。毎回、まだない名前の場所を作る。
-            backup = Path(tempfile.mkdtemp(prefix=f".{slug}.{pid}.", suffix=".old", dir=asset_dir.parent))
+            backup = guard.temporary_directory(asset_dir.parent, prefix=f".{slug}.", suffix=".old")
             for old in old_files:
                 dest = backup / old.name
-                # 移す前に記録する。移した直後に止められても、戻しと注記がその画像を知っている。
                 moved.append((dest, old))
-                replace_with_retry(old, dest)
-        if images:
-            asset_dir.mkdir(parents=True, exist_ok=True)
-            for name, _data in images:
-                replace_with_retry(staging / name, asset_dir / name)
-                placed.append(asset_dir / name)
-        replace_with_retry(tmp, target)
+                guard.replace_file(old, dest, delays=delays)
+        for name, _ in images:
+            source = staging / name
+            dest = asset_dir / name
+            placed.append((source, dest))
+            guard.replace_file(source, dest, delays=delays)
+        guard.write_bytes(target, text.encode("utf-8"), replace=True, delays=delays)
         replaced = True
     except BaseException:
         try:
-            for path in placed:
-                if path.exists():
-                    path.unlink()
+            for source, dest in placed:
+                if guard.file_info(source) is None:
+                    guard.remove_file(dest)
             for dest, original in moved:
-                if dest.exists():
-                    replace_with_retry(dest, original)
+                if guard.file_info(dest) is not None:
+                    guard.replace_file(dest, original, delays=delays)
         except BaseException as exc:
-            if any(dest.exists() for dest, _original in moved):
-                exc.add_note(f"古い画像を戻しきれなかった。戻していない古い画像を {backup} に残した。"
-                             f"{asset_dir} に移すと元に戻る")
+            if backup is not None:
+                exc.add_note(f"古い画像を戻しきれなかった。退避先 {backup} を確認する。元の場所は {asset_dir}")
             raise
         raise
     finally:
-        if tmp.exists():
-            tmp.unlink()
-        # 退避の場所の中身を消すのは、本文を置き換えたあとだけにする。失敗したときに残っているのは、
-        # 戻しきれなかった古い画像のただ 1 つの写しなので消さない。空になった場所だけを消す。
-        for d, drop_files in ((staging, True), (backup, replaced)):
-            if d is not None and d.is_dir():
-                if drop_files:
-                    for leftover in d.iterdir():
-                        leftover.unlink()
-                if not any(d.iterdir()):
-                    d.rmdir()
+        for directory, files, drop in ((staging, (staging / name for name, _ in images), True),
+                                       (backup, (path for path, _ in moved), replaced)):
+            if directory is not None and guard.directory_info(directory):
+                if drop:
+                    for path in files:
+                        guard.remove_file(path)
+                if not any(directory.iterdir()):
+                    directory.rmdir()
 
 
 MAX_TIMEOUT = 86400.0  # --timeout の上限（秒）。大きすぎる値は、ソケットの待ち時間で OverflowError になる。
@@ -1315,94 +1307,43 @@ def has_old_work_dir(args, target: Path) -> bool:
         return False
 
 
-def build(args) -> tuple[int, dict]:
-    raw_root: Path = args.raw_root
-    check_slug(args.slug)
-    target = raw_root / f"{args.slug}.md"
-    asset_dir = raw_root / "assets" / args.slug
-    if not inside(raw_root, target) or not inside(raw_root, asset_dir):
-        raise ValueError(f"保存先が RAW_ROOT の外になる: {target}")
+@dataclass
+class PageContent:
+    """HTTP とブラウザで共有する、画像を保存する前の変換結果。"""
 
-    wiki = getattr(args, "wiki", None)
-    html_file = getattr(args, "html_file", None)
-    # YouTube の URL は、Web ページの経路で取らない（ADR-0027）。途中の取り込みの再開よりも先に止める。
-    refuse_youtube(args.url, "渡された URL ")
-    if getattr(args, "page_url", None):
-        refuse_youtube(args.page_url, "--page-url ")
-    # 途中の取り込みは、取得の前に再開する。続けるかは写しと raw の状態だけで決まるので、ページを取り直さない。
-    # 取り直して原文を比べると、--html-file で取ったページ（DOM のハッシュ）や、取得のたびに変わるページでは、
-    # 写しがそろっていても内容が違うとして止まり、ネットにつながらなければ取得の失敗で止まる。
-    # --html-file は、渡した内容で取るという入力なので、ここでは続けずに、読んで比べる（下の枝）。
-    # 0.14.1 までの版が書いた写しは、resumable_fetch が続けられないものとする（どちらの枝でも続けない）。
-    if wiki is not None and not html_file and not args.force and target.exists():
-        saved = wiki_rawcheck.resumable_fetch(wiki, args.slug, target)
-        if saved is not None and saved["url"] == args.url:
-            # 前の版で始めた取り込みの転送先が YouTube なら、続けずに止まる（ADR-0027）。
-            refuse_youtube(saved.get("final_url") or "", "前の取得の最後の URL ")
-            # 前の取得の出力（警告を含む）に、取得しなかったことと、どの段まで進んだかを足して返す。
-            result = {"path": target.as_posix(), "url": args.url, "final_url": saved["final_url"],
-                      "source_sha256": saved["source_sha256"], "unchanged": True, "fetch_skipped": True,
-                      "work_dir": True}
-            result.update(wiki_rawcheck.resume_fields(wiki, args.slug, saved))
-            return 0, result
+    encoding: str
+    lang: str
+    how: str
+    title: str
+    blocks: list[str]
+    images: list[dict]
+    removed: list[dict]
+    warnings: list[str]
 
-    # 内部のアドレスを取るかは、ユーザーが渡した URL で決める。公開のページが内部のアドレスへ
-    # リダイレクトしても、その先は取らない。ユーザーが内部のページを直接渡したときだけ許す。
-    block_private = not is_private_host(urllib.parse.urlsplit(args.url).hostname or "")
-    if html_file:
-        # ブラウザで保存した HTML。基準の URL は、本文を取ったときのアドレス欄の URL にする。
-        check_url(args.page_url)
-        data = Path(html_file).read_bytes()
-        if len(data) > args.max_bytes:
-            raise FetchError(f"HTML のファイルが大きすぎる（{len(data):,} バイト）")
-        try:
-            data.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise ValueError(f"--html-file は UTF-8 で保存した HTML にする（{exc.reason}、{exc.start} バイト目）") from None
-        final_url, content_type = args.page_url, "text/html; charset=utf-8"
-    else:
-        data, final_url, content_type = fetch(args.url, args.timeout, args.max_bytes, block_private=block_private,
-                                              refuse_youtube_redirect=True)
-        refuse_youtube(final_url, "最後の URL ")
+    def is_short(self, keep_noise: bool = False) -> bool:
+        blocks = self.blocks if keep_noise else apply_block_rules(self.blocks, self.title)[0]
+        body = IMG_MARK_RE.sub("", "\n\n".join(blocks))
+        return len(re.sub(r"\s+", "", body)) < 500
+
+
+def check_html_type(content_type: str) -> None:
     ctype = content_type.split(";")[0].strip().lower()
     if ctype and ctype not in ("text/html", "application/xhtml+xml", "text/plain", "application/xml", "text/xml"):
         raise FetchError(f"HTML のページではない（Content-Type: {ctype}）。PDF などは保存してから通常の手順で取り込む")
-    sha = hashlib.sha256(data).hexdigest()
-    # source_sha256_of は、どの取得か（dom はブラウザで保存した HTML）を示す。続きの手順は、本文が短いときに
-    # ブラウザで取り直すかを、これで決める（dom なら、もうブラウザで取ってある）。
-    result: dict = {"path": target.as_posix(), "url": args.url, "final_url": final_url, "source_sha256": sha,
-                    "source_sha256_of": "dom" if html_file else "html", "unchanged": False, "warnings": []}
-    if has_old_work_dir(args, target):
-        # 原文が同じでも違っても（終了コード 3）、続けられない旧版の写しがあることを知らせる。
-        result["old_work_dir"] = True
 
-    if target.exists() and not args.force:
-        old = existing_sha(target)
-        if old == sha:
-            result["unchanged"] = True
-            if wiki is not None:
-                # 写しがそろい（そろった印は raw を書いたあとに置くので、raw と同じ取得で書いたもの）、raw の
-                # frontmatter を書き換えていないときだけ、途中から続けられる。
-                saved = wiki_rawcheck.resumable_fetch(wiki, args.slug, target)
-                result["work_dir"] = saved is not None
-                if saved is not None:
-                    result.update(wiki_rawcheck.resume_fields(wiki, args.slug, saved))
-            return 0, result
-        suggestion = f"{args.slug}-{datetime.now().strftime('%Y%m%d')}"
-        result["suggested_slug"] = suggestion
-        result["error"] = "existing_differs"
-        return 3, result
 
+def prepare_page(data: bytes, content_type: str, final_url: str, keep_noise: bool) -> PageContent:
+    """本文の推定と変換を行う。まだファイルも画像も保存しない。"""
+    check_html_type(content_type)
     html_text, encoding = decode_html(data, content_type)
     doc = parse_html(html_text)
-    keep_noise = getattr(args, "keep_noise", False)
-    removed_by_rule: list[dict] = [] if keep_noise else drop_mediawiki_parts(doc)
+    removed = [] if keep_noise else drop_mediawiki_parts(doc)
     html_node = next((n for n in doc.iter() if n.tag == "html"), None)
     lang = (html_node.attrs.get("lang") or html_node.attrs.get("xml:lang") or "").strip().lower() if html_node else ""
     root, how = choose_root(doc)
+    warnings = []
     if how == "guess":
-        result["warnings"].append("article と main がないので、段落の多い要素を本文と推定した。雑音が残っていれば削る")
-
+        warnings.append("article と main がないので、段落の多い要素を本文と推定した。雑音が残っていれば削る")
     base_tag = next((n for n in doc.iter() if n.tag == "base" and n.attrs.get("href")), None)
     base_url = urllib.parse.urljoin(final_url, base_tag.attrs["href"]) if base_tag else final_url
     conv = Converter(base_url)
@@ -1414,15 +1355,244 @@ def build(args) -> tuple[int, dict]:
         conv.heading_shift = 1
     blocks = conv.blocks(root)
     title = _clean_inline(text_of(conv.title_node)) if conv.title_node is not None else ""
-    # 「1. Datatypes In SQLite」のような節の番号は題名に含めない。
-    title = _SECTION_NUMBER_RE.sub("", title)
-    if not title:
-        title = page_title
+    title = _SECTION_NUMBER_RE.sub("", title) or page_title
     if not title:
         og = next((n for n in doc.iter() if n.tag == "meta" and n.attrs.get("property") == "og:title"), None)
         title = _clean_inline(og.attrs.get("content", "")) if og else ""
     if not title:
-        result["warnings"].append("題名が見つからない。frontmatter の title を埋める")
+        warnings.append("題名が見つからない。frontmatter の title を埋める")
+    return PageContent(encoding, lang, how, title, blocks, conv.images, removed, warnings)
+
+
+EXTENSION_TOKEN = "PLAYWRIGHT_MCP_EXTENSION_TOKEN"
+
+
+def windows_user_extension_token() -> str | None:
+    """起動済みの Windows アプリから、後で設定されたユーザー環境変数を読む。"""
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            value, _ = winreg.QueryValueEx(key, EXTENSION_TOKEN)
+    except OSError:
+        return None
+    return value if isinstance(value, str) else None
+
+
+def browser_environment(*, extension: bool = False) -> dict[str, str]:
+    """診断用の変数を除き、拡張のトークンは接続する経路にだけ渡す。"""
+    env = {key: value for key, value in os.environ.items()
+           if key.upper() not in ("DEBUG", "DEBUG_FILE", "NODE_OPTIONS", "PWDEBUG")
+           and (extension or key.upper() != EXTENSION_TOKEN)
+           and not key.upper().startswith(("PWTEST_", "PW_LOG", "PW_TRACE", "PW_PROFILE", "PW_INSTRUMENT"))}
+    if extension and sys.platform == "win32" and EXTENSION_TOKEN not in env:
+        token = windows_user_extension_token()
+        if token is not None:
+            env[EXTENSION_TOKEN] = token
+    return env
+
+
+def fetch_browser(url: str, timeout: float, max_bytes: int, block_private: bool, *, browser: str = "system",
+                  browser_session: str = "existing", capture_images: dict | None = None,
+                  max_images: int = 50) -> tuple[bytes, str, str]:
+    """固定した Playwright を別の環境で動かし、DOM をメモリで受け取る。"""
+    uv = shutil.which("uv")
+    if uv is None:
+        raise FetchError("Playwright の自動取得には uv が必要である。uv を導入するか、--html-file と --page-url で HTML を渡す")
+    command = [uv, "run", "--script", str(Path(__file__).with_name("wiki_fetch_browser.py")),
+               url, "--timeout", str(timeout), "--max-bytes", str(max_bytes),
+               "--browser-session", browser_session, "--max-images", str(max_images), "--browser", browser]
+    if block_private:
+        command.append("--block-private")
+    env = {**browser_environment(extension=browser_session == "existing"), "PYTHONIOENCODING": "utf-8"}
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", env=env,
+                              timeout=timeout + 360, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise FetchError(f"Playwright を実行できない: {exc}。--html-file と --page-url で HTML を渡せる") from None
+    try:
+        result = json.loads(done.stdout)
+        if not isinstance(result, dict):
+            raise ValueError("結果が JSON のオブジェクトでない")
+        if done.returncode != 0:
+            if result.get("kind") == "youtube":
+                raise YouTubeRefused(result["url"], "ブラウザの移動先 ")
+            raise ValueError(result.get("error", "ブラウザが失敗した"))
+        html, final_url = result["html"], result["final_url"]
+        if not isinstance(html, str) or not isinstance(final_url, str):
+            raise ValueError("DOM または URL が文字列でない")
+        check_url(final_url)
+        refuse_youtube(final_url, "ブラウザの最後の URL ")
+        if block_private and is_private_host(urllib.parse.urlsplit(final_url).hostname or ""):
+            raise ValueError("ブラウザの最後の URL が内部のアドレスである")
+        data = html.encode("utf-8")
+        if len(data) > max_bytes:
+            raise ValueError(f"DOM が {max_bytes:,} バイトを超えた")
+        if browser_session == "existing":
+            # ブラウザと同じ WHATWG URL の正規化を Node 側で行う。Python で異なる規則を重ねない。
+            if result.get("request_url") != url or result.get("matched_url") != final_url:
+                raise ValueError("要求した URL と既存タブの URL が一致しない")
+            images = result.get("images", [])
+            if not isinstance(images, list) or len(images) > max_images:
+                raise ValueError("既存タブの画像の結果が不正である")
+            total = 0
+            accepted = {}
+            origin = urllib.parse.urlsplit(final_url)
+            for img in images:
+                if not isinstance(img, dict) or not isinstance(img.get("url"), str):
+                    raise ValueError("既存タブの画像の形式が不正である")
+                image_url = img["url"]
+                image_origin = urllib.parse.urlsplit(image_url)
+                if (image_origin.scheme, image_origin.netloc) != (origin.scheme, origin.netloc):
+                    raise ValueError("既存タブの画像が別の origin を指している")
+                encoded = img["base64"]
+                if not isinstance(encoded, str) or len(encoded) > (max_bytes + 2) // 3 * 4:
+                    raise ValueError("既存タブの画像が大きすぎる")
+                payload = base64.b64decode(encoded, validate=True)
+                total += len(payload)
+                if total > max_bytes or not payload.startswith(b"\x89PNG\r\n\x1a\n"):
+                    raise ValueError("既存タブの画像が PNG ではない、または大きすぎる")
+                accepted[image_url] = payload
+            if capture_images is not None:
+                capture_images.update(accepted)
+    except (KeyError, ValueError) as exc:
+        detail = str(exc) if done.stdout.strip() else done.stderr.strip()[-1500:]
+        raise FetchError(f"Playwright で本文を取得できない: {detail}。--html-file と --page-url で HTML を渡せる") from None
+    return data, final_url, "text/html; charset=utf-8"
+
+
+def build(args) -> tuple[int, dict]:
+    raw_root: Path = args.raw_root
+    check_slug(args.slug)
+    target = raw_root / f"{args.slug}.md"
+    asset_dir = raw_root / "assets" / args.slug
+    wiki = getattr(args, "wiki", None)
+    html_file = getattr(args, "html_file", None)
+    # YouTube の URL は、Web ページの経路で取らない（ADR-0027）。途中の取り込みの再開よりも先に止める。
+    refuse_youtube(args.url, "渡された URL ")
+    if getattr(args, "page_url", None):
+        refuse_youtube(args.page_url, "--page-url ")
+    if wiki is None:
+        raise ValueError("raw の根を記録するために --wiki を指定する")
+    if args.slug.startswith("."):
+        raise ValueError("Web のスラッグはピリオドで始められない")
+    raw_guard, wiki_guard = WriteGuard(raw_root), WriteGuard(wiki)
+    wd = wiki_rawcheck.work_dir(wiki, args.slug)
+    initial = raw_version(raw_guard.file_info(target))
+    raw_guard.directory_info(asset_dir)
+    wiki_rawcheck.check_image_backups(raw_guard, args.slug)
+    has_work = wiki_rawcheck.check_work_files(wiki_guard, wd)
+    # 途中の取り込みは、取得の前に再開する。続けるかは写しと raw の状態だけで決まるので、ページを取り直さない。
+    # 取り直して原文を比べると、--html-file で取ったページ（DOM のハッシュ）や、取得のたびに変わるページでは、
+    # 写しがそろっていても内容が違うとして止まり、ネットにつながらなければ取得の失敗で止まる。
+    # --html-file は、渡した内容で取るという入力なので、ここでは続けずに、読んで比べる（下の枝）。
+    # 0.14.1 までの版が書いた写しは、resumable_fetch が続けられないものとする（どちらの枝でも続けない）。
+    if has_work and initial is not None and not html_file and not getattr(args, "browser_only", False) and not args.force:
+        with wiki_rawcheck.web_write_locks(wiki_guard, raw_guard, args.slug):
+            if raw_version(raw_guard.file_info(target)) != initial:
+                raise ValueError("取得前に raw が変わった。いまの原本を確かめてやり直す")
+            wiki_rawcheck.check_image_backups(raw_guard, args.slug)
+            wiki_rawcheck.check_work_files(wiki_guard, wd)
+            saved = wiki_rawcheck.resumable_fetch(wiki, args.slug, target)
+            if saved is not None and saved["url"] == args.url:
+                # 前の版で始めた取り込みの転送先が YouTube なら、続けずに止まる（ADR-0027）。
+                refuse_youtube(saved.get("final_url") or "", "前の取得の最後の URL ")
+                # 前の取得の出力（警告を含む）に、取得しなかったことと、どの段まで進んだかを足して返す。
+                result = {"path": target.as_posix(), "url": args.url, "final_url": saved["final_url"],
+                          "source_sha256": saved["source_sha256"], "unchanged": True, "fetch_skipped": True,
+                          "work_dir": True}
+                result.update(wiki_rawcheck.resume_fields(wiki, args.slug, saved))
+                return 0, result
+
+    # 内部のアドレスを取るかは、ユーザーが渡した URL で決める。公開のページが内部のアドレスへ
+    # リダイレクトしても、その先は取らない。ユーザーが内部のページを直接渡したときだけ許す。
+    block_private = not is_private_host(urllib.parse.urlsplit(args.url).hostname or "")
+    keep_noise = getattr(args, "keep_noise", False)
+    method = "html_file" if html_file else "http"
+    fallback_reason = None
+    captured_images: dict[str, bytes] = {}
+    browser_session = getattr(args, "browser_session", "existing")
+
+    def from_browser():
+        return fetch_browser(args.url, args.timeout, args.max_bytes, block_private,
+                             browser=getattr(args, "browser", "system"), browser_session=browser_session,
+                             capture_images=captured_images, max_images=0 if args.no_images else args.max_images)
+    if html_file:
+        # ブラウザで保存した HTML。基準の URL は、本文を取ったときのアドレス欄の URL にする。
+        check_url(args.page_url)
+        data = Path(html_file).read_bytes()
+        if len(data) > args.max_bytes:
+            raise FetchError(f"HTML のファイルが大きすぎる（{len(data):,} バイト）")
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"--html-file は UTF-8 で保存した HTML にする（{exc.reason}、{exc.start} バイト目）") from None
+        final_url, content_type = args.page_url, "text/html; charset=utf-8"
+    elif getattr(args, "browser_only", False):
+        data, final_url, content_type = from_browser()
+        method, fallback_reason = "playwright", "explicit"
+    else:
+        try:
+            data, final_url, content_type = fetch(args.url, args.timeout, args.max_bytes, block_private=block_private,
+                                                  refuse_youtube_redirect=True)
+        except FetchError as exc:
+            if not getattr(args, "browser_fallback", False) or exc.http_status not in (401, 403):
+                raise
+            fallback_reason = f"http_{exc.http_status}"
+            data, final_url, content_type = from_browser()
+            method = "playwright"
+        refuse_youtube(final_url, "最後の URL ")
+    check_html_type(content_type)
+    page = None
+    if not html_file and method == "http" and getattr(args, "browser_fallback", False):
+        page = prepare_page(data, content_type, final_url, keep_noise)
+        if page.is_short(keep_noise):
+            fallback_reason = "short_body"
+            data, final_url, content_type = from_browser()
+            method = "playwright"
+            page = prepare_page(data, content_type, final_url, keep_noise)
+    source_kind = "dom" if method in ("html_file", "playwright") else "html"
+    sha = hashlib.sha256(data).hexdigest()
+    # source_sha256_of は、どの取得か（dom はブラウザで保存した HTML）を示す。続きの手順は、本文が短いときに
+    # ブラウザで取り直すかを、これで決める（dom なら、もうブラウザで取ってある）。
+    result: dict = {"path": target.as_posix(), "url": args.url, "final_url": final_url, "source_sha256": sha,
+                    "source_sha256_of": source_kind, "fetch_method": method, "unchanged": False,
+                    "warnings": []}
+    if fallback_reason:
+        result["browser_fallback_reason"] = fallback_reason
+    if method == "playwright":
+        result["browser_session"] = browser_session
+    if has_old_work_dir(args, target):
+        # 原文が同じでも違っても（終了コード 3）、続けられない旧版の写しがあることを知らせる。
+        result["old_work_dir"] = True
+
+    if initial is not None and not args.force:
+        has_work = wiki_rawcheck.check_work_files(wiki_guard, wd)
+        with wiki_rawcheck.web_write_locks(wiki_guard, raw_guard, args.slug) if has_work else nullcontext():
+            if raw_version(raw_guard.file_info(target)) != initial:
+                raise ValueError("取得中に raw が変わった。いまの原本を確かめてやり直す")
+            wiki_rawcheck.check_image_backups(raw_guard, args.slug)
+            if has_work:
+                wiki_rawcheck.check_work_files(wiki_guard, wd)
+            old = existing_sha(target)
+            if raw_version(raw_guard.file_info(target)) != initial:
+                raise ValueError("既存の raw を読んでいる間に版が変わった")
+            if old == sha:
+                result["unchanged"] = True
+                saved = wiki_rawcheck.resumable_fetch(wiki, args.slug, target) if has_work else None
+                result["work_dir"] = saved is not None
+                if saved is not None:
+                    result.update(wiki_rawcheck.resume_fields(wiki, args.slug, saved))
+                return 0, result
+            suggestion = f"{args.slug}-{datetime.now().strftime('%Y%m%d')}"
+            result["suggested_slug"] = suggestion
+            result["error"] = "existing_differs"
+            return 3, result
+
+    page = page or prepare_page(data, content_type, final_url, keep_noise)
+    result["warnings"].extend(page.warnings)
+    encoding, lang, how, title = page.encoding, page.lang, page.how, page.title
+    blocks, removed_by_rule = page.blocks, page.removed
 
     # 画像を保存する。
     # 画像も同じ方針で取る。ユーザーが内部のページを渡したときだけ、内部のアドレスの画像も取る。
@@ -1433,7 +1603,7 @@ def build(args) -> tuple[int, dict]:
     pending: list[tuple[str, bytes]] = []   # (ファイル名, 中身)。本文を書く直前にまとめて書く。
     number = 0
     attempts = 0
-    for index, img in enumerate(conv.images):
+    for index, img in enumerate(page.images):
         url, alt = img["url"], img["alt"]
         if not url or url.startswith("data:"):
             dropped.append({"url": url[:60], "alt": alt, "reason": "data_uri" if url else "no_src"})
@@ -1454,10 +1624,16 @@ def build(args) -> tuple[int, dict]:
             images_out.append({"path": "", "url": url, "alt": alt,
                                "status": "not_downloaded" if args.no_images else "over_max_images"})
             continue
-        attempts += 1
         try:
-            img_data, img_final, img_type = fetch(url, args.timeout, args.max_bytes, accept="image/*,*/*;q=0.5",
-                                                  block_private=block_private)
+            if method == "playwright" and browser_session == "existing":
+                if url not in captured_images:
+                    raise FetchError("普段のブラウザの読み込み済み画像を取得できなかった。認証なしの再取得はしない")
+                attempts += 1
+                img_data, img_final, img_type = captured_images[url], url, "image/png"
+            else:
+                attempts += 1
+                img_data, img_final, img_type = fetch(url, args.timeout, args.max_bytes, accept="image/*,*/*;q=0.5",
+                                                      block_private=block_private)
         except (FetchError, ValueError) as exc:
             replacements[index] = f"![{_alt_text(alt)}]({_md_url(url)})（未取得）"
             images_out.append({"path": "", "url": url, "alt": alt, "status": "failed", "error": str(exc)})
@@ -1496,13 +1672,16 @@ def build(args) -> tuple[int, dict]:
         "title": title,
         "fetched_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "source_sha256": sha,
-        "source_sha256_of": "dom" if html_file else "html",
+        "source_sha256_of": source_kind,
+        "fetch_method": method,
         "source_lang": lang,
         "translated_by": "",
         "fetched_by": FETCHED_BY,
     }
     if final_url != args.url:
         meta["final_url"] = final_url
+    if method == "playwright":
+        meta["browser_session"] = browser_session
     fm = "---\n" + "".join(f"{k}: {format_fm_value(v)}\n" for k, v in meta.items()) + "---\n"
     text = fm + "\n" + (f"# {title}\n\n" if title else "") + body + "\n"
 
@@ -1542,19 +1721,19 @@ def build(args) -> tuple[int, dict]:
     # 書いたものである。raw を書けずに止まると（--force の取り直しで、前の raw が残るときも）、写しはそろわず、
     # 取り直しは work_dir を偽にする。写しがそろったかは、fetched.md と、JSON として読める fetch.json の両方で
     # 判定する（wiki_rawcheck.work_dir_complete）。
-    tmp = None
-    if wiki is not None:
+    record_raw_root(wiki, raw_guard.root, writer="wiki_fetch")
+    with wiki_rawcheck.web_write_locks(wiki_guard, raw_guard, args.slug):
+        if raw_version(raw_guard.file_info(target)) != initial:
+            raise ValueError("取得中に raw が変わった。いまの原本を確かめてやり直す")
+        wiki_rawcheck.check_image_backups(raw_guard, args.slug)
+        check_outputs(raw_guard, target, asset_dir, args.slug, pending)
         wiki_rawcheck.remove_work_dir(wiki, args.slug)
-        wd = wiki_rawcheck.work_dir(wiki, args.slug)
-        wd.mkdir(parents=True)
+        wiki_guard.ensure_directory(wd)
         result["work_dir"] = True
-        (wd / "fetched.md").write_bytes(text.encode("utf-8"))
-        tmp = wd / "fetch.json.tmp"
-        tmp.write_bytes(json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"))
-    write_outputs(raw_root, target, asset_dir, args.slug, text, pending)
-    if tmp is not None:
-        # 書いた直後の fetch.json.tmp は、ウイルス対策の検査が開いていることがある（write_outputs と同じ理由）。
-        replace_with_retry(tmp, tmp.with_name("fetch.json"))
+        wiki_guard.write_bytes(wd / "fetched.md", text.encode("utf-8"), replace=True, delays=replace_delays())
+        write_outputs(raw_root, target, asset_dir, args.slug, text, pending, guard=raw_guard)
+        wiki_guard.write_bytes(wd / "fetch.json", json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"),
+                               replace=True, delays=replace_delays())
     return 0, result
 
 
@@ -1643,11 +1822,21 @@ def main(argv: list[str] | None = None) -> int:
                         help="URL を取得する代わりに、ブラウザで保存した HTML（UTF-8）を読む。--page-url と一緒に使う")
     parser.add_argument("--page-url",
                         help="--html-file の本文を取ったときのブラウザのアドレス欄の URL。相対リンクと画像の基準にする")
+    parser.add_argument("--browser-fallback", action="store_true",
+                        help="本文が 500 文字未満、または HTTP 401/403 のとき、Playwright で一度だけ取得する（uv が必要）")
+    parser.add_argument("--browser", choices=("system", "chromium", "chrome", "msedge"), default="system",
+                        help="Playwright で使うブラウザ（既定: system。Windows の URL の既定アプリを使う）")
+    parser.add_argument("--browser-session", choices=("existing", "isolated"), default="existing",
+                        help="既定は普段のブラウザの許可済みタブを読む。isolated は独立したブラウザで取得する")
+    parser.add_argument("--browser-only", action="store_true",
+                        help="HTTP では取得せず、ブラウザの本文を使う（ログインが必要と分かっているページ向け）")
     args = parser.parse_args(argv)
     if args.html_file and not args.page_url:
         parser.error("--html-file には --page-url を付ける")
     if args.page_url and not args.html_file:
         parser.error("--page-url は --html-file と一緒に使う")
+    if args.browser_only and args.html_file:
+        parser.error("--browser-only と --html-file は同時に使わない")
 
     # ネットにつなぐ前に、取り込み先の wiki と raw のルートを確かめる（ADR-0019）。
     found = wiki_initialized.problem(args.wiki)

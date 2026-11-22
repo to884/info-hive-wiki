@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ja" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>経験の記録とスキルの改善 | info-hive</title>
+  <link rel="stylesheet" href="assets/fluent2.css">
+  <link rel="stylesheet" href="assets/manual.css">
+  <link rel="stylesheet" href="assets/manual-print.css" media="print">
+  <script defer src="assets/manual-code.js"></script>
+</head>
+<body class="fui-FluentProvider">
+  <a class="skip-link fui-Link" href="#main">本文へ移動</a>
+  <header class="site-header">
+    <div class="shell"><a class="site-name fui-Link" href="index.html">info-hive</a></div>
+  </header>
+  <div class="shell reading-layout">
+    <nav class="contents" aria-label="目次">
+      <a class="fui-Link" href="index.html#toc">文書の目次へ戻る</a>
+    </nav>
+    <main class="page-content readme-content" id="main" tabindex="-1">
+<h1 id="経験の記録とスキルの改善" class="fui-Title1">経験の記録とスキルの改善</h1>
+<!-- page-summary:start -->
+<figure class="page-summary page-summary-flow">
+  <ol role="list" aria-label="概要">
+    <li><strong>経験を記録</strong><span>learn で検証結果を残す</span></li>
+    <li><strong>改善案を評価</strong><span>evolve で比較する</span></li>
+    <li><strong>結果を判断</strong><span>承認して適用、必要なら復旧</span></li>
+  </ol>
+</figure>
+<!-- page-summary:end -->
+<p>スキルを改善するときは、実際のタスクの結果を wiki に記録し、再利用できるパターンにまとめます。その記録をもとに、1 つのスキル全体の変更案を作り、検証結果から案を選びます。この手順は任意です。独立した最終テストを実行する前に、選んだスキルを固定します。インストール済みのスキルが変わるのは、ユーザーが得られた改善案を適用したときだけです。</p>
+<h2 id="研究上の根拠と取り入れ方" class="fui-Subtitle1">研究上の根拠と取り入れ方</h2>
+<p>改善の仕組みは、Liyan Tang らによる <span>WikiSkill: Compiling Agent Experience into Persistent Knowledge for Skill Evolution</span>（Google Research と Virginia Tech、2026 年）をもとにしています。論文の<span>手法</span>と LLM Wiki の実装は、次のように対応します。</p>
+<div class="table-scroll" role="region" aria-label="表" tabindex="0">
+<table class="fui-Table">
+<thead class="fui-TableHeader">
+<tr class="fui-TableRow">
+<th class="fui-TableHeaderCell" scope="col">論文のアイデア</th>
+<th class="fui-TableHeaderCell" scope="col">LLM Wiki での実装</th>
+</tr>
+</thead>
+<tbody class="fui-TableBody">
+<tr class="fui-TableRow">
+<td class="fui-TableCell">経験、蓄積した知識、スキルを分ける</td>
+<td class="fui-TableCell">変更不可の学習時の記録、既存のソースページとコンセプトのページ、独立したスキルのディレクトリ</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">実行、統合、提案を繰り返す</td>
+<td class="fui-TableCell"><code>wiki_evolve_loop.py</code> で、推論、メンテナー、プロポーザーの呼び出しを回数に上限を設けて行う</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">提案が失敗しても教訓を残す</td>
+<td class="fui-TableCell">永続的なパターンと採否の履歴。却下された提案や重複した提案も、あとから確認できます。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">出典を付けてスキルを作成・改良する</td>
+<td class="fui-TableCell">複数のテキストファイルにまたがる、スキル全体または新しいスキルの提案。証拠との対応は <code>PURPOSE.md</code> に記録します。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">検証で採否を決め、独立してテストする</td>
+<td class="fui-TableCell">検証で厳密に改善した候補を選びます。最終テストと、任意で行う別のエージェントやモデルへの転用評価の前に、選定結果を固定します。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">評価中はスキルを直接渡す</td>
+<td class="fui-TableCell">ハッシュ付きでスキル全体を注入します。スキルが起動しないことによる失敗は、比較の対象から外します。</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>このプロジェクトでの取り入れ方には、論文と異なる点があります。推論には事実情報のタスク用 wiki を使わせ、最適化側の学習履歴は見せません。1回の実行で扱うスキルは1つです。改善案は、論文のようにツールを使うプロポーザーではなく、渡された証拠から構造化された提案として作ります。記録するのは公開されたツールの観測結果で、非公開の推論は残しません。スキルを段階的に見つけるネイティブの仕組みは測定していません。このプロジェクトは、9 つのホストに対応するアダプターを用意し、取り込み、グラフ、ハイブリッド検索をアサーションで検査します。インストール済みスキルへの変更には明示的な承認を求めます。持ち運べる証拠のバンドルと、リクエスト前に API の費用を予約する仕組みも、このプロジェクト独自の実装です。</p>
+<p>この実装には論文の手法を取り入れています。論文のベンチマーク研究の再現は対象外です。移植元で<span>公開したワークフローの研究</span>では、提案された2つの変更はどちらも却下され、品質の向上は示されませんでした。変更しないスキルとの比較で、Codex は 3/8 対 2/8、Claude は 3/8 対 3/8 でした。レポートには、当初の評価器の制約と、その後の訂正も残しています。5つのホストは、まだアカウント、クライアント、ゲートウェイのセットアップが必要で、API の予算付きランナーは実際のキーを使った試験をしていません。</p>
+<pre><code class="language-mermaid">flowchart LR
+  train[Training tasks] --&gt; raw[Immutable observable experience]
+  raw --&gt; wiki[Persistent patterns and failed attempts]
+  wiki --&gt; propose[Propose one skill change]
+  propose --&gt; validate[Compare on validation tasks]
+  validate --&gt;|Improves| best[Update experiment's best skill]
+  validate --&gt;|Rejected| wiki
+  best --&gt; train
+  best --&gt; freeze[Freeze final selection]
+  freeze --&gt; test[Independent final test and transfer]
+  test --&gt; review[Review report and diff]
+  review --&gt; apply[Explicit apply or rollback]
+</code></pre>
+<h2 id="サイクル全体を実行する" class="fui-Subtitle1">サイクル全体を実行する</h2>
+<p><code>/wiki:evolve</code> を使うか、スキルの改善を実行するようエージェントに頼みます。事実情報のコーパス、学習用 wiki、raw ルート、対象のスキルは、それぞれ個別に指定します。作業用のスキルのコピーを使います。対象のディレクトリがなければスキルなしの状態から始まり、プロポーザーが新しくスキルを作ります。知識のページを書く前に、wiki のスキーマを読みます。</p>
+<p>プラグインのリポジトリから <code>eval/evolution/pilot/config.example.json</code> をコピーし、アダプターのパスと正確なモデル ID を書き換えます。ロールごとに専用のランナーとモデルを設定します。推論（inference）はタスクを実行し、メンテナー（maintainer）は経験を統合します。プロポーザー（proposer）はスキルを変更し、ジャッジ（judge）は回答を検証します。推論を始める前に、承認済みの実行予算を設定します。</p>
+<pre><code class="language-bash">python &lt;skill-root&gt;/scripts/wiki_evolve_loop.py \
+  --wiki /path/to/learning-wiki --raw /path/to/raw \
+  --id query-cycle-01 --skill /path/to/working-skill \
+  --suite /path/to/suite-v2.json --config /path/to/config.json
+</code></pre>
+<p>ループは、上限のある回数だけ反復します。反復のたびに、学習時のツールイベント、回答、成果物、検証結果を記録します。再利用できるパターンを更新し、過去の試行を確認して、複数のファイルにまたがる一貫した変更を提案します。提案した変更とその時点で最良のスキルを、検証用タスクを繰り返し実行して比較します。採用には、検証の成績が厳密に上回ることが必要です。任意で、コストやツール使用の比率、重要なタスクでの回帰チェックを設定し、選定をさらに絞ることもできます。却下された変更とその理由は後の提案で参照できます。一方、同じベースラインに対して却下済みの候補と重複するものはスキップします。</p>
+<p>すべての反復が終わると、選定結果を固定します。ベースラインと選ばれたスキルを、最終テスト用のタスクで実行します。最終テストの結果はレポートに載せます。メンテナーやプロポーザーには渡さず、別の候補の選定にも使いません。任意の <code>transfer</code> 項目を設定すると、同じジャッジと予算のもとで、固定した同じ比較を別のエージェントとモデルの組み合わせで実行します。最終結果が悪いなら、採用を見送る理由になります。結果を見たテストに合わせて最適化してよいということにはなりません。後で別の研究をするなら、新しいテスト用タスクを使います。学習用 wiki は、使用済みのテストのフィンガープリントを記録し、以降の最適化の実行で再利用されると拒否します。</p>
+<p>実行が成功し、改善が選ばれると、<code>&lt;run-id&gt;-selected</code> ができます。これは既存のレビュー用・適用用のコマンドでそのまま扱えます。</p>
+<pre><code class="language-bash">python &lt;skill-root&gt;/scripts/wiki_evolve.py --wiki /path/to/learning-wiki show query-cycle-01-selected
+python &lt;skill-root&gt;/scripts/wiki_evolve.py --wiki /path/to/learning-wiki apply query-cycle-01-selected
+python &lt;skill-root&gt;/scripts/wiki_evolve.py --wiki /path/to/learning-wiki rollback query-cycle-01-selected
+</code></pre>
+<p><code>wiki_evolve.py history</code> と <code>show &lt;run-id&gt;</code> では、ループ全体の実行と、そこで残した判断も確認できます。実行が完了しても、変更が選ばれないことはあります。実行時の失敗や予算切れでは、適用できる改善案は作られません。実行を中断しても証拠は残ります。評価の入力をいったんモデルに渡したあとは、同じ ID で再開できません。</p>
+<h2 id="タスクと検証" class="fui-Subtitle1">タスクと検証</h2>
+<p>バージョン 2 のスイートでは、<code>train</code>、<code>validation</code>、<code>test</code> のタスクを分けることと、ジャッジを較正するための正例と負例が必要です。どのタスクにも、質問、意味で判定するルーブリック、回答を控えるべきかどうか、ソースのパスを指定します。較正は学習の前に実行し、合格しなければなりません。自分のジャッジを較正するときは、正しい言い換え、数値の誤り、矛盾、もっともらしいが裏づけのない追記を含めておきます。</p>
+<p>推論のランナーが受け取るのは、タスク、事実情報の wiki、書き込みの権限、スキルの内容全体だけです。ルーブリック、データの分割、期待する回答、どちらの候補かを示すラベル、学習履歴は受け取りません。アダプターはスキル全体を注入し、そのハッシュを返します。ハッシュで確認できるのは、スキルがモデルに渡されたことまでです。プロンプトでは実行の範囲と出力の形式を伝え、対象の手順そのものは教えません。</p>
+<p>独立したジャッジが見るのは、質問、ルーブリック、回答、ソースのテキストで、スキルやどちらの候補かは見せません。ジャッジは、意味とソースによる裏づけを確かめ、ソースをそのまま引用して判定を返します。ハーネスは、その引用が実際にあるか、出典と回答の控え方が正しいかを検証し、求められた成果物を確認します。ジャッジがツールを呼び出したら、その実行は無効になります。ツールを余分に使って得た採点は、ブラインド評価の証拠として認めません。ジャッジは、測定したコマンドの出力と、ハッシュにもとづく整合性の観測結果も受け取ります。取り込みのタスクでは raw の入力を <code>sources</code> に含め、要約が記録そのものに忠実かを確かめられるようにします。これでキーワードの一致に頼った誤りは減るが、較正したモデルのジャッジでも間違えることはあります。重大な失敗はレビューし、効果を主張するときは、サンプル数、モデル、繰り返し実行した結果をあわせて報告します。</p>
+<p>タスクの出力パスは、渡された wiki のルートからの相対パスです。タスクには、<code>allow_write</code> のパターンと <code>artifacts</code> のチェックを宣言できます。チェックの種類は、完全一致の <code>text</code> と <code>json</code>、含まれるべきテキスト片（<code>contains</code>）、オブジェクトやリストに再帰的に含まれるか（<code>json_subset</code> と <code>jsonl_subset</code>）、存在しないこと（<code>absent</code>）です。<code>required_commands</code> を使うと、実行したと主張しただけのものや、ソースの文中に引用されたコマンドは認めず、実際のシェルツールへの入力に指定のテキスト片が含まれることを求められます。これにより、新しくコピーした作業領域で、取り込み、編集、生成された出力を評価できます。宣言していない変更をしたタスクは、完了していても 0 点とし、違反のハッシュと成果物を残します。その場合は意味の採点をスキップし、使い捨てのコピーを破棄して比較を続けます。ランナー、認証、プロトコルの失敗では、これまでどおり実行を中止します。元のソースファイルは、タスクで明示的に許可しない限り保護されます。作り直せる <code>.wiki-cache/</code> への書き込みは、隔離されたコピーの中では許可します。Bash を使えるアダプターは既存の検索スクリプトを実行でき、コピーしたスキルと実行時の依存パッケージがそろっていれば、ハイブリッド検索も実行できます。</p>
+<p>ワークフローの試験では、固定バージョンの依存パッケージをインストールしたインタープリターを用意します。その絶対パスをトップレベルの <code>runtime_python</code> に指定します。推論を始める前に <code>setup_wiki.py</code> を実行して、ローカルのモデルを準備します。どちらの候補にも同じインタープリターを使います。ランナーは、ONNX のテレメトリーと、バイトコードの書き出しを無効にします。エージェントには、準備済みの実行環境を使い、パッケージのインストールやホストのキャッシュのコピーをしないよう伝えます。</p>
+<p>公開デモ用のフィクスチャ <code>eval/evolution/pilot/suite-v2.json</code> には、架空の Lark を題材にした 23 のタスクがあります。成果物を作るタスクも含みます。実際のプロジェクトの知識とは異なるため、この結果だけで汎化は判断できません。製品について判断する前に、代表的な非公開のコーパスと独立したタスクに置き換えます。検索ベンチマークは、このデモとは別に用意しています。</p>
+<p>追加の <code>eval/evolution/workflows/</code> スイートは、公開リポジトリの仕様に対する 16 のタスクを固定したものです。取り込み、ソースとコンセプトの出典、インデックスとログの更新、グラフのコンパイル、実際のハイブリッド検索の出力を含みます。ソースのマニフェストには、公開コミットとハッシュが記されています。対応する研究のプロトコルと結果では、実行の失敗、インフラによる障害、測定した結果を区別しています。</p>
+<p>最終レポートには、対応のある正解率の差、タスク単位のクラスターブートストラップによる区間、対応のあるランダム化検定が含まれます。繰り返し実行した結果はタスクごとにまとめて扱い、独立したサンプルとしては数えません。信頼度の閾値は、主たる比較と転用の比較をあわせて調整します。<code>benefit_demonstrated</code> を立てるには、スキルが実際に変わっていることと、最終テストで良い結果が出ていることが必要です。実装のテストに通ったこと、ベースラインと同点であること、繰り返し回数を増やしたことでは立ちません。これらの測定値は、サンプルとして選んだタスクについてのものであり、どんな場合にも性能を保証するものではありません。</p>
+<h2 id="エージェントのアダプターと予算" class="fui-Subtitle1">エージェントのアダプターと予算</h2>
+<p>共通のアダプターは、<code>claude</code>、<code>codex</code>、<code>cursor</code>、<code>gemini</code>、<code>opencode</code>、<code>pi</code>、<code>omp</code>、<code>hermes</code>、<code>openclaw</code> に対応しています。どのアダプターも、4つのロールの仕様を扱います。先に対応するホストをインストールして認証しておきます。プロトコルのテストは、実際のアカウントでの確認の代わりにはなりません。</p>
+<pre><code class="language-json">{&quot;argv&quot;:[&quot;python3&quot;,&quot;/absolute/skill/scripts/wiki_evolve_agent.py&quot;,&quot;codex&quot;],&quot;model&quot;:&quot;EXACT_MODEL_ID&quot;}
+</code></pre>
+<div class="table-scroll" role="region" aria-label="表" tabindex="0">
+<table class="fui-Table">
+<thead class="fui-TableHeader">
+<tr class="fui-TableRow">
+<th class="fui-TableHeaderCell" scope="col">アダプター</th>
+<th class="fui-TableHeaderCell" scope="col">実行方法とモデルの選択</th>
+<th class="fui-TableHeaderCell" scope="col">使用量の記録</th>
+</tr>
+</thead>
+<tbody class="fui-TableBody">
+<tr class="fui-TableRow">
+<td class="fui-TableCell">Claude Code</td>
+<td class="fui-TableCell"><code>claude</code> のストリーム JSON と、ネイティブの構造化出力</td>
+<td class="fui-TableCell">報告されたトークン数と USD</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">Codex</td>
+<td class="fui-TableCell"><code>codex exec</code> の JSON イベントと出力スキーマ</td>
+<td class="fui-TableCell">トークン数。USD は取得できません。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">Cursor</td>
+<td class="fui-TableCell"><code>cursor-agent</code> のストリーム JSON。無関係な <code>agent</code> 実行ファイルでは代用できません。</td>
+<td class="fui-TableCell">トークン数と USD は取得できないことがあります。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">Gemini CLI</td>
+<td class="fui-TableCell">ヘッドレスのストリーム JSON、モデルの明示指定、自動検出したスキルの無効化</td>
+<td class="fui-TableCell">報告されたトークン数。USD は取得できません。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">OpenCode</td>
+<td class="fui-TableCell"><code>opencode run --pure --format json</code>、<code>provider/model</code> の明示指定</td>
+<td class="fui-TableCell">報告されたトークン数とモデルのコスト</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">Pi / OMP</td>
+<td class="fui-TableCell">一時的な JSON モード、制限したツール一覧、自動検出したスキルや拡張機能なし</td>
+<td class="fui-TableCell">報告された使用量とモデルのコスト</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">Hermes</td>
+<td class="fui-TableCell">認証済みのホストのプロファイルで新しい ACP セッションを開きます。明示した <code>provider:model</code> が推論の前に解決できる必要があります。</td>
+<td class="fui-TableCell">公開されていれば補完のトークン使用量。USD は取得できません。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">OpenClaw</td>
+<td class="fui-TableCell">設定済みのローカルゲートウェイへの ACP ブリッジ。新しいセッションを開き、正規の <code>provider/model</code> をセッションの RPC で確かめます。</td>
+<td class="fui-TableCell">コンテキストのおおよその使用量は、課金されたトークン数として扱いません。取得できない値は null のままです。</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Hermes のランナーでは、<code>&quot;options&quot;:{&quot;home&quot;:&quot;/absolute/hermes-eval-profile&quot;}</code> を設定して、設定を管理した既存のプロファイルを使えます。アダプターが認証情報をコピーしたり移動したりすることはありません。OpenClaw のランナーでは、<code>&quot;options&quot;:{&quot;profile&quot;:&quot;wiki-eval&quot;}</code> を設定して、既存の隔離されたゲートウェイのプロファイルを選べます。ゲートウェイは、渡されたローカルの作業領域にアクセスでき、ツールの入出力を公開し、必要な操作をゲートウェイ自身のポリシーで許可していなければなりません。ACP の権限リクエストで承認するのは、範囲を限った読み取りだけです。変更や実行には、事前に設定した範囲の限られたホストのポリシーが必要になります。Hermes は、モデルを選んだあと、新しい空のセッションを読み込み直して、解決されたプロバイダーとモデルを確かめます。モデルの設定に失敗した場合や、プロバイダーが黙って別のものに切り替わった場合は、タスクのプロンプトを送る前に止めます。ホストには、それぞれ独自のシステムポリシーが残ります。アダプターが正常に応答したからといって、そうしたポリシーがないとは判断できません。</p>
+<p>ジャッジは、チェック済みの成果物と、変更されたすべてのテキストの成果物を受け取ります。生成されたグラフのファイルも含みます。ソースをそのまま引用した証拠では、保存した成果物を参照して、観測した状態を示せます。ただし、新しく書いた事実の主張には、引き続き事実情報のソースによる裏づけが必要です。バイナリの成果物はハッシュを保存します。ジャッジ向けのデコードは行いません。</p>
+<p>観測できるツールイベントは、届くたびに <code>trace-NNNNN.jsonl</code> に追記し、fsync します。タイムアウトやクラッシュの記録は、残っているトレースのハッシュを参照し、量を限ったエラーの診断情報を残します。非公開の推論とプロンプトのエコーは含めません。取得できなかった使用量は <code>null</code> とし、0 をでっち上げることはありません。コストの指標が取得できないまま選定しようとすると、安全側に倒して失敗します。旧来のエントリーポイントである <code>wiki_evolve_claude.py</code> も、引き続き使えます。</p>
+<p>すべてのロール、較正、検証、最終テスト、転用のランナーを、1つの台帳で数えます。<code>max_calls</code> に達すると、ランナーの起動を打ち切ります。<code>max_seconds</code> は実行時間の合計を制限します。<code>timeout</code> に達したプロセスは、プロセスグループごと終了します。親プロセスが終了する前に見つかった、切り離された子孫プロセスも終了の対象です。子孫プロセスを片づけるには、ホストがプロセスの調査を許可している必要があります。これらはランナーとプロセスについての制限であり、CLI が内部で行う見えないモデルへのリクエストの数は数えません。CLI の試験では <code>max_usd: null</code> にする必要があります。CLI がリクエストのあとに報告するコストや、CLI ネイティブの閾値では、金額の上限を確実には守れないためです。</p>
+<p>リクエストの前に金額の上限を守るには、<strong>すべてのロールと転用のランナー</strong>で、同梱の API ランナーを使うよう設定します。</p>
+<pre><code class="language-json">{&quot;argv&quot;:[&quot;python3&quot;,&quot;/absolute/skill/scripts/wiki_evolve_api.py&quot;],&quot;model&quot;:&quot;claude-sonnet-5&quot;}
+</code></pre>
+<p><code>budget.max_usd</code> を設定し、環境変数 <code>ANTHROPIC_API_KEY</code> を用意します。ランナーは Messages API にリクエストを送る前に、費用を予約します。ドキュメントに記載された入力コンテキストの上限と最大出力を使い、レビュー済みのファーストパーティの価格で計算します。予約できないリクエストは送りません。応答が返ってきたら、実際の使用量で精算します。応答がなかった場合は予約を残したまま、再試行せずに試験を中止します。十進数で計算するので、浮動小数点の誤差が積み重なって上限を超えることはありません。予約は保守的に見積もるので、実際のリクエストのコストがずっと小さそうでも、Sonnet 5 では残額が少なくとも $2.08192 必要になります。</p>
+<p>この上限が対象にするのは、固定した料金でのこのランナーによる標準のファーストパーティの推論で、税金とアカウントのほかの利用は含みません。このランナーは、キャッシュ、サーバーツール、プレミアムなルーティング、任意のシェル実行を無効にします。推論で使えるツールは、許可された wiki のファイルの読み取り、一覧、書き込みです。シェルを使うワークフローの評価には、CLI のランナーを使います。レビュー済みの価格表は 2026-10-13 に期限が切れ、レビューし直すまでは実行を拒否します。対応していないモデルは、推論の前に失敗します。価格とコンテキストについての前提は、<span>Claude の料金</span>に記載されています。プラグインには、API キーも、有料の API を実際に使った試験も同梱していません。</p>
+<p>アダプターは、周囲の環境から入る指示を減らし、ネイティブの制限モードやサンドボックスモードを使います。それでも、ホストが管理するポリシーが適用されることはあります。作業領域のコピー、ハッシュ、書き込みのチェックが対象にするのは、コピーした作業領域であり、ホストのファイルシステム全体ではありません。ネイティブのポリシーでは、共有の一時ディレクトリへの書き込みが許可されることがあります。ランナーは信頼されたローカルのコードであり、任意の実行ファイルを閉じ込めるセキュリティサンドボックスではありません。全体で書き込みを隔離する必要があるなら、別に隔離したホストを使います。外部のモデルを呼び出すと、渡したコンテキストは選んだプロバイダーに送られます。非公開のソース、記録、認証情報は、公開するフィクスチャに含めません。</p>
+<h2 id="証拠保存復旧" class="fui-Subtitle1">証拠、保存、復旧</h2>
+<p>学習時の raw の観測結果は、<code>raw/experiences/</code> に変更不可の形で保存します。記録には、ルートに <code>SCHEMA.md</code> がある初期化済みの wiki と、すでにある raw ディレクトリが必要です。<code>wiki_evolve.py capture</code> と <code>wiki_evolve_loop.py</code> は、どちらかがなければ何も書き込まずに止まります。raw ディレクトリは初期化時に作成します。ソースページとコンセプトのページ、インデックスのリンク、ログの項目によって、観測した結果と永続的なパターンを結びつけます。<code>.evolution/learning.json</code> には、実行をまたいで統合と提案の履歴を残します。プロポーザーが受け取るのはこの学習の履歴であり、最終テストのレポートは受け取りません。モデルが書いた無効なパッチ（SKILL.md の削除を含む）は、却下された提案としてアーカイブし、残りの反復と最終テストには最後に有効だったスキルを使います。変更していないファイルはパッチに含めてはなりません。null は削除を明示的に意味します。<code>PURPOSE.md</code> は選ばれたスキルと一緒に持ち運ばれ、その理由、パターンの適用範囲、もとになった実行とタスクの証拠を記録します。</p>
+<p>同梱の改善用の実行環境が実行中に変わると、ハーネスはそれ以降の呼び出しを拒否します。呼び出しの実行中に同時編集が起きると、その呼び出しを無効にします。実行ごとのアーカイブには、固定した設定とコーパス、ハッシュ付きの改善用の実行環境のスクリプト、観測できる呼び出しの記録、実行時の成果物、候補のスナップショット、反復ごとの判断、選定結果、最終結果が含まれます。<code>.evolution/</code> はバックアップしておきます。<code>.wiki-cache/</code> と違い、消えては困る証拠です。通常の検索、lint、stats、グラフのツールは、このアーカイブを対象から外します。検索できる教訓は、通常の wiki ページに残ります。</p>
+<p>適用とロールバックでは、1つのスキルの中でのファイルの追加、編集、削除を扱えます。インストール済みのスキル全体を確認し、同時編集があれば拒否します。移行の記録（ジャーナル）により、複数のファイルの書き込みが途中で中断しても復旧できます。中断からは復旧できます。ほかの処理がファイルを読むと、移行途中の状態が見えることがあります。移行中は、対象のスキルを同時に使わないようにします。中断したら、同じ適用またはロールバックを再実行します。終了したプロセスが残した空のロックを削除する前に、古い wiki とスキルのロックを確認します。合格の結果を無理に出すために、証拠やスナップショットを編集してはなりません。</p>
+<p>完了した実行は、持ち運べる1つのバンドルとしてエクスポートできます。</p>
+<pre><code class="language-bash">python &lt;skill-root&gt;/scripts/wiki_evolve.py --wiki /path/to/wiki export query-cycle-01 --destination /path/to/new-bundle
+python &lt;skill-root&gt;/scripts/wiki_evolve.py verify-bundle /path/to/new-bundle
+</code></pre>
+<p>バンドルには、<code>skill/</code>、<code>evidence/</code>、すべてのファイルを対象にした SHA-256 のマニフェストが含まれます。<code>PURPOSE.md</code>、パターンとの対応、観測できる実行の記録、却下された試行、固定したソースの文脈が一緒に持ち運ばれます。後で推論の作業領域に置いてよいのは <code>bundle/skill</code> だけです。監査用のアーカイブには結果を見たテストが含まれるので、スキルの指示として注入してはなりません。検証で確かめるのはマニフェストであり、デジタル署名でも、元の観測が正しかったことの証明でもありません。</p>
+<h2 id="経験の手動記録と手動の改善案" class="fui-Subtitle1">経験の手動記録と手動の改善案</h2>
+<p><code>/wiki:learn</code> は、最適化を始めずに、完了した作業を記録します。インストール済みの <code>.experience-template.json</code> と <code>.pattern-template.md</code> を使い、検証できる成功と失敗を残し、ソースの証拠を取り込み、新しいパターンを作る前に既存のパターンに統合します。</p>
+<p>スキル全体の改善案を手動で作る場合は、候補のディレクトリを渡します。対象が既存の 1 ファイルだけなら、引き続き <code>--target</code> を使います。</p>
+<pre><code class="language-bash">python &lt;skill-root&gt;/scripts/wiki_evolve.py --wiki /path/to/wiki propose \
+  --id query-manual-01 --skill /path/to/working-skill \
+  --candidate /path/to/candidate-skill --evidence concepts/query-pattern.md \
+  --reason &quot;Address the verified failure&quot;
+</code></pre>
+<p>旧来の <code>wiki_evolve.py evaluate</code> コマンドとバージョン 1 の <code>suite.json</code> は、決定的な回帰チェックとして引き続き使えます。採否の判定には、検証用のセットと、歴史的な経緯で「holdout」と呼ばれているセットの両方が使われ、どちらも独立した最終テストではありません。最適化と汎化の測定には、バージョン 2 のループを使います。</p>
+<p>移植元の SemVer の方針では、移植元のバージョン 3.2.0 は機能の追加のみです。既存の wiki はそのまま使い続けることも、<code>/wiki:upgrade</code> で任意のテンプレートを追加することもできます。スキルの改善案を適用しても、プラグインのリリースが公開されることはありません。</p>
+    </main>
+  </div>
+</body>
+</html>

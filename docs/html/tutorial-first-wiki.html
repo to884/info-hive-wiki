@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ja" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>はじめての wiki を作る | info-hive</title>
+  <link rel="stylesheet" href="assets/fluent2.css">
+  <link rel="stylesheet" href="assets/manual.css">
+  <link rel="stylesheet" href="assets/manual-print.css" media="print">
+  <script defer src="assets/manual-code.js"></script>
+</head>
+<body class="fui-FluentProvider">
+  <a class="skip-link fui-Link" href="#main">本文へ移動</a>
+  <header class="site-header">
+    <div class="shell">
+      <a class="fui-Link site-name" href="index.html">info-hive</a>
+    </div>
+  </header>
+
+  <main class="shell reading-layout" id="main" tabindex="-1">
+    <nav class="contents" aria-label="このページの目次">
+      <h2>目次</h2>
+      <ol>
+        <li><a class="fui-Link" href="#folder">練習用フォルダーを開く</a></li>
+        <li><a class="fui-Link" href="#initialize">wiki を作る</a></li>
+        <li><a class="fui-Link" href="#first-source">味噌の資料を取り込む</a></li>
+        <li><a class="fui-Link" href="#first-question">味噌の原料を質問する</a></li>
+      </ol>
+    </nav>
+
+    <article class="page-content" aria-labelledby="page-title">
+      <header class="intro" id="prepare">
+        <h1 class="fui-Title1" id="page-title">はじめての wiki を作る</h1>
+<!-- page-summary:start -->
+<figure class="page-summary page-summary-flow">
+  <ol role="list" aria-label="概要">
+    <li><strong>wiki を作る</strong><span>練習フォルダーで初期化</span></li>
+    <li><strong>味噌を取り込む</strong><span>原本から要約を作る</span></li>
+    <li><strong>質問する</strong><span>出典のある答えを確認</span></li>
+  </ol>
+</figure>
+<!-- page-summary:end -->
+        <p>味噌の資料を 1 件取り込み、味噌の原料を質問します。答えに出典が付くことを確かめます。</p>
+        <dl class="prerequisites">
+          <div><dt>環境</dt><dd>Windows 11、Claude デスクトップアプリの Code タブ</dd></div>
+          <div><dt>準備</dt><dd>Git for Windows、uv、Python 3.12、Microsoft Visual C++ 再頒布可能パッケージ、<code>wiki@info-hive</code></dd></div>
+          <div><dt>検証版</dt><dd>Claude Desktop 6.6395.0.0、wiki 0.39.1</dd></div>
+        </dl>
+        <p>Code タブで <code>/wiki:help</code> を送って 12 本のコマンドが表示されたら、この練習に進めます。準備が必要なときは、<a class="fui-Link" data-inline href="tutorial-install.html">Code タブに wiki を入れる手順</a>を開きます。</p>
+      </header>
+
+      <section id="folder">
+        <h2 class="fui-Subtitle1">1. 練習用フォルダーを開く</h2>
+        <ol>
+          <li>エクスプローラーで <code>%USERPROFILE%</code> を開きます。</li>
+          <li><code>info-hive-practice</code> という空のフォルダーを作ります。</li>
+          <li>Claude デスクトップアプリの Code タブを開きます。</li>
+          <li>「このコンピューター」で <code>info-hive-practice</code> を選びます。</li>
+          <li>「このワークスペースを信頼しますか？」と聞かれたら、練習用フォルダーのアクセスを承認します。</li>
+        </ol>
+      </section>
+
+      <section id="initialize">
+        <h2 class="fui-Subtitle1">2. wiki を作る</h2>
+        <p>初回は <code>multilingual-e5-small</code>（約 250 MB）を <code>%USERPROFILE%\.cache\info-hive\fastembed\</code> に取得します。数分かかることがあります。</p>
+        <ol>
+          <li>Code タブの入力欄から次のコマンドを送ります。
+            <pre><code>/wiki:init</code></pre>
+          </li>
+          <li>初期化の設定を聞かれたら、次の内容を伝えます。「後回し」が選択肢になければ、自由入力で答えます。
+            <blockquote>プロジェクトの wiki にしてください。場所は、このフォルダーの <code>wiki/</code> と <code>raw/</code> です。モデルのキャッシュは既定の場所にしてください。グラフ層は後回しにします。エージェントとの連携は、このフォルダーの <code>CLAUDE.md</code> に追記してください。</blockquote>
+          </li>
+          <li><code>init_wiki.py</code> を実行したツール呼び出しを開き、出力の <code>"status": "ready"</code> を確かめます。</li>
+          <li>規約の変更を聞かれたら「変更しません」と答えます。</li>
+          <li><code>CLAUDE.md</code> の案を示されたら、標準案を承認します。</li>
+        </ol>
+        <p>エラーで止まったら、<a class="fui-Link" data-inline href="howto-troubleshoot.html#diagnostic">検索環境の障害対処</a>を確認します。</p>
+      </section>
+
+      <section id="first-source">
+        <h2 class="fui-Subtitle1">3. 味噌の資料を取り込む</h2>
+        <ol>
+          <li>次の練習用資料をメモ帳にコピーします。
+            <pre><code># 味噌
+
+味噌は、大豆を主な原料にした、日本の発酵調味料である。
+
+蒸すか煮るかしてやわらかくした大豆をつぶし、麹と塩を混ぜて仕込む。これを数か月から数年おいて、発酵させ、熟成させる。
+
+麹は、米、麦、大豆などの穀物に麹菌を育てたものである。どの麹を使うかで、米味噌、麦味噌、豆味噌に分けられる。
+
+熟成の期間が長いほど、色は濃くなる。塩の量と麹の量の割合で、味が甘口にも辛口にもなる。</code></pre>
+          </li>
+          <li>「名前を付けて保存」で <code>%USERPROFILE%\info-hive-practice\raw\味噌.md</code> に保存します。「ファイルの種類」は「すべてのファイル」、「エンコード」は UTF-8 を選びます。</li>
+          <li>Code タブの入力欄から次のコマンドを送ります。
+            <pre><code>/wiki:ingest raw/味噌.md</code></pre>
+          </li>
+          <li>要点を示されたら「『麹』のページを作ってください」と返します。</li>
+          <li>作成するページと変更の一覧を確認し、適用を承認します。</li>
+        </ol>
+        <aside class="check" aria-labelledby="ingest-check">
+          <h3 id="ingest-check">取り込みの目印</h3>
+          <p>エクスプローラーで練習用フォルダーの <code>wiki</code> を開きます。</p>
+          <ul>
+            <li><code>wiki/sources/味噌.md</code> ができています。</li>
+            <li><code>wiki/index.md</code> に <code>[[味噌</code> で始まるリンクが加わります。ほかのページの行が増えることもあります。</li>
+            <li><code>wiki/log.md</code> の末尾に今日の日付の <code>## [日付] ingest | 味噌</code> が加わります。</li>
+          </ul>
+        </aside>
+        <p>原本が見つからないときは、エクスプローラーでファイル名拡張子を表示し、練習用フォルダーの <code>raw</code> に <code>味噌.md</code> があることを確かめます。</p>
+        <p><strong>手元の資料を取り込むとき</strong>は、<code>raw/</code> の外にあるファイルもパスで指定できます。たとえば「<code>C:/資料/会議メモ.md</code> をこのプロジェクトの wiki に取り込んで」と頼みます。この例では、練習用フォルダー直下の <code>raw/</code> に資料のコピーができます。</p>
+      </section>
+
+      <section id="first-question">
+        <h2 class="fui-Subtitle1">4. 味噌の原料を質問する</h2>
+        <ol>
+          <li>Code タブの入力欄から次のコマンドを送ります。
+            <pre><code>/wiki:query 味噌の原料は？</code></pre>
+          </li>
+          <li>答えに <code>[[味噌]]</code> のような出典が少なくとも 1 つあることを確かめます。</li>
+          <li>答えの末尾に「信頼度（confidence）」の行があることを確かめます。</li>
+        </ol>
+        <p>出典がないときは、<a class="fui-Link" data-inline href="#ingest-check">取り込みの目印</a>を確認します。練習用フォルダーは次のチュートリアルでも使います。</p>
+      </section>
+
+      <nav class="page-navigation" aria-label="前後のページ">
+        <a class="fui-Link" rel="prev" href="tutorial-install.html">前へ　Code タブに wiki を入れる</a>
+        <a class="fui-Link" rel="next" href="tutorial-second-source.html">次へ　醤油を取り込み、wiki を点検する</a>
+      </nav>
+    </article>
+  </main>
+  <footer class="shell site-footer repeated-footer">
+    <p>Fluent 2 のデザインを参照した info-hive の文書です。Fluent、Microsoft、Segoe は Microsoft Corporation の商標です。</p>
+  </footer>
+</body>
+</html>

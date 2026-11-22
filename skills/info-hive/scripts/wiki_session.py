@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-wiki_session.py — Claude Code のセッションの記録（JSONL）から会話だけを抜き出し、raw を作る。
+wiki_session.py — Claude Code と Codex の記録から会話だけを抜き出し、raw を作る。
 
 /wiki:ingest に session、session:<ID>、session:<パス>、<パス>.jsonl を渡したときに使う（info-hive-dev の
 ADR-0020）。記録から会話だけを許可リストで抜き出し、自動の伏せ字をかけ（これを「土台」と呼ぶ）、人の決定
@@ -9,6 +9,8 @@ ADR-0020）。記録から会話だけを許可リストで抜き出し、自動
 
 サブコマンド:
     locate  --session-id <ID>                     セッションの ID から記録のパスを探す
+            --host codex --current               実行中の Codex の会話と範囲を決める
+            --host codex --session-id <ID>         指定した Codex の会話を決める
     list    [--limit 20]                           記録の一覧（新しい順）。会話の文は出さない
     inspect --transcript <P> [共通] [--wiki W --raw-root R --slug S]
                                                    セッションの記録と認めるかと、件数、警告、raw の有無
@@ -28,7 +30,8 @@ ADR-0020）。記録から会話だけを許可リストで抜き出し、自動
                                                    < 書く予定の文（--path がなければ標準入力）
                                                    伏せた文字列と、自動の伏せ字の規則に当たる文字列を探す
 
-共通の引数: [--session-id <ID>] [--before <uuid>] [--tools summary|none] [--keep-reminders]
+Codex の読み取り元は --transcript codex:<ID> として渡す。locate の before を --before に固定する。
+共通の引数: [--session-id <ID>] [--before <記録の ID>] [--tools summary|none] [--keep-reminders]
             [--utc-offset +09:00] [--max-bytes 268435456]
 決定のファイルを渡すコマンドでは、省いた共通の引数を決定のファイルから取る。違う値を渡せば拒む。
 
@@ -53,13 +56,20 @@ import sys
 import time
 import unicodedata
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wiki_text import format_fm_value, localize_argparse, parse_frontmatter_text  # noqa: E402
 import wiki_initialized  # noqa: E402
+from wiki_fsguard import ExclusiveUnsupported, Refused, WriteGuard, external_raw_guard  # noqa: E402
+from wiki_raw_roots import record_raw_root  # noqa: E402
+
+# 直接実行した入口を、Codex アダプターからも同じモジュールとして参照する。
+# 二重に読み込むと Fail が別のクラスになり、入口で捕まえられなくなる。
+if __name__ == "__main__":
+    sys.modules["wiki_session"] = sys.modules[__name__]
 
 EXTRACTED_BY = "wiki_session.py 0.1"
 DECISIONS_FORMAT = 1
@@ -523,7 +533,7 @@ def tool_line(name: str, value: str) -> str:
 @dataclass
 class Turn:
     n: int
-    kind: str            # "user"、"claude"、"marker"
+    kind: str            # "user"、"claude"、"codex"、"marker"
     time: str
     body: str
     model: str = ""
@@ -531,14 +541,15 @@ class Turn:
 
     @property
     def fenced(self) -> bool:
-        return self.kind in ("user", "claude")
+        return self.kind in ("user", "claude", "codex")
 
     def heading(self) -> str:
         if self.kind == "user":
             return f"T{self.n} ユーザー（{self.time}）"
-        if self.kind == "claude":
+        if self.kind in ("claude", "codex"):
             target = f"T{self.reply_to} への返答" if self.reply_to is not None else "不明への返答"
-            return f"T{self.n} Claude（{self.model}、{self.time}、{target}）"
+            speaker = "Codex" if self.kind == "codex" else "Claude"
+            return f"T{self.n} {speaker}（{self.model}、{self.time}、{target}）"
         return f"T{self.n} 印（{self.time}）"
 
 
@@ -582,17 +593,27 @@ class Extract:
     humans: list                 # (uuid, 時刻, 伏せ字をかけた本文) の並び
     not_objects: int = 0
     untyped: int = 0
+    # Claude の既存の決定ファイルと raw は同じバイト列を保つ。
+    # ホストごとに異なる情報は抽出器から渡し、伏せ字・承認・書き込みは共用する。
+    source_kind: str = "claude-code-session"
+    source_sha256_of: str = "jsonl-range"
+    extracted_by: str = EXTRACTED_BY
+    version_field: str = "claude_code_versions"
+    tool_turns: set[int] = field(default_factory=set)
 
     def base(self) -> dict:
-        return {
-            "extracted_by": EXTRACTED_BY, "session_id": self.session_id, "cwd": self.cwd,
+        result = {
+            "extracted_by": self.extracted_by, "session_id": self.session_id, "cwd": self.cwd,
             "git_branch": self.git_branch, "started_at": self.started_at, "ended_at": self.ended_at,
-            "claude_code_versions": self.versions, "source_sha256": self.source_sha256,
+            self.version_field: self.versions, "source_sha256": self.source_sha256,
             "source_bytes": self.source_bytes, "cut_before": self.cut_before, "options": self.options.as_dict(),
             "excluded_records": format_counts(self.excluded), "auto_redactions": self.redactions.count,
             "turns": [{"n": t.n, "kind": t.kind, "time": t.time, "model": t.model, "reply_to": t.reply_to,
                        "body": t.body} for t in self.turns],
         }
+        if self.source_kind != "claude-code-session":
+            result.update(source_kind=self.source_kind, source_sha256_of=self.source_sha256_of)
+        return result
 
     @property
     def base_sha256(self) -> str:
@@ -926,7 +947,7 @@ class Decisions:
 
 
 def new_decisions(ex: Extract) -> dict:
-    return {"format": DECISIONS_FORMAT, "extracted_by": EXTRACTED_BY, "session_id": ex.session_id,
+    return {"format": DECISIONS_FORMAT, "extracted_by": ex.extracted_by, "session_id": ex.session_id,
             "source_sha256": ex.source_sha256, "source_bytes": ex.source_bytes, "cut_before": ex.cut_before,
             "options": ex.options.as_dict(), "base_sha256": ex.base_sha256, "spans": [], "drop": []}
 
@@ -961,8 +982,8 @@ def load_decisions(path: Path) -> Decisions:
 def check_decisions(dec: Decisions, ex: Extract) -> None:
     """決定のファイルが、今の記録の範囲と土台に当たることを確かめる。"""
     d = dec.data
-    if d["extracted_by"] != EXTRACTED_BY:
-        raise Fail(f"決定のファイルを作った抽出器の版が違う: {d['extracted_by']}（今は {EXTRACTED_BY}）")
+    if d["extracted_by"] != ex.extracted_by:
+        raise Fail(f"決定のファイルを作った抽出器の版が違う: {d['extracted_by']}（今は {ex.extracted_by}）")
     if d["source_sha256"] != ex.source_sha256 or d["source_bytes"] != ex.source_bytes:
         raise Fail("記録の範囲が、決定のファイルを作ったときと違う（source_sha256 が一致しない）")
     if d["session_id"] != ex.session_id or d["cut_before"] != ex.cut_before:
@@ -1049,10 +1070,10 @@ def frontmatter_fields(ex: Extract, title: str, spans: list, drop: list) -> dict
     cwd = apply_spans(ex.cwd, merged.get("cwd", []))
     branch = apply_spans(ex.git_branch, merged.get("git_branch", []))
     return {
-        "title": title, "source_kind": "claude-code-session", "session_id": ex.session_id, "cwd": cwd,
+        "title": title, "source_kind": ex.source_kind, "session_id": ex.session_id, "cwd": cwd,
         "git_branch": branch, "started_at": ex.started_at, "ended_at": ex.ended_at,
-        "claude_code_versions": ex.versions, "source_sha256": ex.source_sha256, "source_sha256_of": "jsonl-range",
-        "source_bytes": ex.source_bytes, "cut_before": ex.cut_before, "extracted_by": EXTRACTED_BY,
+        ex.version_field: ex.versions, "source_sha256": ex.source_sha256, "source_sha256_of": ex.source_sha256_of,
+        "source_bytes": ex.source_bytes, "cut_before": ex.cut_before, "extracted_by": ex.extracted_by,
         "tools": ex.options.tools, "keep_reminders": "true" if ex.options.keep_reminders else "false",
         "utc_offset": ex.options.utc_offset, "turns": len(ex.turns),
         "excluded_records": format_counts(ex.excluded), "auto_redactions": ex.redactions.count,
@@ -1097,6 +1118,17 @@ def render_parts(ex: Extract, title: str, spans: list, drop: list) -> list:
 
 def render(ex: Extract, title: str, spans: list, drop: list) -> bytes:
     return "".join(p for _n, p in render_parts(ex, title, spans, drop)).encode("utf-8")
+
+
+def render_conversation(ex: Extract, title: str, spans: list, drop: list) -> bytes:
+    """承認対象の原本と同じ発言番号と伏せ字を使い、ツール通知だけを省く。"""
+    title = f"{title}（会話版）"
+    check_no_secret("会話版の題名", title, ex, spans)
+    conversation = replace(ex, turns=[turn for turn in ex.turns if turn.n not in ex.tool_turns],
+                           options=replace(ex.options, tools="none"))
+    tool_targets = {f"T{n}" for n in ex.tool_turns}
+    return render(conversation, title, [s for s in spans if s["target"] not in tool_targets],
+                  [n for n in drop if n not in ex.tool_turns])
 
 
 def self_check(text: str, fields: dict, turns: list) -> None:
@@ -1171,12 +1203,18 @@ def check_no_secret(label: str, value: str, ex: Extract, spans: list) -> None:
         raise Fail(f"{label}に、伏せた文字列か、自動の伏せ字の規則に当たる文字列がある（{rules}）")
 
 
-def check_slug_value(slug: str, ex: Extract, spans: list) -> None:
+def check_slug(slug: str) -> None:
     import wiki_fetch
+    if slug.startswith("."):
+        raise Fail("セッションのスラッグはピリオドで始められない")
     try:
         wiki_fetch.check_slug(slug)
     except ValueError as exc:
-        raise Fail(str(exc))
+        raise Fail(str(exc)) from exc
+
+
+def check_slug_value(slug: str, ex: Extract, spans: list) -> None:
+    check_slug(slug)
     check_no_secret("スラッグ", slug, ex, spans)
 
 
@@ -1187,46 +1225,12 @@ def _is_link(path: Path) -> bool:
     return os.path.islink(path) or os.path.isjunction(path)
 
 
-def path_within(inner: str, outer: str) -> bool:
-    """inner が outer と同じか、その中にあるか。ドライブの違うパス（Windows の C: と D:）は、中にない。"""
-    try:
-        return os.path.commonpath([inner, outer]) == outer
-    except ValueError:
-        return False
-
-
-def check_destination(wiki: Path, raw_root: Path, target: Path) -> None:
+def check_destination(wiki: Path, raw_root: Path) -> WriteGuard:
     """raw の行き先を確かめる（設計の 9 節の手順 4）。"""
-    raw_abs = Path(os.path.abspath(raw_root))
-    # raw のルートと、そのすべての祖先（wiki の親の外にあっても）を見る（設計の 9 節の手順 4）。
-    for p in (raw_abs, *raw_abs.parents):
-        if _is_link(p):
-            raise Fail(f"raw のルートか、その途中の階層がリンクかジャンクションなので書かない: {p}")
-    if os.path.lexists(target) and (_is_link(target) or not stat.S_ISREG(os.lstat(target).st_mode)):
-        raise Fail(f"raw の行き先がリンクか、ふつうのファイルではないので書かない: {target}")
-    real_raw = os.path.normcase(os.path.realpath(raw_abs))
-    real_wiki = os.path.normcase(os.path.realpath(wiki))
-    if path_within(real_raw, real_wiki) or path_within(real_wiki, real_raw):
-        raise Fail(f"raw のルートと wiki のルートの一方が、他方の中にある（raw のルート {real_raw}、wiki {real_wiki}）。"
-                   "raw のルートには /wiki:init が作る raw/ などを使う")
-
-
-class ExclusiveUnsupported(Exception):
-    """重ねて書かない形で置けないファイルシステム。"""
-
-
-def publish_exclusive(tmp: Path, target: Path) -> None:
-    """一時ファイルを、行き先に重ねて書かない形で置く。行き先があれば FileExistsError。"""
-    if WINDOWS:
-        os.rename(tmp, target)
-        return
     try:
-        os.link(tmp, target)
-    except FileExistsError:
-        raise
-    except OSError as exc:
-        raise ExclusiveUnsupported(str(exc))
-    os.unlink(tmp)
+        return external_raw_guard(wiki, raw_root)
+    except (OSError, ValueError) as exc:
+        raise Fail(f"raw の行き先を使えない: {exc}") from exc
 
 
 def before_publish() -> None:
@@ -1237,14 +1241,12 @@ def after_publish() -> None:
     """公開の直後（試験が例外を差し込む口）。"""
 
 
-def make_read_only(path: Path) -> None:
-    mode = os.stat(path).st_mode
-    if mode & 0o222:
-        os.chmod(path, stat.S_IMODE(mode) & ~0o222)
-
-
 def is_read_only(path: Path) -> bool:
     return not (os.stat(path).st_mode & 0o222)
+
+
+def make_read_only(path: Path) -> None:
+    WriteGuard(path.parent, strict_root=True).make_read_only(path)
 
 
 def raw_ref_of(wiki: Path, target: Path) -> str:
@@ -1259,41 +1261,45 @@ def raw_ref_of(wiki: Path, target: Path) -> str:
 def write_raw(wiki: Path, raw_root: Path, slug: str, data: bytes) -> tuple[str, Path]:
     """raw を重ねて書かない形で置く。返り値は（状態, パス）。"""
     target = raw_root / f"{slug}.md"
+    guard = check_destination(wiki, raw_root)
     busy = 0
+    recorded = False
     while True:
-        check_destination(wiki, raw_root, target)
-        if os.path.lexists(target):
-            return ("identical" if target.read_bytes() == data else "conflict"), target
-        if os.path.lexists(wiki / "sources" / f"{slug}.md"):
-            return "slug_taken", target
-        tmp = raw_root / f".wiki-session-{secrets.token_hex(8)}.tmp"
         try:
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o644)
-            with os.fdopen(fd, "wb") as fh:
-                fh.write(data)
-                fh.flush()
-                os.fsync(fh.fileno())
-            before_publish()
-            try:
-                publish_exclusive(tmp, target)
-            except FileExistsError:
+            exists = guard.file_info(target) is not None
+            if exists and target.read_bytes() != data:
+                return "conflict", target
+            if not exists and os.path.lexists(wiki / "sources" / f"{slug}.md"):
+                return "slug_taken", target
+            if not recorded:
+                try:
+                    record_raw_root(wiki, guard.root, writer="wiki_session")
+                except (OSError, ValueError, RuntimeError) as exc:
+                    raise Fail(f"raw の根を記録できないので保存しない: {exc}") from exc
+                recorded = True
+            if exists:
+                return "identical", target
+            guard.write_bytes(target, data, prefix=".wiki-session-", before_publish=before_publish)
+        except FileExistsError:
+            continue
+        except Refused as exc:
+            # POSIX の排他公開で、一時名の削除までの短い間だけハードリンクになる。
+            if exc.kind == "hardlink" and exc.path == guard.root / target.name and busy < 5:
+                busy += 1
+                time.sleep(0.02)
                 continue
-            except PermissionError as exc:
-                # Windows では、ほかのプロセスが同じ行き先へ名前を変えている最中だと、FileExistsError ではなく
-                # アクセスの拒否になる。少し待って行き先を確かめ直す（できていれば identical か conflict）。
-                # 回数を限り、本当に書けないディレクトリでは止まる。
-                if WINDOWS and busy < 50:
-                    busy += 1
-                    time.sleep(0.02)
-                    continue
-                raise Fail(f"raw を置けない（{exc}）")
-            except ExclusiveUnsupported as exc:
-                raise Fail(f"このファイルシステムでは、raw を重ねて書かない形で置けないので書かない（{exc}）")
-            after_publish()
-            return "created", target
-        finally:
-            if os.path.lexists(tmp):
-                os.unlink(tmp)
+            raise
+        except PermissionError as exc:
+            # Windows では、名前の変更の競合で一時的にアクセス拒否になることがある。
+            if WINDOWS and busy < 50:
+                busy += 1
+                time.sleep(0.02)
+                continue
+            raise Fail(f"raw を置けない（{exc}）") from exc
+        except ExclusiveUnsupported as exc:
+            raise Fail(f"このファイルシステムでは、raw を重ねて書かない形で置けないので書かない（{exc}）") from exc
+        after_publish()
+        return "created", target
 
 
 # ---------------------------------------------------------------- 入口の共通
@@ -1339,8 +1345,12 @@ def resolve_options(args, dec: Decisions | None) -> Options:
 
 def load_extract(args, dec: Decisions | None = None) -> Extract:
     opts = resolve_options(args, dec)
-    rng = read_range(Path(args.transcript), opts.before, args.max_bytes)
-    ex = extract(rng, opts)
+    if args.transcript.startswith("codex:"):
+        import wiki_codex_session
+        ex = wiki_codex_session.extract_session(args.transcript[len("codex:"):], opts, args.max_bytes)
+    else:
+        rng = read_range(Path(args.transcript), opts.before, args.max_bytes)
+        ex = extract(rng, opts)
     if dec is not None:
         check_decisions(dec, ex)
     return ex
@@ -1352,6 +1362,8 @@ def verdict(ex: Extract) -> tuple[str, str]:
     if ex.untyped:
         return "not_session", "uuid のある記録に type がない"
     if not ex.humans:
+        if ex.source_kind == "codex-session":
+            return "not_session", "選んだ範囲に、人の発言として確認できる記録が 1 件もない"
         return "not_session", "人の発言が 1 件もない（claude -p のセッションか、Claude Code の記録でない）"
     return "session", ""
 
@@ -1383,6 +1395,13 @@ def _project_dirs() -> list:
 
 
 def cmd_locate(args) -> int:
+    if args.host == "codex":
+        import wiki_codex_session
+        result = wiki_codex_session.locate(args.session_id, args.current)
+        out_json(result) if args.json else print(result["transcript"])
+        return 0
+    if args.current:
+        raise Fail("--current は --host codex のときだけ使える。Claude Code では --session-id を渡す")
     sid = args.session_id
     if not UUID_RE.match(sid or ""):
         raise Fail(f"セッションの ID は小文字の UUID で渡す: {sid!r}")
@@ -1400,6 +1419,13 @@ def cmd_locate(args) -> int:
 
 
 def cmd_list(args) -> int:
+    if args.limit <= 0:
+        raise Fail("--limit は 1 以上にする")
+    if args.host == "codex":
+        import wiki_codex_session
+        rows = wiki_codex_session.list_sessions(args.limit)
+        out_json(rows) if args.json else out_lines({"sessions": rows})
+        return 0
     items = []
     for d in _project_dirs():
         with os.scandir(d) as it:
@@ -1422,16 +1448,46 @@ def cmd_list(args) -> int:
 def _raw_frontmatter(path: Path) -> dict:
     try:
         text = path.read_bytes().decode("utf-8")
-    except (OSError, UnicodeDecodeError):
+    except UnicodeDecodeError:
         return {}
     m = FRONTMATTER_RE.match(text)
     return parse_frontmatter_text(m.group(1)) if m else {}
+
+
+def _inspect_saved_raw(raw_root: Path, slug: str) -> tuple[dict, list[str]]:
+    target = raw_root / f"{slug}.md"
+    exists = False
+    reason = None
+    fm = {}
+    temps = []
+    try:
+        guard = WriteGuard(raw_root, strict_root=True)
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError) as exc:
+        exists, reason = None, str(exc)
+    else:
+        try:
+            with os.scandir(guard.root) as entries:
+                temps = sorted(e.name for e in entries if e.name.startswith(".wiki-session-") and e.name.endswith(".tmp"))
+            exists = guard.file_info(target) is not None
+            if exists:
+                fm = _raw_frontmatter(target)
+        except (OSError, ValueError) as exc:
+            exists, reason = None, str(exc)
+    raw = {"exists": exists, "session_id": fm.get("session_id"),
+           "source_sha256": fm.get("source_sha256"), "cut_before": fm.get("cut_before")}
+    if reason is not None:
+        raw["reason"] = reason
+    return raw, temps
 
 
 def cmd_inspect(args) -> int:
     trio = (args.wiki, args.raw_root, args.slug)
     if any(v is not None for v in trio) and not all(v is not None for v in trio):
         raise Fail("--wiki、--raw-root、--slug は 3 つそろえて渡す")
+    if args.slug is not None:
+        check_slug(args.slug)
     ex = load_extract(args)
     v, reason = verdict(ex)
     tail = [{"uuid": uid, "time": t, "head": " ".join(text.split())[:40]} for uid, t, text in ex.humans[-5:]]
@@ -1444,7 +1500,7 @@ def cmd_inspect(args) -> int:
     transcript = Path(args.transcript)
     sub = transcript.parent / transcript.stem / "subagents"
     subagent_files = 0
-    if os.path.isdir(sub) and not _is_link(sub):
+    if ex.source_kind == "claude-code-session" and os.path.isdir(sub) and not _is_link(sub):
         with os.scandir(sub) as it:
             subagent_files = sum(1 for e in it if e.name.endswith(".jsonl") and e.is_file(follow_symlinks=False))
     result = {
@@ -1455,19 +1511,18 @@ def cmd_inspect(args) -> int:
         "warnings": summarize_warnings(ex.warnings), "broken_lines": ex.broken_lines,
         "subagent_files": subagent_files,
     }
+    if ex.source_kind != "claude-code-session":
+        result["source_kind"] = ex.source_kind
+        result["source_sha256_of"] = ex.source_sha256_of
     if args.wiki is not None:
-        raw_root = Path(args.raw_root)
-        target = raw_root / f"{args.slug}.md"
-        exists = os.path.lexists(target)
-        fm = _raw_frontmatter(target) if exists else {}
-        result["raw"] = {"exists": exists, "session_id": fm.get("session_id"),
-                         "source_sha256": fm.get("source_sha256"), "cut_before": fm.get("cut_before")}
+        result["raw"], result["temp_files"] = _inspect_saved_raw(Path(args.raw_root), args.slug)
         result["source_page_exists"] = os.path.lexists(Path(args.wiki) / "sources" / f"{args.slug}.md")
-        temps = []
-        if os.path.isdir(raw_root):
-            with os.scandir(raw_root) as it:
-                temps = sorted(e.name for e in it if e.name.startswith(".wiki-session-") and e.name.endswith(".tmp"))
-        result["temp_files"] = temps
+        if ex.source_kind == "codex-session":
+            filename = f"{args.slug}-会話版.md"
+            result["conversation"] = {
+                "raw_exists": os.path.lexists(Path(args.raw_root) / filename),
+                "source_page_exists": os.path.lexists(Path(args.wiki) / "sources" / filename),
+            }
     out_json(result) if args.json else out_lines(result)
     return 0 if v == "session" else 2
 
@@ -1504,6 +1559,15 @@ def cmd_show(args) -> int:
                   "render_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(), "chars": len(text),
                   "turns": len(ex.turns), "manual_redactions": sum(len(v) for v in merged_spans(spans).values()),
                   "dropped_turns": len(set(drop)), "warnings": summarize_warnings(ex.warnings)}
+        if ex.source_kind == "codex-session":
+            if args.slug is not None:
+                check_slug_value(f"{args.slug}-会話版", ex, spans)
+            try:
+                data = render_conversation(ex, args.title, spans, drop)
+            except RenderError as exc:
+                raise Fail(f"会話版の自己検査を通らない: {exc}") from None
+            result["conversation"] = {"turns": len(ex.turns) - len(ex.tool_turns),
+                                      "render_sha256": hashlib.sha256(data).hexdigest()}
         out_json(result) if args.json else out_lines(result)
         return 0
     first, last = parse_turn_range(args.turns, len(ex.turns))
@@ -1639,13 +1703,15 @@ def cmd_decide(args) -> int:
 def cmd_write(args) -> int:
     wiki = Path(args.wiki)
     raw_root = Path(args.raw_root)
+    from wiki_pages import absolute_user_path
+    try:
+        absolute_user_path(wiki)
+        absolute_user_path(raw_root)
+    except ValueError as exc:
+        raise Fail(str(exc)) from None
     if not os.path.isdir(raw_root):
         raise Fail(f"raw のルートがない（作らない）: {raw_root}")
-    import wiki_fetch
-    try:
-        wiki_fetch.check_slug(args.slug)
-    except ValueError as exc:
-        raise Fail(str(exc))
+    check_slug(args.slug)
     dec = load_decisions(Path(args.decisions))
     ex = load_extract(args, dec)
     require_session(ex)
@@ -1658,27 +1724,63 @@ def cmd_write(args) -> int:
         raise Fail(f"作った raw のハッシュが、承認したものと一致しない（{sha}）。show --meta からやり直す")
     check_title(args.title, ex, dec.spans)
     check_slug_value(args.slug, ex, dec.spans)
-    state, target = write_raw(wiki, raw_root, args.slug, data)
+    conversation = None
+    if args.expect_conversation_sha256 is not None:
+        if ex.source_kind != "codex-session":
+            raise Fail("会話版を一緒に書けるのは Codex のセッションだけ")
+        conversation_slug = f"{args.slug}-会話版"
+        check_slug_value(conversation_slug, ex, dec.spans)
+        try:
+            conversation = render_conversation(ex, args.title, dec.spans, dec.drop)
+        except RenderError as exc:
+            raise Fail(f"会話版の自己検査を通らない: {exc}") from None
+        if hashlib.sha256(conversation).hexdigest() != args.expect_conversation_sha256:
+            raise Fail("会話版のハッシュが、承認したものと一致しない。show --meta からやり直す")
+    result = save_raw(wiki, raw_root, args.slug, data, sha, ex.session_id)
+    ok = result["raw_state"] in ("created", "identical")
+    if ok and conversation is not None:
+        result["conversation"] = save_raw(wiki, raw_root, conversation_slug, conversation,
+                                          args.expect_conversation_sha256, ex.session_id)
+        ok = result["conversation"]["raw_state"] in ("created", "identical")
+    out_json(result) if args.json else out_lines(result)
+    return 0 if ok else 3
+
+
+def save_raw(wiki: Path, raw_root: Path, slug: str, data: bytes, sha: str, session_id: str) -> dict:
+    try:
+        state, target = write_raw(wiki, raw_root, slug, data)
+    except (OSError, ValueError) as exc:
+        raise Fail(f"raw を保存できない: {exc}") from exc
     result = {"raw_state": state, "raw_path": str(target), "raw_ref": raw_ref_of(wiki, target), "render_sha256": sha}
     if state in ("created", "identical"):
-        if target.read_bytes() != data:
-            raise Fail(f"書いた raw を読み直すと、バイト列が違う: {target}")
-        import wiki_lint
-        if wiki_lint.missing_raw({"type": "source", "raw": result["raw_ref"]},
-                                 wiki / "sources" / f"{args.slug}.md", wiki):
-            raise Fail(f"要約ページの raw に書く値で、raw が見つからない: {result['raw_ref']}")
-        make_read_only(target)
-    out_json(result) if args.json else out_lines(result)
-    return 0 if state in ("created", "identical") else 3
+        from wiki_pages import resolve_raw
+        checked = resolve_raw({"type": "source", "raw": result["raw_ref"], "raw_sha256": sha, "session_id": session_id},
+                              wiki / "sources" / f"{slug}.md", wiki, raw_roots=[raw_root])[0]
+        if checked.state != "resolved":
+            raise Fail(f"要約ページの raw を確かめられない: {checked.state}: {checked.reason} {result['raw_ref']}")
+        try:
+            guard = check_destination(wiki, raw_root)
+            if guard.file_info(target) is None or target.read_bytes() != data:
+                raise Fail(f"書いた raw を読み直すと、バイト列が違う: {target}")
+            make_read_only(target)
+        except OSError as exc:
+            raise Fail(f"書いた raw を読み取り専用にできない: {exc}") from exc
+        result["raw_sha256"] = sha
+    return result
 
 
 def cmd_verify(args) -> int:
     target = Path(args.raw_root) / f"{args.slug}.md"
-    if not os.path.lexists(target) or _is_link(target) or not stat.S_ISREG(os.lstat(target).st_mode):
-        raise Fail(f"raw がないか、ふつうのファイルではない: {target}")
-    sha = hashlib.sha256(target.read_bytes()).hexdigest()
+    try:
+        guard = WriteGuard(Path(args.raw_root), strict_root=True)
+        info = guard.file_info(target)
+        if info is None:
+            raise FileNotFoundError(target)
+        sha = hashlib.sha256(target.read_bytes()).hexdigest()
+    except (OSError, ValueError) as exc:
+        raise Fail(f"raw を確かめられない: {exc}") from exc
     result = {"raw_path": str(target), "sha256_matches": sha == args.expect_sha256,
-              "read_only": is_read_only(target)}
+              "read_only": not (info.st_mode & 0o222)}
     out_json(result) if args.json else out_lines(result)
     return 0 if result["sha256_matches"] and result["read_only"] else 1
 
@@ -1813,20 +1915,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     def common(p, transcript=True):
         if transcript:
-            p.add_argument("--transcript", required=True, help="セッションの記録（JSONL）のパス")
+            p.add_argument("--transcript", required=True, help="Claude Code の JSONL のパス、または codex:<チャットの ID>")
         p.add_argument("--session-id", default=None, help="セッションの ID（記録のどこかの sessionId にあること）")
-        p.add_argument("--before", default=None, help="この uuid の記録の行の先頭までを範囲にする")
+        p.add_argument("--before", default=None, help="この記録の手前までを範囲にする（Claude は uuid、Codex は item ID または turn ID）")
         p.add_argument("--tools", choices=("summary", "none"), default=None, help="ツールの呼び出しの 1 行の要約を残すか")
         p.add_argument("--keep-reminders", action="store_const", const=True, default=None,
                        help="人の発言の先頭の <system-reminder> を除かない")
         p.add_argument("--utc-offset", default=None, help="時刻を直す時差（+09:00 の形。既定は +00:00）")
-        p.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES, help="記録のファイルの大きさの上限")
+        p.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES, help="記録の範囲の大きさの上限")
         p.add_argument("--json", action="store_true", help="結果を JSON で出力する。キーは英語のまま")
 
     p = localize_argparse(sub.add_parser("locate", help="セッションの ID から記録のパスを探す"))
-    p.add_argument("--session-id", required=True)
+    p.add_argument("--host", choices=("claude", "codex"), default="claude")
+    source = p.add_mutually_exclusive_group(required=True)
+    source.add_argument("--session-id")
+    source.add_argument("--current", action="store_true", help="実行中の Codex のチャットを、環境の ID で特定する")
     p.add_argument("--json", action="store_true")
     p = localize_argparse(sub.add_parser("list", help="記録の一覧（新しい順）"))
+    p.add_argument("--host", choices=("claude", "codex"), default="claude")
     p.add_argument("--limit", type=int, default=20)
     p.add_argument("--json", action="store_true")
     p = localize_argparse(sub.add_parser("inspect", help="セッションの記録と認めるかと、件数、警告"))
@@ -1872,6 +1978,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--raw-root", required=True)
     p.add_argument("--slug", required=True)
     p.add_argument("--expect-sha256", required=True)
+    p.add_argument("--expect-conversation-sha256", help="承認した会話版のハッシュ（Codex のセッション用）")
     p = localize_argparse(sub.add_parser("verify", help="raw が承認したバイト列で、読み取り専用かを照らす"))
     p.add_argument("--raw-root", required=True)
     p.add_argument("--slug", required=True)

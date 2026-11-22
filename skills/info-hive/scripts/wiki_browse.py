@@ -9,7 +9,7 @@
 wiki_browse.py — wiki の閲覧（browse）の入口。
 
     uv run --script wiki_browse.py build <WIKI_ROOT> [--out DIR] [--raw text|link|basename|none] [--scope user|project]
-    uv run --script wiki_browse.py serve <WIKI_ROOT> [--page SLUG] [--no-open] [--idle-timeout 秒] [--scope user|project]
+    uv run --script wiki_browse.py serve <WIKI_ROOT> [--raw-root DIR] [--page SLUG] [--no-open] [--idle-timeout 秒] [--scope user|project]
     uv run --script wiki_browse.py stop <WIKI_ROOT>
     uv run --script wiki_browse.py core          （標準入力から 1 行に 1 つの JSON の要求を読む）
 
@@ -30,6 +30,7 @@ import sys
 sys.dont_write_bytecode = True
 
 import argparse  # noqa: E402
+import hashlib  # noqa: E402
 import hmac  # noqa: E402
 import html  # noqa: E402
 import http.client  # noqa: E402
@@ -121,6 +122,8 @@ READ_ATTEMPTS = 3
 
 def _read_and_render(root: PurePath, raw: str, scope: "str | None", generated_at: str):
     """写しを採り、すべてのページを描く。読んでいるあいだに Wiki が変われば、3 回までやり直す（設計の 4.2）。"""
+    import wiki_browse_pele
+
     for attempt in range(READ_ATTEMPTS):
         try:
             snap = core.take_snapshot(root)
@@ -129,7 +132,13 @@ def _read_and_render(root: PurePath, raw: str, scope: "str | None", generated_at
                 raise Failed("読んでいるあいだに Wiki が変わり続けた。前の世代を残して止める。少し待ってからやり直す")
             continue
         c = core.Core(snap, scope=scope)
-        return snap, c, c.render_all(raw, generated_at)
+        sources = c.mermaid_sources()
+        images, warnings = wiki_browse_pele.render_sources(sources)
+        missed = len(sources) - len(images)
+        if missed:
+            warnings.append(f"Mermaid の図を {missed} 種類描けない。その図はコードで表示する")
+        c.prepare_static_mermaid(images)
+        return snap, c, c.render_all(raw, generated_at), warnings
     raise AssertionError("unreachable")
 
 
@@ -143,6 +152,8 @@ def _machine_needles(root: PurePath, snap) -> "tuple[list, int]":
         return needles, len(snap.entries)
     unknown = 0
     for _kind, rel, _size, _mtime in snap.entries:
+        if _kind in ("overview_entry", "overview_dir"):
+            continue  # 中身を読まず、出力にも写さない項目の実体は解決しない。
         try:
             real = fs.resolve(os.path.join(str(root), *rel.split("/")))
         except (fs.Unknown, fs.Absent):
@@ -163,9 +174,10 @@ def build(root: PurePath, out_arg: "str | None", raw: "str | None", scope: "str 
     raw = raw or ("link" if default else "basename")
     started = time.perf_counter()
     assets = core.load_assets()
+    assets.pop("assets/figures.js")
     owner = fs.owner_of(root)
     generated_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-    snap, c, files = _read_and_render(root, raw, scope, generated_at)
+    snap, c, files, warnings = _read_and_render(root, raw, scope, generated_at)
     files = {name: (content if isinstance(content, bytes) else content.encode("utf-8"))
              for name, content in files.items()}
     files.update(assets)
@@ -178,7 +190,6 @@ def build(root: PurePath, out_arg: "str | None", raw: "str | None", scope: "str 
     tokens, unreadable_records = fs.server_tokens(bdir)
     # 同梱の画面の部品は入力の中身を含まないので、調べない（図の描画の設計の 7.2）
     findings = core.scan_machine_info({n: v for n, v in files.items() if n not in assets}, needles, tokens)
-    warnings = []
     for name, what in findings:
         warnings.append(f"この出力に、{'絶対パス' if what == 'path' else 'サーバーの操作のトークン'}がある"
                         f"（{name}）。入力の中身にあるもので、持ち出すと渡る")
@@ -192,7 +203,8 @@ def build(root: PurePath, out_arg: "str | None", raw: "str | None", scope: "str 
         warnings.append(f"この入力を読めない。ない Wiki と同じに描き、「読めない」と示した（{kind}: {rel}）")
 
     report = {"wiki": root.as_posix(), "out": PurePath(out).as_posix(), "generation": c.generation,
-              "pages": len(c.drawn), "raw": raw, "warnings": list(warnings), "diagnostics": len(c.diagnostics)}
+              "pages": len(c.drawn), "raw": raw, "warnings": list(warnings), "diagnostics": len(c.diagnostics),
+              "link_warnings": list(c.link_warnings)}
     fs.WARNINGS.clear()
     for message in warnings:
         fs.warn(message)
@@ -213,8 +225,7 @@ def build(root: PurePath, out_arg: "str | None", raw: "str | None", scope: "str 
 def core_loop(stdin, stdout) -> int:
     cache = {}
 
-    def get(wiki: str):
-        root = wiki_root(wiki)
+    def get(root):
         # 鍵は、綴りそのままの文字にする。PureWindowsPath は大文字と小文字を同一視して等しくするが、大文字と小文字を
         # 区別するディレクトリでは別の Wiki である（実装の 3 回目のレビューの重大 3）
         key = os.fspath(root)
@@ -233,7 +244,9 @@ def core_loop(stdin, stdout) -> int:
         try:
             req = json.loads(line)
             op = req.get("op")
-            c = get(str(req.get("wiki", "")))
+            root = wiki_root(str(req.get("wiki", "")))
+            release = fs.publication(root, req.get("release_id"))
+            c = get(release.root if release else root)
             if op == "manifest":
                 res = {"ok": True, "protocol_version": core.PROTOCOL_VERSION, "generation": c.generation,
                        "manifest": c.manifest(), "nav": c._nav_json(), "diagnostics": c.diagnostics,
@@ -242,16 +255,19 @@ def core_loop(stdin, stdout) -> int:
             elif op == "page":
                 pid = str(req.get("id", ""))
                 raw = req.get("raw") or "text"
-                if pid not in c.drawn or raw not in core.RAW_MODES:
+                if pid not in c.drawn or raw not in core.RAW_MODES or (release and raw == "link"):
                     res = {"ok": False, "error": "unknown_page" if pid not in c.drawn else "bad_raw"}
                 else:
                     res = {"ok": True, "protocol_version": core.PROTOCOL_VERSION, "generation": c.generation,
                            "id": pid, "path": c.out_name[pid], "html": c.render(c.out_name[pid], raw)}
             else:
                 res = {"ok": False, "error": "unknown_op"}
+            if release and res["ok"]:
+                fs.publication(release.wiki, release.release_id)
+                res["release_id"] = release.release_id
         except Failed:
             res = {"ok": False, "error": "no_wiki"}
-        except (core.InputsUnknown, core.InputsChanged):
+        except (core.InputsUnknown, core.InputsChanged, fs.Absent, fs.Unknown, fs.Stop):
             res = {"ok": False, "error": "unavailable"}
         except (ValueError, AttributeError):
             res = {"ok": False, "error": "bad_request"}
@@ -280,9 +296,14 @@ def _quote_path(name: str) -> str:
 class BrowseState:
     """サーバーが持つ中核と、作り直しの状態（設計の 8.3）。"""
 
-    def __init__(self, root: PurePath, raw: str = "text", scope: "str | None" = None):
+    def __init__(self, root: PurePath, raw: str = "text", scope: "str | None" = None, *, raw_root=None):
         self.root = root
         self.raw = raw
+        self.raw_root = os.path.abspath(os.path.expanduser(raw_root)) if raw_root is not None else None
+        self.raw_root_key = (
+            hashlib.sha256(self.raw_root.encode("utf-8", errors="surrogatepass")).hexdigest()
+            if self.raw_root is not None else None
+        )
         # このサーバーが wiki のページ（サイドバーの先頭とタブの題名）に描くスコープ。サーバーは描くスコープを
         # ここにだけ持つ。組み立てるどの中核にも同じものを渡し、操作の口の status と起動の出力もこれを書く。
         # wiki を組み立てられないあいだは 503 を返してページを描かないが、この値は変わらない。
@@ -340,7 +361,7 @@ class BrowseState:
                 self.failed = self.failed or "InputsUnknown"
                 return self._answer(cur, request_sig, "failed")
             try:
-                snap = core.take_snapshot(self.root)
+                snap = core.take_snapshot(self.root, raw_root=self.raw_root)
                 new = core.Core(snap, scope=self.scope)
             except Exception as e:  # noqa: BLE001  前の中核を使い続ける（InputsUnknown、InputsChanged を含む）
                 self.failed = type(e).__name__
@@ -356,7 +377,7 @@ class BrowseState:
     def _signature(self) -> "str | None":
         """入力の印。入力の名前の集合が分からなければ None（どの中核の印とも一致しない）。"""
         try:
-            return core.signature(self.root)
+            return core.signature(self.root, self.raw_root)
         except Exception:  # noqa: BLE001  InputsUnknown のほか、思わない例外でも新しい中核を採らない
             return None
 
@@ -390,8 +411,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if app.verbose:
             say(f"{self.command} {getattr(self, '_kind', '-')} {code}")
 
+    def _publication_available(self):
+        app = self.server.app
+        pinned = app.publication
+        try:
+            if pinned is None:
+                return fs.publication(app.root) is None
+            fs.publication(pinned.wiki, pinned.release_id)
+            return True
+        except (fs.Absent, fs.Unknown, fs.Stop):
+            return False
+
     def _send(self, code: int, body: bytes, ctype: str = "text/plain; charset=utf-8", extra: "dict | None" = None,
               csp: "str | None" = None, cache: "str | None" = None):
+        if code in (200, 304) and getattr(self, "_kind", None) == "view":
+            if not self._publication_available():
+                return self._text(410, "公開版を取得できません")
+            if self.server.app.publication is not None:
+                cache = "no-store"
         # CSP は応答の種類ごとに選ぶ（図の描画の設計の 6.5、7.3）。CSP は重なって効くので、1 つの応答に 1 つだけ付ける
         self.send_response(code)
         self.send_header("Content-Type", ctype)
@@ -498,6 +535,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return self._send(200, body, "text/javascript; charset=utf-8", cache="private, max-age=86400")
 
     def _view(self, name: str):
+        if not self._publication_available():
+            return self._text(410, "公開版を取得できません")
+        return self._render_view(name)
+
+    def _render_view(self, name: str):
         app = self.server.app
         if name in core.ASSETS:
             ctype = "text/javascript; charset=utf-8" if name.endswith(".js") else "text/css; charset=utf-8"
@@ -522,13 +564,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # 図の svg。CSP の sandbox で、直接開かれても中のスクリプトを動かさない（図の描画の設計の 6.5）
             return self._send(200, svg, "image/svg+xml", csp=core.CSP_SVG)
         reason = None if stale is None else ("組み立てに失敗した" if stale == "failed" else "組み立てている")
-        text = c.render(name, app.state.raw, generated_at=getattr(c, "generated_at", ""), stale=reason)
+        # COOP で別オリジンの開き元が切れる前に、要求の種類で図を出す入口を絞る。
+        allow_figures = (self.headers.get("Sec-Fetch-Mode") == "navigate"
+                         and self.headers.get("Sec-Fetch-Dest") == "document"
+                         and self.headers.get("Sec-Fetch-Site") in ("none", "same-origin"))
+        text = c.render(name, app.state.raw, generated_at=getattr(c, "generated_at", ""), stale=reason,
+                        allow_figures=allow_figures, filter_secret=app.filter_secret)
         ctype = "text/javascript; charset=utf-8" if name.endswith(".js") else "text/html; charset=utf-8"
-        return self._send(200, text.encode("utf-8"), ctype)
+        extra = None if name.endswith(".js") else {"Cross-Origin-Opener-Policy": "same-origin"}
+        return self._send(200, text.encode("utf-8"), ctype, extra=extra)
 
     def _control_locate(self, target: str):
         """行き先を wikilink と同じ規則で解決し、状態と、解決したページの出力の名前を返す。"""
         app = self.server.app
+        if not self._publication_available():
+            return self._json(410, {"state": "unavailable"})
         c, _stale = app.state.get()
         if c is None:
             return self._json(200, {"state": "unavailable"})
@@ -545,7 +595,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         op = rest[0] if rest else ""
         if op == "status" and self.command in ("GET", "HEAD") and len(rest) == 1:
             # scope は BrowseState.scope である。使い回すときの起動の出力は、これを書く。
-            return self._json(200, {"instance": app.instance, "wiki_key": app.key, "scope": app.state.scope})
+            return self._json(200, {"instance": app.instance, "wiki_key": app.key, "scope": app.state.scope,
+                                    "raw_root_key": app.state.raw_root_key})
         if op == "stop" and self.command == "POST" and len(rest) == 1:
             self._json(200, {"stopping": True})
             app.request_shutdown()
@@ -585,17 +636,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 class App:
     def __init__(self, root: PurePath, idle: float, verbose: bool = False, scope: "str | None" = None,
-                 assets: "dict | None" = None, frame_assets: "dict | None" = None):
+                 assets: "dict | None" = None, frame_assets: "dict | None" = None, *, raw_root=None,
+                 publication=None):
         self.root = root
         self.key = common.wiki_key(root)
         self.idle = idle
         self.verbose = verbose
         self.assets = assets or {}
         self.frame_assets = frame_assets or {}   # Mermaid の図の枠の同梱物（図の描画の設計の 7.2）
+        self.filter_secret = b""
         self.view_token = secrets.token_urlsafe(24)
         self.control_token = secrets.token_urlsafe(24)
         self.instance = secrets.token_hex(12)
-        self.state = BrowseState(root, scope=scope)
+        self.state = BrowseState(root, scope=scope, raw_root=raw_root)
+        self.publication = publication
         self.last = time.monotonic()
         self.httpd = None
         self.port = 0
@@ -724,7 +778,7 @@ def _page_url(base_url_for, port, token, target):
 
 
 def serve(root: PurePath, page: "str | None", open_browser: bool, idle: float, verbose: bool = False,
-          scope: "str | None" = None) -> int:
+          scope: "str | None" = None, *, raw_root=None, publication=None) -> int:
     bdir = browse_dir()
     state_dir = _state_dir(root)
     if os.name == "nt" and os.environ.get(common.DATA_DIR_ENV, "").strip():
@@ -732,10 +786,15 @@ def serve(root: PurePath, page: "str | None", open_browser: bool, idle: float, v
     assets = core.load_assets()
     frame_assets = core.load_frame_assets()
     owner = fs.owner_of(root)
-    app = App(root, idle, verbose, scope, assets, frame_assets)
+    app = App(root, idle, verbose, scope, assets, frame_assets, raw_root=raw_root, publication=publication)
 
     def make_record():
         # ロックを取ったあとに待ち受けを始め、記録を置き換える（設計の 7.1）
+        secret = fs.browse_filter_secret(state_dir)
+        if secret is not None:
+            app.filter_secret = hmac.digest(secret, owner.encode("utf-8"), "sha256")
+        else:
+            say("絞り込み用の鍵を使えないため、タグと種類の選択を保存できない")
         httpd = _Server(("127.0.0.1", 0), Handler)
         httpd.app = app
         app.httpd = httpd
@@ -758,6 +817,8 @@ def serve(root: PurePath, page: "str | None", open_browser: bool, idle: float, v
         # 記録を読めなければ（'unreadable'）、動いているが届かないので待つ。読めた記録だけで使い回す（設計の 7.1）
         live = _answering(value) if outcome == "reuse" else None
         if live is not None:
+            if live.get("raw_root_key") != app.state.raw_root_key:
+                raise Failed("動いているサーバーの raw の設定が異なる。/wiki:browse --stop で止めてからやり直す")
             rec = value
             key = rec.get("wiki_key") or app.key
 
@@ -847,6 +908,7 @@ def main(argv=None) -> int:
     b = sub.add_parser("build", help="静的の HTML を書き出す", parents=[common_args])
     b.add_argument("wiki")
     b.add_argument("--out", default=None, help="書き出し先（既定は <data_dir>/browse/<wiki_key>/）")
+    b.add_argument("--release-id", help="閲覧する公開版")
     b.add_argument("--raw", choices=("text", "link", "basename", "none"), default=None,
                    help="raw: の出し方（既定は、既定の書き出し先で link、--out で basename）")
     _add_scope_arguments(b)
@@ -884,13 +946,24 @@ def _dispatch(args) -> int:
     # 新しいサブコマンドも、wiki を引数に取れば既定でここを通る。core は要求ごとに wiki を受け取り、要求ごとに
     # 判定する（core_loop）。
     root = wiki_root(args.wiki) if hasattr(args, "wiki") else None
+    release = None
+    if root is not None:
+        release = fs.publication(root, getattr(args, "release_id", None))
+        if release:
+            if getattr(args, "raw_root", None) is not None:
+                raise Failed("公開版の browse にライブの raw は指定できません")
+            if getattr(args, "raw", None) == "link":
+                raise Failed("公開版の browse にライブの raw へのリンクは出せません")
+            if args.cmd == "build" and args.raw is None:
+                args.raw = "text"
+            root = release.root
     if args.cmd == "build":
         build(root, args.out, args.raw, args.scope)
         return EXIT_OK
     if args.cmd == "core":
         sys.stdin.reconfigure(encoding="utf-8")
         return core_loop(sys.stdin, sys.stdout)
-    return _run_server_command(args, root)
+    return _run_server_command(args, root, publication=release)
 
 
 def _exit_for(e: Exception, debug: bool) -> int:
@@ -926,6 +999,8 @@ def _add_server_commands(sub, common_args) -> None:
     """serve と stop（設計の 8）。"""
     s = sub.add_parser("serve", help="127.0.0.1 のサーバーを起動して開く（動いていれば使い回す）", parents=[common_args])
     s.add_argument("wiki")
+    s.add_argument("--raw-root", help="raw カテゴリに表示する Markdown のルート")
+    s.add_argument("--release-id", help="閲覧する公開版")
     s.add_argument("--page", default=None, help="開くページ（[[slug]] と同じ規則で探す）")
     s.add_argument("--no-open", action="store_true", help="ブラウザで開かない（URL を出すだけ）")
     s.add_argument("--idle-timeout", type=float, default=DEFAULT_IDLE, help="操作がないときに終わるまでの秒数（既定 1800）")
@@ -933,12 +1008,17 @@ def _add_server_commands(sub, common_args) -> None:
     _add_scope_arguments(s)
     t = sub.add_parser("stop", help="動いているサーバーを止める", parents=[common_args])
     t.add_argument("wiki")
+    t.add_argument("--release-id", help="サーバーを停止する公開版")
 
 
-def _run_server_command(args, root: PurePath) -> int:
+def _run_server_command(args, root: PurePath, *, publication=None) -> int:
     """root は、main() が判定した wiki のルート。"""
     if args.cmd == "serve":
-        return serve(root, args.page, not args.no_open, args.idle_timeout, args.verbose, args.scope)
+        if publication is not None:
+            return serve(root, args.page, not args.no_open, args.idle_timeout, args.verbose, args.scope,
+                         publication=publication)
+        return serve(root, args.page, not args.no_open, args.idle_timeout, args.verbose, args.scope,
+                     raw_root=args.raw_root)
     if args.cmd == "stop":
         return stop(root)
     raise Failed(f"未対応のコマンド: {args.cmd}")

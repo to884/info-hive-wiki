@@ -10,6 +10,8 @@
 その下に次を置く。
     server.json        動いているサーバーのポート、トークン、pid、コードの版
     server.lock        サーバーの起動を 1 つにするためのロック
+    server-info.lock   サーバーの記録の読み取り、公開、削除を直列化するロック
+    server-start.json  起動を許可された試行の識別子（中継が起動を待つ間だけ使う）
     index/<wiki のハッシュ>/       wiki ごとの索引
     index/collections/<名前>/     index_chunks で受け取るチャンクの索引
     models/            埋め込みモデルのファイル
@@ -22,6 +24,7 @@ import io
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -30,6 +33,7 @@ import unicodedata
 from pathlib import Path
 
 DATA_DIR_ENV = "INFO_HIVE_DATA_DIR"
+START_ID_ENV = "INFO_HIVE_MCP_START_ID"
 # 要求がない状態がこの秒数続いたら、サーバーは自分で止まる。
 IDLE_SECONDS_ENV = "INFO_HIVE_MCP_IDLE_SECONDS"
 DEFAULT_IDLE_SECONDS = 900
@@ -37,36 +41,46 @@ DEFAULT_IDLE_SECONDS = 900
 PROTOCOL = 1
 SCRIPTS = Path(__file__).resolve().parent
 # サーバーの版を決めるファイル。中身が変わったら、中継は古いサーバーを止めて起動し直す。
-SERVER_FILES = ("wiki_mcp_common.py", "wiki_mcp_server.py", "wiki_index.py", "wiki_search.py", "wiki_text.py",
+SERVER_FILES = ("wiki_mcp_common.py", "wiki_mcp_server.py", "wiki_index.py", "wiki_search.py", "wiki_tokens.py",
+                "wiki_text.py",
                 "wiki_pages.py", "wiki_lint.py", "wiki_stats.py", "wiki_workspace.py", "wiki_initialized.py",
                 "wiki_graph_common.py", "wiki_graph_query.py",
-                "wiki_graph_lint.py", "wiki_graph_extract.py")
+                "wiki_graph_lint.py", "wiki_graph_extract.py",
+                # ADR-0029 の実装で足した。サーバーが関数の中で遅れて読み込むものも入れる（MCP の lint が wiki_captions を、
+                # それが閲覧の中核を、検索が判定のレイヤーを読み込む）。足りているかは tests/wiki/test_wiki_links.py が確かめる
+                "wiki_overview.py", "wiki_links.py", "wiki_raw.py", "wiki_decide.py", "wiki_captions.py", "wiki_browse_core.py", "wiki_browse_fs.py",
+                "wiki_fetch.py", "wiki_rawcheck.py", "wiki_youtube_url.py", "wiki_fsguard.py", "wiki_raw_roots.py",
+                "wiki_apply.py", "wiki_live_apply.py", "wiki_public_save.py", "wiki_public_projection.py",
+                "wiki_live_return.py", "wiki_republish.py")
 COLLECTION_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
-def data_dir() -> Path:
-    override = os.environ.get(DATA_DIR_ENV, "").strip()
+def data_dir(environ=None) -> Path:
+    env = os.environ if environ is None else environ
+    override = env.get(DATA_DIR_ENV, "").strip()
     if override:
         return Path(override)
     if os.name == "nt":
-        base = os.environ.get("LOCALAPPDATA", "").strip()
-        root = Path(base) if base else Path.home() / "AppData" / "Local"
+        base = env.get("LOCALAPPDATA", "").strip()
+        root = Path(base) if base else _data_home(environ) / "AppData" / "Local"
     else:
-        base = os.environ.get("XDG_DATA_HOME", "").strip()
-        root = Path(base) if base else Path.home() / ".local" / "share"
+        base = env.get("XDG_DATA_HOME", "").strip()
+        root = Path(base) if base else _data_home(environ) / ".local" / "share"
     return root / "info-hive"
 
 
-def server_json_path() -> Path:
-    return data_dir() / "server.json"
-
-
-def server_lock_path() -> Path:
-    return data_dir() / "server.lock"
-
-
-def logs_dir() -> Path:
-    return data_dir() / "logs"
+def _data_home(environ) -> Path:
+    if environ is None:
+        return Path.home()
+    if os.name == "nt":
+        home = environ.get("USERPROFILE")
+        if home is None and "HOMEPATH" in environ:
+            home = os.path.join(environ.get("HOMEDRIVE", ""), environ["HOMEPATH"])
+    else:
+        home = environ.get("HOME")
+    if not home:
+        raise ValueError("プロセスのホームディレクトリを環境から確認できない")
+    return Path(home)
 
 
 def models_dir() -> Path:
@@ -165,8 +179,13 @@ def server_creationflags() -> int:
 # uv の環境が壊れているとき、中継とサーバーはこの終了コードで止まる（EX_TEMPFAIL）。
 # 起動した側（入口、中継）は、この終了コードを見て環境を入れ直し、1 回だけ起動し直す。
 BROKEN_ENV_EXIT = 75
+# Windows で、依存の共有ライブラリ（DLL）を読めないとき、中継とサーバーはこの終了コードで止まる。
+# 素の Windows にない Visual C++ 再頒布可能パッケージが原因で、環境を入れ直しても直らない。
+# 起動した側は、BROKEN_ENV_EXIT と違い、入れ直さずに利用者へ対処を伝えて止まる。
+RUNTIME_LIB_EXIT = 76
+VC_REDIST_COMMAND = "winget install --id Microsoft.VCRedist.2015+.x64 -e --source winget"
 # 中継とサーバーが起動の最初に import する外部の依存（require_env）。共有ライブラリが読めないことも見つける。
-RELAY_MODULES = ("anyio", "httpx", "filelock", "psutil", "mcp", "mcp.types", "mcp.server.lowlevel",
+RELAY_MODULES = ("anyio", "httpx", "psutil", "mcp", "mcp.types", "mcp.server.lowlevel",
                  "mcp.server.stdio", "mcp.client.session", "mcp.client.streamable_http")
 SERVER_MODULES = ("anyio", "uvicorn", "numpy", "usearch.index", "tantivy", "yaml", "mcp.server.fastmcp",
                   "mcp.server.fastmcp.exceptions", "mcp.server.transport_security")
@@ -268,6 +287,36 @@ def env_problems(limit: int = 10) -> list[str]:
     return problems
 
 
+def is_dll_load_error(exc: BaseException, windows: bool | None = None) -> bool:
+    """Windows で、依存の DLL を読めなかった ImportError か。CPython はこの文言を OS の言語によらず英語で付ける
+    （`DLL load failed while importing <module>: <OS のメッセージ>`）。"""
+    if not (os.name == "nt" if windows is None else windows):
+        return False
+    return isinstance(exc, ImportError) and "DLL load failed" in str(exc)
+
+
+VC_RUNTIME_DLLS = ("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")
+
+
+def missing_vc_runtime_dlls(system_dir: Path | None = None) -> list[str]:
+    """システムのディレクトリ（System32）にない Visual C++ ランタイムの DLL の名前。
+
+    `DLL load failed` は、拡張ファイルの形式が不正なときなど、ランタイム不足以外でも出る。案内を出して
+    入れ直しをやめるのは、不足を実際に確かめられたときだけにする。Windows 以外では空を返す。
+    """
+    if system_dir is None:
+        if os.name != "nt":
+            return []
+        system_dir = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
+    return [name for name in VC_RUNTIME_DLLS if not (system_dir / name).is_file()]
+
+
+def vc_runtime_message(missing: list[str] | None = None) -> str:
+    names = "、".join(missing) if missing else "、".join(VC_RUNTIME_DLLS)
+    return (f"Visual C++ 再頒布可能パッケージ（{names}）が必要である。"
+            f"次を実行して入れ、Claude Code を再起動する: {VC_REDIST_COMMAND}")
+
+
 def require_env(modules) -> None:
     """uv の環境がそろっているかを確かめる。壊れていれば理由を標準エラーに書き、BROKEN_ENV_EXIT で止まる。
 
@@ -289,6 +338,13 @@ def require_env(modules) -> None:
             if getattr(module, "__file__", None) is None:
                 raise ImportError(f"{name} の本体（__init__.py）がない")
         except ImportError as exc:  # 共有ライブラリを読めないときも ImportError になる
+            missing = missing_vc_runtime_dlls() if is_dll_load_error(exc) else []
+            if missing:
+                # ランタイム不足を確かめられた。入れ直しても直らない。BROKEN_ENV_EXIT にすると、起動した側が
+                # 無駄に入れ直す。確かめられない DLL の失敗は、従来どおり壊れた環境として入れ直しに任せる。
+                print(f"[wiki] 依存の {name} の DLL を読み込めない（{type(exc).__name__}: {exc}）。"
+                      + vc_runtime_message(missing), file=sys.stderr, flush=True)
+                sys.exit(RUNTIME_LIB_EXIT)
             print(f"[wiki] 依存の {name} を import できない（{type(exc).__name__}: {exc}）。uv の環境が壊れているかもしれない",
                   file=sys.stderr, flush=True)
             sys.exit(BROKEN_ENV_EXIT)
@@ -384,6 +440,17 @@ class UvResolveError(UvSetupError):
     """uv が依存を解決できなかった（使う Python に合う配布物がない、など）。環境を入れ直しても直らない。"""
 
 
+class VcRuntimeError(UvSetupError):
+    """Windows に Visual C++ 再頒布可能パッケージがなく、依存の DLL を読めない。環境を入れ直しても直らない。"""
+
+
+def raise_vc_runtime_error(prefix: str = "") -> None:
+    """VcRuntimeError を launch.log に記録して送り出す。理由と対処（vc_runtime_message）を含める。"""
+    message = prefix + vc_runtime_message()
+    record_failure(f"VcRuntimeError: {message}")
+    raise VcRuntimeError(message)
+
+
 def is_tls_error(text: str) -> bool:
     lowered = text.lower()
     return any(marker in lowered for marker in _TLS_ERROR_MARKERS)
@@ -467,11 +534,11 @@ def record_failure(message: str) -> None:
     """失敗の理由を logs/launch.log に残す。ホストは標準エラーを利用者に見せないことがある（Claude Code は
     CONNECTION_CLOSED とだけ表示する）ので、利用者が後から読める場所に書く。書けなくても止まらない。"""
     try:
-        logs_dir().mkdir(parents=True, exist_ok=True)
-        with open(logs_dir() / "launch.log", "a", encoding="utf-8", newline="\n") as handle:
-            handle.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}\n")
-    except OSError:
-        pass
+        files = ServerFiles()
+        with files.open_log("launch.log") as handle:
+            handle.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}\n".encode("utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"[wiki] 起動ログを書けない。{exc}", file=sys.stderr, flush=True)
 
 
 def _run_uv(command: list[str], env: dict, output, timeout: float) -> tuple[int, str]:
@@ -644,6 +711,8 @@ def _imports_ok(python: str, script: Path, output, timeout: float) -> bool:
     out = subprocess.run([python, "-X", "utf8", str(script), CHECK_IMPORTS_ARG], stdin=subprocess.DEVNULL,
                          stdout=output, stderr=output, timeout=timeout, env={**os.environ, "PYTHONUTF8": "1"},
                          creationflags=child_creationflags())
+    if out.returncode == RUNTIME_LIB_EXIT:
+        raise_vc_runtime_error(f"{script.name} の依存の DLL を読み込めない。")  # 入れ直しても直らない
     if out.returncode in (0, BROKEN_ENV_EXIT):
         return out.returncode == 0
     raise RuntimeError(f"{script.name} の環境を確かめられなかった（{CHECK_IMPORTS_ARG} の終了コード {out.returncode}）")
@@ -663,6 +732,8 @@ def prepare_script(script: Path, *, output, timeout: float, log, force: bool = F
       ロックの中で確かめ直すので、2 つのセッションが同時に入れ直して、動いている環境を壊すことはない。
     - uv が TLS 証明書を検証できなかったとき、依存を解決できなかったとき（_uv_sync）: 環境は壊れていないので
       入れ直さず、UvTlsError か UvResolveError（どちらも UvSetupError）を送り出す。
+    - 依存の DLL を読めなかったとき（`--check-imports` が RUNTIME_LIB_EXIT で止まる）: Visual C++ 再頒布可能
+      パッケージがないので、入れ直さず VcRuntimeError（UvSetupError）を送り出す。
 
     失敗は、どれも利用者が読む logs/launch.log に残す。ホストは標準エラーを見せないことがあり、中継が
     サーバーの環境を用意するときは、uv の出力は server.log にしか書かれないためである。
@@ -721,33 +792,88 @@ def idle_seconds() -> float:
     return value if value > 0 else DEFAULT_IDLE_SECONDS
 
 
-def read_server_info() -> dict | None:
-    try:
-        info = json.loads(server_json_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if not isinstance(info, dict) or not all(k in info for k in ("port", "token", "pid")):
-        return None
-    return info
+class ServerFiles:
+    """設定されたデータの根にある、MCP 起動用のロックと記録。"""
 
+    def __init__(self):
+        from wiki_fsguard import WriteGuard
+        from wiki_pages import absolute_user_path
 
-def write_server_info(info: dict) -> None:
-    """server.json を一時ファイルに書いてから置き換える。トークンを含むので、POSIX では本人だけが読めるようにする。"""
-    path = server_json_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f"server.json.{os.getpid()}.tmp")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-    fd = os.open(temporary, flags, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-        json.dump(info, handle, ensure_ascii=False)
-    os.replace(temporary, path)
+        self.root = absolute_user_path(data_dir())
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.guard = WriteGuard(self.root)
+        self.record = self.root / "server.json"
+        self.pending = self.root / "server-start.json"
 
+    def open_log(self, name: str):
+        logs = self.root / "logs"
+        self.guard.ensure_directory(logs)
+        return self.guard.open_append(logs / name)
 
-def remove_server_info(pid: int) -> None:
-    """自分の pid が書かれているときだけ server.json を消す。後から起動したサーバーの分は消さない。"""
-    info = read_server_info()
-    if info and info.get("pid") == pid:
+    def startup_lock(self, *, timeout: float):
+        return self.guard.hold_lock(self.root / "server.lock", timeout=timeout)
+
+    def _record_lock(self):
+        # 中継が旧サーバーの終了や新サーバーの公開を待つ間も、サーバーは記録を操作できる。
+        return self.guard.hold_lock(self.root / "server-info.lock", timeout=30)
+
+    def _read_info(self) -> dict | None:
+        content = self.guard.read_bytes(self.record)
+        if content is None:
+            return None
         try:
-            server_json_path().unlink()
-        except OSError:
-            pass
+            info = json.loads(content.decode("utf-8"))
+        except ValueError:
+            return None
+        if not isinstance(info, dict) or not all(k in info for k in ("port", "token", "pid")):
+            return None
+        if (type(info["pid"]) is not int or info["pid"] <= 0
+                or type(info["port"]) is not int or not 0 < info["port"] <= 65535
+                or not isinstance(info["token"], str) or not info["token"]):
+            return None
+        return info
+
+    def read_info(self) -> dict | None:
+        with self._record_lock():
+            return self._read_info()
+
+    def write_info(self, info: dict, *, start_id: str | None = None) -> None:
+        """トークンを含むので、POSIX では一時ファイルの作成時から本人だけが読めるようにする。"""
+        if start_id is not None:
+            info = {**info, "start_id": start_id}
+        data = json.dumps(info, ensure_ascii=False).encode("utf-8")
+        with self._record_lock():
+            expected = self._start_marker(start_id) if start_id is not None else None
+            if self.guard.read_bytes(self.pending) != expected:
+                raise OSError(f"起動の許可が失われた。中継からやり直す: {self.pending}")
+            if start_id is None and self.guard.file_info(self.record) is not None:
+                raise OSError(f"サーバーの記録がすでにある。中継から起動する: {self.record}")
+            self.guard.write_bytes(self.record, data, replace=True, prefix=".server-json-", mode=0o600)
+
+    @staticmethod
+    def _start_marker(start_id: str) -> bytes:
+        return json.dumps(start_id).encode("utf-8")
+
+    def reserve_start(self, previous: dict | None) -> str:
+        """中継が起動ロックを保持している間に、残った記録を消し、子の公開を許可する。"""
+        start_id = secrets.token_hex(16)
+        with self._record_lock():
+            self.guard.file_info(self.pending)
+            current = self._read_info()
+            if current is not None and current != previous:
+                raise RuntimeError(f"サーバーの確認中に記録が変わった。もう一度やり直す: {self.record}")
+            self.guard.remove_file(self.record)
+            self.guard.write_bytes(self.pending, self._start_marker(start_id), replace=True, mode=0o600)
+        return start_id
+
+    def release_start(self, start_id: str) -> None:
+        with self._record_lock():
+            if self.guard.read_bytes(self.pending) == self._start_marker(start_id):
+                self.guard.remove_file(self.pending)
+
+    def remove_own_info(self, pid: int, token: str) -> None:
+        """自分が公開した記録を消す。照合から削除まで記録のロックを保持する。"""
+        with self._record_lock():
+            info = self._read_info()
+            if info is not None and info["pid"] == pid and info["token"] == token:
+                self.guard.remove_file(self.record)

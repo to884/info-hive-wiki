@@ -60,10 +60,13 @@ from wiki_text import (  # noqa: E402
 )
 import wiki_initialized  # noqa: E402
 import wiki_workspace  # noqa: E402
+from wiki_fsguard import Refused, WriteGuard  # noqa: E402
 # ページの集合とリンクの規則は wiki_pages の 1 か所に置く（ADR-0010 の決定の 1）。wiki_index、wiki_decide、
 # 試験が wiki_search.resolve_link などの名前で使うので、同じ名前で読み込んでおく。
 from wiki_pages import (  # noqa: E402
     WIKILINK_RE,
+    _article_rel,
+    absolute_user_path,
     build_link_index,
     clean_link_target,
     code_line_mask,
@@ -73,6 +76,10 @@ from wiki_pages import (  # noqa: E402
     split_lines,
     extract_wikilinks,
     iter_page_files,
+    NOTICE_UNVERIFIED,
+    capture_notices,
+    link_warnings,
+    walk_pages,
     ref_values,
     resolve_link,
     scalar_value,
@@ -81,16 +88,11 @@ from wiki_pages import (  # noqa: E402
 )
 
 
+# トークン化は wiki_tokens の 1 か所に置く。wiki_index と試験が wiki_search.tokenize と
+# wiki_search.SCRIPT_RUN_RE の名前で使うので、同じ名前で読み込んでおく。
+from wiki_tokens import SCRIPT_RUN_RE, tokenize  # noqa: E402,F401
+
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
-# 文字種ごとの並び。英数字は小文字にしたあとの ASCII だけを語とみなす（移植元と同じ）。
-# 漢字には 々 と 〆、CJK 統合漢字の拡張 B 以降（𠮷 など）を含める。
-# カタカナには長音符 ー を含め、中黒 ・ は区切りとして扱う。
-SCRIPT_RUN_RE = re.compile(
-    r"(?P<ascii>[a-z0-9]+)"
-    r"|(?P<kanji>[\u3005\u3006\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U0003134f]+)"
-    r"|(?P<hiragana>[\u3041-\u309f]+)"
-    r"|(?P<katakana>[\u30a1-\u30fa\u30fc-\u30ff\u31f0-\u31ff]+)"
-)
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 # 使える埋め込みモデル（計画の方針 F）。英語専用のモデルは置かず、多言語モデルだけにする。
 # モデルを加えるときは、max_distance を評価セットで測ってから加える。
@@ -158,30 +160,6 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
     return meta, body
 
 
-def tokenize(text: str) -> list[str]:
-    """検索用のトークンに分ける（計画の方針 E）。
-
-    NFKC で正規化して小文字にしたあと、文字種（英数字、漢字、ひらがな、カタカナ）の境界で区切る。
-    英数字は語単位のまま、かな・漢字は 2 文字ずつ重ねて切り出す（1 文字だけの並びは 1 文字）。
-    「税」のような単漢字のクエリが「消費税」に当たるよう、漢字は 1 文字単位でも加える。
-    """
-    tokens = []
-    for match in SCRIPT_RUN_RE.finditer(unicodedata.normalize("NFKC", text).lower()):
-        run = match.group()
-        if match.lastgroup == "ascii":
-            tokens.append(run)
-            continue
-        if len(run) == 1:
-            tokens.append(run)
-            continue
-        tokens.extend(run[i:i + 2] for i in range(len(run) - 1))
-        if match.lastgroup == "kanji":
-            tokens.extend(run)
-    return tokens
-
-
-
-
 def slug_from_path(path: Path, wiki_root: Path) -> str:
     # macOS が NFD で返すファイル名を、リンクと同じ NFC にそろえる。
     return nfc(path.stem)
@@ -246,14 +224,42 @@ def load_parse_cache(cache_path: Path) -> dict:
     return files
 
 
-def write_parse_cache(cache_path: Path, files: dict) -> None:
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = Path(str(cache_path) + ".tmp")
-    temporary.write_text(
-        json.dumps({"schema": PARSE_CACHE_SCHEMA, "parser": PARSER_ID, "files": files}, ensure_ascii=False, sort_keys=True),
-        encoding="utf-8",
-    )
-    os.replace(temporary, cache_path)
+def write_parse_cache(cache_path: Path, files: dict, guard: WriteGuard) -> None:
+    data = json.dumps({"schema": PARSE_CACHE_SCHEMA, "parser": PARSER_ID, "files": files},
+                      ensure_ascii=False, sort_keys=True).encode("utf-8")
+    if cache_path.parent != guard.root:
+        guard.ensure_directory(cache_path.parent)
+    guard.write_bytes(cache_path, data, replace=True)
+
+
+def _parse_cache_destination(wiki_root: Path, path: Path, cache_root: Path | None) -> tuple[WriteGuard, Path]:
+    if cache_root is not None:
+        return WriteGuard(cache_root), path
+    # 外から wiki の根の別名を経由する親も検査する。最後の名前のリンクは解決しない。
+    inside = _article_rel(path.parent, wiki_root)
+    if inside is not None:
+        root, relative = inside
+        return WriteGuard(Path(root)), Path(root) / relative / path.name
+    # 外部に明示したキャッシュは、既存の親を利用者が選んだ根として扱う。別のボリュームも選べる。
+    for parent in path.parents:
+        try:
+            return WriteGuard(parent), path
+        except FileNotFoundError:
+            continue
+    raise FileNotFoundError(path.parent)
+
+
+def _warn_cache(path: Path, exc: Exception, fallback: str, warnings: list[dict] | None) -> None:
+    if isinstance(exc, Refused):
+        path, kind, reason = exc.path, exc.kind, str(exc)
+    else:
+        kind = getattr(exc, "sqlite_errorname", "unknown")
+        reason = kind if isinstance(exc, sqlite3.Error) else str(exc)
+    if warnings is not None:
+        warning = {"path": path.as_posix(), "kind": kind, "reason": reason}
+        if warning not in warnings:
+            warnings.append(warning)
+    print(f"警告: {path} をキャッシュに使えない（{reason}）。{fallback}", file=sys.stderr)
 
 
 def link_key(link: str, by_path: dict, by_slug) -> str:
@@ -261,10 +267,32 @@ def link_key(link: str, by_path: dict, by_slug) -> str:
     return resolve_link(link, by_path, by_slug) or clean_link_target(link)
 
 
-def collect_pages(wiki_root: Path, cache_path: Path | None = None) -> list[dict]:
+def collect_pages(wiki_root: Path, cache_path: Path | None = None, *,
+                  cache_root: Path | None = None, cache_warnings: list[dict] | None = None) -> list[dict]:
     """wiki を走査し、[{path, slug, meta, body, tokens, links}] を返す。"""
+    if cache_path is None:
+        return _collect_pages(wiki_root, {})[0]
+    fallback = "パースキャッシュを使わずに記事を解析する"
+    try:
+        cache_path = absolute_user_path(cache_path)
+        guard, cache_path = _parse_cache_destination(wiki_root, cache_path, cache_root)
+        guard.file_info(cache_path)
+    except (OSError, ValueError) as exc:
+        _warn_cache(cache_path, exc, fallback, cache_warnings)
+        return _collect_pages(wiki_root, {})[0]
+    cached_files = load_parse_cache(cache_path)
+    pages, next_cache = _collect_pages(wiki_root, cached_files)
+    try:
+        write_parse_cache(cache_path, next_cache, guard)
+    except (OSError, ValueError) as exc:
+        _warn_cache(cache_path, exc, fallback, cache_warnings)
+        if cached_files:
+            pages = _collect_pages(wiki_root, {})[0]
+    return pages
+
+
+def _collect_pages(wiki_root: Path, cached_files: dict) -> tuple[list[dict], dict]:
     pages = []
-    cached_files = load_parse_cache(cache_path) if cache_path else {}
     next_cache = {}
     # ページの集合は lint と同じ（wiki_pages）。最上位の README.md と assets/、.evolution/、.wiki-cache/ は含めない。
     for md_path in iter_page_files(wiki_root):
@@ -319,9 +347,7 @@ def collect_pages(wiki_root: Path, cache_path: Path | None = None) -> list[dict]
             ],
         })
     pages.sort(key=lambda page: page["rel_path"])
-    if cache_path:
-        write_parse_cache(cache_path, next_cache)
-    return pages
+    return pages, next_cache
 
 
 def split_sections(title: str, body: str) -> list[dict]:
@@ -608,9 +634,36 @@ def load_local_embedding_backend():
     return model, sqlite_vec, dimension
 
 
-def open_vector_index(wiki_root: Path, sqlite_vec, dimension: int) -> sqlite3.Connection:
+def vector_index_path(wiki_root: Path, *, create_parent: bool = False) -> Path:
+    """SQLite が開く本体と付随ファイルを、wiki の根から検査する。"""
     path = wiki_root / ".wiki-cache" / VECTOR_INDEX_NAME
-    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path = absolute_user_path(path)
+        guard = WriteGuard(wiki_root)
+        if create_parent:
+            guard.ensure_directory(path.parent)
+        guard.check_sqlite(path)
+    except Refused:
+        raise
+    except (OSError, ValueError) as exc:
+        raise Refused(path, "unwritable", str(exc)) from exc
+    return path
+
+
+def warn_vector_refusal(wiki_root: Path, exc: Exception, warnings: list[dict] | None) -> bool:
+    """経路の検査または SQLite の書き込みを拒まれたときに理由を伝える。"""
+    sqlite_code = (getattr(exc, "sqlite_errorcode", 0) or 0) & 0xff
+    if not isinstance(exc, Refused) and sqlite_code not in (
+        sqlite3.SQLITE_READONLY, sqlite3.SQLITE_CANTOPEN, sqlite3.SQLITE_PERM, sqlite3.SQLITE_FULL,
+        sqlite3.SQLITE_IOERR, sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED,
+    ):
+        return False
+    _warn_cache(wiki_root / ".wiki-cache" / VECTOR_INDEX_NAME, exc, "語彙検索だけを使える", warnings)
+    return True
+
+
+def open_vector_index(wiki_root: Path, sqlite_vec, dimension: int) -> sqlite3.Connection:
+    path = vector_index_path(wiki_root, create_parent=True)
     connection = sqlite3.connect(path, timeout=30)
     try:
         connection.enable_load_extension(True)
@@ -749,6 +802,7 @@ def local_semantic_order(
     allowed_locators: set[str],
     wiki_root: Path,
 ) -> list[str]:
+    vector_index_path(wiki_root)
     model, sqlite_vec, dimension = load_local_embedding_backend()
     max_distance = embed_model_spec()["max_distance"]
     connection = open_vector_index(wiki_root, sqlite_vec, dimension)
@@ -847,13 +901,22 @@ def json_result(
 def emit_json(args, results: list[dict], mode: str = "lexical", decision: dict | None = None) -> None:
     payload = {
         "query": args.query,
-        "wiki": Path(args.wiki).as_posix(),
+        "wiki": Path(getattr(args, "publication_wiki", args.wiki)).as_posix(),
         "granularity": args.granularity,
         "mode": mode,
         "results": results,
+        # 走査がリンクなので読まなかったページ（ADR-0029）。拒んだものがなければ空
+        "link_warnings": getattr(args, "link_warnings", []),
     }
+    if getattr(args, "unverified", None):
+        payload["unverified"] = args.unverified  # 調べられなかった場所
     if decision is not None:
         payload["decision"] = decision
+    if getattr(args, "publication_id", None):
+        from wiki_apply import resolve_publication
+
+        resolve_publication(args.publication_wiki, args.publication_id)
+        payload["release_id"] = args.publication_id
     print(json.dumps(payload, ensure_ascii=False))
 
 
@@ -1025,11 +1088,12 @@ def cmd_search(args, pages: list[dict]) -> None:
             ranked.sort(key=lambda item: -item[0])
             mode = "hybrid"
         except Exception as exc:
-            label = embedding_failure_label(exc)
-            print(
-                f"警告: ローカルの埋め込み検索を使えない（{label}）。語彙検索だけで続ける",
-                file=sys.stderr,
-            )
+            if not warn_vector_refusal(args.wiki, exc, getattr(args, "link_warnings", None)):
+                label = embedding_failure_label(exc)
+                print(
+                    f"警告: ローカルの埋め込み検索を使えない（{label}）。語彙検索だけで続ける",
+                    file=sys.stderr,
+                )
 
     page_counts = Counter()
     top_sections = []
@@ -1123,6 +1187,7 @@ def main():
     parser = localize_argparse(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter))
     parser.add_argument("query", nargs="?", default="", help="検索語")
     parser.add_argument("--wiki", type=Path, default=None, help=wiki_workspace.WIKI_DEFAULT_HELP)
+    parser.add_argument("--release-id", help="検索する公開版")
     parser.add_argument("--top", type=int, default=10, help="上位 N 件の結果を返す（既定: 10）")
     parser.add_argument("--type", help="frontmatter の type で絞り込む")
     parser.add_argument("--tag", action="append", default=[], help="タグで絞り込む（複数指定できる）")
@@ -1149,12 +1214,34 @@ def main():
         args.wiki = wiki_workspace.default_wiki_or_exit()
     # SCHEMA.md のないディレクトリは、初期化された wiki とみなさない（ADR-0019）。パースキャッシュを書く前に確かめる。
     wiki_initialized.require_or_exit(args.wiki)
+    from wiki_apply import resolve_publication
+
+    try:
+        release = resolve_publication(args.wiki, args.release_id)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    if release:
+        if args.cache:
+            parser.error("公開版の検索ではパースキャッシュを使えません")
+        args.publication_wiki = release.wiki
+        args.publication_id = release.release_id
+        args.wiki = release.root
+        args.no_embed = True
     cache_path = None
     if args.cache:
         cache_path = args.wiki / ".wiki-cache" / "search-index.json" if args.cache == "AUTO" else Path(args.cache)
 
-    pages = collect_pages(args.wiki, cache_path)
+    # 記事か記事までの道がリンクなら、走査は読まない（ADR-0029）。黙って消さず、JSON の link_warnings と標準エラーで知らせる。
+    # JSON の link_warnings は、実際にページを集めた走査の知らせから作る（別に走査すると、間に変わったものを取り逃がす）
+    cache_warnings = []
+    with capture_notices() as notes:
+        pages = collect_pages(args.wiki, cache_path, cache_warnings=cache_warnings)
+    args.link_warnings = [n for n in notes.items if n["kind"] not in NOTICE_UNVERIFIED] + cache_warnings
+    args.unverified = [n for n in notes.items if n["kind"] in NOTICE_UNVERIFIED]
     if not pages:
+        if getattr(args, "json", False) and args.query:
+            emit_empty_json(args)  # JSON を求められたら、ページがなくても link_warnings を返す
+            sys.exit(0)
         print(f"wiki のページが見つからない: {args.wiki}", file=sys.stderr)
         sys.exit(0)
 

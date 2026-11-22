@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import html
-import io
+import hmac
 import json
 import os
 import posixpath
@@ -29,15 +29,20 @@ import threading
 import urllib.parse
 from collections import defaultdict
 from dataclasses import dataclass, field
-from pathlib import PurePosixPath
+from itertools import chain
+from pathlib import PurePath, PurePosixPath
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import wiki_browse_fs as fs  # noqa: E402
 import wiki_lint  # noqa: E402
 import wiki_pages  # noqa: E402
-from wiki_text import canonical_meta, nfc, posix_rel  # noqa: E402
-from markdown_it.token import Token  # noqa: E402  （wiki_pages が同梱のものを読み込んだあと）
+import wiki_overview  # noqa: E402
+from wiki_raw import raw_path_is_safe  # noqa: E402
+from wiki_text import canonical_meta, nfc, nfkc, posix_rel  # noqa: E402
+
+# 走査だけのimportは解析器を起こさない。本文を描く閲覧では同梱版を明示的に取得する。
+Token = wiki_pages.markdown_module("token").Token
 
 try:
     import yaml  # noqa: F401
@@ -46,7 +51,7 @@ except (ImportError, SystemExit):
     wiki_graph_extract = None
 
 PROTOCOL_VERSION = 2   # 探しやすさの設計の 2.3、6（nav.js の形とグループの並びが変わった）
-CORE_VERSION = "browse-core-4"   # 3: 図の svg を出す。4: Mermaid の図の枠（frame-src と figures.js。図の描画の設計の 9）
+CORE_VERSION = "browse-core-9"   # 9: 索引の絞り込みに保存用の識別子を付ける。
 NAME_LIMIT = 200
 # frame-src 'self' は、figures.js が作る Mermaid の図の枠のため（図の描画の設計の 7.3）
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src 'self'; "
@@ -77,7 +82,7 @@ ASSET_OUT_DIR = "assets/wiki"
 ICON_LINK = '<link rel="icon" href="data:,">'
 RAW_MODES = ("text", "link", "basename", "none")
 # 画面の部品。fluent2.css は Fluent 2 の再現の CSS の同梱の写し（Fluent 2 の設計の 2）、theme.js は配色を描く前に決める
-# figures.js は Mermaid の図を描く（ADR-0030）。静的の書き出しでは何もしない
+# figures.js はサーバーの方式で Mermaid の図を描く（ADR-0030）。静的の書き出しには入れない（ADR-0035）
 ASSETS = ("assets/app.js", "assets/style.css", "assets/fluent2.css", "assets/theme.js", "assets/figures.js")
 ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "browse_assets")
 DATA_FILES = ("nav.js", "data/manifest.js", "data/diagnostics.js", "data/search.js")
@@ -136,12 +141,12 @@ class InputsChanged(Exception):
     """読む前と読んだあとの走査が違った（読んでいるあいだに Wiki が変わった。設計の 4.2）。"""
 
 
-def input_list(root) -> tuple:
+def input_list(root, raw_root=None) -> tuple:
     """入力の一覧（設計の 4）。(種類, ディスク上の相対パス, 大きさ, 更新時刻) の並び。分からなければ InputsUnknown。
 
     写しが読むものも、変化を知るための印も、比べる 2 回の走査も、この 1 つの一覧から作る。
     """
-    entries, problem = fs.walk_inputs(root)
+    entries, problem = fs.walk_inputs(root, raw_root)
     if problem is not None:
         raise InputsUnknown(problem)
     return tuple(entries)
@@ -155,14 +160,14 @@ def signature_of(entries) -> str:
     return h.hexdigest()
 
 
-def signature(root) -> str:
+def signature(root, raw_root=None) -> str:
     """今の入力の印。名前の集合が分からなければ InputsUnknown。"""
-    return signature_of(input_list(root))
+    return signature_of(input_list(root, raw_root))
 
 
 def read_text_like_lint(data: bytes) -> str:
     """lint の read_text(encoding="utf-8-sig") と同じ文字にする。BOM を除き、改行を LF にそろえる。"""
-    return io.TextIOWrapper(io.BytesIO(data), encoding="utf-8-sig", newline=None).read()
+    return wiki_pages.page_text(data)
 
 
 @dataclass
@@ -174,6 +179,7 @@ class Snapshot:
     unreadable: list = field(default_factory=list)   # 中身を読めなかった入力の (種類, 相対パス)（UTF-8 でないものを含む）
     entries: tuple = ()                              # 入力の一覧（読み取りの情報。公開の前の検査が使う）
     transient: list = field(default_factory=list)    # そのうち、開けなかった入力（ファイルを変えずに読めるようになりうる）
+    raw_targets: dict = field(default_factory=dict)   # (参照元の相対パス, raw: の位置) -> 原本のページ ID
 
     def by_kind(self, kind: str) -> list:
         return [f for f in self.inputs if f.kind == kind]
@@ -300,26 +306,53 @@ def _read_asset(root, f: InputFile, size) -> None:
     f.data = data
 
 
-def take_snapshot(root, entries=None) -> Snapshot:
+def take_snapshot(root, entries=None, *, raw_root=None) -> Snapshot:
     """入力の一覧を作り、入力を読み、もう 1 度一覧を作る。2 回が同じときだけ、写しを採る（設計の 4.2）。
 
     違えば InputsChanged、名前の集合が分からなければ InputsUnknown。中身を読めない入力は、その入力がない Wiki と
     同じに描き、読み取りの印を足す（設計の 4.1）。
     """
-    first = input_list(root) if entries is None else tuple(entries)
+    first = input_list(root, raw_root) if entries is None else tuple(entries)
     inputs = []
     unreadable = []
     transient = []
     gen = hashlib.sha256(CORE_VERSION.encode("utf-8"))
     for kind, rel_disk, size, _mtime in first:
+        if kind == "link":
+            # リンクなので読まない（ADR-0029）。読まないことも内容なので、世代に入れる
+            gen.update(f"link\0{rel_disk}\0{_mtime}\n".encode("utf-8"))
+            continue
         f = InputFile(kind=kind, disk_rel=rel_disk, rel=posix_rel(rel_disk))
-        if kind in ("asset", "asset_dir"):
+        if kind == "overview":
+            unsafe = isinstance(_mtime, str) and _mtime.startswith("unsafe:")
+            sidecar = (wiki_overview.Sidecar("unreadable", reason="unsafe_path") if unsafe else
+                       fs.read_overview(root, rel_disk) if size is not None else wiki_overview.Sidecar("unreadable"))
+            if sidecar.kind == "ok":
+                f.sha = hashlib.sha256(sidecar.data).hexdigest()
+                try:
+                    sidecar.data.decode("utf-8-sig")
+                except UnicodeDecodeError:
+                    f.error = "decode"
+                else:
+                    f.data = sidecar.data
+            else:
+                f.error = "unsafe" if sidecar.reason in ("unsafe_path", "spelling", "invalid_name") else "os"
+        elif kind == "overview_dir":
+            f.error = "os" if _mtime == "unreadable" else "unsafe"
+        elif kind == "overview_entry":
+            f.sha = hashlib.sha256(f"{rel_disk}\0{size}\0{_mtime}".encode("utf-8")).hexdigest()
+        elif kind in ("asset", "asset_dir"):
             _read_asset(root, f, size)     # asset_dir（assets/ の一覧を作れない）は大きさがなく、読めない入力になる
+        elif kind == "raw_link":
+            f.error = "link"
         else:
             data = None
             if size is not None:
                 try:
-                    data = fs.read_input(root, rel_disk)
+                    if kind == "raw":
+                        data = fs.read_raw_input(raw_root, rel_disk)
+                    else:
+                        data = fs.read_input(root, rel_disk)
                 except (fs.Unknown, fs.Absent):
                     data = None
             if data is None:
@@ -336,11 +369,12 @@ def take_snapshot(root, entries=None) -> Snapshot:
             transient.append((kind, f.rel))
         gen.update(f"{kind}\0{rel_disk}\0{f.sha or '!' + str(f.error)}\n".encode("utf-8"))
         inputs.append(f)
-    second = input_list(root)
+    second = input_list(root, raw_root)
     if second != first:
         raise InputsChanged("読んでいるあいだに Wiki が変わった")
     return Snapshot(signature=signature_of(second), inputs=inputs, generation=gen.hexdigest()[:20],
-                    unreadable=unreadable, entries=second, transient=transient)
+                    unreadable=unreadable, entries=second, transient=transient,
+                    raw_targets=_snapshot_raw_targets(inputs, root, raw_root))
 
 
 # ---------------------------------------------------------------------------
@@ -675,6 +709,61 @@ def _page_id(rel: str) -> str:
     return rel[:-3] if rel.lower().endswith(".md") else rel
 
 
+def _snapshot_raw_targets(inputs: list, root, raw_root) -> dict:
+    """raw: を読み込めた原本だけと照らす。中核に根の絶対パスやファイル操作を持ち込まない。"""
+    if raw_root is None:
+        return {}
+    raw_hashes = {f.rel: f.sha for f in inputs if f.kind == "raw" and f.text is not None}
+    if not raw_hashes:
+        return {}
+    root = os.path.abspath(root)
+    matches = {}
+    for f in inputs:
+        if f.kind != "page" or f.text is None:
+            continue
+        try:
+            fields, *_ = wiki_lint.parse_frontmatter_raw(f.text)
+            meta, _ = canonical_meta(fields)
+        except Exception:  # noqa: BLE001  読めないページの参照は解決しない。
+            continue
+        refs = wiki_pages.ref_values(meta.get("raw"))
+        hashes = wiki_pages.ref_values(meta.get("raw_sha256"))
+        if meta.get("raw_sha256") and (len(hashes) != len(refs) or
+                                     not all(re.fullmatch(r"[0-9a-fA-F]{64}", h) for h in hashes)):
+            continue
+        bases = (os.path.dirname(root),)
+        if not wiki_pages.ref_values(meta.get("session_id")):
+            bases += (root, os.path.join(root, os.path.dirname(f.disk_rel)))
+        for i, ref in enumerate(refs):
+            raw = classify_raw(ref)
+            if raw["kind"] == "url":
+                continue
+            absolute = raw["kind"] == "absolute"
+            value = raw["value"] if absolute else posix_rel(raw["value"])
+            if not raw_path_is_safe(value, absolute=absolute):
+                continue
+            if absolute:
+                path = os.path.expanduser(value)
+                if not PurePath(path).is_absolute():
+                    continue
+                candidates = (path,)
+            else:
+                candidates = (os.path.join(base, value) for base in bases)
+            targets = set()
+            for path in candidates:
+                try:
+                    target = "raw/" + posix_rel(os.path.relpath(path, raw_root))
+                except ValueError:
+                    continue
+                if target in raw_hashes:
+                    targets.add(target)
+            if len(targets) == 1:
+                target = next(iter(targets))
+                if not hashes or hashes[i].lower() == raw_hashes[target]:
+                    matches[f.rel, i] = _page_id(target)
+    return matches
+
+
 # MessageBar のアイコン（Fluent UI System Icons の WarningFilled と DiamondDismissFilled、20px。MIT）
 ICON_WARNING = ('<svg class="fui-Icon" width="20" height="20" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" '
                 'focusable="false"><path d="M7.37 3.56a3 3 0 0 1 5.26 0l5.5 10A3 3 0 0 1 15.5 18h-11a3 3 0 0 1-2.63-4.44z'
@@ -782,6 +871,31 @@ def _check_tree(top: list) -> None:
                 raise NavInvariantError("木にないグループを指すか、名前が行き先のグループの名前と違う")
 
 
+def overview_svg_name(data: bytes) -> str:
+    """内容が変わった図に、別の URL を与える。"""
+    return f"assets/overview/{hashlib.sha256(data).hexdigest()}.svg"
+
+
+_SESSION_SOURCE_KINDS = ("codex-session", "claude-code-session")
+_SESSION_SPEAKER_RE = re.compile(r"T[0-9]+ (ユーザー|Codex|Claude)（.+）")
+
+
+def _mark_session_turns(tokens: list) -> None:
+    """セッションの raw の発言を、本文の text フェンスと対になった見出しで見分ける。"""
+    for i, heading in enumerate(tokens[:-3]):
+        if heading.type != "heading_open" or heading.tag != "h2" or heading.level != 0:
+            continue
+        inline, close, message = tokens[i + 1:i + 4]
+        if inline.type != "inline" or close.type != "heading_close":
+            continue
+        if message.type != "fence" or message.info.strip() != "text":
+            continue
+        speaker = _SESSION_SPEAKER_RE.fullmatch(inline.content)
+        if speaker:
+            role = "user" if speaker.group(1) == "ユーザー" else "assistant"
+            heading.attrJoin("class", f"session-turn session-turn-{role}")
+
+
 class Core:
     """1 つの写しから組み立てた中核。描く関数は静的の書き出しとサーバーで同じものを使う。"""
 
@@ -793,6 +907,9 @@ class Core:
         self.parser = wiki_pages.new_parser()
         self.diagnostics = []
         self._body_cache = {}
+        self.static_mermaid = None  # None はサーバー用。書き出し時は、図がなくても辞書を設定する。
+        self.static_mermaid_assets = {}
+        self.static_overview_tokens = {}
         # 描けなかったページの識別子（設計の 7.2。そのページに「描けない」と出して続ける）
         self.render_failures = []
         # 解釈できなかった入力の (種類, 相対パス)。読めない入力と同じに扱い、「不完全」の印を描く
@@ -800,13 +917,24 @@ class Core:
         # 読めなかった入力（読み取りの情報）。読み取りの印（「不完全」）を描くのに使う（構造の直しの設計の 4.1）
         unreadable = list(snapshot.unreadable)
         self.unreadable_pages = sorted(rel for kind, rel in unreadable if kind == "page")
+        for kind, rel in unreadable:
+            if kind == "raw_dir" or kind == "raw_link":
+                self.diagnostics.append({"kind": "raw_read_error", "target": rel,
+                                         "reason": "link" if kind == "raw_link" else "os"})
         self.unreadable_indexes = sorted(rel for kind, rel in unreadable if kind == "index")
         self.unreadable_ontology = [rel for kind, rel in unreadable if kind == "ontology"]
         self._render_lock = threading.Lock()
         self._build_pages()
         self._build_assets()
+        self.link_warnings = [{"path": rel, "kind": kind} for entry, rel, _size, kind in snapshot.entries
+                              if entry == "link"]
+        # 走査がリンクなので読まなかった記事と記事までの道（ADR-0029）。黙って消さず、診断に出す
+        for kind, rel, _size, link_kind in snapshot.entries:
+            if kind == "link":
+                self.diagnostics.append({"kind": "link", "path": rel, "link_kind": link_kind})
         self.out_name = assign_names(sorted(self.drawn), name_limit)
         self.name_to_id = {name: pid for pid, name in self.out_name.items()}
+        self._build_overviews()
         for pid in sorted(self.drawn):
             if self.out_name[pid] != pid + ".html":
                 self.diagnostics.append({"kind": "renamed", "page": pid, "output": self.out_name[pid]})
@@ -834,7 +962,9 @@ class Core:
         self.pages = {}          # disk_rel -> ページ（lint の形）
         self.page_files = {}     # disk_rel -> InputFile
         by_id = defaultdict(list)
-        for f in self.snapshot.by_kind("page"):
+        for f in self.snapshot.inputs:
+            if f.kind not in ("page", "raw"):
+                continue
             pid = _page_id(f.rel)
             if f.text is None:
                 self.diagnostics.append({"kind": "read_error", "page": pid, "reason": f.error})
@@ -846,8 +976,10 @@ class Core:
                 self.diagnostics.append({"kind": "read_error", "page": pid, "reason": "parse"})
                 self.parse_failures.append((f.kind, f.rel))
                 continue
+            if f.kind == "raw":
+                meta["type"] = "raw"
             p = {"rel_path": f.rel, "disk_rel_path": f.disk_rel, "slug": nfc(f.stem), "meta": meta,
-                 "body": body, "malformed_fm": malformed, "id": pid, "text": f.text}
+                 "body": body, "malformed_fm": malformed, "id": pid, "text": f.text, "kind": f.kind}
             self.pages[f.disk_rel] = p
             self.page_files[f.disk_rel] = f
             by_id[pid].append(f.disk_rel)
@@ -858,7 +990,31 @@ class Core:
             else:
                 self.diagnostics.append({"kind": "id_collision", "page": pid, "files": sorted(disks)})
         self.pages_by_path, self.pages_by_slug = wiki_pages.build_page_index(
-            list(self.pages.values()), lambda p: p["disk_rel_path"])
+            [p for p in self.pages.values() if p["kind"] == "page"], lambda p: p["disk_rel_path"])
+        self._inherit_raw_tags()
+
+    def _inherit_raw_tags(self) -> None:
+        """分類できるタグがない raw には、同じファイルを指すソースページのタグを使う。"""
+        inherited = defaultdict(set)
+        for pid in self.drawn:
+            if self.page_type(pid) != "source":
+                continue
+            tags = tuple(self.page_tags(pid))
+            if not tags:
+                continue
+            page = self.page(pid)
+            for i, _ in enumerate(wiki_pages.ref_values(page["meta"].get("raw"))):
+                target = self.snapshot.raw_targets.get((page["rel_path"], i))
+                if target in self.drawn:
+                    inherited[target].add(tags)
+        for pid, candidates in inherited.items():
+            tags = self.page_tags(pid)
+            if len(candidates) == 1 and not self._raw_classification_tags(tags):
+                self.page(pid)["meta"]["tags"] = list(dict.fromkeys([*tags, *next(iter(candidates))]))
+
+    @staticmethod
+    def _raw_classification_tags(tags: list[str]) -> list[str]:
+        return [tag for tag in tags if nfkc(tag).casefold() != "raw"]
 
     def _build_assets(self) -> None:
         """図の svg の表（図の描画の設計の 6.2、6.3）。NFC で同じ綴りになる svg は、どれも描かない。"""
@@ -887,6 +1043,132 @@ class Core:
             self.asset_out[rel] = f"{ASSET_OUT_DIR}/{short_hash(f.disk_rel, 16)}.svg"
         self.asset_by_out = {name: rel for rel, name in self.asset_out.items()}
 
+    def _build_overviews(self) -> None:
+        """ページと概要の同じ写しから状態を決め、出力する図を集める。I/O は行わない。"""
+        self.overview_scan_unknown = bool(self.snapshot.by_kind("overview_dir"))
+        self.overview_assets = {}
+        self.overview_figure_out = {}
+        self.overview_render_failures = set()
+        self.overview_asset_conflicts = set()
+        self.overviews = {}
+        by_key = defaultdict(list)
+        for f in self.snapshot.by_kind("page"):
+            identifier = wiki_overview.page_id(f.disk_rel)
+            by_key[wiki_overview.page_key(identifier)].append((identifier, f))
+        sidecars = {wiki_overview.SIDECAR.fullmatch(PurePosixPath(f.disk_rel).name)[1]: f
+                    for f in self.snapshot.by_kind("overview")}
+        rejected = set()
+        for f in self.snapshot.by_kind("overview_entry"):
+            self.diagnostics.append({"kind": "overview_unknown_entry", "path": f.disk_rel})
+            match = wiki_overview.SIDECAR.fullmatch(PurePosixPath(f.disk_rel).name)
+            if match:
+                rejected.add(match[1])
+        if self.overview_scan_unknown:
+            self.diagnostics.append({"kind": "overview_unlistable", "path": "assets/overview"})
+        views = {}
+        staged = {}
+        conflicts = set()
+        rendered_pages = {
+            pid: wiki_overview.page_key(wiki_overview.page_id(disk))
+            for pid, disk in self.drawn.items()
+            if self.page(pid)["kind"] == "page"
+        }
+        rendered_keys = set(rendered_pages.values())
+        for key in sorted(set(by_key) | set(sidecars) | rejected):
+            pages = by_key.get(key, [])
+            f = sidecars.get(key)
+            sidecar = (wiki_overview.Sidecar("unreadable") if key in rejected or (f is not None and f.data is None) else
+                       wiki_overview.Sidecar("ok", f.data) if f is not None else wiki_overview.Sidecar("absent"))
+            if len(pages) > 1:
+                page = wiki_overview.PageState("unknown")
+            elif not pages:
+                links = [(item["path"], item["kind"]) for item in self.link_warnings]
+                page = wiki_overview.missing_page_state(key, sidecar, links)
+            else:
+                f = pages[0][1]
+                page = (wiki_overview.PageState("unreadable") if f.text is None else
+                        wiki_overview.PageState("ok", wiki_pages.normalized_text_sha256(f.text)))
+            try:
+                result = wiki_overview.view(key, sidecar, page)
+            except Exception as exc:  # 概要の解釈の失敗で、元ページを描けなくしない。
+                result = wiki_overview.OverviewView("render_error", type(exc).__name__)
+            views[key] = result
+            if result.state not in ("none", "fresh"):
+                diag = {"kind": f"overview_{result.state}", "path": f"assets/overview/{key}.overview.md"}
+                if len(pages) == 1:
+                    diag["page"] = _page_id(pages[0][1].rel)
+                if result.detail:
+                    diag["reason"] = result.detail
+                elif len(pages) > 1:
+                    diag["reason"] = "collision"
+                self.diagnostics.append(diag)
+            if key not in rendered_keys:
+                continue
+            for name, data in result.figures.items():
+                out = overview_svg_name(data)
+                if out in staged and staged[out] != data:
+                    conflicts.add(out)
+                staged[out] = data
+                self.overview_figure_out[key, name] = out
+        for key, result in views.items():
+            if key not in rendered_keys:
+                continue
+            if any(self.overview_figure_out[key, name] in conflicts for name in result.figures):
+                self.overview_asset_conflicts.add(key)
+                self.diagnostics.append({"kind": "overview_render_error", "path": f"assets/overview/{key}.overview.md",
+                                         "reason": "figure_name_collision"})
+            else:
+                for name, data in result.figures.items():
+                    self.overview_assets[self.overview_figure_out[key, name]] = data
+        for pid, key in rendered_pages.items():
+            self.overviews[pid] = (key, views[key])
+
+    def _overview_html(self, pid: str) -> str:
+        if self.overview_scan_unknown:
+            return self._message_bar("", "warning", "概要の一覧を確認できない", "", "wiki-overview-notice")
+        key, result = self.overviews[pid]
+        if result.state == "none":
+            return ""
+        if key in self.overview_asset_conflicts or result.state not in ("fresh", "stale"):
+            return self._message_bar("", "warning", "概要を読めない", "診断で元ページと概要の状態を確認する。", "wiki-overview-notice")
+        try:
+            path = self.out_name[pid]
+            tokens = self.static_overview_tokens.pop(pid, None)
+            if tokens is None:
+                tokens = self.parser.parse(result.body)
+
+            def image(token):
+                name = token.attrs.get("src", "").removeprefix("#fig-")
+                data = result.figures.get(name)
+                if data is None:
+                    return None
+                src = rel_href(path, self.overview_figure_out[key, name])
+                return self._svg_image_html(src, token.content, data)
+
+            self._transform_tokens(tokens, path, [0, []], self.drawn[pid], image, False)
+            body = self._render_body_tokens(tokens, path)
+            if key in self.overview_render_failures:
+                self.overview_render_failures.discard(key)
+                self.diagnostics[:] = [d for d in self.diagnostics if not (d["kind"] == "overview_render_error" and d.get("page") == pid)]
+            stale = result.state == "stale"
+            notice = (self._message_bar("", "warning", "元のページが更新されている",
+                                       "この概要は古い。/wiki:overview で作り直せる。") if stale else "")
+            metadata = " · ".join(html.escape(value) for value in (result.generated, result.generator) if value)
+            status = '<span class="wiki-overview-status">元のページが更新されている</span>' if stale else ""
+            chevron = ('<span class="fui-AccordionHeader__expandIcon" aria-hidden="true">'
+                       '<svg class="fui-Icon" width="20" height="20" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">'
+                       '<path d="M7.65 4.15c.2-.2.5-.2.7 0l5.49 5.46c.21.22.21.57 0 .78l-5.49 5.47a.5.5 0 0 1-.7-.71L12.8 10 7.65 4.85a.5.5 0 0 1 0-.7"/>'
+                       '</svg></span>')
+            return (f'<details class="wiki-overview fui-AccordionItem" data-overview-state="{result.state}"'
+                    f'{"" if stale else " open"}><summary class="fui-AccordionHeader__button">{chevron}概要{status}</summary>'
+                    f'<div class="wiki-overview-content fui-AccordionPanel">{notice}<p class="wiki-overview-meta">{metadata}</p>'
+                    f'{body}</div></details>\n')
+        except Exception as exc:
+            if key not in self.overview_render_failures:
+                self.overview_render_failures.add(key)
+                self.diagnostics.append({"kind": "overview_render_error", "page": pid, "reason": type(exc).__name__})
+            return self._message_bar("", "warning", "概要を表示できない", "本文はそのまま閲覧できる。", "wiki-overview-notice")
+
     def figure_state(self, page_disk_rel: str, src: str) -> tuple:
         """本文の画像の参照の状態。(状態, 行き先) を返す。状態は "ok"、"missing"、"unreadable"、"other"。
 
@@ -899,6 +1181,8 @@ class Core:
 
     def asset_bytes(self, name: str) -> "bytes | None":
         """図の svg の出力の名前から、配るバイト列。知らない名前なら None。"""
+        if name in self.overview_assets:
+            return self.overview_assets[name]
         rel = self.asset_by_out.get(name)
         return None if rel is None else self.assets[rel].data
 
@@ -908,16 +1192,25 @@ class Core:
         if state != "ok":
             return None
         src = rel_href(path, self.asset_out[target])
-        alt = html.escape(image.content, quote=True)
-        # 大きさが分からない svg は、置き換え要素の既定の大きさ（300×150）にする。Firefox は、大きさのない svg の
-        # 画像に固有の幅を持たせず、幅を中身で決める入れ物の中で幅 0 にする
-        width, height = svg_size(self.assets[target].data) or (300, 150)
+        return self._svg_image_html(src, image.content, self.assets[target].data)
+
+    @staticmethod
+    def _svg_image_html(src: str, alt_text: str, data: bytes) -> str:
         # 入れ物は段落の中に置くので <span> にする。data-theme="light" で、手書きの svg の地を明るい配色に保つ
         # （図の描画の設計の 8）。リンクで包まない（静的版で svg を直接開くと、中のスクリプトが動く）。
         # 大きさは width と height の属性で渡す（svg_size）。loading="lazy" は付けない。WebKit は、幅を中身で決める
         # 入れ物の中の画像を、読み込む前の幅 0 のまま残す
         return (f'<span class="wiki-fig fui-Card" data-fig="svg" data-theme="light">'
-                f'<img class="fui-Image" src="{html.escape(src)}" alt="{alt}" width="{width}" height="{height}"></span>')
+                f'{Core._svg_img(src, alt_text, data)}</span>')
+
+    @staticmethod
+    def _svg_img(src: str, alt_text: str, data: bytes, theme: str | None = None) -> str:
+        alt = html.escape(alt_text, quote=True)
+        # 大きさが分からない SVG も、幅を中身で決める入れ物の中で幅 0 にしない。
+        width, height = svg_size(data) or (300, 150)
+        theme_attr = f' data-fig-theme="{theme}"' if theme else ""
+        return (f'<img class="fui-Image" src="{html.escape(src)}" alt="{alt}" '
+                f'width="{width}" height="{height}"{theme_attr}>')
 
     def page(self, pid: str) -> dict:
         return self.pages[self.drawn[pid]]
@@ -933,8 +1226,11 @@ class Core:
         pid = self.pages[disks[0]]["id"]
         return pid if self.drawn.get(pid) == disks[0] else None
 
-    def resolve(self, target: str) -> dict:
+    def resolve(self, target: str, *, articles: bool = False) -> dict:
         """wikilink の行き先を解決する（設計の 3.3）。"""
+        refused = wiki_pages.refused_link(target, self.link_warnings, articles=articles)
+        if refused is not None:
+            return {"state": "refused", "target": target, "path": refused["path"], "link_kind": refused["kind"]}
         disks = wiki_pages.link_candidates(target, self.pages_by_path, self.pages_by_slug)
         if not disks:
             return {"state": "unresolved", "target": target}
@@ -974,6 +1270,10 @@ class Core:
         for disk, p in sorted(self.pages.items()):
             pid = p["id"]
             drawn = self.drawn.get(pid) == disk
+            if p["kind"] == "raw":
+                if drawn:
+                    self.links[pid] = []
+                continue
             if drawn:
                 tokens = self.tokens[pid]
             elif disk not in unparsed:
@@ -1010,7 +1310,11 @@ class Core:
             for r in found:
                 where = {"page": pid} if drawn else {"page": None, "source_page": pid}
                 if r["state"] != "resolved":
-                    self.diagnostics.append({"kind": r["state"], **where, "target": r["target"]})
+                    if r["state"] == "refused":
+                        self.diagnostics.append({"kind": "link", **where, "target": r["target"],
+                                                 "path": r["path"], "link_kind": r["link_kind"]})
+                    else:
+                        self.diagnostics.append({"kind": r["state"], **where, "target": r["target"]})
                 elif r.get("missing_heading"):
                     self.diagnostics.append({"kind": "missing_heading", **where, "target": r["target"]})
 
@@ -1055,6 +1359,8 @@ class Core:
         gpages = []
         diag = []
         for disk, p in sorted(self.pages.items()):
+            if p["kind"] == "raw":
+                continue
             # グラフの抽出と同じ読み方（wiki 0.9.5 の read_frontmatter）。最上位の欄は lint の値、graph だけを
             # PyYAML から取る（設計の 2）。PyYAML が組み立てられない値は、関係表の診断になる。
             try:
@@ -1072,7 +1378,7 @@ class Core:
                            "links": links, "fm_problems": problems})
         try:
             _nodes, page_node_ids, _aliases = wiki_graph_extract.build_nodes(gpages, ontology, diag)
-            edges = wiki_graph_extract.build_edges(gpages, page_node_ids, diag)
+            edges = wiki_graph_extract.build_edges(gpages, page_node_ids, diag, link_warnings=self.link_warnings)
         except Exception:  # noqa: BLE001  オントロジーの中の形が誤っている（node_types が配列など）
             self.relations_state = "error"
             self.diagnostics.append({"kind": "relations_error", "reason": "invalid"})
@@ -1196,8 +1502,11 @@ class Core:
                             listed.add(item["id"])
             file_groups.append((f, top))
         rest = defaultdict(list)
+        raw_items = []
         for pid in sorted(self.drawn):
-            if pid not in listed:
+            if self.page(pid)["kind"] == "raw":
+                raw_items.append({"state": "resolved", "id": pid, "label": self.title(pid)})
+            elif pid not in listed:
                 rest[str(self.page(pid)["meta"].get("type") or "")].append(pid)
         rest_groups = []
         if rest:
@@ -1208,6 +1517,10 @@ class Core:
                 sub["items"] = [{"state": "resolved", "id": pid, "label": self.title(pid)} for pid in rest[t]]
                 g["children"].append(sub)
             rest_groups.append(g)
+        if raw_items:
+            raw_group = new_group("raw", "_gr")
+            raw_group["items"] = raw_items
+            rest_groups.append(raw_group)
         self.nav_groups = self._nav_stage_two(file_groups, rest_groups)
         self._page_listing()
 
@@ -1289,27 +1602,31 @@ class Core:
     def _nav_tag_stage(self, top: list) -> None:
         """木の 3 つ目の段 N9（タグでまとめる設計の 2 節）。
 
-        ページの項目を自分の項目に持つグループのすべてで、ページの項目を、ページの最初のタグごとの子のグループ
-        （タグのないページは「タグなし」）に移す。ページでない項目は元のグループに残す。タグのグループは、
+        ページの項目を自分の項目に持つグループのすべてで、ページの項目をタグごとの子のグループに移す。
+        wiki のページは最初のタグ、raw は raw というタグを除いた最初のタグを使う。
+        該当する値がなければ「タグなし」にする。
+        ページでない項目は元のグループに残す。タグのグループは、
         元のグループの項目の並びでタグが初めて現れた順に、元の子のグループより前に並べ、「タグなし」を最後に置く。
         ID は `_gt` と、木を深さ優先でたどって（親、子の順）作った順の番号で、タグの文字を入れない。
         """
         before = {g["id"]: [it["id"] for it in g["items"] if it["state"] == "resolved"] for g in _walk(top)}
         listed = _page_ids(top)
-        first_tag = {}
+        group_tags = {}
         counter = [0]
 
         def tag_of(pid):
-            if pid not in first_tag:
+            if pid not in group_tags:
                 tags = self.page_tags(pid)
-                first_tag[pid] = tags[0] if tags else None
-            return first_tag[pid]
+                if self.page(pid)["kind"] == "raw":
+                    tags = self._raw_classification_tags(tags)
+                group_tags[pid] = tags[0] if tags else None
+            return group_tags[pid]
 
         def apply(g):
             original_children = g["children"]
             pages = [it for it in g["items"] if it["state"] == "resolved"]
             if pages:
-                buckets = {}           # 最初のタグ（なければ None）-> 項目。dict は入れた順を保つ
+                buckets = {}           # 分類に使うタグ（なければ None）-> 項目。dict は入れた順を保つ
                 for it in pages:
                     buckets.setdefault(tag_of(it["id"]), []).append(it)
                 keys = [k for k in buckets if k is not None] + ([None] if None in buckets else [])
@@ -1338,7 +1655,7 @@ class Core:
                         holders[pid].append(ch["title"])
             for pid in set(pids):
                 if holders.get(pid) != [tag_of(pid) or NO_TAG_LABEL]:
-                    raise NavInvariantError("ページが、最初のタグのグループのちょうど 1 つに入っていない")
+                    raise NavInvariantError("ページが、該当するタグのグループのちょうど 1 つに入っていない")
 
     def _page_listing(self) -> None:
         """索引のページの一覧と検索の索引に使う、ページごとの並び、グループ、階層、索引の行の要約（4.1、4.2）。"""
@@ -1362,7 +1679,7 @@ class Core:
                     self.page_groups[pid].update(x["id"] for x in trail)
                     if pid not in self.index_summary and it.get("after"):
                         self.index_summary[pid] = it["after"]
-                elif it["state"] in ("unresolved", "ambiguous"):
+                elif it["state"] in ("unresolved", "ambiguous", "refused"):
                     self.index_unresolved.append(([x["title"] for x in trail if x["title"]], it))
             for ch in g["children"]:
                 rec(ch, trail)
@@ -1382,7 +1699,7 @@ class Core:
                 after = _after_first_link(inline_tok)
                 if clean in group_of_file and clean.startswith("indexes/"):
                     return {"state": "group", "group": group_of_file[clean], "label": label, "after": after}
-                r = self.resolve(target)
+                r = self.resolve(target, articles=True)
                 if r["state"] == "resolved":
                     return {"state": "resolved", "id": r["id"], "label": self.title(r["id"]),
                             "anchor": r.get("anchor"), "after": after}
@@ -1395,7 +1712,7 @@ class Core:
         return sorted(self.out_name.values())
 
     def knows(self, name: str) -> bool:
-        return name in self.name_to_id or name in ("index.html", *DATA_FILES) or name in self.asset_by_out
+        return name in self.name_to_id or name in ("index.html", *DATA_FILES) or name in self.asset_by_out or name in self.overview_assets
 
     def _link_html(self, path: str, r: dict) -> str:
         label = html.escape(r["label"])
@@ -1407,9 +1724,11 @@ class Core:
             return f'<a class="{cls}" href="{html.escape(href)}">{label}</a>'
         if r["state"] == "ambiguous":
             return f'<span class="wl wl-ambiguous" title="行き先を 1 つに決められない">{label}</span>'
+        if r["state"] == "refused":
+            return f'<span class="wl wl-unresolved" title="リンクなので読まない">{label}</span>'
         return f'<span class="wl wl-unresolved" title="ページがない">{label}</span>'
 
-    def _transform_inline(self, children, path: str, counter: list, file: str) -> list:
+    def _transform_inline(self, children, path: str, counter: list, file: str, image_renderer=None, wikilinks: bool = True) -> list:
         """本文の inline の字句を描く形に替える。path はページの出力の名前、file はページのディスク上の相対パス
         （図の svg の参照を解く基準。図の描画の設計の 6.4）。"""
         out = []
@@ -1438,24 +1757,24 @@ class Core:
                     c.attrSet("rel", "noopener noreferrer")
                     c.attrSet("class", "ext")
                     out.append(c)
-                    out.extend(self._transform_inline(inner, path, counter, file))
+                    out.extend(self._transform_inline(inner, path, counter, file, image_renderer, wikilinks))
                     if j < len(children):
                         out.append(children[j])
                 else:
-                    out.extend(self._transform_inline(inner, path, counter, file))
+                    out.extend(self._transform_inline(inner, path, counter, file, image_renderer, wikilinks))
                     if c.markup != "autolink":
                         out.append(Token("text", "", 0, content=f"（{display_href(href)}）"))
                 i = j + 1
                 continue
             if c.type == "image":
-                figure = self._figure_html(path, file, c)
+                figure = image_renderer(c) if image_renderer else self._figure_html(path, file, c)
                 if figure is None:
                     out.append(Token("text", "", 0, content=c.content))
                 else:
                     out.append(Token("html_inline", "", 0, content=figure))
                 i += 1
                 continue
-            if c.type == "text" and "[[" in c.content and wiki_pages.WIKILINK_FULL_RE.search(c.content):
+            if wikilinks and c.type == "text" and "[[" in c.content and wiki_pages.WIKILINK_FULL_RE.search(c.content):
                 pos = 0
                 for m in wiki_pages.WIKILINK_FULL_RE.finditer(c.content):
                     if m.start() > pos:
@@ -1472,17 +1791,8 @@ class Core:
             i += 1
         return out
 
-    def body_html(self, pid: str) -> str:
-        if pid in self._body_cache:
-            return self._body_cache[pid]
-        path = self.out_name[pid]
-        # 下ごしらえの字句を 1 度だけ使う。描くときに字句を書き換えるので、描けずに終わったあとは、本文から
-        # 解析し直して描く（設計の 7.2。描画は中核を変えないので、失敗のあとも同じ中核からもう一度描ける）。
-        tokens = self.tokens.pop(pid, None)
-        if tokens is None:
-            tokens = self.parser.parse(self.page(pid)["body"])
-            assign_heading_ids(tokens)
-        counter = [0, self.links[pid]]
+    def _transform_tokens(self, tokens, path, counter, file, image_renderer=None, wikilinks=True):
+        """表・リンク・画像の安全な表示を、本文と概要で共用する。"""
         for tok in tokens:
             if tok.type in ("th_open", "td_open") and "style" in (tok.attrs or {}):
                 style = tok.attrs.pop("style")
@@ -1490,9 +1800,82 @@ class Core:
                 if m:
                     tok.attrSet("class", f"ta-{m.group(1)}")
             if tok.type == "inline" and tok.children:
-                tok.children = self._transform_inline(tok.children, path, counter, self.drawn[pid])
-        rendered = self.parser.renderer.render(tokens, self.parser.options, {})
-        self._body_cache[pid] = rendered
+                tok.children = self._transform_inline(tok.children, path, counter, file, image_renderer, wikilinks)
+
+    @staticmethod
+    def _is_mermaid_fence(tok) -> bool:
+        return tok.type == "fence" and tok.info.split(maxsplit=1)[:1] == ["mermaid"]
+
+    def mermaid_sources(self) -> list[str]:
+        """書き出す本文と概要の字句から、図の原稿を重複なしで集める。"""
+        if not self.overview_scan_unknown:
+            for pid, (key, result) in self.overviews.items():
+                if key in self.overview_asset_conflicts or result.state not in ("fresh", "stale"):
+                    continue
+                try:
+                    self.static_overview_tokens[pid] = self.parser.parse(result.body)
+                except Exception:  # 概要の解析の失敗は、描くときにそのページの診断に出す。
+                    continue
+        streams = chain(self.tokens.values(), self.static_overview_tokens.values())
+        return list(dict.fromkeys(tok.content for tokens in streams for tok in (tokens or [])
+                                  if self._is_mermaid_fence(tok)))
+
+    def prepare_static_mermaid(self, images: dict) -> None:
+        """描画と検査を終えた SVG を、書き出しの世代に加える。"""
+        self.static_mermaid = {}
+        for source, (light, dark, title) in images.items():
+            names = []
+            for data in (light, dark):
+                name = f"assets/figures/{hashlib.sha256(data).hexdigest()}.svg"
+                self.static_mermaid_assets[name] = data
+                names.append(name)
+            self.static_mermaid[source] = (*names, title or "Mermaid の図")
+
+    def _static_mermaid_token(self, tok, path: str):
+        code = self.parser.renderer.render([tok], self.parser.options, {})
+        figure = self.static_mermaid.get(tok.content)
+        if figure is None:
+            content = '<p class="notice wiki-fig-error">この図を描けないため、コードを表示する。</p>\n' + code
+        else:
+            light, dark, alt = figure
+            images = "".join(self._svg_img(rel_href(path, name), alt, self.static_mermaid_assets[name], theme)
+                             for theme, name in (("light", light), ("dark", dark)))
+            content = (f'<figure class="wiki-fig fui-Card" data-fig="pele">{images}</figure>\n'
+                       f'<details class="wiki-fig-source"><summary>図のコード</summary>{code}</details>\n')
+        return Token("html_block", "", 0, content=content)
+
+    def _render_body_tokens(self, tokens, path: str) -> str:
+        if self.static_mermaid is not None:
+            tokens = [self._static_mermaid_token(tok, path) if self._is_mermaid_fence(tok) else tok for tok in tokens]
+        return self.parser.renderer.render(tokens, self.parser.options, {})
+
+    def body_html(self, pid: str) -> str:
+        if pid in self._body_cache:
+            return self._body_cache[pid]
+        path = self.out_name[pid]
+        page = self.page(pid)
+        # 下ごしらえの字句を 1 度だけ使う。描くときに字句を書き換えるので、描けずに終わったあとは、本文から
+        # 解析し直して描く（設計の 7.2。描画は中核を変えないので、失敗のあとも同じ中核からもう一度描ける）。
+        tokens = self.tokens.pop(pid, None)
+        if tokens is None:
+            tokens = self.parser.parse(page["body"])
+            assign_heading_ids(tokens)
+        if page["kind"] == "raw" and page["meta"].get("source_kind") in _SESSION_SOURCE_KINDS:
+            _mark_session_turns(tokens)
+        counter = [0, self.links[pid]]
+        insertion = 0
+        for index, tok in enumerate(tokens):
+            if tok.type == "heading_close" and tok.tag == "h1" and tok.level == 0:
+                insertion = index + 1
+                break
+        self._transform_tokens(tokens, path, counter, self.drawn[pid])
+        overview = self.overviews.get(pid)
+        overview_html = self._overview_html(pid) if overview is not None else ""
+        if overview_html:
+            tokens.insert(insertion, Token("html_block", "", 0, content=overview_html))
+        rendered = self._render_body_tokens(tokens, path)
+        if overview is None or overview[0] not in self.overview_render_failures:
+            self._body_cache[pid] = rendered
         return rendered
 
     @staticmethod
@@ -1520,7 +1903,11 @@ class Core:
             cells = []
             for ref in sources:
                 _status, found, _t = wiki_pages.classify_source_ref(
-                    ref, self.pages_by_path, self.pages_by_slug, lambda d: self.pages[d]["meta"].get("type"))
+                    ref, self.pages_by_path, self.pages_by_slug, lambda d: self.pages[d]["meta"].get("type"),
+                    link_warnings=self.link_warnings)
+                if _status == "refused":
+                    cells.append(self._link_html(path, {"state": "refused", "label": ref}))
+                    continue
                 sp = self.resolve_disks(found)
                 if sp is not None:
                     cells.append(f'<a href="{html.escape(rel_href(path, self.out_name[sp]))}">'
@@ -1531,11 +1918,20 @@ class Core:
         raws = wiki_pages.ref_values(meta.get("raw"))
         if raws and raw_mode != "none":
             sha = str(meta.get("raw_sha256") or "")
-            cells = [self._raw_html(classify_raw(v), sha, raw_mode, path) for v in raws]
+            source = self.page(pid)["rel_path"]
+            cells = []
+            for i, value in enumerate(raws):
+                raw = classify_raw(value)
+                raw_id = self.snapshot.raw_targets.get((source, i)) if raw_mode == "text" else None
+                if raw_id in self.drawn:
+                    href = html.escape(rel_href(path, self.out_name[raw_id]))
+                    cells.append(f'<a href="{href}"><code>{html.escape(raw["value"])}</code></a>')
+                else:
+                    cells.append(self._raw_html(raw, sha, raw_mode))
             rows.append(self._meta_row("原本", "<br>".join(cells)))
         return "".join(rows)
 
-    def _raw_html(self, raw: dict, sha: str, mode: str, path: str) -> str:
+    def _raw_html(self, raw: dict, sha: str, mode: str) -> str:
         value = raw["value"]
         if raw["kind"] != "absolute" or mode == "text":
             return f"<code>{html.escape(value)}</code>"
@@ -1585,7 +1981,7 @@ class Core:
                 rows.append('<tr class="fui-TableRow">'
                             + "".join(f'<td class="fui-TableCell">{c}</td>' for c in cells) + "</tr>")
         cols = "".join(f'<th class="fui-TableHeaderCell" scope="col">{h}</th>'
-                       for h in ("向き", "述語", "相手", "状態", "開始", "終了", "確信度", "出典", "証拠"))
+                       for h in ("向き", "述語", "相手", "状態", "開始", "終了", "信頼度", "出典", "証拠"))
         # 9 列の表は狭い幅で本文からはみ出すので、表だけを横に送る入れ物で包む（Fluent 2 の設計の 5）。
         # 入れ物はキーボードでも送れるように、フォーカスできる領域にする
         return (f'<section id="_relations">{head}{self._incomplete_html()}'
@@ -1603,7 +1999,7 @@ class Core:
         lis = []
         for d in items:
             parts = [d["kind"]]
-            for key in ("target", "reason", "output", "node_id", "predicate", "object", "source", "source_page"):
+            for key in ("target", "path", "link_kind", "reason", "output", "node_id", "predicate", "object", "source", "source_page"):
                 if d.get(key):
                     parts.append(f"{key}: {d[key]}")
             lis.append(f"<li>{html.escape(' / '.join(map(str, parts)))}</li>")
@@ -1624,10 +2020,13 @@ class Core:
     def _message_bar(self, mid: str, intent: str, title: str, body: str, extra_class: str = "") -> str:
         """Fluent の MessageBar（multiline）。アイコンはインライン SVG（Fluent 2 の設計の 4）。body は文字で渡す。"""
         cls = f"{extra_class} fui-MessageBar" if extra_class else "fui-MessageBar"
-        return (f'<div id="{mid}" class="{cls}" role="group" aria-labelledby="{mid}_title" data-intent="{intent}" '
+        identity = f'id="{mid}" ' if mid else ""
+        label = f'aria-labelledby="{mid}_title"' if mid else f'aria-label="{html.escape(title, quote=True)}"'
+        title_id = f' id="{mid}_title"' if mid else ""
+        return (f'<div {identity}class="{cls}" role="group" {label} data-intent="{intent}" '
                 f'data-layout="multiline"><div class="fui-MessageBar__icon" aria-hidden="true">'
                 f'{ICON_ERROR if intent == "error" else ICON_WARNING}</div>'
-                f'<div class="fui-MessageBarBody"><span class="fui-MessageBarTitle" id="{mid}_title">'
+                f'<div class="fui-MessageBarBody"><span class="fui-MessageBarTitle"{title_id}>'
                 f'{html.escape(title)}</span>{html.escape(body)}</div>'
                 f'<div class="fui-MessageBarActions"></div><div class="fui-MessageBar__bottomReflowSpacer"></div></div>\n')
 
@@ -1659,31 +2058,35 @@ class Core:
                 f'<noscript><a class="fui-Link" href="{prefix}index.html">Index へ</a></noscript></div></nav>\n'
                 f'<main id="_main">\n{banner}')
 
-    def _tail(self, path: str, extra_data: tuple = ()) -> str:
+    def _tail(self, path: str, extra_data: tuple = (), *, allow_figures: bool = True) -> str:
         prefix = root_prefix(path)
         # figures.js は app.js と別のファイルにする。app.js は契約の版が違うときなどに途中で抜けるので、図の描画を
         # それに縛らない（図の描画の設計の 7.4）
-        scripts = "".join(f'<script src="{prefix}{name}"></script>\n'
-                          for name in ("nav.js", "data/manifest.js", *extra_data, "assets/app.js", "assets/figures.js"))
+        files = ("nav.js", "data/manifest.js", *extra_data, "assets/app.js")
+        if allow_figures and self.static_mermaid is None:
+            files += ("assets/figures.js",)
+        scripts = "".join(f'<script src="{prefix}{name}"></script>\n' for name in files)
         return f"</main>\n{scripts}</body>\n</html>\n"
 
-    def render_page(self, pid: str, raw_mode: str = "text", stale: "str | None" = None) -> str:
+    def render_page(self, pid: str, raw_mode: str = "text", stale: "str | None" = None, *,
+                    allow_figures: bool = True) -> str:
         path = self.out_name[pid]
         title = self.title(pid)
         back = "".join(f'<li class="fui-ListItem"><a href="{html.escape(rel_href(path, self.out_name[b]))}">'
                        f"{html.escape(self.title(b))}</a></li>" for b in self.backlinks[pid])
+        body = self.body_html(pid)
         diags = list(self.page_diagnostics(pid))
         if stale:
             diags.insert(0, {"kind": "stale", "reason": stale})
         return (self._head(path, title, stale)
                 + f'<article id="_article" data-page-id="{html.escape(pid)}">\n'
                 + self._meta_html(pid, path, raw_mode)
-                + f'<div id="_body">\n{self.body_html(pid)}</div>\n</article>\n'
+                + f'<div id="_body">\n{body}</div>\n</article>\n'
                 + f'<section id="_backlinks">{self._section_head("被リンク")}{self._incomplete_html()}'
                   f'<ul class="fui-List" role="list">{back}</ul></section>\n'
                 + self._relations_html(pid, path)
                 + self._diagnostics_html(diags, path)
-                + self._tail(path))
+                + self._tail(path, allow_figures=allow_figures))
 
     def _incomplete_html(self) -> str:
         """中身に依る一覧（未解決リンク、被リンク、関係）の「不完全」の印（構造の直しの設計の 4.1）。"""
@@ -1764,14 +2167,31 @@ class Core:
             return ""
         lis = []
         for trail, it in self.index_unresolved:
-            title = "ページがない" if it["state"] == "unresolved" else "行き先を 1 つに決められない"
             where = f'<span class="fui-Caption1 state">（{html.escape(" › ".join(trail))}）</span>' if trail else ""
-            lis.append(f'<li><span class="wl wl-{it["state"]}" title="{title}">{html.escape(it["label"])}</span>'
-                       f"{where}</li>")
+            lis.append(f'<li>{self._link_html("index.html", it)}{where}</li>')
         return ('<section id="_index_unresolved"><h2 class="fui-Subtitle2">ページに決まらない Index の行</h2>'
                 f'<ul>{"".join(lis)}</ul></section>\n')
 
-    def render_index(self, stale: "str | None" = None) -> str:
+    def _index_filter_keys(self, secret: bytes | None) -> str:
+        # cookie はほかのポートにも届くので、索引のトークンで守られた画面だけが知る識別子を使う。
+        # 静的 HTML は書き出した世代で分け、ファイルのパスをブラウザーに保存しない。
+        server = secret is not None
+        key = secret if server else self.generation.encode("utf-8")
+        if not key:
+            return html.escape(json.dumps({"server": server}))
+
+        def identify(kind: str, value: str = "") -> str:
+            data = f"browse-filter\0{kind}\0{value}".encode("utf-8")
+            return hmac.digest(key, data, "sha256")[:16].hex()
+
+        types = {self.page_type(pid) for pid in self.page_order}
+        tags = {tag for pid in self.page_order for tag in self.page_tags(pid)}
+        data = {"server": server, "scope": identify("scope"),
+                "type": {value: identify("type", value) for value in types},
+                "tag": {value: identify("tag", value) for value in tags}}
+        return html.escape(json.dumps(data, sort_keys=True, separators=(",", ":")))
+
+    def render_index(self, stale: "str | None" = None, *, filter_secret: bytes | None = None) -> str:
         path = "index.html"
         diags = list(self.diagnostics)
         if stale:
@@ -1787,7 +2207,8 @@ class Core:
         return (self._head(path, "Index", stale)
                 + f'<header id="_ixhead"><h1 class="fui-Title2">Index</h1>'
                   f'<p class="ix-stats fui-Caption1">{total} ページ</p></header>\n{nav_note}'
-                + '<div id="_filters" class="fx-bar"><noscript><p class="state fui-Caption1">絞り込みと検索には '
+                + f'<div id="_filters" class="fx-bar" data-filter-keys="{self._index_filter_keys(filter_secret)}">'
+                  '<noscript><p class="state fui-Caption1">絞り込みと検索には '
                   'JavaScript が要る。一覧は Index の順に並んでいる。</p></noscript></div>\n'
                 + f'<p id="_count" class="fx-count fui-Caption1" aria-live="polite">{total} 件</p>\n'
                 + f'<ul id="_index" class="fx-list">{rows}</ul>\n'
@@ -1839,11 +2260,13 @@ class Core:
     def manifest(self, generated_at: str = "") -> dict:
         return {"protocol_version": PROTOCOL_VERSION, "generation": self.generation, "generated_at": generated_at,
                 "capabilities": {"search": "embedded", "relations": self.relations_state, "rag": False,
-                                 "multi_wiki": False, "live_reload": False},
+                                 "multi_wiki": False, "live_reload": False, "overviews": True},
                 "pages": len(self.drawn),
                 "incomplete": {"unreadable_pages": len(self.unreadable_pages),
                                "unreadable_indexes": len(self.unreadable_indexes),
-                               "unreadable_ontology": bool(self.unreadable_ontology)}}
+                               "unreadable_ontology": bool(self.unreadable_ontology),
+                               "unreadable_overviews": sum(kind == "overview" for kind, _ in self.snapshot.unreadable),
+                               "overview_scan_unknown": self.overview_scan_unknown}}
 
     def diagnostics_json(self) -> dict:
         return {"protocol_version": PROTOCOL_VERSION, "generation": self.generation, "items": self.diagnostics}
@@ -1866,19 +2289,19 @@ class Core:
         raise KeyError(name)
 
     def render(self, name: str, raw_mode: str = "text", generated_at: str = "",
-               stale: "str | None" = None) -> str:
+               stale: "str | None" = None, *, allow_figures: bool = True, filter_secret: bytes | None = None) -> str:
         """出力の名前 1 つを描く。中核が知らない名前なら KeyError。ほかの要求と同時に呼んでよい。"""
         with self._render_lock:
-            return self._render(name, raw_mode, generated_at, stale)
+            if name == "index.html":
+                return self.render_index(stale, filter_secret=filter_secret)
+            return self._render(name, raw_mode, generated_at, stale, allow_figures)
 
-    def _render(self, name: str, raw_mode: str, generated_at: str, stale: "str | None") -> str:
-        if name == "index.html":
-            return self.render_index(stale)
+    def _render(self, name: str, raw_mode: str, generated_at: str, stale: "str | None", allow_figures: bool) -> str:
         if name in DATA_FILES:
             return self.render_data(name, generated_at, stale)
         pid = self.name_to_id[name]
         try:
-            return self.render_page(pid, raw_mode, stale)
+            return self.render_page(pid, raw_mode, stale, allow_figures=allow_figures)
         except Exception as e:  # noqa: BLE001  1 ページを描けなくても、その場所に「描けない」と出して続ける（設計の 7.2）
             if pid not in self.render_failures:
                 self.render_failures.append(pid)
@@ -1890,6 +2313,8 @@ class Core:
             out[name] = self.render(name, raw_mode)
         for name, rel in self.asset_by_out.items():
             out[name] = self.assets[rel].data     # 図の svg は、読んだバイト列のまま書く
+        out.update(self.overview_assets)
+        out.update(self.static_mermaid_assets)
         out["index.html"] = self.render_index()
         for name in DATA_FILES:
             out[name] = self.render_data(name, generated_at)

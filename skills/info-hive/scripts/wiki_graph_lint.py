@@ -519,12 +519,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("wiki", nargs="?", type=Path, default=None, help=wiki_workspace.WIKI_DEFAULT_HELP)
     parser.add_argument("--ontology", type=Path, help="オントロジーのファイル（既定: <wiki>/graph/ontology.yaml）")
+    parser.add_argument("--release-id", help="検査する公開版")
     parser.add_argument("--json", action="store_true", help="テキストの代わりに JSON を出力する。キーは英語のまま")
     parser.add_argument("--decide", action="store_true",
                         help="ソースページからの引用になっていないエッジの証拠を、判定モデルでチェックする。"
                              "使うには INFO_HIVE_DECISIONS の設定が必要")
     parser.add_argument("--decide-threshold", type=float, default=None,
-                        help="裏づけの文として認めるのに必要な確信度"
+                        help="裏づけの文として認めるのに必要な信頼度"
                              f"（既定: {decision_default_threshold('evidence')}）")
     localize_argparse(parser)
     args = parser.parse_args()
@@ -532,6 +533,16 @@ def main():
         args.wiki = wiki_workspace.default_wiki_or_exit()
     # SCHEMA.md のないディレクトリは、初期化された wiki とみなさない（ADR-0019）。
     wiki_initialized.require_or_exit(args.wiki)
+    from wiki_apply import resolve_publication
+
+    try:
+        release = resolve_publication(args.wiki, args.release_id)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    if release:
+        if args.ontology is not None:
+            parser.error("公開版の lint に別のオントロジーは指定できません")
+        args.wiki = release.root
 
     # オントロジーの有無と読み方は extract、query と同じ規則に従う。
     try:
@@ -542,6 +553,7 @@ def main():
     ontology = _extract.load_ontology(ontology_path)
 
     pages = collect_pages(args.wiki)
+    # リンクなので読まなかったページは、グラフの lint の対象に入らない（ADR-0029）。知らせは、走査が終わりに出す
     findings = lint(pages, ontology)
     if args.decide:
         unsupported, check = decide_evidence(pages, ontology, args.decide_threshold)
@@ -549,6 +561,9 @@ def main():
         findings["evidence_check"] = check
         findings["summary"]["evidence_unsupported"] = len(unsupported)
 
+    if release:
+        resolve_publication(release.wiki, release.release_id)
+        findings["release_id"] = release.release_id
     if args.json:
         print(json.dumps(findings, indent=2, default=str, ensure_ascii=False))
     else:

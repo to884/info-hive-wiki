@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ja" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>wiki の用語 | info-hive</title>
+  <link rel="stylesheet" href="assets/fluent2.css">
+  <link rel="stylesheet" href="assets/manual.css">
+  <link rel="stylesheet" href="assets/manual-print.css" media="print">
+</head>
+<body class="fui-FluentProvider">
+  <a class="skip-link fui-Link" href="#main">本文へ移動</a>
+  <header class="site-header">
+    <div class="shell"><a class="fui-Link site-name" href="index.html">info-hive</a></div>
+  </header>
+  <main class="shell reading-layout" id="main" tabindex="-1">
+    <nav class="contents" aria-label="このページの目次">
+      <h2>目次</h2>
+      <ul>
+        <li><a class="fui-Link" data-inline href="#workspace">保存場所</a></li>
+        <li><a class="fui-Link" data-inline href="#pages">ページと点検</a></li>
+        <li><a class="fui-Link" data-inline href="#search">検索と回答</a></li>
+      </ul>
+    </nav>
+    <article class="page-content" aria-labelledby="page-title">
+      <header class="intro">
+        <h1 class="fui-Title1" id="page-title">wiki の用語</h1>
+        <p>操作の案内や回答に出てくる用語を説明します。</p>
+      </header>
+      <section id="workspace">
+        <h2 class="fui-Subtitle1">保存場所</h2>
+        <dl>
+        <dt>wiki</dt><dd>エージェントが整理した Markdown のページを置く場所です。</dd>
+        <dt>raw</dt><dd>取り込む資料とその写しを置く場所です。</dd>
+        <dt>SCHEMA.md</dt><dd>ページの種類、タグ、取り込みの規約を記したファイルです。</dd>
+        <dt>プロジェクトスコープ</dt><dd>開いているフォルダーに置く wiki です。</dd>
+        <dt>ユーザースコープ</dt><dd>複数の作業フォルダーで使う、そのユーザーの wiki です。</dd>
+        </dl>
+      </section>
+
+      <section id="pages">
+        <h2 class="fui-Subtitle1">ページと点検</h2>
+        <dl>
+        <dt>索引</dt><dd>wiki のページを探すための一覧です。通常は <code>wiki/index.md</code> から開きます。</dd>
+        <dt>wikilink</dt><dd><code>[[味噌]]</code> のようにページを指すリンクです。</dd>
+        <dt>被リンク</dt><dd>今開いているページを指している、ほかのページからのリンクです。</dd>
+        <dt>シンセシス</dt><dd>複数のページの内容をまとめたり、比較したりしたページです。</dd>
+        <dt>lint</dt><dd>リンク切れや孤立などの構造を調べ、内容の古さや矛盾も確認する操作です。</dd>
+        </dl>
+      </section>
+
+      <section id="search">
+        <h2 class="fui-Subtitle1">検索と回答</h2>
+        <dl>
+        <dt>MCP</dt><dd>Claude Code が wiki の検索、点検、統計などのツールを呼ぶための仕組みです。</dd>
+        <dt>埋め込み</dt><dd>文の内容を数の並びで表し、近い内容を検索するために使います。</dd>
+        <dt>信頼度</dt><dd>回答が wiki の出典でどれだけ裏付けられるかを、高・中・低で示す値です。</dd>
+        </dl>
+      </section>
+
+      <nav class="page-navigation" aria-label="関連ページ">
+        <a class="fui-Link" href="commands.html">コマンドのリファレンスを開く</a>
+      </nav>
+    </article>
+  </main>
+</body>
+</html>

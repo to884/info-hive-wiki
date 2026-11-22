@@ -276,6 +276,32 @@ pre {
   padding: var(--spacingVerticalM) var(--spacingHorizontalM); border-radius: var(--borderRadiusMedium); line-height: 1.6;
 }
 pre code { background: none; padding: 0; font-size: var(--fontSizeBase300); overflow-wrap: normal; }
+
+/* セッションの raw では、行と空白を保ったまま発言を折り返す。 */
+#_body h2.session-turn {
+  margin: var(--spacingVerticalL) 0 var(--spacingVerticalXS);
+  padding: 0;
+  border: none;
+  font-size: var(--fontSizeBase400);
+  line-height: var(--lineHeightBase400);
+  overflow-wrap: anywhere;
+}
+#_body .session-turn + pre {
+  margin: 0;
+  font: inherit;
+  white-space: pre-wrap;
+  white-space: break-spaces;
+  overflow-wrap: anywhere;
+  background-color: var(--colorNeutralBackground2);
+  border-inline-start: var(--strokeWidthThick) solid var(--colorNeutralStroke1);
+}
+#_body .session-turn + pre code { font: inherit; overflow-wrap: inherit; }
+#_body .session-turn-user { color: var(--colorBrandForeground2); }
+#_body .session-turn-user + pre {
+  background-color: var(--colorBrandBackground2);
+  border-inline-start-color: var(--colorBrandStroke1);
+}
+
 /* 図（ADR-0030）。入れ物は Fluent の Card、画像は Image で、色、角、影は fluent2.css に任せる。ここは配置だけを決める。
    入れ物の幅は中身に合わせ、大きな図は幅に合わせて縮める（図の描画の設計の 8）。Card の flex と fit-content の組では、
    WebKit が読み込む前の画像の幅 0 のまま組むので、inline-block にする */
@@ -284,9 +310,24 @@ pre code { background: none; padding: 0; font-size: var(--fontSizeBase300); over
   margin-block: var(--spacingVerticalM); margin-inline: 0; overflow-x: auto;
 }
 #_body .wiki-fig > img { display: block; max-width: 100%; height: auto; }
-/* Mermaid の図のコード（Accordion）と、描けなかったときの警告（MessageBar）。figures.js が作る */
+/* 静的版の図は 2 配色を画像に固定し、閲覧側で表示する画像を選ぶ（ADR-0035）。 */
+#_body .wiki-fig > img[data-fig-theme="dark"],
+:root[data-theme="dark"] #_body .wiki-fig > img[data-fig-theme="light"] { display: none; }
+:root[data-theme="dark"] #_body .wiki-fig > img[data-fig-theme="dark"] { display: block; }
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="auto"] #_body .wiki-fig > img[data-fig-theme="light"] { display: none; }
+  :root[data-theme="auto"] #_body .wiki-fig > img[data-fig-theme="dark"] { display: block; }
+}
+/* Mermaid の図のコード（Accordion）と、描けなかったときの警告（MessageBar） */
 #_body .wiki-fig-source { margin-block-end: var(--spacingVerticalL); }
 #_body .wiki-fig-error { margin-block: var(--spacingVerticalS); }
+/* 概要（ADR-0033）。色と部品は同梱の Fluent 2 を使う。 */
+#_body .wiki-overview { margin-block: var(--spacingVerticalL); }
+#_body .wiki-overview > summary { flex-wrap: wrap; gap: var(--spacingHorizontalM); }
+#_body .wiki-overview-content { padding-block: var(--spacingVerticalM); }
+#_body .wiki-overview-status { font-size: var(--fontSizeBase200); color: var(--colorNeutralForeground2); }
+#_body .wiki-overview-meta { color: var(--colorNeutralForeground2); font-size: var(--fontSizeBase200); }
+#_body .wiki-overview-notice { margin-block: var(--spacingVerticalM); }
 /* Mermaid を描く見えない枠。幅と高さは属性で決め、画面の外に置く（display: none では文字の幅を測れない） */
 .fig-frame { position: absolute; inset-block-start: 0; inset-inline-start: -200vw; border: 0; }
 /* 本文の表は、今と同じく display: block で横に送る */
