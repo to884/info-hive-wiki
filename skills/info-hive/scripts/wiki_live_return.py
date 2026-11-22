@@ -226,6 +226,9 @@ def make_result(guard, area, plan, checksum, paths, preimages):
 
 
 def finish(guard, area, plan, checksum, checkpoint):
+    from wiki_restore import acknowledge, check as check_restore
+
+    check_restore(guard, area)
     active = publish.verified_active(guard, area)
     if active is None or active[0] != plan["release_id"]:
         raise publish.PublicationError("切り戻しの日誌と公開版が一致しません")
@@ -292,6 +295,10 @@ def finish(guard, area, plan, checksum, checkpoint):
                        "return_write_mode", replace=True)
         checkpoint("return_switched")
     live.verify_latest_live(guard, area)
+    records = [("return_live", result)]
+    if bridge is not None:
+        records.append(("live", bridge))
+    acknowledge(guard, area, *records)
     live.remove(guard, area / publish.RETURN_JOURNAL)
     return result
 
@@ -308,10 +315,13 @@ def resume(guard, area, checkpoint=lambda _: None, *, expected=None):
 
 
 def apply(wiki, plan, checksum, *, timeout=180, checkpoint=lambda _: None):
+    from wiki_restore import check as check_restore, require_completion
+
     guard, area = publish.writing_area(wiki)
     load_plan(guard, plan, checksum)
     with guard.hold_lock(area / "apply.lock", timeout=timeout):
         publish.check_live_writer(guard, area)
+        check_restore(guard, area)
         mode, fingerprint = publish.mode_marker(guard)
         if guard.file_info(area / publish.RETURN_JOURNAL) is not None or mode == "returning":
             return resume(guard, area, checkpoint, expected=checksum)
@@ -322,6 +332,7 @@ def apply(wiki, plan, checksum, *, timeout=180, checkpoint=lambda _: None):
             if result["plan_sha256"] != checksum:
                 raise publish.Conflict("別の承認でライブへの切り戻しが済んでいます")
             protect_preimages(guard, area, plan, result["preimages"])
+            require_completion(guard, area, "return_live", result)
             return {**result, "state": "already_returned"}
         publish.finish_journal(guard, area)
         active = publish.verified_active(guard, area)
@@ -333,6 +344,7 @@ def apply(wiki, plan, checksum, *, timeout=180, checkpoint=lambda _: None):
                                            stored_path=publish.archived_return(area, proof))
                     if result["plan_sha256"] == checksum:
                         protect_preimages(guard, area, plan, result["preimages"])
+                        require_completion(guard, area, "return_live", result)
                         return {**result, "state": "already_returned"}
         if active is None or active[0] != plan["release_id"]:
             raise publish.Conflict("公開版が変わりました。切り戻しの計画を作り直してください")

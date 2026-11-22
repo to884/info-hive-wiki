@@ -201,6 +201,8 @@ def archived_root(wiki):
 
 
 def resolve_publication(wiki: Path, release_id: str | None = None) -> Publication | None:
+    from wiki_restore import LEDGER_ENV, check as check_restore, require_completion
+
     wiki = Path(wiki).resolve()
     archived = archived_root(wiki)
     if archived:
@@ -208,23 +210,28 @@ def resolve_publication(wiki: Path, release_id: str | None = None) -> Publicatio
         if release_id is not None and release_id != stored:
             raise PublicationError("保存先と指定した公開版が一致しません")
         release_id = stored
-    if release_id is None and not any(os.path.lexists(wiki / path) for path in (Path(MARKER), AREA)):
+    if (release_id is None and not os.environ.get(LEDGER_ENV)
+            and not any(os.path.lexists(wiki / path) for path in (Path(MARKER), AREA))):
         return None
     guard = WriteGuard(wiki)
     area = guard.root / AREA
     active = read_active(guard, area)
+    mode, fingerprint = mode_marker(guard) if active and release_id is None else (None, None)
+    wanted = checked(release_id) if release_id is not None else active[0] if active else None
+    restore_state = check_restore(guard, area, wanted, live_payload=mode == "live")
     if active is None:
         if release_id is not None:
             raise PublicationError("公開版がありません")
         return None
-    if release_id is None:
-        mode, fingerprint = mode_marker(guard)
-        if mode == "live":
-            from wiki_live_return import verify_result
-            verify_result(guard, area, active[0], fingerprint,
-                          stored_path=live_return_record_path(guard, area, fingerprint))
-            return None
-    wanted = checked(release_id) if release_id is not None else active[0]
+    if restore_state is not None:
+        require_completion(guard, area, "publication", expected_receipt(guard, area, *active), state=restore_state)
+    if mode == "live":
+        from wiki_live_return import verify_result
+        result = verify_result(guard, area, active[0], fingerprint,
+                               stored_path=live_return_record_path(guard, area, fingerprint))
+        if restore_state is not None:
+            require_completion(guard, area, "return_live", result, state=restore_state)
+        return None
     for version, entry in history(guard, area, active, stop=wanted):
         if version == wanted:
             if guard.file_info(area / "retired" / f"{version}.json") is not None:
@@ -411,6 +418,9 @@ def marker_present(guard):
 
 
 def check_publication_writer(guard, area):
+    from wiki_restore import check as check_restore
+
+    check_restore(guard, area)
     mode, _ = mode_marker(guard)
     if mode in {"returning", "live"} or any(guard.file_info(area / name) is not None
                                            for name in (RETURN_JOURNAL, RETURN_RECEIPT)):
@@ -632,17 +642,27 @@ def verified_receipt(guard, area, active, plan_id):
 
 
 def read_receipt(wiki, plan_id):
+    from wiki_restore import check as check_restore, require_completion
+
     guard = WriteGuard(wiki)
     area = guard.root / AREA
-    return verified_receipt(guard, area, read_active(guard, area), plan_id)
+    state = check_restore(guard, area)
+    result = verified_receipt(guard, area, read_active(guard, area), plan_id)
+    if result and state is not None:
+        require_completion(guard, area, "publication", result, state=state)
+    return result
 
 
 def check_retry(guard, area, active, plan_id, expected):
+    from wiki_restore import require_completion
+
     if guard.file_info(area / "rejected" / f"{plan_id}.json") is not None:
         raise Conflict("打ち切った計画です。再検査して別の計画を作ってください")
     prior = verified_receipt(guard, area, active, plan_id)
     if prior and prior["plan_sha256"] != expected:
         raise Conflict("完了した計画 ID は再利用できません")
+    if prior:
+        require_completion(guard, area, "publication", prior)
     return prior
 
 
@@ -678,6 +698,9 @@ def abort_publication(guard, area, tx, reason):
 
 
 def finish_journal(guard, area, checkpoint=lambda _: None):
+    from wiki_restore import acknowledge, check as check_restore
+
+    check_restore(guard, area)
     journal = area / JOURNAL
     tx = read_publication_journal(guard, area)
     if tx is None:
@@ -781,6 +804,7 @@ def finish_journal(guard, area, checkpoint=lambda _: None):
         from wiki_republish import seal_republication
         seal_republication(guard, area, tx, checkpoint)
     verified_active(guard, area)
+    acknowledge(guard, area, ("publication", result))
     guard.remove_file(journal)
     sync_directory(area)
     return result
@@ -951,12 +975,18 @@ def recover(wiki, *, timeout=180):
 
 
 def retire(wiki, release_id):
+    from wiki_restore import retire as retire_independently
+
+    checked(release_id)
     guard, area = writing_area(wiki)
     with guard.hold_lock(area / "apply.lock", timeout=180):
         check_live_writer(guard, area)
-        finish_journal(guard, area)
+        if read_publication_journal(guard, area) is not None:
+            finish_journal(guard, area)
         if current(guard, area) == release_id:
             raise Conflict("公開中の版は、別の版を公開してから取り下げてください")
+        if retire_independently(guard, area, release_id):
+            return
         release = resolve_publication(wiki, release_id)
         guard.write_bytes(area / "retired" / f"{release.release_id}.json", encoded({"release_id": release.release_id}))
         sync_directory(area / "retired")
@@ -984,6 +1014,16 @@ def main(argv=None):
     apply.add_argument("--expect-sha256", required=True)
     restore = sub.add_parser("recover", help="残った公開日誌を完了させる")
     restore.add_argument("--wiki", type=Path, required=True)
+    recovery_setup = sub.add_parser("init-restore-ledger", help="別ボリュームの復元記録を確定済みの公開 wiki に設定する")
+    recovery_setup.add_argument("--wiki", type=Path, required=True)
+    recovery_setup.add_argument("--ledger", type=Path, required=True)
+    recovery_setup.add_argument("--raw-root", type=Path, help="独立記録で保護する raw の根")
+    reconcile = sub.add_parser("reconcile-restore", help="独立した完了記録を照合し、取り下げを復元する")
+    reconcile.add_argument("--wiki", type=Path, required=True)
+    reconcile.add_argument("--restore-content", action="store_true", help="別ディスクから本文・成果物・保全原本を復元する")
+    withdrawal = sub.add_parser("retire", help="旧公開版を取り下げる")
+    withdrawal.add_argument("--wiki", type=Path, required=True)
+    withdrawal.add_argument("--release-id", required=True)
     preview = sub.add_parser("plan-return-live", help="公開の変更をライブに書き戻す計画を表示する")
     preview.add_argument("--wiki", type=Path, required=True)
     preview.add_argument("--raw-root", type=Path, required=True)
@@ -1014,7 +1054,16 @@ def main(argv=None):
             print(json.dumps({"read_root": str(release.root if release else root),
                               "release_id": release.release_id if release else None}, ensure_ascii=False))
             return 0
-        if args.cmd == "plan-return-live":
+        if args.cmd == "init-restore-ledger":
+            from wiki_restore import enroll
+            result = enroll(args.wiki, args.ledger, raw_root=args.raw_root)
+        elif args.cmd == "reconcile-restore":
+            from wiki_restore import reconcile
+            result = reconcile(args.wiki, restore_content=args.restore_content)
+        elif args.cmd == "retire":
+            retire(args.wiki, args.release_id)
+            result = {"state": "retired", "release_id": args.release_id}
+        elif args.cmd == "plan-return-live":
             from wiki_live_return import build_plan as plan_return
             plan = plan_return(args.wiki, args.raw_root)
             result = {"plan": plan, "plan_sha256": digest(encoded(plan))}
@@ -1041,7 +1090,7 @@ def main(argv=None):
         print(str(error), file=sys.stderr)
         return 4 if isinstance(error, Conflict) else 1
     print(json.dumps(result, ensure_ascii=False))
-    return 0
+    return 4 if args.cmd == "reconcile-restore" and result["state"] == "blocked" else 0
 
 
 if __name__ == "__main__":

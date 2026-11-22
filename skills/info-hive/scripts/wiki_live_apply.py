@@ -263,7 +263,10 @@ def restrict_raw(guard, raw_root, candidate_pages=(), targets=(), *, view=None):
 
 
 def live_mode(guard):
+    from wiki_restore import check as check_restore
+
     area = guard.root / AREA
+    check_restore(guard, area)
     if mode_marker(guard)[0] == "live":
         if guard.file_info(area / RETURN_JOURNAL) is not None:
             raise Conflict("ライブへの切り戻しが中断しています。recover で完了させてください")
@@ -692,9 +695,13 @@ def verify_live_retry(guard, area, result):
 
 
 def completed_live_retry(guard, area, prior, expected):
+    from wiki_restore import check as check_restore, require_completion
+
+    check_restore(guard, area)
     if prior["plan_sha256"] != expected:
         raise Conflict("別の承認済み差分がこの計画ですでに適用されています")
     verify_live_retry(guard, area, prior)
+    require_completion(guard, area, "live", prior)
     return dict(prior, state="already_applied")
 
 
@@ -715,6 +722,8 @@ def clear_transaction(guard, area, *, committed=True):
 
 
 def finish_without_journal(guard, area):
+    from wiki_restore import acknowledge
+
     marker = load(guard, area / TRANSACTION)
     if marker is None:
         return None
@@ -722,6 +731,7 @@ def finish_without_journal(guard, area):
     if result != marker:
         raise Stuck("ライブ書き込みの記録は残っていますが日誌がありません。日誌を復元してください")
     verify_live_retry(guard, area, result)
+    acknowledge(guard, area, ("live", result))
     return result
 
 
@@ -750,6 +760,8 @@ def rollback(guard, area, journal, changes):
 
 
 def finish(guard, area, journal, checkpoint):
+    from wiki_restore import acknowledge
+
     if list(guard.root_id) != journal["wiki_identity"]:
         raise Conflict("日誌を作った wiki の実体が変わりました")
     try:
@@ -778,6 +790,7 @@ def finish(guard, area, journal, checkpoint):
         verify_applied(guard, {path.relative_to(guard.root).as_posix(): digest(after)
                               for path, _, after, _ in changes})
         commit_live_head(guard, area, prior)
+        acknowledge(guard, area, ("live", prior))
         clear_transaction(guard, area)
         return prior
     if marker is None:
@@ -804,6 +817,7 @@ def finish(guard, area, journal, checkpoint):
     write(guard, receipt, encoded(journal["result"]), replace=True)
     commit_live_head(guard, area, result)
     checkpoint("after_receipt")
+    acknowledge(guard, area, ("live", result))
     clear_transaction(guard, area)
     return journal["result"]
 

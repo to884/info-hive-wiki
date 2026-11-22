@@ -226,15 +226,23 @@ class WriteGuard:
                 or previous is not None and _identity(previous) != _identity(opened)):
             raise Refused(path, "changed", "開いたファイルの実体が変わった")
 
-    def read_bytes(self, path: Path) -> bytes | None:
+    @contextmanager
+    def open_read(self, path: Path, *, missing_ok=False):
         from wiki_browse_fs import X
 
         previous = self.file_info(path)
         if previous is None:
-            return None
+            if missing_ok:
+                yield None
+                return
+            raise FileNotFoundError(path)
         with os.fdopen(X.open_plain_read(path), "rb") as handle:
             self._check_open_file(path, handle.fileno(), previous=previous)
-            return handle.read()
+            yield handle
+
+    def read_bytes(self, path: Path) -> bytes | None:
+        with self.open_read(path, missing_ok=True) as handle:
+            return handle.read() if handle is not None else None
 
     def open_new(self, path: Path, *, mode: int = 0o644) -> BinaryIO:
         """検査した場所に、既にない通常のファイルを開く。"""
@@ -313,9 +321,11 @@ class WriteGuard:
                     prefix=prefix, before_publish=before_publish, mode=mode, temporary=temporary,
                     write_through=write_through)
 
-    def write_stream(self, path: Path, source: BinaryIO) -> None:
+    def write_stream(self, path: Path, source: BinaryIO, *, mode=0o644, temporary=None,
+                     write_through=False, before_publish=None) -> None:
         """読み取り中のストリームを、一時名に写して排他公開する。"""
-        self._write(path, lambda fh: shutil.copyfileobj(source, fh))
+        self._write(path, lambda fh: shutil.copyfileobj(source, fh), mode=mode, temporary=temporary,
+                    write_through=write_through, before_publish=before_publish)
 
     def _write(self, path: Path, write, *, replace: bool = False, delays: tuple[float, ...] = (),
                prefix: str = ".wiki-write-", before_publish=None, mode: int = 0o644,

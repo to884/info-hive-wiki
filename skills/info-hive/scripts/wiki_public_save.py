@@ -335,6 +335,18 @@ def run_save(guard, record, timeout, checkpoint):
     return {"state": "pending", "plan_id": record["plan_id"], "plan_sha256": record["approval"], "reason": cause}
 
 
+def record_for_retry(guard, plan_id, expected):
+    from wiki_restore_content import completed_public_save
+
+    record = load_record(guard, plan_id, expected)
+    if record is None or not (record.get("completed") or record.get("discarded")):
+        completed = completed_public_save(guard, plan_id, expected)
+        if completed:
+            write_record(guard, completed)
+            return completed
+    return record
+
+
 def queue_save(directory, expected, *, timeout=180, checkpoint=lambda _: None):
     publish.checked(expected)
     work = live.work_directory(directory)
@@ -345,7 +357,7 @@ def queue_save(directory, expected, *, timeout=180, checkpoint=lambda _: None):
         with save_lock(guard, plan_id, timeout):
             with pending_lock(guard, timeout):
                 clear_record_temp(guard, record_path(guard, plan_id))
-                record = load_record(guard, plan_id, expected)
+                record = record_for_retry(guard, plan_id, expected)
                 new = record is None
                 if new:
                     publish.check_publication_writer(guard, guard.root / publish.AREA)
@@ -358,7 +370,7 @@ def queue_save(directory, expected, *, timeout=180, checkpoint=lambda _: None):
 def require_queued_record(guard, plan_id, expected, timeout):
     with pending_lock(guard, timeout):
         clear_record_temp(guard, record_path(guard, plan_id))
-        record = load_record(guard, plan_id, expected)
+        record = record_for_retry(guard, plan_id, expected)
     if record is None:
         raise publish.PublicationError("承認済みの保存の記録がありません")
     return record
