@@ -25,9 +25,9 @@ PDF のヘッダー（`%PDF-`）は、登録のあとの処理で確かめ、ヘ
 短時間待つ場合は `wait_seconds=30` を使い、細かい連続呼び出しを避ける。
 `queued`、`running`、`paused` の間は受付・処理中であり、索引化完了でも wiki の取り込み完了でもない。
 会話を終える場合はジョブ ID を報告して手順を止める。次回 rag の MCP 接続時に、未完了ジョブが保存済みのページと埋め込みバッチから自動再開する。
-`failed` の理由を直した後は `retry_job` を使う。`cancelled` は明示的な依頼なしに再試行しない。
+`failed` の理由を直した後は `retry_job` を使う。ただし、rag のジョブは登録したときの設定（`ocr_mode`、`ocr_dpi` など）のまま動き、`retry_job` も同じ設定で動かす。失敗の理由が設定のとき（`ocr_mode` が `off` で OCR が要るページがあった、など）は、`configure` で設定を変えたあとで、`register_pdf` で新しく登録する。`cancelled` は明示的な依頼なしに再試行しない。`failed` のときも、`result.page_report` があれば、失敗するまでに判定したページの番号を伝える（`lists.pending` は、判定まで済んで本文が決まらなかったページ）。
 
-`completed` になったら `result.extracted_markdown` を分割して読み、手順 2 の「PDF を読む」の「rag で取り込んだとき」で読めないページを確かめてから、手順 3 以降へ進む。
+`completed` になったら、手順 2 の「PDF を読む」に従い、`result.page_report` の有無に応じたページの確認と本文の読み込みを済ませてから、手順 3 以降へ進む。
 ソースの要約ページには `raw: "<result.raw>"`、`raw_sha256: "<result.sha256>"`、`rag_job_id: "<job_id>"` を書く。
 `result.raw` は `/` 区切りの絶対パス（Windows では `C:/Books/本.pdf`）で、`result.sha256` は PDF の内容の SHA-256 である。
 値の中の `\` は `\\`、`"` は `\"` と書く（`page-conventions.md` の frontmatter の決まり）。
@@ -308,12 +308,35 @@ uv run --script "<skill-root>/scripts/wiki_pdf.py" "<PDF>"
 
 Read は、図と版面を見るとき、確かめるべきページと、判定が `text` 以外のページを見るときに使う。本文を読むためには使わない。
 
-**rag で取り込んだとき。** 今の rag は、ページの判定を返さない。そこで、`job_status` が `completed` になったら、同じ PDF に `wiki_pdf.py --json` を動かし、判定と確かめるべきページを得る。まず、`--json` の `sha256` が rag の `result.sha256` と同じかを確かめる。違えば、rag が処理したあとで PDF が変わっている。ページの情報は使えないので、そのことをユーザーに伝える。同じなら、次のように進める。
+**rag で取り込んだとき（rag が `page_report` を返すとき）。** rag 0.6.0 以降は、`job_status` の `result.page_report` にページの情報が入る。`wiki_pdf.py` は動かさず、これを使う。
+
+1. 判定が `text` 以外のページ（`lists.kind:vertical`、`kind:garbled`、`kind:scan`、`kind:blank`）と、確かめるべきページ（`lists.needs_check`）の番号と数を伝える。一覧の形は `wiki_pdf.py --json` と同じで、範囲の数が 200 を超えると `next` に位置が入るので、`job_status` の `page_report_from` にその位置を渡して続きを取る。
+2. OCR したページ（`lists.ocr`）と、OCR の結果が空のページ（`lists.ocr_empty`）を伝える。OCR の結果が空のページは、読めなかったページとして扱う。
+3. 今の OCR の設定は、`status` の `settings`（`ocr_mode`、`ocr_dpi`）で分かる。`page_report.ocr.mode` は、そのジョブを処理したときの設定である。
+4. 確かめるべきページ（判定は `text`）と `blank` のページは、`ocr_mode` が `auto` なら OCR されていない。Read でページの画像を見る。
+5. 確認が要るページがあれば、要約のページを書く前に、下の「OCR の印の付いたページを確かめる」のとおりにユーザーに確かめてもらう。確認が要るのは、印の付いた行がありまだ決めていないページ（`lists.review:pending`）と、前に決めたあとで OCR をやり直して本文が変わったページ（`lists.review:stale`。新しい本文に印がなくても、前の結果は当てていない）である。印が不明のページ（`lists.ocr_unknown_flags`。rag 0.5 以前の OCR の結果を移したページなど）は、数と番号を伝える。不明のページは、印がないとは扱わない。
+
+**OCR の印の付いたページを確かめる。** rag は、OCR の行のうち、誤っている見込みの高い行に印を付ける。印の理由（`reasons`）は 4 つある。`low` は行の信頼度が閾値より低い（読めなかった行を含む）、`blur` は行の画像を少しぼかして読み直すと本文が変わる、`alt` は別の解像度で読み直した本文と違い、信頼度も 0.9 未満、`rapid` は別の認識器で読むと英数字か記号が足されるか置き換わる（ローマ数字や注の番号の欠けなど）。印は、誤りのすべてを捉えない。2 つの読みがそろって同じに誤った行、検出の漏れ、縦書きの列の順、表の崩れには、印が付かない。閾値がまだ確かめられていない（`page_report.confidence.threshold_calibrated` が `false`）ときは、そのこともユーザーに伝える。
+
+1. 確認が要るページ（`review:pending` と `review:stale`）の数と番号を伝え、1 回の質問で、次から選んでもらう。古くなったページは、前に決めた結果（`ocr_page_detail` の `decision`）と、本文が変わったことも伝える。
+   - **いま確かめる:** 印の付いた行の多い順に、1 回に 10 ページまでを示す。ページごとに `ocr_page_detail(wiki_root, job_id, page)` を呼び、印の付いた行（`flagged_lines` の行の番号、本文、印の理由、ぼかした読み `blur_text`、別の解像度の読み `alt_text`、別の認識器の読み `rapid_text`）を示す。2 つ目の読みは、正しい本文の候補になる。ユーザーは PDF のそのページを見て、ページごとに「そのまま使う」「直す」「却下する」「あとで」を選ぶ。エージェントは Read でページの画像を見て、どの行が怪しいかを説明してよい。残りのページは、続けるか、あとにするかを聞く。
+   - **すべてそのまま使う:** 確認が要るページを、すべて「そのまま使う」にする。
+   - **あとで確かめる:** 確認待ちのまま残す。
+2. **直す:** ユーザーが直した本文を書く。エージェントがページの画像から直した本文の案を作ってもよいが、ユーザーが案を承認するまで送らない。ユーザーが書いたときは `decided_by` を `user`、エージェントの案をユーザーが承認したときは `agent_draft_approved` にする。
+3. 決めたページを `decide_ocr_pages(wiki_root, job_id, base_version, decisions)` で送る。`base_version` は `ocr_page_detail` の `ledger_version`、各ページの `ocr_sha256` は `ocr_page_detail` で確かめた値にする（`action` は `accept`、`fix`、`reject`）。受け付けられないとき（別のセッションで決めた、OCR をやり直した）は、`ocr_page_detail` で取り直して、もう一度ユーザーに確かめる。「あとで」のページは送らない。
+4. **却下する:** その wiki の索引から、そのページを外す。返す本文のそのページは、見出しと、却下したことを書いた 1 行だけになる。
+5. **要約との順:** 送ったあとは、結果の `rebuild_job` を `job_status` で待ち、`page_report.review.published_version` が台帳の版（`ledger_version`）に追いついてから、要約のページを書く。本文は、確認を当てた本文（`page_report.review.extracted_markdown`、または `rebuild_job` の結果の `extracted_markdown`）を読み直す。確認待ち（`lists.review:pending`）、古くなった（`lists.review:stale`）、「あとで」のページの本文は、要約に使わず、要約のページに確認待ちのページの番号を書く。確認が済んだら、要約のページを直すかをユーザーに聞く。
+6. **答えがないとき:** セッションが終わるなどして答えがないページは、確認待ちのまま残す。黙って「そのまま使う」にはしない。`status` の `review.pending_pages` が、wiki ごとの確認待ちのページ（古くなったページを含む）の数を返すので、次の取り込みのときに伝える。
+7. **検索の印:** 確認待ちのページも検索の対象になり、検索の結果の `review.state` が `pending` になる。反映待ち（確認を送ったが、まだ索引に反映されていない）のページは `review.awaiting_publish` が真になる。確認待ちのページを根拠にするときは、そのことを書く。
+
+OCR の確認結果を反映した本文があれば、上の手順で選んだ版を使う。それ以外は `result.extracted_markdown` を分割して読む。OCR しなかったページ（`lists.ocr` に入っていないページ）の本文は、同じ抽出の識別（`result.extraction`）なら `wiki_pdf.py` の本文と同じである。`ocr_mode` が `always` なら、判定が `text` のページも OCR の結果になるので、`wiki_pdf.py` の本文とは違う。
+
+**rag で取り込んだとき（rag が `page_report` を返さないとき）。** rag 0.5 以前は、ページの判定を返さない。そこで、`job_status` が `completed` になったら、同じ PDF に `wiki_pdf.py --json` を動かし、判定と確かめるべきページを得る。まず、`--json` の `sha256` が rag の `result.sha256` と同じかを確かめる。違えば、rag が処理したあとで PDF が変わっている。ページの情報は使えないので、そのことをユーザーに伝える。同じなら、次のように進める。
 
 1. 判定が `text` 以外のページと、確かめるべきページの番号と数を伝える。
 2. rag の本文（`result.extracted_markdown`）で、`## p. <番号>` のあとの本文が空のページを、判定によらず、すべてのページで探す（rag の `ocr_mode` が `always` なら、判定が `text` のページも OCR され、その結果が空のこともある）。
-3. そのうち、`--json` の `lists.empty_text` に入っていないページ（文字の層には本文があるページ）を、「rag の本文が空のページ」として伝える。OCR の結果が空だった見込みが高いが、今の rag では確かめられない。
-4. 今の rag は設定（`ocr_mode`）を返さないので、どのページが OCR されたかは分からない。そのこともユーザーに伝える。
+3. そのうち、`--json` の `lists.empty_text` に入っていないページ（文字の層には本文があるページ）を、「rag の本文が空のページ」として伝える。OCR の結果が空だった見込みが高いが、古い rag では確かめられない。
+4. 古い rag は設定（`ocr_mode`）を返さないので、どのページが OCR されたかは分からない。そのこともユーザーに伝える。
 
 rag の抽出の識別は分からないので、rag の本文が `wiki_pdf.py` の本文と同じとは言えない。本文は rag の `extracted_markdown` を読む。
 

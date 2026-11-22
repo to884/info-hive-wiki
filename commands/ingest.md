@@ -80,7 +80,7 @@ Claude Code の JSONL、または Codex の履歴の読み取り API から、�
 1. `python "${CLAUDE_PLUGIN_ROOT}/skills/info-hive/scripts/wiki_raw_ingest.py" pdf --wiki "<WIKI_ROOT>" --raw-root "<RAW_ROOT>" --source "<ユーザーが指定した PDF>"` を実行する。失敗したら理由を伝えて止まる。成功したら要約ページのスラッグを決め、`rag` MCP サーバーの `register_pdf` に `wiki_root=<WIKI_ROOT の絶対パス>`、`source=<検査の JSON が返した source>`、`source_page="sources/<スラッグ>.md"`、`title=<題名>` を渡す。`source` はスクリプトが返したパスの綴りを使う。ユーザーが指定していない PDF は登録しない。ツール名は接続に表示されたものを使う。別プラグインの内部パスを組み立ててスクリプトを実行しない。PDF を閲覧するだけの場合は登録しない。
 2. 応答の `job_id` を記録する。`queued`、`running`、`paused` は受付・処理中であり、索引化や wiki の取り込み完了と報告しない。原本を `<RAW_ROOT>` へコピーしない。登録を拒まれたら、理由（絶対パスでない、PDF でない、UNC パス、rag の派生データの中にある、など）をそのまま伝える。
 3. `job_status(wiki_root, job_id)` で進捗を確認する。短時間待つ場合は `wait_seconds=30` を使い、細かい連続呼び出しを避ける。処理中に会話を終える場合はジョブ ID と再開待ちの状態を報告し、ここで手順を止める。次回 rag の MCP 接続時に未完了ジョブは自動再開する。キャンセル済みのジョブは自動再開しない。
-4. `completed` のときだけ `result.extracted_markdown` を分割して読み、通常の手順 4〜8 に進む。要約ページの `raw` には `result.raw`（`/` 区切りの絶対パス）を、`raw_sha256` には `result.sha256` を、`rag_job_id` にはジョブ ID を書く。値は二重引用符で囲み、`\` は `\\`、`"` は `\"` と書く。内容を読む前に要約を作らない。
-5. `failed` は理由を報告し、修正後は `retry_job` で再試行する。`cancelled` の再試行は明示的に依頼された場合だけ行う。
+4. `completed` になったら、`skills/info-hive/references/ingest-workflow.md` の手順 2「PDF を読む」に従う。`result.page_report` の有無に応じたページの確認と本文の読み込みを済ませてから、通常の手順 4〜8 に進む。要約ページの `raw` には `result.raw`（`/` 区切りの絶対パス）を、`raw_sha256` には `result.sha256` を、`rag_job_id` にはジョブ ID を書く。値は二重引用符で囲み、`\` は `\\`、`"` は `\"` と書く。内容を読む前に要約を作らない。
+5. `failed` のときは、`skills/info-hive/references/ingest-workflow.md` の「PDF と rag の連携」に従い、失敗の理由と、`result.page_report` があれば判定済みのページを伝える。原因に応じて再試行するか、設定を変更して登録し直す。`cancelled` の再試行は明示的に依頼された場合だけ行う。
 
 rag が使えないときも wiki の通常の取り込みは使える。RAG 連携を求められている場合は、rag の有効化を案内し、索引化済みとは報告しない。
