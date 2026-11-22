@@ -246,7 +246,7 @@ def acknowledge(guard, area, *results):
                 changed = True
         if changed:
             if "raw" in state:
-                raw_archive.archive(guard, ledger, state["raw"])
+                raw_archive.archive(guard, ledger, state["raw"], preserve_recorded=True)
             if state["format"] >= 2:
                 content.capture(guard, area, ledger, state)
             store(ledger, state)

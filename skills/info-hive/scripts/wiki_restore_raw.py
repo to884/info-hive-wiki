@@ -116,7 +116,24 @@ def copy(source, original, destination, path, name, checksum):
     publication.sync_directory(path.parent)
 
 
-def archive(guard, ledger, record, *, target=None, expected=None):
+def compatible_paths(known, current):
+    """既知の原本を上書きせず、記録済みの種類・名前と両立するパスを選ぶ。"""
+    identities = {unicodedata.normalize("NFC", name.casefold()) for name in known}
+    accepted = {}
+    for name in sorted(current):
+        checksum = current[name]
+        if name in known:
+            if checksum != known[name]:
+                continue
+        elif unicodedata.normalize("NFC", name.casefold()) in identities:
+            continue
+        parent = PurePosixPath(name).parent.as_posix()
+        if parent == "." or (parent in accepted and accepted[parent] is None):
+            accepted[name] = checksum
+    return accepted
+
+
+def archive(guard, ledger, record, *, target=None, expected=None, preserve_recorded=False):
     raw = root_guard(guard, ledger, record["root"])
     if target is not None and raw_digest(target, origin=raw.root) != expected:
         raise publication.PublicationError("保存した raw 原本の SHA-256 が変わりました")
@@ -133,7 +150,9 @@ def archive(guard, ledger, record, *, target=None, expected=None):
             current[name] = fingerprint(raw, raw.root / relative(name))
     relevant = known if target is None else {name: value for name, value in known.items()
                                              if name in current or within(raw.root / relative(name), target)}
-    if any(name not in current or current[name] != value for name, value in relevant.items()):
+    if preserve_recorded:
+        current = compatible_paths(known, current)
+    elif any(name not in current or current[name] != value for name, value in relevant.items()):
         raise publication.PublicationError("記録済みの raw 原本が欠落または変更されています。復元するか原本を確認してください")
     verify_paths(known | current)
     for name, checksum in current.items():
@@ -151,7 +170,7 @@ def archive(guard, ledger, record, *, target=None, expected=None):
         raise publication.PublicationError("別ディスクへの保存中に raw 原本の SHA-256 が変わりました")
     # 復元後の既存原本を指定した再試行も、記録済みのバイト列を参照する。
     refreshed = {name: info for name, info in present.items()
-                 if info is not None and (target is None or name not in known)}
+                 if info is not None and name in current and (target is None or name not in known)}
     if refreshed:
         record["observed"] = observed | refreshed
     known.update(current)

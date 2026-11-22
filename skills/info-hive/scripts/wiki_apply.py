@@ -201,7 +201,7 @@ def archived_root(wiki):
 
 
 def resolve_publication(wiki: Path, release_id: str | None = None) -> Publication | None:
-    from wiki_restore import LEDGER_ENV, check as check_restore, require_completion
+    from wiki_restore import LEDGER_ENV
 
     wiki = Path(wiki).resolve()
     archived = archived_root(wiki)
@@ -215,10 +215,26 @@ def resolve_publication(wiki: Path, release_id: str | None = None) -> Publicatio
         return None
     guard = WriteGuard(wiki)
     area = guard.root / AREA
-    active = read_active(guard, area)
-    mode, fingerprint = mode_marker(guard) if active and release_id is None else (None, None)
+    return retry_publication_read(lambda: resolve_readable_tip(guard, area, release_id))
+
+
+def resolve_readable_tip(guard, area, release_id):
+    from wiki_restore import check as check_restore, completion, completion_key, require_completion, verify_live
+
+    restore_state = check_restore(guard, area)
+    active = None
+    if restore_state is not None:
+        tx = read_publication_journal(guard, area)
+        if tx and tx["previous"] and f"publication:{tx['plan_id']}" not in restore_state["completions"]:
+            active = pending_publication_base(guard, area, tx)
+    if active is None:
+        active = verified_active(guard, area)
+        mode, fingerprint = mode_marker(guard) if active and release_id is None else (None, None)
+    else:
+        mode, fingerprint = "publication", None
     wanted = checked(release_id) if release_id is not None else active[0] if active else None
-    restore_state = check_restore(guard, area, wanted, live_payload=mode == "live")
+    if restore_state is not None and wanted in restore_state["retired"]:
+        raise RetiredPublication("この公開版は取り下げられています")
     if active is None:
         if release_id is not None:
             raise PublicationError("公開版がありません")
@@ -229,9 +245,15 @@ def resolve_publication(wiki: Path, release_id: str | None = None) -> Publicatio
         from wiki_live_return import verify_result
         result = verify_result(guard, area, active[0], fingerprint,
                                stored_path=live_return_record_path(guard, area, fingerprint))
-        if restore_state is not None:
+        if restore_state is None:
+            return None
+        returned = completion(guard, area, "return_live", result)
+        if (completion_key(returned) in restore_state["completions"]
+                or guard.file_info(area / RETURN_JOURNAL) is None):
             require_completion(guard, area, "return_live", result, state=restore_state)
-        return None
+            verify_live(guard, area, restore_state)
+            return None
+        # ライブへの切り戻しを確定するまでは、直前の公開版を読み続ける。
     for version, entry in history(guard, area, active, stop=wanted):
         if version == wanted:
             if guard.file_info(area / "retired" / f"{version}.json") is not None:
@@ -552,6 +574,25 @@ def verify_completions(guard, area, active):
         raise PublicationError("公開履歴と公開先ディレクトリの一覧が一致しません")
 
 
+def pending_publication_base(guard, area, tx):
+    """独立記録に未確定の候補は、日誌で検証した基準版だけを閲覧に使う。"""
+    old, candidate = tx["previous"], tx["release_id"]
+    mode, _ = mode_marker(guard)
+    if mode == "live" and "return_sha256" in tx:
+        # 再公開の候補を準備している間は、検証済みのライブを引き続き読む。
+        return None
+    entry = manifest(guard, area, old)
+    prior = verify_release(guard, area, old, entry)
+    result = {key: tx[key] for key in ("plan_id", "plan_sha256", "release_id")}
+    version = current(guard, area)
+    head = read_completion(guard, area / HEAD)
+    if (mode != "publication" or version not in (old, candidate)
+            or head not in (prior, result) or (head == result and version != candidate)):
+        raise PublicationError("公開日誌と公開ポインターまたは先頭記録が一致しません")
+    verify_completions(guard, area, (old, entry))
+    return old, entry
+
+
 def verified_active(guard, area):
     mode, fingerprint = mode_marker(guard)
     tx = read_publication_journal(guard, area)
@@ -618,10 +659,16 @@ def republish_visible_tip(guard, area, tx, checksum):
 
 
 def read_active(guard, area):
-    # 読み取り中に書き手がポインターや管理記録を進めた場合だけ、落ち着いた状態を読み直す。
+    return retry_publication_read(lambda: verified_active(guard, area))
+
+
+def retry_publication_read(read_state):
+    # 読み取り中に書き手がポインターや管理記録を進めた場合、落ち着いた状態を読み直す。
     for delay in (0.01, 0.03, 0.08, None):
         try:
-            return verified_active(guard, area)
+            return read_state()
+        except RetiredPublication:
+            raise
         except (PublicationError, FileNotFoundError, Refused) as error:
             if delay is None or (isinstance(error, Refused) and error.kind != "changed"):
                 raise
