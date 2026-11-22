@@ -90,6 +90,7 @@ Claude Code と Codex では、`ingest session` で実行中の会話を取り�
 | 文書 | 内容 |
 | --- | --- |
 | [エージェント](docs/agents.md) | 対応表、導入方法、エージェントのメモリとの連携 |
+| [LLM モデルと用途](docs/agents.md#llm-モデルと用途) | Web ページの翻訳、候補ページの読み取り、YouTube 字幕の要約に使うモデルと設定 |
 | [コマンド](docs/commands.md) | 操作の一覧、引数、使用例 |
 | [ワークフロー](docs/workflows.md) | 取り込み、質問、点検の手順 |
 | [検索と取得](docs/search.md) | ローカル検索、セクション単位の取得、キャッシュ |
