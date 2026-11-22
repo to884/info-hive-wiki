@@ -306,7 +306,7 @@ def pack(output, manifest, locations, expected):
             target.writestr("manifest.json", encoded(manifest))
             for name, location in locations.items():
                 stream = io.BytesIO(location) if isinstance(location, bytes) else location[1].open_read(location[0])
-                with stream as source, target.open(name, "w", force_zip64=True) as dest:
+                with stream as source, target.open(name, "w", force_zip64=True) as dest:  # encoding: default-ok (ZIP 内のバイナリストリーム)
                     if transfer(source, dest) != manifest["files"][name]:
                         raise ValueError(f"作成中に内容が変わりました: {name}")
         publish_exclusive(archive, output)
@@ -340,7 +340,7 @@ def receive(bundle, expected=None):
             for name, info in files.items():
                 if archive.getinfo(name).file_size != info["size"]:
                     raise ValueError(f"サイズが一致しません: {name}")
-                with archive.open(name) as source:
+                with archive.open(name) as source:  # encoding: default-ok (ZIP 内のバイナリストリーム)
                     if folder is None:
                         actual = transfer(source)
                     else:
