@@ -2,7 +2,7 @@
 
 # コマンド
 
-Claude Code のプラグインには、12個の `/wiki:*` スラッシュコマンドが付属する。ほかのエージェントでは、同じ依頼を自然言語で伝える。どちらの方法でも、裏で同じスキルが呼び出される。
+Claude Code のプラグインには、14個の `/wiki:*` スラッシュコマンドが付属する。ほかのエージェントでは、同じ依頼を自然言語で伝える。どちらの方法でも、裏で同じスキルが呼び出される。
 
 `/wiki:init` と `/wiki:help` 以外のコマンドは、初期化された wiki（ルートに `SCHEMA.md` がある）だけを扱う。wiki の場所に `SCHEMA.md` がなければ（まだ初期化していないか、GitHub の wiki の写しのような、ほかの用途の `wiki/` のとき）、何も書かずに止まり、`/wiki:init` を案内する。同梱のスクリプトと MCP のツールも同じ判定で止まる。
 
@@ -16,6 +16,8 @@ Claude Code のプラグインには、12個の `/wiki:*` スラッシュコマ�
 | [`/wiki:graph <action>`](#wikigraph-action) | 型付きグラフ層をコンパイル、lint、またはクエリする。 |
 | [`/wiki:browse [slug]`](#wikibrowse-slug) | wiki をブラウザで閲覧する。 |
 | [`/wiki:overview <page>`](#wikioverview-page) | 指定したページから図を中心にした概要を作り、別のサイドカーに保存する。 |
+| [`/wiki:export <記事>`](#wikiexport-page) | 記事と関連記事と原本を ZIP にまとめる。 |
+| [`/wiki:import <ZIP> <取り込み先>`](#wikiimport-zip-destination) | 受け手が選んだ wiki に記事 ZIP を取り込む。 |
 | [`/wiki:learn <task artifacts>`](#wikilearn-task-artifacts) | 検証済みの経験を記録し、再利用できるパターンにまとめる。 |
 | [`/wiki:evolve <goal or action>`](#wikievolve-goal-or-action) | スキルの改善案をステージング、評価、確認、適用、またはロールバックする。 |
 | [`/wiki:upgrade`](#wikiupgrade) | 既存の wiki を、現在のプラグインのバージョンにアップグレードする。 |
@@ -158,6 +160,14 @@ slug を付けると、`[[slug]]` と同じ規則でページを探して開く�
 
 概要はページ数、検索、グラフ、統計に含めず、`log.md` に記録しない。電源断後の存続と完全性は保証せず、欠落や破損があれば元ページから再生成する。
 `/wiki:browse` は概要を最初の h1 の直後に表示し、h1 がなければ本文の先頭に置く。元ページが変わった概要は警告付きで折りたたむ。概要にある SVG と Mermaid は本文と同じ方法で表示する。閲覧時に概要を作り直すことはない。
+
+## `/wiki:export <page>`
+
+例：`/wiki:export concepts/設計方針`。プロジェクト wiki の記事、直接参照する記事、各記事の原本を確認して ZIP にまとめる。`--only` で指定記事だけを選べる。`--without-raw` で原本を省ける。
+
+## `/wiki:import <zip> <destination>`
+
+例：`/wiki:import 設計方針.zip --user` で受け手の個人 wiki に、`/wiki:import 設計方針.zip ../別プロジェクト/wiki` で指定したプロジェクト wiki に取り込む。原本と参照を確認し、記事・索引・ログの差分を承認して保存する。同名で内容が違う既存記事があれば停止する。
 
 ## `/wiki:upgrade`
 

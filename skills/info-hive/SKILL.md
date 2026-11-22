@@ -1,7 +1,7 @@
 ---
 name: info-hive
 description: |
-  日本語の論文、記事、文字起こし、メモ、PDF、プロジェクトでの調査結果から、LLM が整理するナレッジベース（wiki）を作り、保守する。ソースをリンクでつないだ Markdown のページに取り込み、出典つきで質問に答え、wiki を lint またはアップグレードし、役に立つ回答をシンセシスのページとして残す。検証済みのタスクの経験を記録し、根拠にもとづくスキルの改善案を作成・評価・適用し、必要に応じてロールバックすることもできる。「この資料を wiki に取り込んで」「この URL を wiki に取り込んで」「この YouTube の動画を wiki に取り込んで」「wiki には〜について何と書いてある？」「wiki を lint して」「このタスクから学んで」「この手順を改善して」のような依頼や、"add this to my wiki" のような英語の依頼、/wiki:ingest、/wiki:query、/wiki:overview、/wiki:learn、/wiki:evolve で起動する。wiki はローカルのフォルダーに置き、日本語のファイル名とページ、日本語と英語が混ざる本文を扱える。インデックスを先に読むナビゲーション、アトミックなページ、日本語に対応したハイブリッド検索を使う。
+  日本語の論文、記事、文字起こし、メモ、PDF、プロジェクトでの調査結果から、LLM が整理するナレッジベース（wiki）を作り、保守する。ソースをリンクでつないだ Markdown のページに取り込み、出典つきで質問に答え、wiki を lint またはアップグレードし、役に立つ回答をシンセシスのページとして残す。検証済みのタスクの経験を記録し、根拠にもとづくスキルの改善案を作成・評価・適用し、必要に応じてロールバックすることもできる。「この資料を wiki に取り込んで」「この URL を wiki に取り込んで」「この YouTube の動画を wiki に取り込んで」「wiki には〜について何と書いてある？」「wiki を lint して」「このタスクから学んで」「この手順を改善して」のような依頼や、"add this to my wiki" のような英語の依頼、/wiki:ingest、/wiki:query、/wiki:overview、/wiki:export、/wiki:import、/wiki:learn、/wiki:evolve で起動する。wiki はローカルのフォルダーに置き、日本語のファイル名とページ、日本語と英語が混ざる本文を扱える。インデックスを先に読むナビゲーション、アトミックなページ、日本語に対応したハイブリッド検索を使う。
 ---
 
 # info-hive（日本語の LLM Wiki）
@@ -52,7 +52,7 @@ wiki には3つの層と3つの操作がある。スキルの残りの部分は�
 
 ## Codex で使う
 
-Codex では `$wiki:info-hive init`、`$wiki:info-hive ingest <ソース>`、`$wiki:info-hive query <質問>` の形か、自然言語で依頼する。`/wiki:*` は Claude Code の呼び出し名である。操作を始める前に `references/codex.md` を読む。プラグイン一式が入っているときは、次のスクリプトで該当する操作の手順を読み、その手順に従う。`<操作>` は `init`、`ingest`、`query`、`lint`、`stats`、`graph`、`browse`、`learn`、`evolve`、`upgrade`、`help` のいずれかである。
+Codex では `$wiki:info-hive init`、`$wiki:info-hive ingest <ソース>`、`$wiki:info-hive query <質問>` の形か、自然言語で依頼する。`/wiki:*` は Claude Code の呼び出し名である。操作を始める前に `references/codex.md` を読む。プラグイン一式が入っているときは、次のスクリプトで該当する操作の手順を読み、その手順に従う。`<操作>` は `init`、`ingest`、`query`、`lint`、`stats`、`graph`、`browse`、`overview`、`export`、`import`、`learn`、`evolve`、`upgrade`、`help` のいずれかである。
 
 ```bash
 uv run --quiet --script "<skill-root>/scripts/wiki_codex.py" <操作>
@@ -133,6 +133,10 @@ LLM Wiki のパターンでもっとも大きな失敗は、wiki そのものが
 **大きい wiki には検索を使う。** wiki が約 300 ページを超えると、あいまいなクエリでは、インデックスを引くだけでは適切なページが見つからないことがある。検索は、まず MCP のツール `query` で行う（「MCP のツールと CLI の使い分け」）。埋め込みは cl-nagoya/ruri-v3-130m、ベクトル索引は usearch、語彙検索は Tantivy で、索引は wiki の外に置く。戻り道の `scripts/wiki_search.py` を使うと、セクション単位のハイブリッド検索を、任意の frontmatter のフィルターと、構造化された `--json` の証拠の行つきで実行できる。既定の経路では、ローカルで多言語の埋め込みモデル `intfloat/multilingual-e5-small`（約 0.25 GB）を FastEmbed で実行し、生成したベクトルを sqlite-vec で `wiki/.wiki-cache/embeddings.sqlite` に保存し、セマンティック検索と BM25 の順位を RRF で統合する。BM25 も日本語に対応している。かなと漢字は2文字ずつ重ねて切り出し、漢字は1文字単位でも索引に入れるので、「税」のような1文字のクエリも「消費税」を含むページに当たる。日本語のクエリは、分かち書きせずにそのまま渡せばよい。初期化とアップグレードでは、`uv` を通じて `scripts/setup_wiki.py` を実行し、バージョンを固定した FastEmbed、sqlite-vec、PyYAML をインストールし、モデルをキャッシュし、すべてのセクションを同期してから、セットアップの完了を報告する。wiki やクエリのテキストがマシンの外に出ることはない。依存パッケージを使わない BM25 にするには、`python "<skill-root>/scripts/wiki_search.py" "クエリ" --no-embed` で PEP 723 による依存解決を通さずに実行する。モデルの選び方とトークン化の詳細は、リポジトリの `docs/search.md` にある。
 
 閾値と移行の手順を含むスケーリングの詳しい手引きは、`references/scaling-playbook.md` を読む。
+
+## 記事の受け渡し
+
+プロジェクト wiki の記事を別の利用者やプロジェクトに渡すには `/wiki:export <記事>` を使う。受け手は `/wiki:import <ZIP> --user` または `/wiki:import <ZIP> <プロジェクト wiki>` で取り込む。Codex では `$wiki:info-hive export` と `$wiki:info-hive import` に同じ引数を渡す。
 
 ## ページの概要
 
