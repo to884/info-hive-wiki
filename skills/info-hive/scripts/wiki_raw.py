@@ -217,7 +217,7 @@ def _raw_meta(path):
 
 
 def resolve_raw(meta, page_path, wiki_root, wiki_root_given=None, allowed_roots=None, *,
-                raw_roots=(), recorded_raw_roots=()):
+                raw_roots=(), recorded_raw_roots=(), allowed_paths=()):
     """source の raw: を値ごとに解く。raw_roots は呼ぶ側が知っている根だけを渡す。推し量らない。
 
     allowed_roots は内容を読んでよい場所の制限で、リンク検査の起点ではない。外の原本にも当てる。
@@ -276,7 +276,7 @@ def resolve_raw(meta, page_path, wiki_root, wiki_root_given=None, allowed_roots=
         result.candidates = [str(p) for p in candidates]
         inspected, excluded = [], []
         for p in candidates:
-            if allowed is not None and not any(within(p, a) for a in allowed):
+            if allowed is not None and p not in allowed_paths and not any(within(p, a) for a in allowed):
                 excluded.append(p)
                 continue
             raw_matches = [r for r in known_raw if within(p, r)]
