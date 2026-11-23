@@ -133,6 +133,26 @@
 <p><strong>頻度</strong></p>
 <p>妥当な既定値は、構造の lint を取り込み 5 回ごと、内容の lint を毎週または取り込み 20 回ごと、足りない点の洗い出しを毎月です。lint のレポートが仕分けられる速さより早く増えていくなら、lint の頻度を上げるか、スキーマを見直す時期です。</p>
 </blockquote>
+<h2 id="取り込み済みの会話から-wiki-の修正案を作る" class="fui-Subtitle1">取り込み済みの会話から wiki の修正案を作る</h2>
+<p><strong>ドリーミング</strong>（Wiki Dreaming）では、取り込み済みの会話を読み直し、根拠を補える既存ページの修正案を作ります。
+<code>/wiki-dream</code> は、開発リポジトリ <code>info-hive-dev</code> で試験中の Claude Code ワークフローです。
+インストール済みの wiki プラグインで使えるコマンドは、<a href="commands.html" class="fui-Link" data-inline="">コマンド一覧</a>を参照してください。</p>
+<p>試すには、Python 3.11 以上と認証済みの Claude Code CLI を用意します。
+<span>開発リポジトリ</span>のルートで次のコマンドを実行します。</p>
+<pre><code class="language-sh">git submodule update --init -- info-hive-wiki
+python -X utf8 -B poc/wiki-dream/run.py --scheduled --limit 2
+</code></pre>
+<p>既定の対象は開発リポジトリの <code>wiki/</code> と <code>raw/</code> です。
+対象にできるのは、公開版を参照していないライブ wiki です。
+個人 wiki などを対象にする場合は、wiki のルートを <code>--wiki</code>、取り込み済み原本のルートを <code>--raw-root</code>、wiki と原本ルートの外にある専用の出力先を <code>--out</code> に指定します。
+定期実行するには、Claude Code Desktop のローカル定期タスクなどに Python の起動コマンドを登録します。
+対象 wiki ごとにジョブと出力先を用意し、同じジョブでは毎回同じ出力先を使います。
+<code>--scheduled</code> を付けると、Python は出力先の <code>ledger.sqlite</code> で処理済みの会話と再試行を管理します。</p>
+<p>Python は原本の SHA-256 が記録された会話を選び、Claude Code が原本と関連記事を読んで修正案を作ります。
+Python は根拠と編集対象を照合し、出力先の実行 ID ごとのディレクトリに報告書 <code>proposal.md</code>、差分 <code>proposal.diff</code>、実行記録 <code>run.json</code> を保存します。
+既定の出力先は <code>work/wiki-dream/</code> です。
+差分が空の場合も、報告書で結果を確認できます。処理対象の会話が 0 件の回は提案を作りません。
+実行は提案の生成までです。差分の内容と原本を確認し、採用する変更を判断します。</p>
 <h2 id="経験の記録とスキルの改善" class="fui-Subtitle1">経験の記録とスキルの改善</h2>
 <p>完了したタスクは、<code>/wiki:learn</code> で変更不可の経験のソースと、再利用できるコンセプトのパターンにできます。<code>/wiki:evolve</code> は、回数に上限のある学習とパターンの統合を行い、スキル全体の変更を提案し、検証の結果で候補を選び、固定した選定結果を独立した最終テストで測定します。失敗した実験も残し、承認された変更を明示的に適用またはロールバックします。通常の事実情報としての wiki はそのまま使えます。ワークフロー全体、実行できるパイロット、評価の範囲については、<a href="evolution.html" class="fui-Link" data-inline="">経験の記録とスキルの改善</a>を参照してください。</p>
     </main>
