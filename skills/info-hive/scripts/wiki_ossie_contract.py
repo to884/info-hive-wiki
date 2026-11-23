@@ -254,7 +254,8 @@ def _expand_iri(value, expansions):
 def _implementation():
     here = Path(__file__)
     return {name: sha256(here.with_name(name).read_bytes()).hexdigest()
-            for name in (here.name, "wiki_semantic_model.py")}
+            for name in (here.name, "wiki_semantic_model.py", "wiki_semantic_adopt.py", "wiki_semantic_store.py",
+                         "wiki_semantic_apply.py", "wiki_semantic_definitions.py")}
 
 
 def _capabilities(doc):

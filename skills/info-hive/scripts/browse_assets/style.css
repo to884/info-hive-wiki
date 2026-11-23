@@ -309,15 +309,35 @@ pre code { background: none; padding: 0; font-size: var(--fontSizeBase300); over
   display: inline-block; vertical-align: top; max-width: 100%; box-sizing: border-box;
   margin-block: var(--spacingVerticalM); margin-inline: 0; overflow-x: auto;
 }
-#_body .wiki-fig > img { display: block; max-width: 100%; height: auto; }
-/* 静的版の図は 2 配色を画像に固定し、閲覧側で表示する画像を選ぶ（ADR-0035）。 */
-#_body .wiki-fig > img[data-fig-theme="dark"],
-:root[data-theme="dark"] #_body .wiki-fig > img[data-fig-theme="light"] { display: none; }
-:root[data-theme="dark"] #_body .wiki-fig > img[data-fig-theme="dark"] { display: block; }
-@media (prefers-color-scheme: dark) {
-  :root[data-theme="auto"] #_body .wiki-fig > img[data-fig-theme="light"] { display: none; }
-  :root[data-theme="auto"] #_body .wiki-fig > img[data-fig-theme="dark"] { display: block; }
+#_body .wiki-fig img { display: block; max-width: 100%; height: auto; }
+.wiki-image-trigger {
+  display: block; max-width: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in;
 }
+.wiki-image-trigger:focus-visible {
+  outline: var(--strokeWidthThick) solid var(--colorStrokeFocus2);
+  outline-offset: var(--strokeWidthThin);
+}
+/* 静的版の図は 2 配色を画像に固定し、閲覧側で表示する画像を選ぶ（ADR-0035）。 */
+#_body .wiki-fig > [data-fig-theme="dark"],
+:root[data-theme="dark"] #_body .wiki-fig > [data-fig-theme="light"] { display: none; }
+:root[data-theme="dark"] #_body .wiki-fig > [data-fig-theme="dark"] { display: block; }
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="auto"] #_body .wiki-fig > [data-fig-theme="light"] { display: none; }
+  :root[data-theme="auto"] #_body .wiki-fig > [data-fig-theme="dark"] { display: block; }
+}
+:root:has(.wiki-image-preview[open]) { overflow: hidden; }
+.wiki-image-preview[open] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--spacingVerticalM);
+  width: calc(100vw - 2 * var(--spacingHorizontalM)); max-width: 90em;
+  height: calc(100dvh - 2 * var(--spacingVerticalL));
+  padding: var(--spacingVerticalM) var(--spacingHorizontalS);
+  overflow: hidden;
+}
+.wiki-image-preview, .wiki-image-preview::backdrop { transition: none; }
+.wiki-image-preview-close { justify-self: end; }
+.wiki-image-preview-img { display: block; width: 100%; height: 100%; object-fit: contain; }
 /* Mermaid の図のコード（Accordion）と、描けなかったときの警告（MessageBar） */
 #_body .wiki-fig-source { margin-block-end: var(--spacingVerticalL); }
 #_body .wiki-fig-error { margin-block: var(--spacingVerticalS); }
