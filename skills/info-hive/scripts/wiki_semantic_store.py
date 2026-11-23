@@ -371,6 +371,30 @@ def _verify_sqlite(value, path):
         raise ModelError(f"派生 DB を読み取れません: {error}") from error
 
 
+def exchange_documents():
+    """汎用交換文書の正規バイト。生成と公開直前の照合で共有する。"""
+    # 汎用レコードの交換定義。旧 writer の WikiArticle / sem_articles とは共有しない。
+    fields = ["record_id", "kind", "wiki_id", "payload_json"]
+    identity = {"referent_mappings": [{"relationship": "record_id", "expression": "records.record_id"}]}
+    ont = {"version": "0.3.0.dev0", "name": "Semantic records v2", "ontology": [{
+        "concept": "SemanticRecord", "type": "EntityType", "identify_by": ["record_id"],
+        "relationships": [{"name": f, "roles": [{"concept": "String"}], "verbalizes": [],
+                           "multiplicity": "ManyToOne"} for f in fields]}]}
+    core = {"version": "0.3.0.dev0", "name": "Semantic records v2 data", "relationships": [],
+            "datasets": [{"name": "records", "source": "records", "primary_key": ["record_id"],
+                          "fields": [{"name": f, "datatype": "String", "expression": {"sql": f'source."{f}"'}}
+                                     for f in fields]}]}
+    mapping = {"version": "0.3.0.dev0", "name": "Semantic records v2 mapping",
+               "ontology_ref": {"name": ont["name"], "iri": "./wiki.ontology.json"},
+               "semantic_model_ref": {"name": core["name"], "iri": "./wiki.semantic_model.json"},
+               "concept_mappings": [{"concept": "SemanticRecord", "object_mappings": [identity],
+                 "link_mappings": [{"object_mapping": identity, "children": [
+                    {"relationship": f, "object_mapping": {"concept": "String", "expression": f"records.{f}"}}
+                    for f in fields if f != "record_id"]}]}]}
+    documents = {"wiki.ontology.json": ont, "wiki.semantic_model.json": core, "wiki.mapping.json": mapping}
+    return {name: canonical(doc) + b"\n" for name, doc in documents.items()}
+
+
 @contextmanager
 def artifacts(value):
     """自分で作った一時ディレクトリにだけ生成する。wiki への適用入口は持たない。"""
@@ -383,27 +407,8 @@ def artifacts(value):
         (ontology / "definition.json").write_bytes(value.catalog_json)
         (folder / "records.jsonl").write_bytes(value.jsonl)
         (folder / "release.json").write_bytes(value.manifest_json)
-        # 汎用レコードの交換定義。旧 writer の WikiArticle / sem_articles とは共有しない。
-        fields = ["record_id", "kind", "wiki_id", "payload_json"]
-        identity = {"referent_mappings": [{"relationship": "record_id", "expression": "records.record_id"}]}
-        ont = {"version": "0.3.0.dev0", "name": "Semantic records v2", "ontology": [{
-            "concept": "SemanticRecord", "type": "EntityType", "identify_by": ["record_id"],
-            "relationships": [{"name": f, "roles": [{"concept": "String"}], "verbalizes": [],
-                               "multiplicity": "ManyToOne"} for f in fields]}]}
-        core = {"version": "0.3.0.dev0", "name": "Semantic records v2 data", "relationships": [],
-                "datasets": [{"name": "records", "source": "records", "primary_key": ["record_id"],
-                              "fields": [{"name": f, "datatype": "String", "expression": {"sql": f'source."{f}"'}}
-                                         for f in fields]}]}
-        mapping = {"version": "0.3.0.dev0", "name": "Semantic records v2 mapping",
-                   "ontology_ref": {"name": ont["name"], "iri": "./wiki.ontology.json"},
-                   "semantic_model_ref": {"name": core["name"], "iri": "./wiki.semantic_model.json"},
-                   "concept_mappings": [{"concept": "SemanticRecord", "object_mappings": [identity],
-                     "link_mappings": [{"object_mapping": identity, "children": [
-                        {"relationship": f, "object_mapping": {"concept": "String", "expression": f"records.{f}"}}
-                        for f in fields if f != "record_id"]}]}]}
-        documents = {"wiki.ontology.json": ont, "wiki.semantic_model.json": core, "wiki.mapping.json": mapping}
-        for path, doc in documents.items():
-            (folder / path).write_bytes(canonical(doc) + b"\n")
+        for path, data in exchange_documents().items():
+            (folder / path).write_bytes(data)
         _write_sqlite(value, folder / "wiki-data.sqlite")
         verify_sqlite(value, folder / "wiki-data.sqlite")
         yield folder
