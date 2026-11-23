@@ -34,11 +34,21 @@ OpenCode は `.claude/skills/` と `~/.claude/skills/` も読むので、Claude 
 
 表の `sonnet` は Claude Code のモデル指定名です。候補ページの読み取りでエフォートを選ぶ際に評価したモデルは Claude Sonnet 5.5（`claude-sonnet-5-5`）です。
 
-意味検索には、質問と wiki の本文をベクトルに変換する埋め込みモデルを使います。
-MCP サーバーは `cl-nagoya/ruri-v3-130m`、CLI のハイブリッド検索は既定で `intfloat/multilingual-e5-small` を使います。[検索と取得](search.md)
-
 任意の判定レイヤーを有効にすると、専用モデルが検索結果の関連度やグラフの関係を裏づける証拠の有無などを判定します。
 既定では無効です。ローカルで使う場合のモデルは Liquid `d1-2B` です。[判定モデルとバックエンドの一覧](decisions.md)
+
+### 意味検索に使う埋め込みモデル
+
+埋め込みモデルは、質問と本文をそれぞれ数値の列（ベクトル）に変換します。意味検索では、質問のベクトルに近い本文を探すため、質問と資料で使われている言葉が違っても、関連する箇所を見つけられます。回答を書くのは、その箇所を読んだ会話モデルです。
+
+| 何をどこで検索するか | 埋め込みモデル | 設定できること |
+| --- | --- | --- |
+| wiki ページを wiki の MCP サーバーで検索 | `cl-nagoya/ruri-v3-130m`（512 次元） | サーバーが使うモデルは固定です。質問には `検索クエリ: `、本文には `検索文書: ` を自動で付けて埋め込みます。 |
+| wiki ページを CLI の `wiki_search.py` で検索 | 既定は `intfloat/multilingual-e5-small`（384 次元）。`intfloat/multilingual-e5-large`（1,024 次元）も選べます。 | 環境変数 `INFO_HIVE_EMBED_MODEL` にモデル名を指定します。変更すると次の検索で CLI 用の索引を作り直します。`--no-embed` を付けると語彙検索（BM25）だけを使います。 |
+| PDF の本文を Claude Code の `rag@info-hive` で検索 | 既定は `cl-nagoya/ruri-v3-130m`（512 次元）。同じ Ruri v3 系列の `30m`（256 次元）、`70m`（384 次元）、`310m`（768 次元）も選べます。 | `/rag:setup` で `embedding_model` を指定します。たとえば CPU の負荷を抑えたい場合は `cl-nagoya/ruri-v3-30m` を選べます。 |
+
+rag で埋め込みモデルを変更したら、`/rag:status` の `reingest` に載った PDF を取り込み直します。モデルだけを変えた場合は、保存済みの本文と OCR 結果を再利用し、ベクトルと索引を作り直します。
+wiki の CLI で使う E5 の容量と検索精度は、[埋め込みモデルを切り替える](search.md#埋め込みモデルを切り替える)で比較できます。
 
 ## インストールのコマンド例
 最初に [`uv`](https://docs.astral.sh/uv/getting-started/installation/) をインストールします。どのエージェントも、バージョンを固定した同じローカルの実行環境を呼び出すので、エージェントごとの Python 環境は要りません。
