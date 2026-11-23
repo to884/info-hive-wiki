@@ -132,15 +132,31 @@
 MCP サーバーは <code>cl-nagoya/ruri-v3-130m</code>、CLI のハイブリッド検索は既定で <code>intfloat/multilingual-e5-small</code> を使います。<a href="search.html" class="fui-Link" data-inline="">検索と取得</a></p>
 <p>任意の判定レイヤーを有効にすると、専用モデルが検索結果の関連度やグラフの関係を裏づける証拠の有無などを判定します。
 既定では無効です。ローカルで使う場合のモデルは Liquid <code>d1-2B</code> です。<a href="decisions.html" class="fui-Link" data-inline="">判定モデルとバックエンドの一覧</a></p>
+<h2 id="事前準備" class="fui-Subtitle1">事前準備</h2>
+<p>エージェントがコマンドを実行する環境に、Git と <a href="howto-prepare.html#uv" class="fui-Link" data-inline="">uv</a>、Python 3.12 以上を用意します。初期化は <code>python</code> を直接呼び出すので、次のコマンドで確認します。</p>
+<pre><code class="language-text">git --version
+uv --version
+python --version
+</code></pre>
+<p>uv 経由の同梱スクリプトには Python 3.12〜3.14 を使います。この範囲の Python が見つからなければ、uv が取得します。依存パッケージも uv が用意します。Windows で Claude デスクトップアプリの Code タブを使う場合は、<a href="index.html#toc" class="fui-Link" data-inline="">HTML マニュアルの目次</a>から「Code タブに wiki を入れる」を開いてください。</p>
 <h2 id="インストールのコマンド例" class="fui-Subtitle1">インストールのコマンド例</h2>
-<p>最初に <a href="howto-prepare.html#uv" class="fui-Link" data-inline=""><code>uv</code></a> をインストールします。どのエージェントも、バージョンを固定した同じローカルの実行環境を呼び出すので、エージェントごとの Python 環境は要りません。</p>
 <h3 id="claude-code-cli" class="fui-Subtitle2">Claude Code CLI</h3>
-<p>Claude Code には、プラグイン一式（スキルとスラッシュコマンド）が入ります。マーケットプレイスは <span>to884/info-hive-marketplace</span> にあります。</p>
+<p>Claude Code には、スキル、MCP サーバー、スラッシュコマンドが入ります。マーケットプレイスは <span>to884/info-hive-marketplace</span> にあります。</p>
 <pre><code class="language-bash">/plugin marketplace add to884/info-hive-marketplace
 /plugin install wiki@info-hive
 </code></pre>
+<h4 id="プラグインを-https-で取得する" class="fui-Body1Strong">プラグインを HTTPS で取得する</h4>
+<p>Claude Code が SSH で GitHub に接続できない場合は、環境変数 <code>CLAUDE_CODE_PLUGIN_PREFER_HTTPS</code> を <code>1</code> に設定して起動します。公開リポジトリを HTTPS で取得する場合、GitHub の認証情報は不要です。</p>
+<p>PowerShell では次を実行します。</p>
+<pre><code class="language-powershell">$env:CLAUDE_CODE_PLUGIN_PREFER_HTTPS = '1'
+claude
+</code></pre>
+<p>macOS・Linux のターミナルでは次を実行します。</p>
+<pre><code class="language-bash">CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1 claude
+</code></pre>
+<p>起動した Claude Code のチャットで、マーケットプレイスの追加とプラグインのインストールを実行します。マーケットプレイスがすでに追加されていれば、プラグインのインストールから再試行できます。</p>
 <h3 id="codex-cli" class="fui-Subtitle2">Codex CLI</h3>
-<p>Codex CLI と <a href="howto-prepare.html#uv" class="fui-Link" data-inline=""><code>uv</code></a> が使えるターミナルで次を実行します。スキルと MCP サーバーをまとめて導入できます（Codex CLI 0.166.0 で確認）。</p>
+<p>事前準備を済ませ、Codex CLI が使えるターミナルで次を実行します。スキルと MCP サーバーをまとめて導入できます（Codex CLI 0.166.0 で確認）。</p>
 <pre><code class="language-bash">codex plugin marketplace add to884/info-hive-marketplace
 codex plugin add wiki@info-hive
 </code></pre>
@@ -151,7 +167,7 @@ codex plugin add wiki@info-hive
 codex plugin add wiki@info-hive-dev
 </code></pre>
 <h3 id="codex-のスキル単体とその他のエージェント" class="fui-Subtitle2">Codex のスキル単体とその他のエージェント</h3>
-<p><strong>Codex のスキルだけを使う場合、および Cursor、Gemini CLI、OpenCode、OpenClaw、Pi</strong> では、<code>skills</code> CLI でスキルをインストールします。対応表の <code>--agent</code> の値に置き換えて使います。スキルだけの場合は、MCP の自動登録とプラグインの <code>commands/</code> は含まれません。同梱の CLI とリファレンスを使い、Codex の呼び出し名は <code>$info-hive</code> になります。</p>
+<p><strong>Codex のスキルだけを使う場合、および Cursor、Gemini CLI、OpenCode、OpenClaw、Pi</strong> では、Node.js と <code>skills</code> CLI を使ってスキルをインストールします。対応表の <code>--agent</code> の値に置き換えて使います。スキルだけの場合は、MCP の自動登録とプラグインの <code>commands/</code> は含まれません。同梱の CLI とリファレンスを使い、Codex の呼び出し名は <code>$info-hive</code> になります。</p>
 <pre><code class="language-bash">npx skills add to884/info-hive-wiki -a codex -g
 npx skills add to884/info-hive-wiki -a cursor -g
 npx skills add to884/info-hive-wiki -a gemini-cli -g

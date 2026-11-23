@@ -6,26 +6,41 @@
 
 ## インストール
 
-インストール方法は2通りある。Claude Code には、プラグイン一式（スキルと `/wiki:*` スラッシュコマンド）が入る。ほかの対応エージェントには、[`skills` CLI](https://github.com/vercel-labs/skills) を使って、同じ [agentskills.io](https://agentskills.io) 形式のスキルをインストールする。全体像は[エージェント対応表](./agents.md)を参照。
+Claude Code と Codex には、スキルと MCP サーバーを含む `wiki@info-hive` プラグインをインストールできる。ほかの対応エージェントでは、[Agent Skills](https://agentskills.io) 形式のスキルを使う。
 
-最初に [`uv`](https://docs.astral.sh/uv/getting-started/installation/) をインストールする。前提条件はこれだけで、同梱のツール用に、バージョンを固定した独立した環境を `uv` が作る。
+エージェントが使う環境で Git、uv、Python のコマンドが実行できることを確認する。初期化は `python` を直接呼ぶので、`python --version` で Python 3.12 以上と表示されることを確かめる。[事前準備](./agents.md#事前準備)
 
-### Claude Code: プラグイン一式
+Web ページの取得に普段のブラウザーを使う場合は、[Playwright の準備](#url-取り込みで使う-playwright-を準備する)も行う。
 
-ネイティブの方法で、スキルとスラッシュコマンドがまとめて入る。プラグインは、マーケットプレイス用のリポジトリ [to884/info-hive-marketplace](https://github.com/to884/info-hive-marketplace) から入れる。
+### Claude Code のプラグイン
 
-```bash
+Claude Code のチャットで実行する。スキル、MCP サーバー、`/wiki:*` コマンドが入る。
+
+```text
 /plugin marketplace add to884/info-hive-marketplace
 /plugin install wiki@info-hive
 ```
 
-マーケットプレイスとプラグインのリポジトリは、どちらも非公開なので、入れるには GitHub の認証情報が要る。HTTPS なら `gh auth login` のあとに `gh auth setup-git` を実行しておく。SSH なら、パスフレーズを聞かれない鍵を用意しておく。
+マーケットプレイスとプラグイン本体のリポジトリは公開されている。HTTPS での取得には GitHub の認証情報は不要。Claude Code が SSH での取得に失敗する場合は、[プラグインを HTTPS で取得する手順](./agents.md#プラグインを-https-で取得する)に進む。
 
 インストールすれば、プラグインはどのプロジェクトでも動く。インストールしただけでは、wiki をどこに置くかは決まらない。
 
-以下のエージェントでは、`skills` CLI で同じスキルをインストールする。どれも同じコマンドで、`-a` の値だけが違う。`-g` を付けるとすべてのプロジェクトで使えるグローバルなインストールになり、外すと現在のプロジェクトだけにインストールする。スラッシュコマンドは Claude Code 専用で、ほかのエージェントでは自然言語でスキルを呼び出す。
+### Codex のプラグイン
 
-### Codex (OpenAI)
+Codex CLI が使えるターミナルで次を実行する。
+
+```bash
+codex plugin marketplace add to884/info-hive-marketplace
+codex plugin add wiki@info-hive
+```
+
+MCP は自動登録される。導入後は新しい Codex のチャットを開き、`$wiki:info-hive help` で操作の一覧を表示する。
+
+### スキル単体
+
+以下のエージェントでは、Node.js と [`skills` CLI](https://github.com/vercel-labs/skills) を使ってスキルをインストールする。スキル単体で使う場合は同梱の CLI を利用できる。どれも同じコマンドで、`-a` の値だけが違う。`-g` を付けるとすべてのプロジェクトで使えるグローバルなインストールになり、外すと現在のプロジェクトだけにインストールする。スラッシュコマンドは Claude Code 専用で、ほかのエージェントでは自然言語でスキルを呼び出す。
+
+#### Codex
 
 ```bash
 npx skills add to884/info-hive-wiki -a codex -g
@@ -33,7 +48,7 @@ npx skills add to884/info-hive-wiki -a codex -g
 
 `/skills`、`$info-hive`、または自然言語で呼び出す。同梱のスクリプトも実行できる。
 
-### Cursor
+#### Cursor
 
 ```bash
 npx skills add to884/info-hive-wiki -a cursor -g
@@ -41,7 +56,7 @@ npx skills add to884/info-hive-wiki -a cursor -g
 
 `/info-hive` または自然言語で呼び出す。同梱のスクリプトも実行できる。
 
-### Gemini CLI
+#### Gemini CLI
 
 ```bash
 npx skills add to884/info-hive-wiki -a gemini-cli -g
@@ -49,7 +64,7 @@ npx skills add to884/info-hive-wiki -a gemini-cli -g
 
 `/skills` の管理コマンドまたは自然言語で呼び出す。同梱のスクリプトも実行できる。
 
-### OpenCode
+#### OpenCode
 
 ```bash
 npx skills add to884/info-hive-wiki -a opencode -g
@@ -57,7 +72,7 @@ npx skills add to884/info-hive-wiki -a opencode -g
 
 自然言語で依頼すると、エージェントがネイティブの `skill` ツールを通じてスキルを呼び出す。OpenCode は `.claude/skills/` と `~/.claude/skills/` も読むので、Claude Code 向けにインストールしたものもそのまま使える。同梱のスクリプトも実行できる。
 
-### OpenClaw
+#### OpenClaw
 
 ```bash
 npx skills add to884/info-hive-wiki -a openclaw -g
@@ -65,7 +80,7 @@ npx skills add to884/info-hive-wiki -a openclaw -g
 
 スキルは自動的にユーザーコマンドとして公開される。同梱のスクリプトも実行できる。
 
-### Pi Agent
+#### Pi Agent
 
 ```bash
 npx skills add to884/info-hive-wiki -a pi -g
@@ -95,6 +110,22 @@ ln -s "$(pwd)/info-hive-wiki/skills/info-hive" ~/.hermes/skills/info-hive
 
 wiki そのものは、特定のエージェントに依存しない。中身は markdown ファイルを置いたディレクトリにすぎない。あるエージェントで取り込み、別のエージェントでクエリすることもできる。
 
+## URL 取り込みで使う Playwright を準備する
+
+通常は HTTP で本文を取得する。本文が短い場合や HTTP 401/403 が返った場合は Playwright に切り替える。ログインが必要なページでは、取り込みを依頼するときに「ログインが必要なので、普段のブラウザーで取り込んで」と伝える。
+
+普段の Chrome または Edge を使う場合は、次の準備を行う。
+
+1. [Node.js の公式ダウンロードページ](https://nodejs.org/en/download)から、20 以上の LTS 版を導入する。新しいターミナルで `node --version` と `npm --version` を実行し、両方の版が表示されることを確かめる。
+2. 取り込みに使う Chrome または Edge のプロファイルで [Playwright Extension](https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm) を開き、拡張機能を追加する。Edge で他のストアからの拡張機能について確認が表示されたら、許可して追加する。
+3. Node.js を導入する前からエージェントを開いていた場合は、終了して起動し直す。URL の取り込みで Playwright の接続画面が出たら、タブを選ばずに「Allow」を押す。
+
+Windows では既定の Chrome または Edge を使う。既定がほかのブラウザーの場合や Windows 以外では、取り込みを依頼するときに Chrome または Edge を指定する。
+
+必要な Playwright のパッケージの取得と起動は、wiki の取り込みスクリプトが行う。初回は npm レジストリに接続する。
+
+公開ページを独立したブラウザーで読みたい場合は、「独立した Chromium で取り込んで」と伝える。この方法では必要な Chromium も wiki が取得する。
+
 ## wiki の置き場所を決める
 
 スキルのスコープと wiki のスコープは、互いに独立している。
@@ -106,7 +137,7 @@ wiki そのものは、特定のエージェントに依存しない。中身は
 
 ## 最初の wiki を作る
 
-以下のコマンドは、Claude Code の `/wiki:*` スラッシュコマンドの書き方を使っている。ほかのエージェントでは、同じ依頼を自然言語で伝える。
+以下は Claude Code の `/wiki:*` で進める例。Codex プラグインでは `$wiki:info-hive init --user` のように、操作名と引数を `$wiki:info-hive` に続ける。スキル単体では、同じ依頼を自然言語で伝える。
 
 1. **構造を初期化する。** プロジェクトをまたいで共有するユーザースコープの wiki 1つにする場合:
 

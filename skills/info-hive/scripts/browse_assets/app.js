@@ -390,11 +390,8 @@
   // グループの一覧への行き先。Index のページでは断片だけ（右の一覧を絞る）、記事のページでは Index のページ
   function groupHref(id) { return (isIndex ? "" : href("index.html")) + "#group=" + encodeURIComponent(id); }
 
-  // 今のページを、自分の項目として持つグループか（記事のページで印を付けるグループ。左のペインの木の設計の 9 節）
-  function holdsCurrent(g) {
-    for (var k = 0; k < g.items.length; k++) { if (g.items[k].state === "resolved" && g.items[k].id === current) { return true; } }
-    return false;
-  }
+  // 記事ページの Tab の入口とスクロール位置には、従来の先頭タグのグループを使う
+  var currentPrimaryGroup = null;
 
   // 木は、記事のページも Index のページも、グループの名前と件数だけを描く（記事の題名は描かない。9 節）。
   // 子のないグループは、グループの一覧へのリンクの葉にする。子を持つグループは枝にする
@@ -405,9 +402,11 @@
       n.item.setAttribute("data-group", g.id);
       nodeMain(n, g.title, "tree-name");
       nodeCount(n, g);
-      if (!isIndex && holdsCurrent(g)) {
+      var currentItem = !isIndex && g.items.find(function (it) { return it.state === "resolved" && it.id === current; });
+      if (currentItem) {
         n.item.setAttribute("aria-current", "true");
         n.item.classList.add("is-current");
+        if (!currentItem.secondary_tag && !currentPrimaryGroup) { currentPrimaryGroup = n.item; }
       }
       return n.item;
     }
@@ -564,7 +563,7 @@
     treeItems().forEach(function (t) { t.tabIndex = t === item ? 0 : -1; });
   }
   function rovingToCurrent() {
-    var c = treeRoot.querySelector(".fui-TreeItem.is-current");
+    var c = currentPrimaryGroup || treeRoot.querySelector(".fui-TreeItem.is-current");
     var shown = shownItems();
     roving(c && isShown(c) ? c : shown[0] || null);
   }
@@ -654,7 +653,7 @@
 
   if (!isIndex) { rovingToCurrent(); }
 
-  var cur = tree.querySelector(".is-current");
+  var cur = currentPrimaryGroup || tree.querySelector(".is-current");
   if (cur && cur.scrollIntoView) {
     // 木だけを送る。ページ全体は送らない
     var box = navBody.getBoundingClientRect();

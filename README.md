@@ -6,7 +6,7 @@ Claude Code と Codex では `wiki@info-hive` プラグインとして、ほか�
 
 ## インストール
 
-最初に [`uv`](https://docs.astral.sh/uv/getting-started/installation/) をインストールする。同梱のスクリプト用に、必要な Python と依存パッケージを `uv` が用意する。初回は検索用モデルも取得するため、数分かかることがある。
+エージェントが使う環境で `git --version`、`uv --version`、`python --version` が実行できることを確認する。Python は 3.12 以上が必要。初回は検索用モデルも取得するため、数分かかることがある。[事前準備](docs/agents.md#事前準備)
 
 ### Claude Code
 
@@ -16,6 +16,8 @@ Claude Code のチャットで次を実行する。スキル、MCP サーバー�
 /plugin marketplace add to884/info-hive-marketplace
 /plugin install wiki@info-hive
 ```
+
+GitHub への SSH 接続が失敗する場合は、[プラグインを HTTPS で取得する手順](docs/agents.md#プラグインを-https-で取得する)を参照。
 
 ### Codex
 
@@ -89,6 +91,7 @@ Claude Code と Codex では、`ingest session` で実行中の会話を取り�
 
 | 文書 | 内容 |
 | --- | --- |
+| [はじめに](docs/getting-started.md) | 最初の wiki の作成と資料の取り込み |
 | [エージェント](docs/agents.md) | 対応表、導入方法、エージェントのメモリとの連携 |
 | [LLM モデルと用途](docs/agents.md#llm-モデルと用途) | Web ページの翻訳、候補ページの読み取り、YouTube 字幕の要約に使うモデルと設定 |
 | [コマンド](docs/commands.md) | 操作の一覧、引数、使用例 |
