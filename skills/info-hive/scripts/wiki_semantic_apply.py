@@ -27,7 +27,7 @@ from wiki_semantic_model import SEMANTIC_WRITES_ENABLED, ModelError
 
 OPERATION = "migrate_format"
 RULE = "migration-preview-v2"
-SUPPORTED = frozenset({OPERATION})
+SUPPORTED = frozenset({OPERATION, "activate_definition", "adopt_semantics"})
 SEMANTIC_DIR = "ontology/ossie/"
 CATALOG = "ontology/definition.json"
 # プレビューが読む元ファイル（報告書の sources のキー）と、公開版の中の位置。
@@ -70,6 +70,7 @@ class Transition:
     operation_id: str
     semantic_snapshot_id: str
     base_release_id: str
+    validate_inputs: object = None
 
 
 def approval(plan):
@@ -251,8 +252,9 @@ def verify_transition(transition, *, wiki, candidate, base, base_release_id):
         raise publish.Conflict("移行の基準公開版が変わりました。移行は保留します")
     base_guard = WriteGuard(Path(base), strict_root=True)
     candidate_guard = WriteGuard(Path(candidate), strict_root=True)
-    if detect(base_guard) != 1 or detect(candidate_guard) != 2:
-        raise ModelError("P3 の移行は形式1の公開版から形式2の候補への遷移だけを扱います")
+    expected_format = 1 if transition.operation == OPERATION else 2
+    if detect(base_guard) != expected_format or detect(candidate_guard) != 2:
+        raise ModelError("P3 の意味操作の基準形式と候補形式が一致しません")
     value = store.read_bundle(candidate_guard.root / "ontology/ossie")
     if value.manifest["semantic_snapshot_id"] != transition.semantic_snapshot_id:
         raise ModelError("公開候補の意味スナップショットが承認と一致しません")
@@ -267,6 +269,15 @@ def verify_transition(transition, *, wiki, candidate, base, base_release_id):
         if candidate_guard.read_bytes(folder / name) != content:
             raise ModelError(f"移行候補の交換用文書が正規の生成物と一致しません: {name}")
     fixed.verify_stored(candidate_guard, candidate_guard.root / "ontology", value)
+    if transition.operation != OPERATION:
+        previous = store.read_bundle(base_guard.root / "ontology/ossie")
+        if value.manifest["parent"] != previous.manifest["semantic_snapshot_id"]:
+            raise ModelError("意味版の親が基準版と一致しません")
+        if not set(previous.records) <= set(value.records):
+            raise ModelError("意味操作で過去の固定レコードを削除・変更できません")
+        if not callable(transition.validate_inputs):
+            raise ModelError("意味採用には承認入力の最終照合が必要です")
+        transition.validate_inputs()
     before, after = publish.file_checksums(base_guard), publish.file_checksums(candidate_guard)
     for name in before.keys() | after.keys():
         if before.get(name) != after.get(name) and name not in CHANGEABLE and not name.startswith(CHANGEABLE_PREFIXES):
