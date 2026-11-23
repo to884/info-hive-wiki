@@ -34,7 +34,7 @@
 <p>コマンド（<code>/wiki:query</code>、<code>/wiki:lint</code>、<code>/wiki:stats</code>、<code>/wiki:graph</code>、<code>/wiki:ingest</code> のグラフの lint）は、まずこのサーバーのツールを使い、使えないときは CLI（<code>wiki_search.py</code> など）に戻ります。使い分けの規則は <code>SKILL.md</code> の「MCP のツールと CLI の使い分け」にあります。</p>
 <h2 id="仕組み" class="fui-Subtitle1">仕組み</h2>
 <pre><code class="language-text">ホスト（Claude Code など）
-  └─ 入口（wiki_mcp_launch.py、.mcp.json で登録。依存を持たない）
+  └─ 入口（wiki_mcp_launch.py、プラグインの設定で登録。依存を持たない）
         └─ stdio の中継（wiki_mcp_relay.py）
               └─ HTTP（127.0.0.1、トークン付き）
                    wiki の MCP サーバー（wiki_mcp_server.py、1 台に 1 つ）
@@ -375,7 +375,7 @@ python &quot;&lt;skill-root&gt;/scripts/wiki_search.py&quot; &quot;&lt;検索語
 <p>サーバーが起動しない: <code>logs/server.log</code> を見ます。<code>uv run --script &quot;&lt;skill-root&gt;/scripts/wiki_mcp_launch.py&quot; --ensure</code> を実行すると、サーバーを確かめ（なければ起動し）、トークンを除いた <code>server.json</code> の中身を表示します。</p>
 </li>
 <li>
-<p>社内ネットワークで起動しない（<code>logs/launch.log</code> か uv の出力に <code>invalid peer certificate</code> や <code>UnknownIssuer</code> がある）: TLS を検査するプロキシの CA を uv が信頼していません。入口と中継は <code>UV_SYSTEM_CERTS=true</code>（古い uv では <code>UV_NATIVE_TLS=true</code>）で 1 回だけやり直すが、CLI の <code>uv run --script</code> はやり直しません。環境変数 <code>UV_SYSTEM_CERTS=true</code> を設定するか、uv の <code>uv.toml</code> で <code>system-certs = true</code> を設定してください。詳しくは README の「トラブルシューティング」を参照してください。その場で CLI を動かすときは、<code>uv run --system-certs --script ...</code> のように <code>--system-certs</code>（古い uv では <code>--native-tls</code>）を付けます。</p>
+<p>社内ネットワークで起動しない（<code>logs/launch.log</code> か uv の出力に <code>invalid peer certificate</code> や <code>UnknownIssuer</code> がある）: TLS を検査するプロキシの CA を uv が信頼していません。入口と中継は <code>UV_SYSTEM_CERTS=true</code>（古い uv では <code>UV_NATIVE_TLS=true</code>）で 1 回だけやり直すが、CLI の <code>uv run --script</code> はやり直しません。環境変数 <code>UV_SYSTEM_CERTS=true</code> を設定するか、uv の <code>uv.toml</code> で <code>system-certs = true</code> を設定してください。設定後にホストを起動し直してください。Windows では<a href="howto-prepare.html#certificates" class="fui-Link" data-inline="">組織の証明書を使う手順</a>を参照できます。その場で CLI を動かすときは、<code>uv run --system-certs --script ...</code> のように <code>--system-certs</code>（古い uv では <code>--native-tls</code>）を付けます。</p>
 </li>
 <li>
 <p>プラグインを更新した: 中継は <code>server.json</code> のコードの版を見て、古いサーバーを止めて起動し直します。</p>
@@ -393,7 +393,8 @@ uv sync --reinstall --script &quot;&lt;skill-root&gt;/scripts/wiki_mcp_server.py
 <p>直したのにツールが出ない: Claude Code は、接続に失敗した MCP サーバーを記録し、しばらく起動しないことがあります。記録は <code>~/.claude/mcp-needs-auth-cache.json</code> の <code>plugin:wiki:wiki</code> に入ります。<code>/mcp</code> で wiki のサーバーをつなぎ直します。</p>
 </li>
 <li>
-<p>Claude Code 以外のホスト（Codex など）: <code>CLAUDE_PLUGIN_ROOT</code> を持たないので、<code>uv run --script &quot;&lt;skill-root&gt;/scripts/wiki_mcp_launch.py&quot;</code> を stdio の MCP サーバーとして登録します。</p>
+<p>Claude Code と Codex に <code>wiki@info-hive</code> プラグインを導入すると、MCP サーバー <code>wiki</code> が自動登録されます。</p>
+<p>スキル単体など、MCP を自動登録しない導入方法で MCP を使う場合は、ホストの MCP 設定に <code>uv run --script &quot;&lt;skill-root&gt;/scripts/wiki_mcp_launch.py&quot;</code> を stdio のサーバーとして登録します。<code>&lt;skill-root&gt;</code> は <code>SKILL.md</code> があるディレクトリの絶対パスに置き換えます。</p>
 </li>
 </ul>
     </main>

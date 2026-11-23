@@ -10,7 +10,7 @@ wiki のプラグインは、検索のためのローカルの MCP サーバー�
 
 ```text
 ホスト（Claude Code など）
-  └─ 入口（wiki_mcp_launch.py、.mcp.json で登録。依存を持たない）
+  └─ 入口（wiki_mcp_launch.py、プラグインの設定で登録。依存を持たない）
         └─ stdio の中継（wiki_mcp_relay.py）
               └─ HTTP（127.0.0.1、トークン付き）
                    wiki の MCP サーバー（wiki_mcp_server.py、1 台に 1 つ）
@@ -159,7 +159,7 @@ CLI の埋め込み検索は、MCP のサーバーとは別のモデル（multil
 ## 困ったとき
 
 - サーバーが起動しない: `logs/server.log` を見る。`uv run --script "<skill-root>/scripts/wiki_mcp_launch.py" --ensure` を実行すると、サーバーを確かめ（なければ起動し）、トークンを除いた `server.json` の中身を表示する。
-- 社内ネットワークで起動しない（`logs/launch.log` か uv の出力に `invalid peer certificate` や `UnknownIssuer` がある）: TLS を検査するプロキシの CA を uv が信頼していない。入口と中継は `UV_SYSTEM_CERTS=true`（古い uv では `UV_NATIVE_TLS=true`）で 1 回だけやり直すが、CLI の `uv run --script` はやり直さない。ユーザーに、環境変数 `UV_SYSTEM_CERTS=true` か、uv の `uv.toml` の `system-certs = true` を設定してもらう（README の「トラブルシューティング」）。その場で CLI を動かすときは、`uv run --system-certs --script ...` のように `--system-certs`（古い uv では `--native-tls`）を付ける。
+- 社内ネットワークで起動しない（`logs/launch.log` か uv の出力に `invalid peer certificate` や `UnknownIssuer` がある）: TLS を検査するプロキシの CA を uv が信頼していない。入口と中継は `UV_SYSTEM_CERTS=true`（古い uv では `UV_NATIVE_TLS=true`）で 1 回だけやり直すが、CLI の `uv run --script` はやり直さない。ユーザーに、環境変数 `UV_SYSTEM_CERTS=true` か、uv の `uv.toml` の `system-certs = true` を設定してもらい、ホストを起動し直す。Windows での設定は[組織の証明書を使う手順](#windows-で組織の証明書を使う)を参照。その場で CLI を動かすときは、`uv run --system-certs --script ...` のように `--system-certs`（古い uv では `--native-tls`）を付ける。
 - プラグインを更新した: 中継は `server.json` のコードの版を見て、古いサーバーを止めて起動し直す。
 - 「初期化された wiki ではない」のエラーになる: `wiki` に渡したディレクトリに `SCHEMA.md` がない。wiki の場所が正しいかを確かめ、正しければ `/wiki:init` で初期化する。CLI も同じ判定で止まる。
 - uv の環境が壊れた（`Failed to read metadata from installed package` のような uv のエラーが出る）: 次の 2 つを実行して入れ直す。入口とサーバーは、起動のたびに同じことを自動で試す。
@@ -170,4 +170,15 @@ CLI の埋め込み検索は、MCP のサーバーとは別のモデル（multil
   ```
 
 - 直したのにツールが出ない: Claude Code は、接続に失敗した MCP のサーバーを覚えていて、しばらく起動しないことがある（`~/.claude/mcp-needs-auth-cache.json` に `plugin:wiki:wiki` が入る）。`/mcp` で wiki のサーバーをつなぎ直す。
-- Claude Code 以外のホスト（Codex など）: `CLAUDE_PLUGIN_ROOT` を持たないので、`uv run --script "<skill-root>/scripts/wiki_mcp_launch.py"` を stdio の MCP サーバーとして登録する。
+- Claude Code と Codex に `wiki@info-hive` プラグインを導入すると、MCP サーバー `wiki` が自動登録される。
+- スキル単体など、MCP を自動登録しない導入方法で MCP を使う場合は、ホストの MCP 設定に `uv run --script "<skill-root>/scripts/wiki_mcp_launch.py"` を stdio のサーバーとして登録する。`<skill-root>` は `SKILL.md` があるディレクトリの絶対パスに置き換える。
+
+### Windows で組織の証明書を使う
+
+組織の CA 証明書が Windows の証明書ストアにあることを管理者に確認する。PowerShell で `uv sync --help | Select-String "UV_SYSTEM_CERTS"` を実行し、使っている uv がこの変数に対応することを確かめる。対応していれば、ユーザー環境変数を設定する。
+
+```powershell
+[Environment]::SetEnvironmentVariable('UV_SYSTEM_CERTS', 'true', 'User')
+```
+
+ホストを終了して起動し直す。新しく開いた PowerShell で `$env:UV_SYSTEM_CERTS` が `true` と表示されることを確認する。
