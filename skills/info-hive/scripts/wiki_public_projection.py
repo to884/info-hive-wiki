@@ -117,6 +117,7 @@ def update_article_db(guard, path, original, additions):
 
 
 def update_projections(guard, changes, *, force=False):
+    publish.require_semantic_format1(guard)
     from wiki_graph_extract import (OUTPUT_NAMES, build_edges, build_nodes, collect_pages, load_ontology, write_outputs)
     from wiki_graph_lint import lint
 
