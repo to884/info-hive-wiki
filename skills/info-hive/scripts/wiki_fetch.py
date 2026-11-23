@@ -355,7 +355,10 @@ def is_dropped(node: Node) -> bool:
         return True
     if "hidden" in node.attrs or node.attrs.get("aria-hidden", "").lower() == "true":
         return True
-    words = _words(node.attrs.get("class", "")) | _words(node.attrs.get("id", ""))
+    # Tailwind CSS の任意値、任意プロパティ、CSS 変数の短縮記法を含むクラスは、語に分けない。
+    class_names = (name for name in node.attrs.get("class", "").split()
+                   if "[" not in name and "-(" not in name)
+    words = _words(" ".join(class_names)) | _words(node.attrs.get("id", ""))
     if node.tag == "img":
         # 数式の代わりに表示する画像。数式は <math> の TeX から書く。
         return {"math", "fallback"} <= words
