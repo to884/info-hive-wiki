@@ -26,6 +26,8 @@
         <li><a class="fui-Link" data-inline href="#wikigraph">/wiki:graph　型付きの関係を調べる</a></li>
         <li><a class="fui-Link" data-inline href="#wikibrowse">/wiki:browse　wiki をブラウザーで開く</a></li>
         <li><a class="fui-Link" data-inline href="#wikioverview">/wiki:overview　ページの概要図を作る</a></li>
+        <li><a class="fui-Link" data-inline href="#wikiexport">/wiki:export　記事を ZIP にまとめる</a></li>
+        <li><a class="fui-Link" data-inline href="#wikiimport">/wiki:import　記事 ZIP を取り込む</a></li>
         <li><a class="fui-Link" data-inline href="#wikiupgrade">/wiki:upgrade　既存の wiki をアップグレードする</a></li>
         <li><a class="fui-Link" data-inline href="#wikilearn">/wiki:learn　作業の経験を記録する</a></li>
         <li><a class="fui-Link" data-inline href="#wikievolve">/wiki:evolve　スキルの改善案を評価する</a></li>
@@ -44,7 +46,7 @@
   </ul>
 </figure>
 <!-- page-summary:end -->
-        <p>wiki 0.39.1 の Claude Code 向けコマンド 12 本の書式、引数、結果を確認できます。初期化とヘルプ以外は、対象の wiki に SCHEMA.md が必要です。</p>
+        <p>Claude Code 向けの wiki コマンドの書式、引数、結果を確認できます。初期化とヘルプ以外は、対象の wiki に SCHEMA.md が必要です。</p>
       </header>
       <section id="wikiinit">
         <h2 class="fui-Subtitle1">/wiki:init　wiki を初期化する</h2>
@@ -113,6 +115,20 @@
         <p>対象ページの概要を本文と別に保存します。<code>--refresh</code> は概要を作り直します。<code>--status</code> はページごとの概要の状態を一覧にします。<code>--remove</code> は指定したページの概要を削除します。</p>
         <pre><code>/wiki:overview &lt;page&gt; [--refresh] | --status | --remove &lt;page&gt;</code></pre>
         <p>例 <code>/wiki:overview --status</code></p>
+      </section>
+
+      <section id="wikiexport">
+        <h2 class="fui-Subtitle1">/wiki:export　記事を ZIP にまとめる</h2>
+        <p>プロジェクト wiki の指定記事、直接参照する記事、原本を共有用の ZIP にまとめます。<code>--only</code> は指定記事に対象を絞り、<code>--without-raw</code> は原本を省きます。ZIP を作る前に共有範囲を確認します。</p>
+        <pre><code>/wiki:export &lt;記事&gt; [ほかの記事] [--only] [--without-raw]</code></pre>
+        <p>例 <code>/wiki:export concepts/設計方針</code></p>
+      </section>
+
+      <section id="wikiimport">
+        <h2 class="fui-Subtitle1">/wiki:import　記事 ZIP を取り込む</h2>
+        <p>受け取った記事 ZIP を、初期化済みの wiki に取り込みます。<code>--user</code> は個人 wiki を指定します。プロジェクト wiki にはプロジェクト名やパスを指定します。原本の保存と、記事・索引・ログの差分はそれぞれ確認します。</p>
+        <pre><code>/wiki:import &lt;ZIP&gt; &lt;取り込み先&gt;</code></pre>
+        <p>例 <code>/wiki:import 設計方針.zip --user</code></p>
       </section>
 
       <section id="wikiupgrade">

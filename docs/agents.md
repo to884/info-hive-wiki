@@ -40,22 +40,51 @@ MCP サーバーは `cl-nagoya/ruri-v3-130m`、CLI のハイブリッド検索�
 任意の判定レイヤーを有効にすると、専用モデルが検索結果の関連度やグラフの関係を裏づける証拠の有無などを判定します。
 既定では無効です。ローカルで使う場合のモデルは Liquid `d1-2B` です。[判定モデルとバックエンドの一覧](decisions.md)
 
-## インストールのコマンド例
-最初に [`uv`](https://docs.astral.sh/uv/getting-started/installation/) をインストールします。どのエージェントも、バージョンを固定した同じローカルの実行環境を呼び出すので、エージェントごとの Python 環境は要りません。
+## 事前準備
 
+エージェントがコマンドを実行する環境に、Git と [uv](https://docs.astral.sh/uv/getting-started/installation/)、Python 3.12 以上を用意します。初期化は `python` を直接呼び出すので、次のコマンドで確認します。
+
+```text
+git --version
+uv --version
+python --version
+```
+
+uv 経由の同梱スクリプトには Python 3.12〜3.14 を使います。この範囲の Python が見つからなければ、uv が取得します。依存パッケージも uv が用意します。Windows で Claude デスクトップアプリの Code タブを使う場合は、[HTML マニュアルの目次](html/index.html)から「Code タブに wiki を入れる」を開いてください。
+
+## インストールのコマンド例
 
 ### Claude Code CLI
 
-Claude Code には、プラグイン一式（スキルとスラッシュコマンド）が入ります。マーケットプレイスは [to884/info-hive-marketplace](https://github.com/to884/info-hive-marketplace) にあります。
+Claude Code には、スキル、MCP サーバー、スラッシュコマンドが入ります。マーケットプレイスは [to884/info-hive-marketplace](https://github.com/to884/info-hive-marketplace) にあります。
 
 ```bash
 /plugin marketplace add to884/info-hive-marketplace
 /plugin install wiki@info-hive
 ```
 
+#### プラグインを HTTPS で取得する
+
+Claude Code が SSH で GitHub に接続できない場合は、環境変数 `CLAUDE_CODE_PLUGIN_PREFER_HTTPS` を `1` に設定して起動します。公開リポジトリを HTTPS で取得する場合、GitHub の認証情報は不要です。
+
+PowerShell では次を実行します。
+
+```powershell
+$env:CLAUDE_CODE_PLUGIN_PREFER_HTTPS = '1'
+claude
+```
+
+macOS・Linux のターミナルでは次を実行します。
+
+```bash
+CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1 claude
+```
+
+起動した Claude Code のチャットで、マーケットプレイスの追加とプラグインのインストールを実行します。マーケットプレイスがすでに追加されていれば、プラグインのインストールから再試行できます。
+
 ### Codex CLI
 
-Codex CLI と [`uv`](https://docs.astral.sh/uv/getting-started/installation/) が使えるターミナルで次を実行します。スキルと MCP サーバーをまとめて導入できます（Codex CLI 0.166.0 で確認）。
+事前準備を済ませ、Codex CLI が使えるターミナルで次を実行します。スキルと MCP サーバーをまとめて導入できます（Codex CLI 0.166.0 で確認）。
 
 ```bash
 codex plugin marketplace add to884/info-hive-marketplace
@@ -75,7 +104,7 @@ codex plugin add wiki@info-hive-dev
 
 ### Codex のスキル単体とその他のエージェント
 
-**Codex のスキルだけを使う場合、および Cursor、Gemini CLI、OpenCode、OpenClaw、Pi** では、`skills` CLI でスキルをインストールします。対応表の `--agent` の値に置き換えて使います。スキルだけの場合は、MCP の自動登録とプラグインの `commands/` は含まれません。同梱の CLI とリファレンスを使い、Codex の呼び出し名は `$info-hive` になります。
+**Codex のスキルだけを使う場合、および Cursor、Gemini CLI、OpenCode、OpenClaw、Pi** では、Node.js と `skills` CLI を使ってスキルをインストールします。対応表の `--agent` の値に置き換えて使います。スキルだけの場合は、MCP の自動登録とプラグインの `commands/` は含まれません。同梱の CLI とリファレンスを使い、Codex の呼び出し名は `$info-hive` になります。
 
 ```bash
 npx skills add to884/info-hive-wiki -a codex -g
