@@ -27,7 +27,7 @@ import string
 import sys
 import threading
 import urllib.parse
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from itertools import chain
 from pathlib import PurePath, PurePosixPath
@@ -51,7 +51,7 @@ except (ImportError, SystemExit):
     wiki_graph_extract = None
 
 PROTOCOL_VERSION = 2   # 探しやすさの設計の 2.3、6（nav.js の形とグループの並びが変わった）
-CORE_VERSION = "browse-core-9"   # 9: 索引の絞り込みに保存用の識別子を付ける。
+CORE_VERSION = "browse-core-10"   # 10: 左の木をすべてのタグで分類する。
 NAME_LIMIT = 200
 # frame-src 'self' は、figures.js が作る Mermaid の図の枠のため（図の描画の設計の 7.3）
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src 'self'; "
@@ -848,21 +848,13 @@ def _check_tree(top: list) -> None:
         raise NavInvariantError("グループの ID が重なる")
     if not all(GROUP_ID_RE.match(i) for i in ids):
         raise NavInvariantError("グループの ID の形が違う")
-    # タグでまとめる設計の 2.4: ページの項目を持つのはタグのグループだけで、タグのグループは子を持たず、
-    # 同じ親の下のタグのグループどうしは、同じページを持たない
+    # ページの項目を持つのはタグのグループだけで、タグのグループは子を持たない
     for g in _walk(top):
         is_tag = bool(TAG_GROUP_ID_RE.match(g["id"]))
         if is_tag and (g["children"] or any(it["state"] != "resolved" for it in g["items"])):
             raise NavInvariantError("タグのグループが、子のグループかページでない項目を持つ")
         if not is_tag and any(it["state"] == "resolved" for it in g["items"]):
             raise NavInvariantError("タグのグループでないグループが、ページの項目を持つ")
-        seen = set()
-        for ch in g["children"]:
-            if TAG_GROUP_ID_RE.match(ch["id"]):
-                pids = {it["id"] for it in ch["items"] if it["state"] == "resolved"}
-                if pids & seen:
-                    raise NavInvariantError("同じページが、同じ親の 2 つのタグのグループに入っている")
-                seen |= pids
     shown = set(ids)
     titles = {g["id"]: g["title"] for g in _walk(top)}
     for g in _walk(top):
@@ -1603,38 +1595,53 @@ class Core:
         """木の 3 つ目の段 N9（タグでまとめる設計の 2 節）。
 
         ページの項目を自分の項目に持つグループのすべてで、ページの項目をタグごとの子のグループに移す。
-        wiki のページは最初のタグ、raw は raw というタグを除いた最初のタグを使う。
+        wiki のページはすべてのタグ、raw は分類に使えるすべてのタグを使う。
+        同じタグが複数回出ても、索引の元の項目を一度ずつ入れる。
         該当する値がなければ「タグなし」にする。
-        ページでない項目は元のグループに残す。タグのグループは、
-        元のグループの項目の並びでタグが初めて現れた順に、元の子のグループより前に並べ、「タグなし」を最後に置く。
-        ID は `_gt` と、木を深さ優先でたどって（親、子の順）作った順の番号で、タグの文字を入れない。
+        グループの順は、先頭タグとして現れた順、残りのタグが現れた順、「タグなし」の順とする。
+        従来のグループ ID を保つため、先頭タグだけで分類した場合にできるグループから番号を振る。
+        新旧それぞれの番号は、木を親から子へ深さ優先でたどる順に振る。
         """
-        before = {g["id"]: [it["id"] for it in g["items"] if it["state"] == "resolved"] for g in _walk(top)}
+        before = {g["id"]: Counter(it["id"] for it in g["items"] if it["state"] == "resolved") for g in _walk(top)}
         listed = _page_ids(top)
         group_tags = {}
-        counter = [0]
+        primary_groups = []
+        additional_groups = []
 
-        def tag_of(pid):
+        def tags_of(pid):
             if pid not in group_tags:
                 tags = self.page_tags(pid)
                 if self.page(pid)["kind"] == "raw":
                     tags = self._raw_classification_tags(tags)
-                group_tags[pid] = tags[0] if tags else None
+                group_tags[pid] = tuple(dict.fromkeys(tags)) if tags else (None,)
             return group_tags[pid]
 
         def apply(g):
             original_children = g["children"]
             pages = [it for it in g["items"] if it["state"] == "resolved"]
             if pages:
-                buckets = {}           # 分類に使うタグ（なければ None）-> 項目。dict は入れた順を保つ
+                buckets = {}
+                primary_tags = {}
                 for it in pages:
-                    buckets.setdefault(tag_of(it["id"]), []).append(it)
-                keys = [k for k in buckets if k is not None] + ([None] if None in buckets else [])
+                    first, *others = tags_of(it["id"])
+                    primary_tags[first] = None
+                    buckets.setdefault(first, []).append(it)
+                    for tag in others:
+                        buckets.setdefault(tag, []).append(dict(it, secondary_tag=True))
+
+                keys = [tag for tag in primary_tags if tag is not None]
+                keys.extend(tag for tag in buckets if tag not in primary_tags)
+                if None in buckets:
+                    keys.append(None)
                 made = []
-                for k in keys:
-                    counter[0] += 1
-                    made.append({"id": f"_gt{counter[0]}", "title": NO_TAG_LABEL if k is None else k,
-                                 "summary": "", "origin": "tag", "items": buckets[k], "children": []})
+                for tag in keys:
+                    group = {"title": NO_TAG_LABEL if tag is None else tag, "tag": tag,
+                             "summary": "", "origin": "tag", "items": buckets[tag], "children": []}
+                    made.append(group)
+                    if tag in primary_tags:
+                        primary_groups.append(group)
+                    else:
+                        additional_groups.append(group)
                 g["items"] = [it for it in g["items"] if it["state"] != "resolved"]
                 g["children"] = made + original_children
             for ch in original_children:
@@ -1642,24 +1649,23 @@ class Core:
 
         for g in top:
             apply(g)
+        for number, group in enumerate(primary_groups + additional_groups, 1):
+            group["id"] = f"_gt{number}"
         # 2.4 の性質のうち、N9 の前の木と比べるもの。形だけで決まるものは _check_tree() が確かめる
         if _page_ids(top) != listed:
             raise NavInvariantError("3 つ目の段で、木に載ったページが変わった")
         by_id = {g["id"]: g for g in _walk(top)}
-        for gid, pids in before.items():
-            # ページ -> そのページを持つタグのグループの名前の並び。ページ数に比例する時間で数える
-            holders = defaultdict(list)
-            for ch in by_id[gid]["children"]:
-                if ch.get("origin") == "tag":
-                    for pid in {it["id"] for it in ch["items"] if it["state"] == "resolved"}:
-                        holders[pid].append(ch["title"])
-            for pid in set(pids):
-                if holders.get(pid) != [tag_of(pid) or NO_TAG_LABEL]:
-                    raise NavInvariantError("ページが、該当するタグのグループのちょうど 1 つに入っていない")
+        for gid, page_counts in before.items():
+            expected = {(pid, tag, index > 0): count for pid, count in page_counts.items()
+                        for index, tag in enumerate(tags_of(pid))}
+            actual = Counter((it["id"], ch["tag"], it.get("secondary_tag", False))
+                             for ch in by_id[gid]["children"] if ch.get("origin") == "tag" for it in ch["items"])
+            if actual != expected:
+                raise NavInvariantError("ページのタグのグループか、先頭タグの印が一致しない")
 
     def _page_listing(self) -> None:
         """索引のページの一覧と検索の索引に使う、ページごとの並び、グループ、階層、索引の行の要約（4.1、4.2）。"""
-        self.page_order = []          # 索引の順（木を深さ優先でたどり、ページが最初に現れた順）
+        self.page_order = []          # 索引の順（先頭タグのグループで最初に現れた順）
         self.page_groups = {}         # ページ -> そのページを項目に持つグループと祖先のグループの ID
         self.page_path = {}           # ページ -> 最初に現れたグループの階層（名前のないグループは飛ばす）
         self.index_summary = {}       # ページ -> 索引の行の要約（4.2 の 2）
@@ -1672,11 +1678,12 @@ class Core:
             for it in g["items"]:
                 if it["state"] == "resolved":
                     pid = it["id"]
-                    if pid not in self.page_groups:
+                    self.page_groups.setdefault(pid, set()).update(x["id"] for x in trail)
+                    if it.get("secondary_tag"):
+                        continue
+                    if pid not in self.page_path:
                         self.page_order.append(pid)
                         self.page_path[pid] = [x["title"] for x in trail if x["title"]]
-                        self.page_groups[pid] = set()
-                    self.page_groups[pid].update(x["id"] for x in trail)
                     if pid not in self.index_summary and it.get("after"):
                         self.index_summary[pid] = it["after"]
                 elif it["state"] in ("unresolved", "ambiguous", "refused"):
@@ -2244,6 +2251,8 @@ class Core:
                     if it["state"] == "resolved":
                         item["id"] = it["id"]
                         item["path"] = self.out_name[it["id"]]
+                        if it.get("secondary_tag"):
+                            item["secondary_tag"] = True
                         if it.get("anchor"):
                             item["anchor"] = it["anchor"]
                     elif it["state"] == "group":
