@@ -201,6 +201,8 @@ raw（`raw/<スラッグ>.md`）は、frontmatter（`page-conventions.md` の「
 
 YouTube の動画の URL は、動画の字幕を原本にする取り込みである。手順は `commands/ingest.md` の V1〜V10 にあり、スクリプトとモデルが次のように分担する（info-hive-dev の ADR-0027）。Web ページの経路（`wiki_fetch.py`）は YouTube の URL を、リダイレクトの先も含めて、本文を読む前に拒む（終了コード 4）。
 
+`uv run --script` は yt-dlp と対応する EJS を導入する。Windows x64、macOS の Intel と Apple Silicon、Linux の x64 と ARM64（glibc 2.27 以上）では Deno も導入する。自動導入の対象外の OS や CPU では、yt-dlp は `PATH` 上の Deno を使う。
+
 | 担当 | 受け持ち |
 | --- | --- |
 | `wiki_youtube.py` | 固定した yt-dlp でメタデータと字幕（json3）を取る。トラックの種類の判定と選択（`inspect`）、raw の生成と、重ねて書かない形での書き込みと読み取り専用（`write`）、用意したページの照合（`verify`）、定義の行の書き方（`define`） |

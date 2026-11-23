@@ -13,6 +13,16 @@
 - OCR の信頼度や別の読みとの食い違いで印が付いたページを、要約の前にユーザーが確認する手順を追加した（ADR-0025）。`ocr_page_detail` で該当する行と読みの候補を示し、ユーザーが選んだ「そのまま使う」「直す」「却下する」を `decide_ocr_pages` で送る。エージェントが作った訂正案はユーザーの承認後に送る。「あとで」を選んだページや返答のないページは確認待ちのまま残す。確認結果を索引に反映してから要約を書き、確認待ちのページの本文は要約に使わない。
 - rag のジョブが再試行時も登録時の設定で動くことを手順に明記した。設定が原因で失敗したときは、`configure` で設定を変えてから `register_pdf` で登録し直す。
 
+## [0.43.1] - 2026-11-22
+
+### 修正
+
+- YouTube の字幕取り込みで、yt-dlp に対応する EJS と、配布対象の環境では Deno を uv が自動で導入する。
+
+### 追加
+
+- 利用者向けガイドに、wiki の操作ごとのモデルの選び方を追加した。
+
 ## [0.43.0] - 2026-11-22
 
 ### 追加
@@ -1037,7 +1047,9 @@ Web ページの取得（`wiki_fetch.py`）が、Medium の記事の図とコー
 [0.2.0]: https://github.com/to884/info-hive-wiki/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/to884/info-hive-wiki/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.1.0
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.42.0...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.43.1...HEAD
+[0.43.1]: https://github.com/to884/info-hive-wiki/releases/tag/v0.43.1
+[0.43.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.43.0
 [0.42.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.42.0
 [0.41.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.41.0
 [0.40.3]: https://github.com/to884/info-hive-wiki/releases/tag/v0.40.3
