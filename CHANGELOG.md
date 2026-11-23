@@ -13,6 +13,13 @@
 - OCR の信頼度や別の読みとの食い違いで印が付いたページを、要約の前にユーザーが確認する手順を追加した（ADR-0025）。`ocr_page_detail` で該当する行と読みの候補を示し、ユーザーが選んだ「そのまま使う」「直す」「却下する」を `decide_ocr_pages` で送る。エージェントが作った訂正案はユーザーの承認後に送る。「あとで」を選んだページや返答のないページは確認待ちのまま残す。確認結果を索引に反映してから要約を書き、確認待ちのページの本文は要約に使わない。
 - rag のジョブが再試行時も登録時の設定で動くことを手順に明記した。設定が原因で失敗したときは、`configure` で設定を変えてから `register_pdf` で登録し直す。
 
+## [0.43.2] - 2026-11-23
+
+### 修正
+
+- 導入ガイドの Codex プラグイン、Python の前提条件、導入確認、MCP の登録と証明書設定を現行の手順にそろえた。
+- URL 取り込みで使う Playwright の準備手順を追加した。
+
 ## [0.43.1] - 2026-11-22
 
 ### 修正
@@ -1047,7 +1054,8 @@ Web ページの取得（`wiki_fetch.py`）が、Medium の記事の図とコー
 [0.2.0]: https://github.com/to884/info-hive-wiki/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/to884/info-hive-wiki/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.1.0
-[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.43.1...HEAD
+[Unreleased]: https://github.com/to884/info-hive-wiki/compare/v0.43.2...HEAD
+[0.43.2]: https://github.com/to884/info-hive-wiki/releases/tag/v0.43.2
 [0.43.1]: https://github.com/to884/info-hive-wiki/releases/tag/v0.43.1
 [0.43.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.43.0
 [0.42.0]: https://github.com/to884/info-hive-wiki/releases/tag/v0.42.0
