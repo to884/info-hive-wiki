@@ -1998,11 +1998,17 @@ class Core:
             return ""
         lis = []
         for d in items:
-            parts = [d["kind"]]
+            parts = [html.escape(d["kind"])]
+            pid = d.get("page")
+            if (d["kind"] == "overview_stale" and pid in self.overviews
+                    and self.overviews[pid][1].state == "stale"):
+                href = html.escape(rel_href(path, self.out_name[pid]))
+                title = self.title(pid).strip() or pid
+                parts.append(f'<a href="{href}">{html.escape(title)}</a>')
             for key in ("target", "path", "link_kind", "reason", "output", "node_id", "predicate", "object", "source", "source_page"):
                 if d.get(key):
-                    parts.append(f"{key}: {d[key]}")
-            lis.append(f"<li>{html.escape(' / '.join(map(str, parts)))}</li>")
+                    parts.append(html.escape(f"{key}: {d[key]}"))
+            lis.append(f"<li>{' / '.join(parts)}</li>")
         return (f'<section id="_diagnostics">{self._section_head("診断")}'
                 f'<ul class="diag-list">{"".join(lis)}</ul></section>\n')
 
