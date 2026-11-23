@@ -583,6 +583,8 @@ def protect_drafts(guard, plan, drafts, *, view=None):
 
 
 def calculate_view(guard, plan, drafts, *, apply=False):
+    from wiki_apply import require_semantic_format1
+    require_semantic_format1(guard)
     changes = dict(drafts)
     log_entries = []
     for name, (before, _) in drafts.items():

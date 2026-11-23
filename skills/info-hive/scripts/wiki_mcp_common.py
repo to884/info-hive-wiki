@@ -51,6 +51,7 @@ SERVER_FILES = ("wiki_mcp_common.py", "wiki_mcp_server.py", "wiki_index.py", "wi
                 "wiki_overview.py", "wiki_links.py", "wiki_raw.py", "wiki_decide.py", "wiki_captions.py", "wiki_browse_core.py", "wiki_browse_fs.py",
                 "wiki_fetch.py", "wiki_rawcheck.py", "wiki_youtube_url.py", "wiki_fsguard.py", "wiki_raw_roots.py",
                 "wiki_apply.py", "wiki_live_apply.py", "wiki_public_save.py", "wiki_public_projection.py",
+                "wiki_semantic_format.py", "wiki_semantic_model.py",
                 "wiki_live_return.py", "wiki_republish.py",
                 "wiki_restore.py", "wiki_restore_content.py", "wiki_restore_raw.py")
 COLLECTION_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")

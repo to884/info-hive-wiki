@@ -371,6 +371,9 @@ def publication_page(publication, page):
 
 
 def build_plan(wiki, source, *, plan_id=None, base: Publication | None = None, live_base=None):
+    require_semantic_format1(WriteGuard(source, strict_root=True))
+    if base is not None:
+        require_semantic_format1(WriteGuard(base.root, strict_root=True))
     wiki = Path(wiki).absolute()
     if base is not None and base.wiki != wiki:
         raise PublicationError("別の wiki の版を基準にできません")
@@ -404,6 +407,14 @@ def writing_area(wiki):
                  area / "quarantine"):
         guard.ensure_directory(path)
     return guard, area
+
+
+def require_semantic_format1(guard):
+    from wiki_semantic_format import require_format1
+    try:
+        require_format1(guard)
+    except ValueError as error:
+        raise Conflict(str(error)) from error
 
 
 def receipt(guard, area, plan_id):
@@ -919,6 +930,9 @@ def apply_plan(wiki, source, plan, expect_sha256, *, checkpoint=lambda _: None, 
     checkpoint("after_initial_check")
 
     source_guard = WriteGuard(source, strict_root=True)
+    require_semantic_format1(source_guard)
+    if active:
+        require_semantic_format1(WriteGuard(area / "releases" / active[0] / "wiki", strict_root=True))
     mark = uuid.uuid4().hex
     stage = area / "staging" / mark
     guard.ensure_directory(stage / "wiki")
@@ -958,6 +972,9 @@ def apply_plan(wiki, source, plan, expect_sha256, *, checkpoint=lambda _: None, 
             if digest(read(guard, stage / "manifest.json")) != release_id:
                 raise PublicationError("試行のマニフェストの指紋が一致しません")
             verify_payload(guard, stage / "wiki", files)
+            require_semantic_format1(WriteGuard(stage / "wiki", strict_root=True))
+            if active:
+                require_semantic_format1(WriteGuard(area / "releases" / active[0] / "wiki", strict_root=True))
             if active and "plan_sha256" not in active[1] and not marker_present(guard):
                 old_receipt = expected_receipt(guard, area, *active)
                 if read_completion(guard, area / HEAD) is None:
