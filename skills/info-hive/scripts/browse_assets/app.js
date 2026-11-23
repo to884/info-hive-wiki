@@ -1,8 +1,8 @@
 /* wiki の閲覧（browse）の画面。classic なスクリプトだけを使い、fetch、ES モジュール、Web Worker を使わない。
    ページの HTML には本文、メタ欄、被リンク、関係表、診断、索引の一覧が描いてあるので、このスクリプトは
-   ナビゲーションの木、検索、索引の一覧の絞り込み、配色の切り替えを組み立て、データの世代を確かめるだけである。
-   要素を作るほかに変えるのは、class、hidden、open、aria-* と、<html> の data-theme（theme.js を通す）だけで、
-   要素の style には触らない。部品のマークアップは Fluent 2 の設計（docs/plans/wiki-browse-fluent2-2026-11-14.md）の
+   ナビゲーションの木、検索、索引の一覧の絞り込み、配色の切り替え、記事の画像の拡大表示を組み立て、データの世代を確かめる。
+   要素の style には触らない。記事の図のボタンと拡大用の dialog が変更する要素と属性は ADR-0030 に記す。
+   部品のマークアップは Fluent 2 の設計（docs/plans/wiki-browse-fluent2-2026-11-14.md）の
    4 節、ふるまいは探しやすさの設計（docs/plans/wiki-browse-findability-2026-11-13.md）の 3〜5 節による。 */
 (function () {
   "use strict";
@@ -52,6 +52,72 @@
     svg.appendChild(p);
     return svg;
   }
+
+  /* --- 記事の画像の拡大表示 --- */
+  function initImagePreview() {
+    var body = document.querySelector("#_article #_body");
+    var dialog = el("dialog", "fui-DialogSurface wiki-image-preview");
+    if (!body || !dialog.showModal) { return; }
+
+    dialog.setAttribute("aria-label", "画像の拡大表示");
+    var close = el("button", "fui-Button wiki-image-preview-close", "閉じる");
+    close.type = "button";
+    close.autofocus = true;
+    var preview = el("img", "wiki-image-preview-img");
+    dialog.append(close, preview);
+
+    close.addEventListener("click", function () { dialog.close(); });
+    function onBackdrop(ev) {
+      if (ev.target !== dialog) { return false; }
+      var bounds = dialog.getBoundingClientRect();
+      return ev.clientX < bounds.left || ev.clientX >= bounds.right ||
+             ev.clientY < bounds.top || ev.clientY >= bounds.bottom;
+    }
+    var backdropPressed = false;
+    dialog.addEventListener("pointerdown", function (ev) { backdropPressed = onBackdrop(ev); });
+    dialog.addEventListener("click", function (ev) {
+      if (backdropPressed && onBackdrop(ev)) { dialog.close(); }
+      backdropPressed = false;
+    });
+    dialog.addEventListener("close", function () {
+      if (!dialog.open) { preview.removeAttribute("src"); }
+    });
+
+    var selector = ".wiki-fig > img";
+    function addTrigger(img) {
+      if (!img.complete || !img.naturalWidth || img.closest("a")) { return; }
+      var figure = img.parentElement;
+      var trigger = el("button", "wiki-image-trigger");
+      trigger.type = "button";
+      trigger.setAttribute("aria-haspopup", "dialog");
+      trigger.setAttribute("aria-label", (img.alt.trim() || "画像") + "を拡大");
+      var imageTheme = img.getAttribute("data-fig-theme");
+      if (imageTheme) { trigger.setAttribute("data-fig-theme", imageTheme); }
+      figure.insertBefore(trigger, img);
+      trigger.appendChild(img);
+      trigger.addEventListener("click", function () {
+        if (dialog.open || !img.complete || !img.naturalWidth) { return; }
+        var theme = imageTheme || figure.getAttribute("data-theme");
+        if (theme) { dialog.setAttribute("data-theme", theme); }
+        else { dialog.removeAttribute("data-theme"); }
+        // SVG は拡大時も img として扱う。元の URL へは移動しない。
+        preview.alt = img.alt;
+        preview.src = img.currentSrc || img.src;
+        if (!dialog.isConnected) { document.body.appendChild(dialog); }
+        // ポインター操作でボタンにフォーカスしないブラウザーでも、閉じたときの復帰先を決める。
+        trigger.focus({ preventScroll: true });
+        backdropPressed = false;
+        dialog.showModal();
+      });
+    }
+
+    // サーバー版の Mermaid は後から画像を作る。ボタンで包んだあとも、figures.js は保持する img を使って描き直す。
+    body.addEventListener("load", function (ev) {
+      if (ev.target.matches(selector)) { addTrigger(ev.target); }
+    }, true);
+    body.querySelectorAll(selector).forEach(addTrigger);
+  }
+  initImagePreview();
 
   // ページの先頭の知らせ（Fluent の MessageBar）。cls は notice-updated、notice-error など、試験が使う印
   var noticeCount = 0;

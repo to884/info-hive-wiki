@@ -6,6 +6,10 @@
 
 ## [Unreleased]
 
+### 追加
+
+- `/wiki:browse` の記事で、画像をクリックして拡大できる。拡大表示は Esc、閉じるボタン、ダイアログの外側のクリックで閉じられる。
+
 ### 変更
 
 - rag 0.6.0 以降で PDF を取り込むときは、`job_status` の `result.page_report` から、判定が `text` 以外のページ、確かめるべきページ、OCR したページ、OCR の結果が空のページを伝える（ADR-0025）。範囲の数が 200 を超える一覧は `page_report_from` で続きを取る。今の OCR 設定は `status` の `settings` で確認する。`page_report` を返さない rag 0.5 以前では、これまでどおり `wiki_pdf.py --json` でページを判定する。
