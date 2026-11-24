@@ -8,8 +8,11 @@
 #   "usearch==2.26.6",
 #   "tantivy==0.27.0",
 #   "fastembed==0.8.0",
+#   "huggingface-hub==1.33.0",
+#   "hf-xet==1.8.0",
 #   "onnxruntime==1.31.1",
 #   "pyyaml==6.0.3",
+#   "truststore==0.10.5",
 # ]
 # ///
 """wiki の MCP サーバー（ADR-0012）。127.0.0.1 で待ち受ける streamable HTTP のサーバーで、応答は JSON にする。
@@ -555,6 +558,16 @@ def build_app(state: State, token: str, port: int):
     return Guard(mcp.streamable_http_app(), token, port, state.activity)
 
 
+def configure_model_tls() -> None:
+    # Hub の import 前に、指定された CA でモデル本体も検証できる HTTPS 経路を選ぶ。
+    if os.environ.get("SSL_CERT_FILE") or os.environ.get("SSL_CERT_DIR"):
+        os.environ["HF_HUB_DISABLE_XET"] = "1"
+        return
+    import truststore
+
+    truststore.inject_into_ssl()
+
+
 def main():
     parser = argparse.ArgumentParser(description="wiki の MCP サーバー（ふつうは中継が起動する）")
     parser.add_argument("--idle", type=float, default=None, help="要求がなくなってから止まるまでの秒数")
@@ -566,6 +579,7 @@ def main():
     common.require_env(common.SERVER_MODULES)
     if args.check_imports:
         return
+    configure_model_tls()
     idle = args.idle if args.idle else common.idle_seconds()
     import uvicorn
 
