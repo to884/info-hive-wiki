@@ -160,7 +160,7 @@ CLI の埋め込み検索は、MCP のサーバーとは別のモデル（multil
 
 - サーバーが起動しない: `logs/server.log` を見る。`uv run --script "<skill-root>/scripts/wiki_mcp_launch.py" --ensure` を実行すると、サーバーを確かめ（なければ起動し）、トークンを除いた `server.json` の中身を表示する。
 - 社内ネットワークで起動しない（`logs/launch.log` か uv の出力に `invalid peer certificate` や `UnknownIssuer` がある）: TLS を検査するプロキシの CA を uv が信頼していない。入口と中継は `UV_SYSTEM_CERTS=true`（古い uv では `UV_NATIVE_TLS=true`）で 1 回だけやり直すが、CLI の `uv run --script` はやり直さない。ユーザーに、環境変数 `UV_SYSTEM_CERTS=true` か、uv の `uv.toml` の `system-certs = true` を設定してもらい、ホストを起動し直す。Windows での設定は[組織の証明書を使う手順](#windows-で組織の証明書を使う)を参照。その場で CLI を動かすときは、`uv run --system-certs --script ...` のように `--system-certs`（古い uv では `--native-tls`）を付ける。
-- wiki 0.46.2 以前で「接続済み」と表示されてもツールが出ず、`tools/list` が `127.0.0.1` 宛の HTTP 403 で失敗する場合は、プロキシの除外設定を確かめる。ホストが中継に渡す `NO_PROXY` と `no_proxy` に `127.0.0.1,localhost` を追加し、ホストを起動し直す。修正版の中継はローカルサーバーに直接接続する。
+- wiki 0.46.5 以前で「接続済み」と表示されてもツールが出ず、`tools/list` が `127.0.0.1` 宛の HTTP 403 で失敗する場合は、プロキシの除外設定を確かめる。ホストが中継に渡す `NO_PROXY` と `no_proxy` に `127.0.0.1,localhost` を追加し、ホストを起動し直す。修正版の中継はローカルサーバーに直接接続する。
 - プラグインを更新した: 中継は `server.json` のコードの版を見て、古いサーバーを止めて起動し直す。
 - 「初期化された wiki ではない」のエラーになる: `wiki` に渡したディレクトリに `SCHEMA.md` がない。wiki の場所が正しいかを確かめ、正しければ `/wiki:init` で初期化する。CLI も同じ判定で止まる。
 - uv の環境が壊れた（`Failed to read metadata from installed package` のような uv のエラーが出る）: 次の 2 つを実行して入れ直す。入口とサーバーは、起動のたびに同じことを自動で試す。
