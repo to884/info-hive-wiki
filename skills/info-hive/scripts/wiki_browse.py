@@ -286,7 +286,7 @@ BUILD_WAIT = 30.0
 RETRY_INTERVAL = 5.0
 RECORD_WAIT = 10.0
 STOP_WAIT = 10.0
-DEFAULT_IDLE = 1800.0
+DEFAULT_IDLE = 7200.0
 
 
 def _quote_path(name: str) -> str:
@@ -1003,7 +1003,8 @@ def _add_server_commands(sub, common_args) -> None:
     s.add_argument("--release-id", help="閲覧する公開版")
     s.add_argument("--page", default=None, help="開くページ（[[slug]] と同じ規則で探す）")
     s.add_argument("--no-open", action="store_true", help="ブラウザで開かない（URL を出すだけ）")
-    s.add_argument("--idle-timeout", type=float, default=DEFAULT_IDLE, help="操作がないときに終わるまでの秒数（既定 1800）")
+    s.add_argument("--idle-timeout", type=float, default=DEFAULT_IDLE,
+                   help=f"操作がないときに終わるまでの秒数（既定 {DEFAULT_IDLE:g}）")
     s.add_argument("--verbose", action="store_true", help="要求の方法、口の種類、状態の番号を標準エラーに出す")
     _add_scope_arguments(s)
     t = sub.add_parser("stop", help="動いているサーバーを止める", parents=[common_args])
