@@ -151,6 +151,22 @@ python --version
 <code>python3</code> だけが使える環境では、Python 3.12 以上を <code>python</code> でも起動できるようにします。
 同じ環境で <a href="#claude-code-cli" class="fui-Link" data-inline>Claude Code CLI</a> または <a href="#codex-cli" class="fui-Link" data-inline>Codex CLI</a> の手順に従ってプラグインを入れます。
 導入後は、Claude Code なら <code>/wiki:help</code>、Codex なら <code>$wiki:info-hive help</code> で操作の一覧が表示されることを確認します。</p>
+<h4 id="wsl-の閲覧-url-を-windows-で開く" class="fui-Body1Strong">WSL の閲覧 URL を Windows で開く</h4>
+<p>WSL 2 の NAT モードでは、Windows 側からの接続に <code>localhostForwarding</code> を使います。
+WSL 内で <code>wslinfo --networking-mode</code> を実行できる環境では、動作中のモードを確認できます。
+Windows の <code>%USERPROFILE%\.wslconfig</code> の <code>[wsl2]</code> に <code>localhostForwarding=false</code> があれば、<code>true</code> に変更します。
+指定がないときの既定値は <code>true</code> です。次は NAT モードで設定を明示する例です。</p>
+<pre><code class="language-ini">[wsl2]
+networkingMode=nat
+localhostForwarding=true
+</code></pre>
+<p>設定を変えた場合は、すべての WSL ディストリビューションで作業を保存し、Windows の PowerShell で <code>wsl --shutdown</code> を実行します。
+<code>wsl --list --running</code> に稼働中のディストリビューションが表示されなくなってから、WSL を起動し直します。
+WSL を起動し直したら、Claude Code で <code>/wiki:browse</code> または Codex で <code>$wiki:info-hive browse</code> を実行します。
+閲覧サーバーはホストとポートを照合するので、表示された <code>http://127.0.0.1:…</code> の URL をそのまま Windows 側のブラウザで開きます。
+Windows 側で開けない場合は、WSL 内にブラウザがあれば、同じ URL を開いて閲覧サーバーが動いていることを確認します。</p>
+<p><code>wsl --version</code> が 3.0.5.0 の環境で、Ubuntu 24.04 から起動した閲覧ページを Windows 版 Edge で表示できることを確認しました。
+<code>mirrored</code> モードでは <code>localhostForwarding</code> は使われません。その構成で閲覧できる場合は、そのまま使えます。<a href="https://learn.microsoft.com/ja-jp/windows/wsl/wsl-config" class="fui-Link" data-inline="">Microsoft Learn の WSL 設定</a></p>
 <h3 id="claude-code-cli" class="fui-Subtitle2">Claude Code CLI</h3>
 <p>Claude Code には、スキル、MCP サーバー、スラッシュコマンドが入ります。マーケットプレイスは <span>to884/info-hive-marketplace</span> にあります。</p>
 <pre><code class="language-bash">/plugin marketplace add to884/info-hive-marketplace
