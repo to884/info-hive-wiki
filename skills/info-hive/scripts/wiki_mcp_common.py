@@ -54,6 +54,7 @@ SERVER_FILES = ("wiki_mcp_common.py", "wiki_mcp_server.py", "wiki_index.py", "wi
                 "wiki_semantic_format.py", "wiki_semantic_model.py",
                 # P3 の形式の遷移の照合。公開の書く段が遅れて読み込む。MCP から意味の書込みは公開しない
                 "wiki_semantic_apply.py", "wiki_semantic_definitions.py", "wiki_semantic_store.py",
+                "wiki_semantic_adopt.py", "wiki_semantic_graph.py", "wiki_semantic_projection.py",
                 "wiki_semantic_migrate.py", "wiki_ossie_contract.py",
                 "wiki_live_return.py", "wiki_republish.py",
                 "wiki_restore.py", "wiki_restore_content.py", "wiki_restore_raw.py")
