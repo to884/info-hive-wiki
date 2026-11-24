@@ -177,9 +177,9 @@ python --version
 既定では Windows 版と WSL 版の CLI は別々の設定を使うため、リポジトリをどちらに置いていても、CLI を動かす環境にインストールします。</p>
 <p>WSL のターミナルで <code>command -v claude</code> または <code>command -v codex</code> を実行し、使う CLI が WSL 側にインストールしたものを指すことを確認します。
 パスが表示されないか、<code>/mnt/c/</code> などにある Windows 版を指す場合は、WSL 側に Linux 版の CLI を用意し、その CLI を使います。</p>
-<p>WSL 側で対象リポジトリのルートに移動し、<a href="agents.html#事前準備" class="fui-Link" data-inline="">事前準備</a> を済ませます。
+<p>WSL 側で対象リポジトリのルートに移動し、<a href="#事前準備" class="fui-Link" data-inline>事前準備</a> を済ませます。
 <code>python3</code> だけが使える環境では、Python 3.12 以上を <code>python</code> でも起動できるようにします。
-同じ環境で <a href="agents.html#claude-code-cli" class="fui-Link" data-inline="">Claude Code CLI</a> または <a href="agents.html#codex-cli" class="fui-Link" data-inline="">Codex CLI</a> の手順に従ってプラグインを入れます。
+同じ環境で <a href="#claude-code-cli" class="fui-Link" data-inline>Claude Code CLI</a> または <a href="#codex-cli" class="fui-Link" data-inline>Codex CLI</a> の手順に従ってプラグインを入れます。
 導入後は、Claude Code なら <code>/wiki:help</code>、Codex なら <code>$wiki:info-hive help</code> で操作の一覧が表示されることを確認します。</p>
 <h4 id="wsl-の閲覧-url-を-windows-で開く" class="fui-Body1Strong">WSL の閲覧 URL を Windows で開く</h4>
 <p>WSL 2 の NAT モードでは、Windows 側からの接続に <code>localhostForwarding</code> を使います。
@@ -196,7 +196,7 @@ WSL を起動し直したら、Claude Code で <code>/wiki:browse</code> また�
 閲覧サーバーはホストとポートを照合するので、表示された <code>http://127.0.0.1:…</code> の URL をそのまま Windows 側のブラウザで開きます。
 Windows 側で開けない場合は、WSL 内にブラウザがあれば、同じ URL を開いて閲覧サーバーが動いていることを確認します。</p>
 <p><code>wsl --version</code> が 3.0.5.0 の環境で、Ubuntu 24.04 から起動した閲覧ページを Windows 版 Edge で表示できることを確認しました。
-<code>mirrored</code> モードでは <code>localhostForwarding</code> は使われません。その構成で閲覧できる場合は、そのまま使えます。<span>Microsoft Learn の WSL 設定</span></p>
+<code>mirrored</code> モードでは <code>localhostForwarding</code> は使われません。その構成で閲覧できる場合は、そのまま使えます。<a href="https://learn.microsoft.com/ja-jp/windows/wsl/wsl-config" class="fui-Link" data-inline="">Microsoft Learn の WSL 設定</a></p>
 <h3 id="claude-code-cli" class="fui-Subtitle2">Claude Code CLI</h3>
 <p>Claude Code には、スキル、MCP サーバー、スラッシュコマンドが入ります。マーケットプレイスは <span>to884/info-hive-marketplace</span> にあります。</p>
 <pre><code class="language-bash">/plugin marketplace add to884/info-hive-marketplace
