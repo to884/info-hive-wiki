@@ -128,10 +128,40 @@
 </table>
 </div>
 <p>表の <code>sonnet</code> は Claude Code のモデル指定名です。候補ページの読み取りでエフォートを選ぶ際に評価したモデルは Claude Sonnet 5.5（<code>claude-sonnet-5-5</code>）です。</p>
-<p>意味検索には、質問と wiki の本文をベクトルに変換する埋め込みモデルを使います。
-MCP サーバーは <code>cl-nagoya/ruri-v3-130m</code>、CLI のハイブリッド検索は既定で <code>intfloat/multilingual-e5-small</code> を使います。<a href="search.html" class="fui-Link" data-inline="">検索と取得</a></p>
 <p>任意の判定レイヤーを有効にすると、専用モデルが検索結果の関連度やグラフの関係を裏づける証拠の有無などを判定します。
 既定では無効です。ローカルで使う場合のモデルは Liquid <code>d1-2B</code> です。<a href="decisions.html" class="fui-Link" data-inline="">判定モデルとバックエンドの一覧</a></p>
+<h3 id="意味検索に使う埋め込みモデル" class="fui-Subtitle2">意味検索に使う埋め込みモデル</h3>
+<p>埋め込みモデルは、質問と本文をそれぞれ数値の列（ベクトル）に変換します。意味検索では、質問のベクトルに近い本文を探すため、質問と資料で使われている言葉が違っても、関連する箇所を見つけられます。回答を書くのは、その箇所を読んだ会話モデルです。</p>
+<div class="table-scroll" role="region" aria-label="表" tabindex="0">
+<table class="fui-Table">
+<thead class="fui-TableHeader">
+<tr class="fui-TableRow">
+<th class="fui-TableHeaderCell" scope="col">何をどこで検索するか</th>
+<th class="fui-TableHeaderCell" scope="col">埋め込みモデル</th>
+<th class="fui-TableHeaderCell" scope="col">設定できること</th>
+</tr>
+</thead>
+<tbody class="fui-TableBody">
+<tr class="fui-TableRow">
+<td class="fui-TableCell">wiki ページを wiki の MCP サーバーで検索</td>
+<td class="fui-TableCell"><code>cl-nagoya/ruri-v3-130m</code>（512 次元）</td>
+<td class="fui-TableCell">サーバーが使うモデルは固定です。質問には <code>検索クエリ: </code>、本文には <code>検索文書: </code> を自動で付けて埋め込みます。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">wiki ページを CLI の <code>wiki_search.py</code> で検索</td>
+<td class="fui-TableCell">既定は <code>intfloat/multilingual-e5-small</code>（384 次元）。<code>intfloat/multilingual-e5-large</code>（1,024 次元）も選べます。</td>
+<td class="fui-TableCell">環境変数 <code>INFO_HIVE_EMBED_MODEL</code> にモデル名を指定します。変更すると次の検索で CLI 用の索引を作り直します。<code>--no-embed</code> を付けると語彙検索（BM25）だけを使います。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell">PDF の本文を Claude Code の <code>rag@info-hive</code> で検索</td>
+<td class="fui-TableCell">既定は <code>cl-nagoya/ruri-v3-130m</code>（512 次元）。同じ Ruri v3 系列の <code>30m</code>（256 次元）、<code>70m</code>（384 次元）、<code>310m</code>（768 次元）も選べます。</td>
+<td class="fui-TableCell"><code>/rag:setup</code> で <code>embedding_model</code> を指定します。たとえば CPU の負荷を抑えたい場合は <code>cl-nagoya/ruri-v3-30m</code> を選べます。</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>rag で埋め込みモデルを変更したら、<code>/rag:status</code> の <code>reingest</code> に載った PDF を取り込み直します。モデルだけを変えた場合は、保存済みの本文と OCR 結果を再利用し、ベクトルと索引を作り直します。
+wiki の CLI で使う E5 の容量と検索精度は、<a href="search.html#埋め込みモデルを切り替える" class="fui-Link" data-inline="">埋め込みモデルを切り替える</a>で比較できます。</p>
 <h2 id="事前準備" class="fui-Subtitle1">事前準備</h2>
 <p>エージェントがコマンドを実行する環境に、Git と <a href="howto-prepare.html#uv" class="fui-Link" data-inline="">uv</a>、Python 3.12 以上を用意します。初期化は <code>python</code> を直接呼び出すので、次のコマンドで確認します。</p>
 <pre><code class="language-text">git --version
