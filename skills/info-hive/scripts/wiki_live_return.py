@@ -68,14 +68,18 @@ def describe(guard, area, raw_root, plan_id, active):
             "plan_id": plan_id, "release_id": active[0], "raw_root": str(raw_root), "before": before, "after": after}
 
 
-def build_plan(wiki, raw_root):
+def build_plan(wiki, raw_root, *, capability=None):
     guard = live.wiki_guard(wiki)
     area = guard.root / publish.AREA
     active = publish.read_active(guard, area)
     publish.check_publication_writer(guard, area)
     if active is None:
         raise publish.Conflict("切り戻す公開版がありません")
-    return describe(guard, area, absolute_user_path(raw_root), uuid.uuid4().hex, active)
+    from wiki_semantic_projection import RETURN_LIVE, cutback_format
+
+    plan_id = uuid.uuid4().hex
+    cutback_format(guard, active, RETURN_LIVE, plan_id, capability)
+    return describe(guard, area, absolute_user_path(raw_root), plan_id, active)
 
 
 def load_plan(guard, plan, checksum):
@@ -314,8 +318,9 @@ def resume(guard, area, checkpoint=lambda _: None, *, expected=None):
     return finish(guard, area, plan, checksum, checkpoint)
 
 
-def apply(wiki, plan, checksum, *, timeout=180, checkpoint=lambda _: None):
+def apply(wiki, plan, checksum, *, timeout=180, checkpoint=lambda _: None, capability=None):
     from wiki_restore import check as check_restore, require_completion
+    from wiki_semantic_projection import RETURN_LIVE, cutback_format
 
     guard, area = publish.writing_area(wiki)
     load_plan(guard, plan, checksum)
@@ -348,6 +353,7 @@ def apply(wiki, plan, checksum, *, timeout=180, checkpoint=lambda _: None):
                         return {**result, "state": "already_returned"}
         if active is None or active[0] != plan["release_id"]:
             raise publish.Conflict("公開版が変わりました。切り戻しの計画を作り直してください")
+        cutback_format(guard, active, RETURN_LIVE, plan["plan_id"], capability)
         if live.load(guard, area / "live-receipts" / f"{plan['plan_id']}.json") is not None:
             raise publish.Conflict("すでに使われているライブ計画 ID です")
         with guard.hold_lock(area / "pending.lock", timeout=timeout):

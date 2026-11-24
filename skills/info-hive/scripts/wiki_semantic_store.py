@@ -101,6 +101,9 @@ def _project(records, manifest):
                 add("previous_id", p["previous_id"], "activation")
         elif r.kind == "entity_revision":
             add("entity_id", p["entity_id"], "entity")
+            if "graph_article_revision_id" in p["display"]:
+                add("display/graph_article_revision_id", p["display"]["graph_article_revision_id"],
+                    kinds={"article_revision"})
             if p["previous_id"] is not None:
                 prev = add("previous_id", p["previous_id"], kinds={"entity_revision"})
                 if prev.payload["entity_id"] != p["entity_id"]:
