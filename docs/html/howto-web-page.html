@@ -39,6 +39,7 @@
       </header>
       <section id="send">
         <h2 class="fui-Subtitle1">ページの URL を渡す</h2>
+        <p>通常は HTTP で本文を取得します。本文が短い場合や HTTP 401/403 が返った場合は Playwright に切り替えます。ブラウザーでの取得に備え、<a class="fui-Link" data-inline href="howto-prepare.html#playwright">Playwright の準備</a>を済ませておきます。ログインが必要なページでは、依頼に「ログインが必要なので、普段のブラウザーで取り込んで」と添えます。</p>
         <ol>
           <li>対象の wiki を開いた Code タブで URL を指定します。<pre><code>/wiki:ingest https://www.iana.org/help/example-domains</code></pre></li>
           <li><code>wiki:web-raw</code> を使う場合は、原本の取得と検査が終わるのを待ちます。</li>
@@ -50,12 +51,13 @@
       <section id="warnings">
         <h2 class="fui-Subtitle1">翻訳や取得の確認を求められた場合</h2>
         <p>翻訳の警告が残る場合は、指摘された箇所と理由を確認します。そのまま取り込むときは、理由をログに残す案を承認します。<code>completed: true</code> が出たら原本の検査は完了です。</p>
-        <p>ブラウザーでの取得には Node.js 20 以上と npm が必要です。接続に使う Chrome または Edge に公式 Playwright 拡張を入れます。Windows では既定のブラウザーが Chrome または Edge なら、そのブラウザーを使います。既定がほかのブラウザーの場合や Windows 以外では、取り込みを依頼するときに Chrome または Edge を指定します。接続画面が出たら、タブを選ばずに「Allow」を押します。wiki が空の接続タブで指定の URL を開いて本文を読み取るので、タブは操作せずに待ちます。</p>
+        <p>ブラウザーで取得するとき、Windows では既定のブラウザーが Chrome または Edge なら、そのブラウザーを使います。既定がほかのブラウザーの場合や Windows 以外では、取り込みを依頼するときに Chrome または Edge を指定します。接続画面が出たら、タブを選ばずに「Allow」を押します。wiki が空の接続タブで指定の URL を開いて本文を読み取るので、タブは操作せずに待ちます。</p>
       </section>
 
       <section id="verify">
         <h2 class="fui-Subtitle1">保存されたファイルを確認する</h2>
         <p>取り込み後は、<code>raw/</code> に原本があり、<code>wiki/sources/</code> にその要約があることを確かめます。取り込みの記録は <code>wiki/log.md</code> に加わります。</p>
+        <p>Playwright で取得した場合は、原本の先頭に <code>fetch_method: playwright</code> と記録されます。</p>
       </section>
 
       <nav class="page-navigation" aria-label="関連ページ">

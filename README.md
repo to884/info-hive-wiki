@@ -6,7 +6,9 @@ Claude Code と Codex では `wiki@info-hive` プラグインとして、ほか�
 
 ## インストール
 
-最初に [`uv`](https://docs.astral.sh/uv/getting-started/installation/) をインストールする。同梱のスクリプト用に、必要な Python と依存パッケージを `uv` が用意する。初回は検索用モデルも取得するため、数分かかることがある。
+エージェントが使う環境で `git --version`、`uv --version`、`python --version` が実行できることを確認する。Python は 3.12 以上が必要。初回は検索用モデルも取得するため、数分かかることがある。[事前準備](docs/agents.md#事前準備)
+
+WSL 版の Claude Code や Codex でプロジェクト wiki を使う場合は、Windows 側に導入済みでも WSL 側に `wiki@info-hive` をインストールする。[WSL での導入手順](docs/agents.md#wsl-でプロジェクト-wiki-を使う)
 
 ### Claude Code
 
@@ -16,6 +18,8 @@ Claude Code のチャットで次を実行する。スキル、MCP サーバー�
 /plugin marketplace add to884/info-hive-marketplace
 /plugin install wiki@info-hive
 ```
+
+GitHub への SSH 接続が失敗する場合は、[プラグインを HTTPS で取得する手順](docs/agents.md#プラグインを-https-で取得する)を参照。
 
 ### Codex
 
@@ -85,10 +89,21 @@ Claude Code と Codex では、`ingest session` で実行中の会話を取り�
 
 ## ドキュメント
 
-手元の [docs/html/index.html](docs/html/index.html) をブラウザーで開くと、図解と目次から使い方を参照できます。
+HTML マニュアルは、ローカル HTTP サーバー経由で開きます。
+手元で `docs/html/` を含むフォルダーに移動し、次のコマンドを実行してください。
+
+```bash
+cd docs/html
+python -m http.server 8000 --bind 127.0.0.1
+```
+
+サーバーを起動したまま、ブラウザーのアドレス欄に `http://127.0.0.1:8000/` と入力すると、図解と目次を表示できます。
+`8000` は例です。別の空いているポートを使う場合は、コマンドと URL の両方に同じ番号を指定してください。
+読み終えたら、サーバーを起動したターミナルで `Ctrl+C` を押して停止します。
 
 | 文書 | 内容 |
 | --- | --- |
+| [はじめに](docs/getting-started.md) | 最初の wiki の作成と資料の取り込み |
 | [エージェント](docs/agents.md) | 対応表、導入方法、エージェントのメモリとの連携 |
 | [LLM モデルと用途](docs/agents.md#llm-モデルと用途) | Web ページの翻訳、候補ページの読み取り、YouTube 字幕の要約に使うモデルと設定 |
 | [コマンド](docs/commands.md) | 操作の一覧、引数、使用例 |

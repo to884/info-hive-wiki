@@ -890,11 +890,26 @@ def _normalize_for_json(value):
     return value
 
 
-OUTPUT_NAMES = ["nodes.jsonl", "edges.jsonl", "graph.sqlite", "graph.graphml"]
+SEMANTIC_REPORT = "semantic-projection.json"
+OUTPUT_NAMES = ["nodes.jsonl", "edges.jsonl", "graph.sqlite", "graph.graphml", SEMANTIC_REPORT]
 FORMAT_OUTPUTS = {"sqlite": ("graph.sqlite",), "jsonl": ("nodes.jsonl", "edges.jsonl"), "graphml": ("graph.graphml",)}
 # 置き換える順序。読み手が開いていて置き換えに失敗しやすい graph.sqlite を最初にする。
 # graph.sqlite の置き換えに失敗したときは、ほかの成果物も前のまま残る。
-PUBLISH_ORDER = ["graph.sqlite", "nodes.jsonl", "edges.jsonl", "graph.graphml"]
+PUBLISH_ORDER = ["graph.sqlite", "nodes.jsonl", "edges.jsonl", "graph.graphml", SEMANTIC_REPORT]
+
+
+def build_graph(guard, pages, ontology, diagnostics=None):
+    from wiki_semantic_format import detect
+
+    nodes, ids, aliases = build_nodes(pages, ontology, diagnostics)
+    edges = build_edges(pages, ids, diagnostics)
+    report = None
+    if detect(guard) == 2:
+        from wiki_semantic_graph import project, read_snapshot
+
+        projected, report = project(guard, read_snapshot(guard), pages, ids)
+        edges.extend(projected)
+    return nodes, aliases, edges, report
 
 
 def _write_lines(file: BinaryIO, rows: list[dict]) -> None:
@@ -921,7 +936,7 @@ def cleanup_outputs(guard: WriteGuard, staged: dict[str, tuple[Path, os.stat_res
 
 
 def stage_outputs(guard: WriteGuard, out_dir: Path, formats: list[str], nodes: list[dict], aliases: list[dict],
-                  edges: list[dict]) -> dict[str, tuple[Path, os.stat_result]]:
+                  edges: list[dict], report=None) -> dict[str, tuple[Path, os.stat_result]]:
     """選んだ形式の成果物をすべて一時ファイルに書き、その場所と実体を返す。
 
     途中で失敗したら、書いた一時ファイルを消して例外を送出する。元の成果物には触れない。
@@ -956,6 +971,9 @@ def stage_outputs(guard: WriteGuard, out_dir: Path, formats: list[str], nodes: l
         if "graphml" in formats:
             with open_temp("graph.graphml") as handle:
                 write_graphml_file(handle, nodes, edges)
+        if report is not None:
+            with open_temp(SEMANTIC_REPORT) as handle:
+                handle.write((json.dumps(report, sort_keys=True, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
     except BaseException as exc:
         cleanup_outputs(guard, staged, exc)
         raise
@@ -983,11 +1001,14 @@ def publish_outputs(guard: WriteGuard, out_dir: Path, staged: dict[str, tuple[Pa
 
 
 def write_outputs(out_dir: Path, formats: list[str], nodes: list[dict], aliases: list[dict],
-                  edges: list[dict], *, guard: WriteGuard | None = None) -> None:
+                  edges: list[dict], *, guard: WriteGuard | None = None, report=None) -> None:
     """成果物を作り直す。すべて書き終えてから置き換えるので、書いている途中で止まっても前の成果物が残る。"""
     guard = guard or WriteGuard(out_dir)
-    check_outputs(guard, out_dir, (name for fmt in formats for name in FORMAT_OUTPUTS[fmt]))
-    publish_outputs(guard, out_dir, stage_outputs(guard, out_dir, formats, nodes, aliases, edges))
+    names = [name for fmt in formats for name in FORMAT_OUTPUTS[fmt]]
+    if report is not None:
+        names.append(SEMANTIC_REPORT)
+    check_outputs(guard, out_dir, names)
+    publish_outputs(guard, out_dir, stage_outputs(guard, out_dir, formats, nodes, aliases, edges, report))
 
 
 def write_jsonl(out_dir: Path, nodes: list[dict], edges: list[dict]) -> None:
@@ -1133,6 +1154,11 @@ def write_graphml_file(path: Path | BinaryIO, nodes: list[dict], edges: list[dic
         ("d_source", "edge", "source", "string"),
         ("d_page", "edge", "page", "string"),
     ]
+    if any(e.get("extraction_method") == "ossie_semantic" for e in edges):
+        keys.extend([
+            ("d_extraction_method", "edge", "extraction_method", "string"),
+            ("d_semantic_metadata", "edge", "semantic_metadata", "string"),
+        ])
     for kid, kfor, kname, ktype in keys:
         k = ET.SubElement(root, f"{{{ns}}}key")
         k.set("id", kid)
@@ -1164,6 +1190,9 @@ def write_graphml_file(path: Path | BinaryIO, nodes: list[dict], edges: list[dic
                 continue
             data = ET.SubElement(edge_el, f"{{{ns}}}data")
             data.set("key", kid)
+            if kname == "semantic_metadata" and e.get("extraction_method") == "ossie_semantic":
+                data.text = _xml_text(_stable_json(e["extras"]))
+                continue
             data.text = _xml_text(e.get(kname) or "")
 
     tree = ET.ElementTree(root)
@@ -1202,7 +1231,7 @@ def live_output_gate(output):
         yield
 
 
-def main():
+def main(*, capability=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("wiki", type=Path, help="wiki のディレクトリ")
     parser.add_argument("--out", type=Path, help="出力ディレクトリ（既定: <wiki>/graph）")
@@ -1221,32 +1250,44 @@ def main():
         print(f"未知の形式: {', '.join(unknown)}。使える形式: {', '.join(DEFAULT_FORMATS)}", file=sys.stderr)
         sys.exit(1)
 
+    from wiki_semantic_graph import standalone_scope
+
+    try:
+        scope = standalone_scope(args.wiki, args.out, args.ontology, capability)
+    except (OSError, ValueError) as exc:
+        print(f"グラフの入力を確かめられなかった: {exc}", file=sys.stderr)
+        sys.exit(1)
+    wiki = scope.source.root if scope else args.wiki
     # オントロジーがなければ、graph/ も生成物も作らずに止まる（lint、query と同じ扱い）。
     try:
-        ontology_path = common.require_ontology(args.wiki, args.ontology)
+        ontology_path = common.require_ontology(wiki, args.ontology)
     except common.GraphLayerDisabled as exc:
         common.report_disabled(exc)
         sys.exit(common.EXIT_GRAPH_DISABLED)
     ontology = load_ontology(ontology_path)
 
-    out_dir = args.out or (args.wiki / "graph")
+    out_dir = scope.output.root if scope else args.out or (wiki / "graph")
 
     # 同じ出力先の extract は 1 つずつ動かす。ロックを取ってからページを読むので、
     # 後から動いた extract の成果物が、先の extract の成果物と混ざらない。
     try:
         with live_output_gate(out_dir):
-            guard = common.output_guard(args.wiki, out_dir)
+            guard = scope.output if scope else common.output_guard(wiki, out_dir)
             with common.extract_lock(out_dir, guard=guard):
                 common.remove_stale_temps(guard, out_dir, OUTPUT_NAMES)
                 try:
-                    pages = collect_pages(args.wiki)
+                    pages = collect_pages(wiki)
                     diagnostics: list[dict] = []
-                    nodes, page_node_ids, aliases = build_nodes(pages, ontology, diagnostics)
-                    edges = build_edges(pages, page_node_ids, diagnostics)
+                    source = scope.source if scope else WriteGuard(wiki)
+                    nodes, aliases, edges, report = build_graph(source, pages, ontology, diagnostics)
+                    if report is not None and scope is None:
+                        raise ValueError("隔離出力先の照合後に、入力の意味保存形式が変わりました")
+                    if scope:
+                        scope.verify()
                 except (OSError, ValueError) as exc:
                     print(f"グラフの入力を処理できなかった: {exc}", file=sys.stderr)
                     sys.exit(1)
-                write_outputs(out_dir, formats, nodes, aliases, edges, guard=guard)
+                write_outputs(out_dir, formats, nodes, aliases, edges, guard=guard, report=report)
     except common.ExtractBusy as exc:
         print(str(exc), file=sys.stderr)
         sys.exit(1)
@@ -1271,6 +1312,8 @@ def main():
             kinds[d["kind"]] += 1
         summary = "、".join(f"{DIAGNOSTIC_LABELS.get(k, k)} {n} 件" for k, n in sorted(kinds.items()))
         print(f"診断: {summary}。wiki_graph_lint.py で確かめる。", file=sys.stderr)
+    if report is not None and report["omitted"]:
+        print(f"投影できない意味の主張 {len(report['omitted'])} 件。{SEMANTIC_REPORT} で確かめる。", file=sys.stderr)
 
 
 if __name__ == "__main__":

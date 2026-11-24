@@ -272,8 +272,7 @@ def live_mode(guard):
             raise Conflict("ライブへの切り戻しが中断しています。recover で完了させてください")
         if read_publication_journal(guard, area) is not None:
             raise Conflict("ライブからの再公開が中断しています。recover で完了させてください")
-        verified_active(guard, area)
-        return
+        return verified_active(guard, area)
     if publication_evidence(guard, area):
         raise Conflict("公開版を使う wiki は公開用の計画から更新してください")
 
@@ -304,10 +303,10 @@ def plan_wiki(plan):
     return guard
 
 
-def begin(wiki, raw_root, name, *, release_id=None, allow_publication=False):
+def begin(wiki, raw_root, name, *, release_id=None, allow_publication=False, capability=None):
     guard = wiki_guard(wiki)
     raw_root = absolute_user_path(raw_root)
-    release = None
+    release = active = None
     if allow_publication:
         from wiki_apply import check_publication_writer, resolve_publication
         try:
@@ -317,14 +316,15 @@ def begin(wiki, raw_root, name, *, release_id=None, allow_publication=False):
         if release is not None:
             check_publication_writer(guard, guard.root / AREA)
         else:
-            live_mode(guard)
+            active = live_mode(guard)
     else:
-        live_mode(guard)
+        active = live_mode(guard)
     restrict_raw(guard, raw_root, view=release)
     parent = work_base()
     existing = next(path for path in (parent, *parent.parents) if os.path.lexists(path))
     anchor = WriteGuard(existing, strict_root=True)
     directory = parent / uuid.uuid4().hex
+    proof = semantic_live_proof(guard, active, directory.name, capability)
     anchor.ensure_directory(directory)
     plan = {"format": 1, "plan_id": directory.name, "name": one_line(name),
             "wiki": str(guard.root), "wiki_identity": list(guard.root_id), "raw_root": str(raw_root),
@@ -332,6 +332,8 @@ def begin(wiki, raw_root, name, *, release_id=None, allow_publication=False):
     if release:
         plan["publication"] = {"release_id": release.release_id, "definition_id": release.definition_id}
         plan["dependencies"] = []
+    if proof is not None:
+        plan["semantic_return_sha256"] = proof
     work = WriteGuard(directory, strict_root=True)
     write(work, directory / "plan.json", encoded(plan))
     return {"apply_dir": str(directory), "plan_id": directory.name,
@@ -568,9 +570,33 @@ def reference_values(references):
     return {name: (ref["href"], ref["title"]) for name, ref in references.items()}
 
 
-def calculate(guard, plan, drafts, *, apply=False):
-    live_mode(guard)
+def semantic_live_proof(guard, active, plan_id, capability):
+    if active is not None:
+        from wiki_semantic_format import detect
+        from wiki_semantic_projection import SAVE_LIVE, cutback_format
+
+        if cutback_format(guard, active, SAVE_LIVE, plan_id, capability) == 2:
+            mode, proof = mode_marker(guard)
+            if mode != "live" or detect(guard) != 2:
+                raise Conflict("切り戻したライブ wiki の意味保存形式が一致しません")
+            return proof
+    return None
+
+
+def check_live_scope(guard, plan, capability):
+    proof = semantic_live_proof(guard, live_mode(guard), plan["plan_id"], capability)
+    if proof != plan.get("semantic_return_sha256"):
+        raise Conflict("下書きを承認した切り戻しの世代が変わりました")
+    if proof is not None:
+        protect_roots(guard, plan["raw_root"], allow_local=False)
+    return proof
+
+
+def calculate(guard, plan, drafts, *, apply=False, capability=None):
+    proof = check_live_scope(guard, plan, capability)
     protect_drafts(guard, plan, drafts)
+    if proof is not None:
+        return calculate_changes(guard, plan, drafts, apply=apply)
     return calculate_view(guard, plan, drafts, apply=apply)
 
 
@@ -583,6 +609,13 @@ def protect_drafts(guard, plan, drafts, *, view=None):
 
 
 def calculate_view(guard, plan, drafts, *, apply=False):
+    from wiki_apply import require_semantic_format1
+    require_semantic_format1(guard)
+    return calculate_changes(guard, plan, drafts, apply=apply)
+
+
+def calculate_changes(guard, plan, drafts, *, apply=False):
+    """形式を照合済みの呼び出し元で、承認済みのページ・索引・ログの差分を計算する。"""
     changes = dict(drafts)
     log_entries = []
     for name, (before, _) in drafts.items():
@@ -609,8 +642,9 @@ def diff_text(changes):
     return "".join(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n"
                    for name, (before, after) in changes.items()
                    for line in difflib.unified_diff((before or b"").decode("utf-8-sig").splitlines(keepends=True),
-                                                    after.decode("utf-8-sig").splitlines(keepends=True),
-                                                    name if before is not None else "/dev/null", name))
+                                                    (after or b"").decode("utf-8-sig").splitlines(keepends=True),
+                                                    name if before is not None else "/dev/null",
+                                                    name if after is not None else "/dev/null"))
 
 
 def pack(data):
@@ -837,9 +871,9 @@ def with_gate(guard, timeout):
     return guard.hold_lock(guard.root / AREA / "apply.lock", timeout=timeout)
 
 
-def preview(work, plan, guard):
+def preview(work, plan, guard, *, capability=None):
     drafts, checksum = snapshot(work, plan)
-    changes, _ = calculate(guard, plan, drafts)
+    changes, _ = calculate(guard, plan, drafts, capability=capability)
     return {"plan_sha256": checksum, "diff": diff_text(changes)}
 
 
@@ -891,14 +925,14 @@ def discard_live_pending(wiki, plan_id, expected, timeout):
     return {"state": "discarded", "plan_id": plan_id, "plan_sha256": expected}
 
 
-def save_pending(guard, plan, checksum, drafts, preview_diff):
+def save_pending(guard, plan, checksum, drafts, preview_diff, *, capability=None):
     path = pending_path(guard, plan["plan_id"], checksum)
     # 同じ承認を待つプロセスが複数あっても、記録は 1 件だけ残す。
     restrict_raw(guard, plan["raw_root"], ((guard.root / name, pair[1]) for name, pair in drafts.items()))
     record = {"plan": plan, "plan_sha256": checksum, "diff": preview_diff,
               "apply_dir": str(work_base() / plan["plan_id"]), "saved_at": time.time()}
     with guard.hold_lock(guard.root / AREA / "pending.lock", timeout=WAIT_SECONDS):
-        live_mode(guard)
+        check_live_scope(guard, plan, capability)
         if pending_discarded(guard, path):
             raise Conflict("この承認済みのライブの保留は取り消されています")
         try:
@@ -910,7 +944,7 @@ def save_pending(guard, plan, checksum, drafts, preview_diff):
         print("pending_alert: 保留の差分が 5 件以上あります", file=sys.stderr)
 
 
-def apply(directory, expected, *, checkpoint=lambda _: None, timeout=WAIT_SECONDS):
+def apply(directory, expected, *, checkpoint=lambda _: None, timeout=WAIT_SECONDS, capability=None):
     checked(expected)
     work = work_directory(directory)
     plan = read_plan(work)
@@ -963,7 +997,7 @@ def apply(directory, expected, *, checkpoint=lambda _: None, timeout=WAIT_SECOND
                     if drafts is None:
                         raise Stuck("確認したライブの完了記録が失われました")
                     generation = len(live_receipts(guard, area)) + 1
-                    changes, entries = calculate(guard, plan, drafts, apply=True)
+                    changes, entries = calculate(guard, plan, drafts, apply=True, capability=capability)
                     if not changes:
                         raise Conflict("適用する差分がありません")
                     result = {"state": "applied", "plan_id": plan["plan_id"], "plan_sha256": expected,
@@ -1006,7 +1040,7 @@ def apply(directory, expected, *, checkpoint=lambda _: None, timeout=WAIT_SECOND
         if time.monotonic() >= deadline:
             if drafts is None:
                 raise Conflict("ライブの完了をロック内で照合できません")
-            save_pending(guard, plan, expected, drafts, preview_diff)
+            save_pending(guard, plan, expected, drafts, preview_diff, capability=capability)
             raise Conflict(f"書き込みを待ちきれず、承認した差分を保留しました: {path}")
         time.sleep(min(0.1, max(0, deadline - time.monotonic())))
 

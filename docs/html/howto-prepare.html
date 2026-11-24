@@ -20,6 +20,7 @@
       <ul>
         <li><a class="fui-Link" data-inline href="#versions">ソフトウェアを確認する</a></li>
         <li><a class="fui-Link" data-inline href="#uv">uv を入れる</a></li>
+        <li><a class="fui-Link" data-inline href="#playwright">URL 取り込みで使う Playwright を準備する</a></li>
         <li><a class="fui-Link" data-inline href="#certificates">組織の証明書を使う</a></li>
       </ul>
     </nav>
@@ -61,6 +62,20 @@ python --version</code></pre>
           <li>新しいターミナルを開きます。</li>
           <li><code>uv --version</code> でバージョンが表示されることを確かめます。</li>
         </ol>
+      </section>
+
+      <section id="playwright">
+        <h2 class="fui-Subtitle1">URL 取り込みで使う Playwright を準備する</h2>
+        <p>普段の Chrome または Edge を使って Playwright で本文を取得する場合の準備です。ログインが必要なページでは、取り込みを依頼するときに「ログインが必要なので、普段のブラウザーで取り込んで」と伝えます。</p>
+        <ol>
+          <li><a class="fui-Link" data-inline href="https://nodejs.org/en/download">Node.js の公式ダウンロードページ</a>から、20 以上の LTS 版を導入します。</li>
+          <li>新しいターミナルで次を実行し、両方の版が表示されることを確かめます。<pre><code>node --version
+npm --version</code></pre></li>
+          <li>取り込みに使う Chrome または Edge のプロファイルで <a class="fui-Link" data-inline href="https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm">Playwright Extension</a> を開き、拡張機能を追加します。Edge で他のストアからの拡張機能について確認が表示されたら、許可して追加します。</li>
+          <li>Node.js を導入する前からエージェントを開いていた場合は、終了して起動し直します。</li>
+        </ol>
+        <p>必要な Playwright のパッケージの取得と起動は、wiki の取り込みスクリプトが行います。初回は npm レジストリに接続します。組織のネットワークで npm の取得に失敗する場合は、npm のプロキシと証明書の設定を管理者に確認します。</p>
+        <p>公開ページを独立したブラウザーで読みたい場合は、「独立した Chromium で取り込んで」と伝えます。この方法では必要な Chromium も wiki が取得します。</p>
       </section>
 
       <section id="certificates">

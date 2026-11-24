@@ -217,6 +217,24 @@ def render(result: dict, command: str) -> str:
     return "\n".join(out)
 
 
+def refuse_live_semantic_graph(wiki):
+    from wiki_apply import AREA, MARKER, read_active
+    from wiki_fsguard import WriteGuard
+    from wiki_semantic_format import detect
+
+    if not (wiki / MARKER).is_file():
+        return
+    guard = WriteGuard(wiki)
+    area = guard.root / AREA
+    # 照会先の解決後に再公開が完了しても、ライブに残ったコピーは使わない。
+    active = read_active(guard, area)
+    if active is not None:
+        release_id, _ = active
+        archive = WriteGuard(area / "releases" / release_id / "wiki", strict_root=True)
+        if detect(archive) == 2:
+            raise QueryError("形式2のライブグラフは照会できません。固定公開版を指定してください")
+
+
 def run_query(wiki: Path, command: str, *, node: str | None = None, subject: str | None = None,
               predicate: str | None = None, start: str | None = None, goal: str | None = None,
               max_depth: int = 6, about: str | None = None, db: Path | None = None,
@@ -236,6 +254,10 @@ def run_query(wiki: Path, command: str, *, node: str | None = None, subject: str
         raise QueryError("公開版の問い合わせでは --db を指定できません")
     if release:
         wiki = release.root
+    else:
+        refuse_live_semantic_graph(wiki)
+        if db is not None:
+            refuse_live_semantic_graph(Path(db).resolve().parent.parent)
     if command not in COMMANDS:
         raise QueryError(f"未知の問い合わせ: {command}。使えるのは {', '.join(COMMANDS)}")
     # グラフのノード ID は NFC で書かれている。macOS のターミナルなどから NFD で渡されても

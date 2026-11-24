@@ -1,0 +1,23 @@
+{
+  "upstream": "https://github.com/apache/ossie",
+  "commit": "83d39d67b9522e479153c552c3ec8594a8144b04",
+  "version": "0.3.0.dev0",
+  "python_minor": "3.12",
+  "files": {
+    "validation/validate.py": "4ae6e64418741e3b1c03c5b77688c2cb39362a1a1c9877a4459c3c1695c26067",
+    "python/src/ossie/_loading.py": "1dc9fedc67ff2a37e5c23a2ab549ae526832c6b5c563f24808b3859b40b3391a",
+    "ontology/ontology.json": "4e4732da74596b03a8ecc10f01fb98c612ce5c75c0e050619b16283c27689923",
+    "ontology/mapping.json": "dfeb28d3be05d1bd0645dfdd42924155c17c3b5ab6ad10ae297e6e8c8f7909bd",
+    "core-spec/ossie-schema.json": "b833534b1da935e373cb75517f8b983dff9d57b399283bac5f78870c928ca1bb"
+  },
+  "dependencies": {
+    "jsonschema": "4.26.0",
+    "PyYAML": "6.0.3",
+    "sqlglot": "30.19.0",
+    "referencing": "0.37.0",
+    "attrs": "26.1.0",
+    "rpds-py": "2026.9.1",
+    "jsonschema-specifications": "2025.9.1",
+    "typing_extensions": "4.16.0"
+  }
+}

@@ -97,6 +97,7 @@
 </ol>
 <p><a class="fui-Link" data-inline href="tutorial-install.html">Windows 11 の導入手順</a>は、VM で確認した構成と操作をもとにしています。</p>
 <p>Codex や Claude Code の CLI を使う場合は、<a class="fui-Link" data-inline href="agents.html#インストールのコマンド例">エージェント別の導入方法</a>を参照できます。</p>
+<p>WSL 版の Claude Code や Codex でプロジェクト wiki を使う場合は、Windows 側に導入済みでも WSL 側に <code>wiki@info-hive</code> をインストールします。<a class="fui-Link" data-inline href="agents.html#wsl-でプロジェクト-wiki-を使う">WSL での導入手順</a></p>
 <h3 id="readme-クイックスタート" class="fui-Subtitle2">クイックスタート</h3>
 <p>プロジェクトをまたいで使える wiki を作ります。まず <code>init</code> を実行し、保存先を確認して初期化します。最初の資料を <code>~/info-hive/raw/your-source.pdf</code> に置いたら、<code>ingest</code> で取り込み、<code>query</code> で質問します。例のパスと質問は、使いたい資料と質問に置き換えてください。</p>
 <h4 id="readme-claude-code" class="fui-Body1Strong">Claude Code</h4>
@@ -134,7 +135,14 @@ $wiki:info-hive query この資料の要点は？
 <p>Claude Code と Codex では、<code>ingest session</code> で実行中の会話を取り込めます。Codex の呼び出し方は <code>$wiki:info-hive ingest session</code>、指定した会話を取り込む場合は <code>$wiki:info-hive ingest session:&lt;ID&gt;</code> です。保存する範囲と伏せ字を確認してから、会話を wiki に取り込みます。</p>
 <p>スキルの改善は任意のワークフローです。移植元の調査では品質の向上は示されていません。<a href="evolution.html#研究上の根拠と取り入れ方" class="fui-Link" data-inline="">仕組みと検証の限界</a>で、調査結果の詳細を確認できます。</p>
 <h3 id="readme-ドキュメント" class="fui-Subtitle2">ドキュメント</h3>
-<p>手元の <a href="index.html#toc" class="fui-Link" data-inline="">docs/html/index.html</a> をブラウザーで開くと、図解と目次から使い方を参照できます。</p>
+<p>HTML マニュアルは、ローカル HTTP サーバー経由で開きます。
+手元で <code>docs/html/</code> を含むフォルダーに移動し、次のコマンドを実行してください。</p>
+<pre><code class="language-bash">cd docs/html
+python -m http.server 8000 --bind 127.0.0.1
+</code></pre>
+<p>サーバーを起動したまま、ブラウザーのアドレス欄に <code>http://127.0.0.1:8000/</code> と入力すると、図解と目次を表示できます。
+<code>8000</code> は例です。別の空いているポートを使う場合は、コマンドと URL の両方に同じ番号を指定してください。
+読み終えたら、サーバーを起動したターミナルで <code>Ctrl+C</code> を押して停止します。</p>
 <div class="table-scroll" role="region" aria-label="表" tabindex="0">
 <table class="fui-Table">
 <thead class="fui-TableHeader">
@@ -144,6 +152,10 @@ $wiki:info-hive query この資料の要点は？
 </tr>
 </thead>
 <tbody class="fui-TableBody">
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><a href="tutorial-first-wiki.html" class="fui-Link" data-inline="">はじめに</a></td>
+<td class="fui-TableCell">最初の wiki の作成と資料の取り込み</td>
+</tr>
 <tr class="fui-TableRow">
 <td class="fui-TableCell"><a href="agents.html" class="fui-Link" data-inline="">エージェント</a></td>
 <td class="fui-TableCell">対応表、導入方法、エージェントのメモリとの連携</td>

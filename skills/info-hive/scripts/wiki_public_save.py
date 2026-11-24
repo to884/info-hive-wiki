@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import re
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import uuid
 
 import wiki_apply as publish
@@ -51,11 +52,26 @@ def register_dependency(guard, plan, name):
     return {"state": "registered", "path": name}
 
 
-def public_preview(work, plan, guard):
+def page_save_format(guard, view, operation_id, capability):
+    from wiki_semantic_format import detect
+    from wiki_semantic_model import ModelError
+
+    try:
+        version = detect(WriteGuard(view.root, strict_root=True))
+    except ModelError as error:
+        raise publish.Conflict(f"意味保存形式の通常保存を開始できません: {error}") from error
+    if version == 2:
+        from wiki_semantic_projection import require_capability
+        require_capability(capability, guard, operation_id)
+    return version
+
+
+def public_preview(work, plan, guard, *, capability=None):
     drafts, checksum = live.snapshot(work, plan)
     base = base_view(guard, plan)
     live.protect_drafts(guard, plan, drafts, view=base)
-    changes, _ = live.calculate_view(WriteGuard(base.root), plan, drafts, apply=True)
+    page_save_format(guard, base, plan["plan_id"], capability)
+    changes, _ = live.calculate_changes(WriteGuard(base.root), plan, drafts, apply=True)
     return {"plan_sha256": checksum, "diff": live.diff_text(changes), "release_id": base.release_id}
 
 
@@ -157,12 +173,13 @@ def referenced_pages(names, files):
     return {name: sorted(link_candidates(name, by_path, by_slug)) for name in names}
 
 
-def verify_basis(plan, drafts, base, active, files):
-    if active.definition_id != base.definition_id:
+def verify_basis(plan, drafts, base, active, files, *, semantic_format=1):
+    original = files if active.release_id == base.release_id else snapshot_files(base)
+    if active.definition_id != base.definition_id and (
+            semantic_format != 2 or not same_semantic_definition(base, active, original, files)):
         raise publish.Conflict("定義版が変わりました。変更を読み直して承認を取り直してください")
     if active.release_id == base.release_id:
         return
-    original = snapshot_files(base)
     dependencies = set(plan["dependencies"])
     for op in plan["operations"]:
         if op["kind"] == "log-sub":
@@ -186,6 +203,27 @@ def verify_basis(plan, drafts, base, active, files):
                     refs.add(ref_link(relation["source"]))
     if referenced_pages(refs, original) != referenced_pages(refs, files):
         raise publish.Conflict("下書きから参照したページが変わりました。承認を取り直してください")
+
+
+def same_semantic_definition(base, active, original, files):
+    """公開定義の指紋は保ち、形式2の通常保存の承認比較でだけ意味版 ID を除く。"""
+    from wiki_semantic_model import load_json
+
+    catalog_path = "ontology/definition.json"
+    if any(original.get(path) != files.get(path) for path in publish.DEFINITION_FILES if path != catalog_path):
+        return False
+    values = []
+    for view, manifest in ((base, original), (active, files)):
+        guard = WriteGuard(view.root, strict_root=True)
+        data = publish.read(guard, guard.root / catalog_path)
+        if publish.digest(data) != manifest.get(catalog_path):
+            raise publish.PublicationError("公開版の定義 catalog の指紋が一致しません")
+        catalog = load_json(data)
+        if not isinstance(catalog, dict) or catalog.get("semantic_format") != 2:
+            return False
+        catalog.pop("semantic_snapshot_id", None)
+        values.append(catalog)
+    return values[0] == values[1]
 
 
 def verify_new_slugs(drafts, files):
@@ -228,17 +266,23 @@ def copy_candidate(active, files, destination):
         live.write(destination, destination.root / path, content)
 
 
-def build_candidate(active, files, changes, receipt, destination):
-    from wiki_public_projection import update_projections
+def build_candidate(active, files, changes, receipt, destination, *, semantic_value=None):
+    from wiki_public_projection import update_graph, update_projections
 
     copy_candidate(active, files, destination)
     for name, (before, after) in changes.items():
         live.write(destination, destination.root / publish.relative(name), after, replace=before is not None)
-    update_projections(destination, changes)
+    if semantic_value is None:
+        update_projections(destination, changes)
+    else:
+        from wiki_semantic_projection import write_page_snapshot
+
+        write_page_snapshot(destination, semantic_value)
+        update_graph(destination)
     live.write(destination, destination.root / RESULT, publish.encoded(receipt), replace=RESULT.as_posix() in files)
 
 
-def confirmed(guard, record, *, compact=True):
+def confirmed(guard, record, *, compact=True, expected_operation=None):
     applied = publish.read_receipt(guard.root, record["attempt"])
     if applied is None:
         if record.get("completed"):
@@ -255,6 +299,8 @@ def confirmed(guard, record, *, compact=True):
     if (not isinstance(result, dict) or result.get("attempt") != record["attempt"]
             or result.get("plan_id") != record["plan_id"] or result.get("approval") != record["approval"]):
         raise publish.PublicationError("公開した保存の記録と承認が一致しません")
+    if expected_operation is not None and result.get("operation", "pages") != expected_operation:
+        raise publish.PublicationError("完了した保存の操作種別が再開の入口と一致しません")
     if compact and not record.get("completed"):
         compact = {key: record[key] for key in ("wiki", "wiki_identity", "plan_id", "approval", "attempt")}
         write_record(guard, {**compact, "completed": True})
@@ -262,62 +308,101 @@ def confirmed(guard, record, *, compact=True):
             "plan_sha256": record["approval"], "files": result["files"], "log_entries": result["log_entries"]}
 
 
-def run_save(guard, record, timeout, checkpoint):
+class PagesOperation:
+    """記事・索引・ログの保存。操作ごとの入力検査・前提確認・候補作成だけを持ち、公開と復旧は run_save が共有する。"""
+    kind = "pages"
+
+    def __init__(self, capability=None):
+        self.capability = capability
+
+    def prepare(self, guard, record):
+        plan, drafts = approved_drafts(record)
+        base = base_view(guard, plan)
+        active = publish.resolve_publication(guard.root)
+        if active is None:
+            raise publish.PublicationError("公開中の版がありません")
+        files = snapshot_files(active)
+        live.protect_drafts(guard, plan, drafts, view=active)
+        version = page_save_format(guard, active, record["plan_id"], self.capability)
+        verify_basis(plan, drafts, base, active, files, semantic_format=version)
+        verify_new_slugs(drafts, files)
+        changes, logs = live.calculate_changes(WriteGuard(active.root), plan, drafts, apply=True)
+        if not changes:
+            raise publish.Conflict("適用する差分がありません")
+        result_info = {"plan_id": record["plan_id"], "approval": record["approval"], "attempt": record["attempt"],
+                       "files": list(changes), "log_entries": logs,
+                       "article_versions": {name: {"before": publish.digest(before) if before is not None else None,
+                                                   "after": publish.digest(after)}
+                                            for name, (before, after) in changes.items() if is_page_path(name)}}
+        transition, value = None, None
+        if version == 2:
+            from wiki_semantic_projection import prepare_page_snapshot
+
+            transition, value = prepare_page_snapshot(active, files, changes, record["plan_id"], self.capability)
+        return SimpleNamespace(base=base, active=active, semantic=transition, rebase=True,
+                               build=lambda destination: build_candidate(
+                                   active, files, changes, result_info, destination, semantic_value=value),
+                               before_journal=lambda: verify_raw_versions(guard, plan, drafts))
+
+
+def operation_for(record, operation):
+    """記録の種類と再開の入口を突き合わせる。意味操作の記録は、通常の入口では再開しない。"""
+    kind = record.get("operation", "pages")
+    if record.get("completed"):
+        # 完了の照合だけを行う。新しい書込みはしない。
+        return operation or PagesOperation()
+    if operation is None:
+        if kind != "pages":
+            raise publish.PublicationError("意味操作の承認済み保存は、この入口では再開できません")
+        return PagesOperation()
+    if operation.kind != kind:
+        raise publish.PublicationError("承認済み保存の種類と再開の入口が一致しません")
+    return operation
+
+
+def run_save(guard, record, timeout, checkpoint, operation=None):
     if record.get("discarded"):
         raise publish.Conflict("この承認済み保存は破棄されています")
+    operation = operation_for(record, operation)
+    expected_operation = None if operation.kind == "pages" else operation.kind
     area = guard.root / publish.AREA
     cause = None
     for _ in range(ATTEMPTS):
         try:
             publish.recover(guard.root, timeout=timeout)
-            result = confirmed(guard, record)
+            result = confirmed(guard, record, expected_operation=expected_operation)
             if result:
                 return result
             if guard.file_info(area / "rejected" / f"{record['attempt']}.json") is not None:
                 record["attempt"] = uuid.uuid4().hex
                 write_record(guard, record)
-            plan, drafts = approved_drafts(record)
-            base = base_view(guard, plan)
-            active = publish.resolve_publication(guard.root)
-            if active is None:
-                raise publish.PublicationError("公開中の版がありません")
-            files = snapshot_files(active)
-            live.protect_drafts(guard, plan, drafts, view=active)
-            verify_basis(plan, drafts, base, active, files)
-            verify_new_slugs(drafts, files)
-            changes, logs = live.calculate_view(WriteGuard(active.root), plan, drafts, apply=True)
-            if not changes:
-                raise publish.Conflict("適用する差分がありません")
-            result_info = {"plan_id": record["plan_id"], "approval": record["approval"], "attempt": record["attempt"],
-                           "files": list(changes), "log_entries": logs,
-                           "article_versions": {name: {"before": publish.digest(before) if before is not None else None,
-                                                       "after": publish.digest(after)}
-                                                for name, (before, after) in changes.items() if is_page_path(name)}}
+            prepared = operation.prepare(guard, record)
             parent = area / "save-work"
             guard.ensure_directory(parent)
             with TemporaryDirectory(dir=parent, prefix="candidate-", ignore_cleanup_errors=True) as temp:
                 destination = WriteGuard(Path(temp), strict_root=True)
-                build_candidate(active, files, changes, result_info, destination)
-                candidate = publish.build_plan(guard.root, destination.root, base=active, plan_id=record["attempt"])
+                prepared.build(destination)
+                candidate = publish.build_plan(guard.root, destination.root, base=prepared.active,
+                                               plan_id=record["attempt"], semantic=prepared.semantic)
                 checkpoint("save_prepared")
 
                 def check(point):
                     if point == "before_journal":
-                        if guard.file_info(area / "retired" / f"{base.release_id}.json") is not None:
+                        if guard.file_info(area / "retired" / f"{prepared.base.release_id}.json") is not None:
                             raise publish.Conflict("承認時の公開版は取り下げられました。現在の版で承認を取り直してください")
-                        verify_raw_versions(guard, plan, drafts)
+                        prepared.before_journal()
                     checkpoint(point)
 
                 try:
                     publish.apply_plan(guard.root, destination.root, candidate, publish.digest(publish.encoded(candidate)),
-                                       checkpoint=check, timeout=timeout)
+                                       checkpoint=check, timeout=timeout, semantic=prepared.semantic)
                 except publish.Conflict:
                     latest = publish.resolve_publication(guard.root)
-                    if latest and latest.release_id != active.release_id:
+                    if prepared.rebase and latest and latest.release_id != prepared.active.release_id:
                         cause = "並行する公開によって基準版が変わりました"
                         continue
                     raise
-            result = confirmed(guard, record)
+            result = confirmed(guard, record, expected_operation=expected_operation)
             if result is None:
                 raise publish.PublicationError("保存の公開結果を照合できません")
             return {**result, "state": "applied"}
@@ -347,7 +432,7 @@ def record_for_retry(guard, plan_id, expected):
     return record
 
 
-def queue_save(directory, expected, *, timeout=180, checkpoint=lambda _: None):
+def queue_save(directory, expected, *, timeout=180, checkpoint=lambda _: None, capability=None):
     publish.checked(expected)
     work = live.work_directory(directory)
     with work.hold_lock(work.root / "plan.lock", timeout=timeout):
@@ -364,7 +449,8 @@ def queue_save(directory, expected, *, timeout=180, checkpoint=lambda _: None):
                     record = freeze(work, plan, guard, expected)
             if new:
                 checkpoint("save_queued")
-            return run_save(guard, record, timeout, checkpoint)
+            operation = PagesOperation(capability) if capability is not None else None
+            return run_save(guard, record, timeout, checkpoint, operation=operation)
 
 
 def require_queued_record(guard, plan_id, expected, timeout):
@@ -376,12 +462,13 @@ def require_queued_record(guard, plan_id, expected, timeout):
     return record
 
 
-def resume(wiki, plan_id, expected, *, timeout=180, checkpoint=lambda _: None):
+def resume(wiki, plan_id, expected, *, timeout=180, checkpoint=lambda _: None, capability=None):
     guard = live.wiki_guard(wiki)
     publish.checked(expected)
     with save_lock(guard, plan_id, timeout):
         record = require_queued_record(guard, plan_id, expected, timeout)
-        return run_save(guard, record, timeout, checkpoint)
+        operation = PagesOperation(capability) if capability is not None else None
+        return run_save(guard, record, timeout, checkpoint, operation=operation)
 
 
 def discard(wiki, plan_id, expected, *, timeout=180):

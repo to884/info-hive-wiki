@@ -117,12 +117,19 @@ def update_article_db(guard, path, original, additions):
 
 
 def update_projections(guard, changes, *, force=False):
-    from wiki_graph_extract import (OUTPUT_NAMES, build_edges, build_nodes, collect_pages, load_ontology, write_outputs)
+    publish.require_semantic_format1(guard)
+    articles = {path: pair for path, pair in changes.items() if is_page_path(path)}
+    if articles or force:
+        update_graph(guard)
+        article_rows(guard, guard.root / "ontology/ossie", articles)
+
+
+def update_graph(guard, *, output=None):
+    """公開候補の記事と意味版から、その候補のグラフを更新する。"""
+    from wiki_graph_extract import (FORMAT_OUTPUTS, OUTPUT_NAMES, SEMANTIC_REPORT, build_graph, collect_pages,
+                                    load_ontology, write_outputs)
     from wiki_graph_lint import lint
 
-    articles = {path: pair for path, pair in changes.items() if is_page_path(path)}
-    if not articles and not force:
-        return
     graph = guard.root / "graph"
     ontology = load_ontology(graph / "ontology.yaml")
     pages = collect_pages(guard.root)
@@ -132,8 +139,7 @@ def update_projections(guard, changes, *, force=False):
                 "object_type_mismatch"):
         if findings[key]:
             raise publish.Conflict(f"公開候補のグラフを検査してください: {key}")
-    nodes, ids, aliases = build_nodes(pages, ontology)
-    edges = build_edges(pages, ids)
+    nodes, aliases, edges, report = build_graph(guard, pages, ontology)
     formats = ["sqlite"]
     if any(guard.file_info(graph / name) is not None for name in ("nodes.jsonl", "edges.jsonl")):
         formats.append("jsonl")
@@ -141,5 +147,25 @@ def update_projections(guard, changes, *, force=False):
         formats.append("graphml")
     for name in OUTPUT_NAMES:
         guard.file_info(graph / name)
-    write_outputs(graph, formats, nodes, aliases, edges, guard=guard)
-    article_rows(guard, guard.root / "ontology/ossie", articles)
+    destination = graph if output is None else output.root
+    write_outputs(destination, formats, nodes, aliases, edges, guard=output or guard, report=report)
+    return tuple(name for fmt in formats for name in FORMAT_OUTPUTS[fmt]) + ((SEMANTIC_REPORT,) if report else ())
+
+
+def verify_graph_projection(guard, files):
+    """承認済みファイルだけを置いたステージからグラフを生成し、指紋を照合する。"""
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+    from wiki_fsguard import WriteGuard
+    from wiki_graph_extract import OUTPUT_NAMES
+
+    with TemporaryDirectory(prefix="info-hive-graph-check-") as directory:
+        output = WriteGuard(Path(directory), strict_root=True)
+        names = update_graph(guard, output=output)
+        if set(names) != {name for name in OUTPUT_NAMES if "graph/" + name in files}:
+            raise publish.Conflict("形式2の互換グラフの成果物が公開計画と一致しません")
+        for name in names:
+            actual = guard.read_bytes(guard.root / "graph" / name)
+            expected = output.read_bytes(output.root / name)
+            if actual != expected or publish.digest(expected) != files["graph/" + name]:
+                raise publish.Conflict(f"形式2の互換グラフが候補の記事・意味版と一致しません: {name}")
