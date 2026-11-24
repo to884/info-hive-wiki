@@ -195,7 +195,7 @@ VC_REDIST_COMMAND = "winget install --id Microsoft.VCRedist.2015+.x64 -e --sourc
 RELAY_MODULES = ("anyio", "httpx", "psutil", "mcp", "mcp.types", "mcp.server.lowlevel",
                  "mcp.server.stdio", "mcp.client.session", "mcp.client.streamable_http")
 SERVER_MODULES = ("anyio", "uvicorn", "numpy", "usearch.index", "tantivy", "yaml", "mcp.server.fastmcp",
-                  "mcp.server.fastmcp.exceptions", "mcp.server.transport_security")
+                  "mcp.server.fastmcp.exceptions", "mcp.server.transport_security", "truststore")
 CHECK_IMPORTS_ARG = "--check-imports"
 
 
