@@ -378,6 +378,9 @@ python &quot;&lt;skill-root&gt;/scripts/wiki_search.py&quot; &quot;&lt;検索語
 <p>社内ネットワークで起動しない（<code>logs/launch.log</code> か uv の出力に <code>invalid peer certificate</code> や <code>UnknownIssuer</code> がある）: TLS を検査するプロキシの CA を uv が信頼していません。入口と中継は <code>UV_SYSTEM_CERTS=true</code>（古い uv では <code>UV_NATIVE_TLS=true</code>）で 1 回だけやり直すが、CLI の <code>uv run --script</code> はやり直しません。環境変数 <code>UV_SYSTEM_CERTS=true</code> を設定するか、uv の <code>uv.toml</code> で <code>system-certs = true</code> を設定してください。設定後にホストを起動し直してください。Windows では<a href="howto-prepare.html#certificates" class="fui-Link" data-inline="">組織の証明書を使う手順</a>を参照できます。その場で CLI を動かすときは、<code>uv run --system-certs --script ...</code> のように <code>--system-certs</code>（古い uv では <code>--native-tls</code>）を付けます。</p>
 </li>
 <li>
+<p>wiki 0.46.2 以前で「接続済み」と表示されてもツールが出ず、<code>tools/list</code> が <code>127.0.0.1</code> 宛の HTTP 403 で失敗する場合は、プロキシの除外設定を確認してください。ホストが中継に渡す <code>NO_PROXY</code> と <code>no_proxy</code> に <code>127.0.0.1,localhost</code> を追加し、ホストを起動し直してください。修正版の中継はローカルサーバーに直接接続します。</p>
+</li>
+<li>
 <p>プラグインを更新した: 中継は <code>server.json</code> のコードの版を見て、古いサーバーを止めて起動し直します。</p>
 </li>
 <li>
@@ -397,6 +400,12 @@ uv sync --reinstall --script &quot;&lt;skill-root&gt;/scripts/wiki_mcp_server.py
 <p>スキル単体など、MCP を自動登録しない導入方法で MCP を使う場合は、ホストの MCP 設定に <code>uv run --script &quot;&lt;skill-root&gt;/scripts/wiki_mcp_launch.py&quot;</code> を stdio のサーバーとして登録します。<code>&lt;skill-root&gt;</code> は <code>SKILL.md</code> があるディレクトリの絶対パスに置き換えます。</p>
 </li>
 </ul>
+<h3 id="モデル取得の証明書エラー" class="fui-Subtitle2">埋め込みモデルの取得で証明書エラーが出る</h3>
+<p><code>stats</code> の <code>index.model.error</code> と <code>logs/server.log</code> を確認します。MCP サーバーが Hub に HTTPS で接続するときは OS の証明書ストアを使います。<code>SSL_CERT_FILE</code> または <code>SSL_CERT_DIR</code> を指定した場合は、モデル本体も Hub の HTTPS 経路で取得し、指定された CA で検証します。<code>UV_SYSTEM_CERTS</code> は uv が依存パッケージを取得するときの設定です。</p>
+<p>組織の CA が OS の証明書ストアに登録されているかを管理者に確認してください。CA バンドルを指定する場合は、ホストの環境変数 <code>SSL_CERT_FILE</code> に PEM ファイルのパスを設定します。Ubuntu で組織の CA をシステムのバンドルに追加済みなら、<code>/etc/ssl/certs/ca-certificates.crt</code> を指定できます。</p>
+<p>設定を反映するには、wiki の MCP を使うホストをすべて終了します。要求も処理もない状態が既定で 900 秒続くと、既存のサーバーが停止します。停止後にホストを開き直し、<code>stats</code> の <code>server.pid</code> が変わったことを確認してください。</p>
+<p>ツール一覧の <code>tools/list</code> が <code>127.0.0.1</code> 宛の HTTP 403 で失敗する場合は、<a href="https://github.com/to884/info-hive-wiki/issues/81" class="fui-Link" data-inline="">Issue #81 の <code>NO_PROXY</code> の案内</a>を参照してください。</p>
+<p>ネットワークから取得できない環境では、同じ版の wiki が取得・検証済みの <code>models/ruri-v3-130m-onnx-cbd305d/</code> を、MCP サーバーのデータの置き場所にコピーできます。個別に配置する場合、取得元の revision、相対パス、SHA-256 は <a href="https://github.com/to884/info-hive-wiki/blob/main/skills/info-hive/scripts/wiki_index.py" class="fui-Link" data-inline=""><code>wiki_index.py</code> の <code>MODEL["files"]</code></a> にあります。サーバーはすべてのファイルを SHA-256 で照合したあとに <code>verified.json</code> を作ります。</p>
     </main>
   </div>
 </body>

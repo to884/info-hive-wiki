@@ -22,6 +22,7 @@ import hashlib
 import json
 import math
 import os
+import ssl
 import stat
 import sqlite3
 import sys
@@ -102,6 +103,21 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _certificate_verification_failed(error: BaseException) -> bool:
+    # Hub は HEAD の失敗を LocalEntryNotFoundError で包むことがある。
+    seen = set()
+    while error is not None and id(error) not in seen:
+        if isinstance(error, ssl.SSLCertVerificationError):
+            return True
+        message = str(error).casefold()
+        if any(marker in message for marker in
+               ("certificate_verify_failed", "certificate verify failed", "invalid peer certificate")):
+            return True
+        seen.add(id(error))
+        error = error.__cause__ or error.__context__
+    return False
+
+
 def ensure_model_files(target: Path | None = None) -> Path:
     """モデルのファイルを models/ に組み立てる。取得したら sha256 を確かめ、確かめた印を残す。"""
     target = target or common.models_dir() / MODEL["folder"]
@@ -120,7 +136,18 @@ def ensure_model_files(target: Path | None = None) -> Path:
         path = target / name
         if not path.is_file() or sha256_file(path) != sha:
             log(f"埋め込みモデルのファイルを取得する: {repo} {name}")
-            hf_hub_download(repo, name, revision=revision, local_dir=str(target))
+            try:
+                hf_hub_download(repo, name, revision=revision, local_dir=str(target))
+            except Exception as exc:
+                if _certificate_verification_failed(exc):
+                    raise RuntimeError(
+                        f"モデル取得時に TLS 証明書を検証できなかった（{repo} {name}）。"
+                        "証明書の有効期限、接続先の名前、発行元を確認する。"
+                        "組織の CA で検証する場合は、OS の証明書ストアに登録するか、"
+                        "PEM 形式の CA バンドルを SSL_CERT_FILE に指定する。"
+                        "wiki の MCP を使うホストをすべて終了し、既存のサーバーが停止してから開き直す。"
+                    ) from exc
+                raise
         actual = sha256_file(path)
         if actual != sha:
             path.unlink(missing_ok=True)
