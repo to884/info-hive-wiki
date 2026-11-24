@@ -10,6 +10,8 @@ Claude Code と Codex には、スキルと MCP サーバーを含む `wiki@info
 
 エージェントが使う環境で Git、uv、Python のコマンドが実行できることを確認する。初期化は `python` を直接呼ぶので、`python --version` で Python 3.12 以上と表示されることを確かめる。[事前準備](./agents.md#事前準備)
 
+WSL 版の Claude Code や Codex でプロジェクト wiki を使う場合は、WSL 側にも `wiki@info-hive` をインストールする。[WSL での導入手順](./agents.md#wsl-でプロジェクト-wiki-を使う)
+
 Web ページの取得に普段のブラウザーを使う場合は、[Playwright の準備](#url-取り込みで使う-playwright-を準備する)も行う。
 
 ### Claude Code のプラグイン
