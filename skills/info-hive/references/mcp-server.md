@@ -184,7 +184,7 @@ CLI の埋め込み検索は、MCP のサーバーとは別のモデル（multil
 
 ツール一覧の `tools/list` が `127.0.0.1` 宛の HTTP 403 で失敗する場合は、[Issue #81 の `NO_PROXY` の案内](https://github.com/to884/info-hive-wiki/issues/81)を参照する。
 
-ネットワークから取得できない環境では、同じ版の wiki が取得・検証済みの `models/ruri-v3-130m-onnx-cbd305d/` を、MCP サーバーのデータの置き場所にコピーできる。個別に配置する場合、取得元の revision、相対パス、SHA-256 は [`wiki_index.py` の `MODEL["files"]`](../scripts/wiki_index.py) にある。サーバーはすべてのファイルを SHA-256 で照合したあとに `verified.json` を作る。
+ネットワークから取得できない環境では、同じ版の wiki が取得・検証済みの `models/ruri-v3-130m-onnx-cbd305d/` を、MCP サーバーのデータの置き場所にコピーできる。個別に配置する場合、取得元の revision、相対パス、SHA-256 は `scripts/wiki_index.py` の `MODEL["files"]` にある。サーバーはすべてのファイルを SHA-256 で照合したあとに `verified.json` を作る。
 
 ### Windows で組織の証明書を使う
 
