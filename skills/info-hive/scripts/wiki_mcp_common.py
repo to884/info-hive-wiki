@@ -49,6 +49,7 @@ SERVER_FILES = ("wiki_mcp_common.py", "wiki_mcp_server.py", "wiki_index.py", "wi
                 # ADR-0029 の実装で足した。サーバーが関数の中で遅れて読み込むものも入れる（MCP の lint が wiki_captions を、
                 # それが閲覧の中核を、検索が判定のレイヤーを読み込む）。足りているかは tests/wiki/test_wiki_links.py が確かめる
                 "wiki_overview.py", "wiki_links.py", "wiki_raw.py", "wiki_decide.py", "wiki_captions.py", "wiki_browse_core.py", "wiki_browse_fs.py",
+                "wiki_browse_highlight.py",
                 "wiki_fetch.py", "wiki_rawcheck.py", "wiki_youtube_url.py", "wiki_fsguard.py", "wiki_raw_roots.py",
                 "wiki_apply.py", "wiki_live_apply.py", "wiki_public_save.py", "wiki_public_projection.py",
                 "wiki_semantic_format.py", "wiki_semantic_model.py",
