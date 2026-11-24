@@ -35,6 +35,7 @@ from pathlib import PurePath, PurePosixPath
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import wiki_browse_fs as fs  # noqa: E402
+import wiki_browse_highlight as code_highlight  # noqa: E402
 import wiki_lint  # noqa: E402
 import wiki_pages  # noqa: E402
 import wiki_overview  # noqa: E402
@@ -51,7 +52,7 @@ except (ImportError, SystemExit):
     wiki_graph_extract = None
 
 PROTOCOL_VERSION = 2   # 探しやすさの設計の 2.3、6（nav.js の形とグループの並びが変わった）
-CORE_VERSION = "browse-core-10"   # 10: 左の木をすべてのタグで分類する。
+CORE_VERSION = "browse-core-11"   # 11: コードフェンスを色分けする。
 NAME_LIMIT = 200
 # frame-src 'self' は、figures.js が作る Mermaid の図の枠のため（図の描画の設計の 7.3）
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src 'self'; "
@@ -316,7 +317,7 @@ def take_snapshot(root, entries=None, *, raw_root=None) -> Snapshot:
     inputs = []
     unreadable = []
     transient = []
-    gen = hashlib.sha256(CORE_VERSION.encode("utf-8"))
+    gen = hashlib.sha256(f"{CORE_VERSION}\0{code_highlight.VERSION}".encode("utf-8"))
     for kind, rel_disk, size, _mtime in first:
         if kind == "link":
             # リンクなので読まない（ADR-0029）。読まないことも内容なので、世代に入れる
@@ -897,6 +898,7 @@ class Core:
         self.scope = normalize_scope(scope)
         self.generation = snapshot.generation
         self.parser = wiki_pages.new_parser()
+        self.parser.options["highlight"] = code_highlight.make_highlighter()
         self.diagnostics = []
         self._body_cache = {}
         self.static_mermaid = None  # None はサーバー用。書き出し時は、図がなくても辞書を設定する。
@@ -2344,11 +2346,13 @@ def js_data(name: str, value) -> str:
 
 
 def load_assets() -> dict:
-    """同梱の画面の部品（app.js、style.css など）を読む。serve と build の始めに 1 度だけ呼ぶ（設計の 3.3）。
+    """同梱の画面の部品を読み、コードの配色を加える。serve と build の始めに 1 度だけ呼ぶ。
 
     読めなければ fs.Unknown か fs.Absent を送出する（呼ぶ側は起動しない）。
     """
-    return {name: fs.read_file(os.path.join(ASSET_DIR, PurePosixPath(name).name)) for name in ASSETS}
+    assets = {name: fs.read_file(os.path.join(ASSET_DIR, PurePosixPath(name).name)) for name in ASSETS}
+    assets["assets/style.css"] += code_highlight.stylesheet()
+    return assets
 
 
 def load_frame_assets() -> dict:
@@ -2387,6 +2391,11 @@ def scan_machine_info(files: dict, needles: list, tokens: list) -> list:
     for name in sorted(files):
         data = files[name]
         text = data.decode("utf-8", errors="replace") if isinstance(data, bytes) else data
+        # 元の HTML の属性なども調べ、コードの色分けで分割された文字列を加える。
+        if name.endswith(".html"):
+            visible = code_highlight.unspan(text)
+            if visible is not None:
+                text += "\n" + visible
         folded = norm(text)
         if any(f in folded for f in forms):
             found.append((name, "path"))
