@@ -417,26 +417,39 @@ def require_semantic_format1(guard):
 
 
 def semantic_commit_gate(semantic, guard):
-    """移行だけ受付ロックを日誌確定まで保持する。通常保存の経路は変更しない。"""
+    """意味操作に応じた日誌確定前の照合を行う。"""
     if semantic is None:
+        return nullcontext(lambda: None)
+    from wiki_semantic_projection import PageTransition
+    if type(semantic) is PageTransition:
         return nullcontext(lambda: None)
     from wiki_semantic_apply import commit_gate
     return commit_gate(semantic, guard)
 
 
-def check_semantic_transition(wiki, candidate, base, semantic=None, *, base_release_id=None):
+def check_semantic_transition(wiki, candidate, base, semantic=None, *, base_release_id=None, verify_inputs=False,
+                              graph_files=None):
     """基準と候補の意味保存形式の遷移を1箇所で照合する。
 
-    semantic がなければ形式1→形式1だけを通す（従来の拒否と同じ）。形式1→2 は、移行の照合条件を渡し、
-    隔離試験の能力が一致する場合だけ通す。2→1、2→2、未知の形式は P3 では常に拒否する。
+    semantic がなければ形式1→形式1だけを通す。形式2の候補には操作ごとの照合と隔離試験の能力が必要。
     """
     if semantic is None:
         require_semantic_format1(WriteGuard(candidate, strict_root=True))
         if base is not None:
             require_semantic_format1(WriteGuard(base, strict_root=True))
         return
-    from wiki_semantic_apply import verify_transition
-    verify_transition(semantic, wiki=wiki, candidate=candidate, base=base, base_release_id=base_release_id)
+    import wiki_semantic_projection as page_save
+    if type(semantic) is page_save.PageTransition:
+        page_save.verify_transition(semantic, wiki=wiki, candidate=candidate, base=base,
+                                    base_release_id=base_release_id, verify_inputs=verify_inputs)
+    else:
+        from wiki_semantic_apply import OPERATION, verify_transition
+        verify_transition(semantic, wiki=wiki, candidate=candidate, base=base, base_release_id=base_release_id)
+        if semantic.operation == OPERATION:
+            return
+    if graph_files is not None:
+        from wiki_public_projection import verify_graph_projection
+        verify_graph_projection(WriteGuard(candidate, strict_root=True), graph_files)
 
 
 def receipt(guard, area, plan_id):
@@ -902,14 +915,15 @@ def check_live_writer(guard, area):
         raise Conflict("ライブ書き込みの中断を unlock と recover --live で処理してください")
 
 
-def apply_plan(wiki, source, plan, expect_sha256, *, checkpoint=lambda _: None, timeout=180, semantic=None):
+def apply_plan(wiki, source, plan, expect_sha256, *, checkpoint=lambda _: None, timeout=180, semantic=None,
+               capability=None):
     """承認したファイルだけを写す。基準が変わった場合はロックの外で作り直せる。"""
     standard = {"format", "plan_id", "wiki", "base", "base_definition", "definition_id", "files", "live_base"}
     if not isinstance(plan, dict) or plan.keys() not in (standard, standard | {"return_sha256", "include", "exclude"}):
         raise PublicationError("公開計画の形式が不正です")
     is_republish = "return_sha256" in plan
     if semantic is not None and (is_republish or plan["base"] is None):
-        raise PublicationError("P3 の意味移行では初回公開・再公開を扱いません")
+        raise PublicationError("意味採用や通常保存の照合条件は初回公開・再公開には渡せません")
     if plan["format"] != (3 if is_republish else 2) or digest(encoded(plan)) != checked(expect_sha256):
         raise PublicationError("承認した計画の指紋が一致しません")
     wiki = Path(wiki).absolute()
@@ -954,8 +968,20 @@ def apply_plan(wiki, source, plan, expect_sha256, *, checkpoint=lambda _: None, 
     checkpoint("after_initial_check")
 
     source_guard = WriteGuard(source, strict_root=True)
-    check_semantic_transition(wiki, source_guard.root, area / "releases" / active[0] / "wiki" if active else None,
-                              semantic, base_release_id=active[0] if active else None)
+    version = 1
+    if is_republish:
+        from wiki_republish import check_format
+        version = check_format(guard, active, plan_id, capability)
+    if version == 2:
+        from wiki_republish import require_candidate_scope
+        from wiki_semantic_format import detect
+
+        require_candidate_scope(capability, source_guard, plan_id)
+        if detect(source_guard) != 2:
+            raise Conflict("形式2から別の意味保存形式には再公開できません")
+    else:
+        check_semantic_transition(wiki, source_guard.root, area / "releases" / active[0] / "wiki" if active else None,
+                                  semantic, base_release_id=active[0] if active else None)
     mark = uuid.uuid4().hex
     stage = area / "staging" / mark
     guard.ensure_directory(stage / "wiki")
@@ -996,8 +1022,9 @@ def apply_plan(wiki, source, plan, expect_sha256, *, checkpoint=lambda _: None, 
                 if digest(read(guard, stage / "manifest.json")) != release_id:
                     raise PublicationError("試行のマニフェストの指紋が一致しません")
                 verify_payload(guard, stage / "wiki", files)
-                check_semantic_transition(wiki, stage / "wiki", area / "releases" / active[0] / "wiki" if active else None,
-                                          semantic, base_release_id=active_id)
+                if version == 1:
+                    check_semantic_transition(wiki, stage / "wiki", area / "releases" / active[0] / "wiki" if active else None,
+                                              semantic, base_release_id=active_id, verify_inputs=True, graph_files=files)
                 validate_pending()
                 if active and "plan_sha256" not in active[1] and not marker_present(guard):
                     old_receipt = expected_receipt(guard, area, *active)
@@ -1012,7 +1039,8 @@ def apply_plan(wiki, source, plan, expect_sha256, *, checkpoint=lambda _: None, 
                         check_initial_live(guard, plan["live_base"], "再公開" if is_republish else "初回公開")
                         if is_republish:
                             from wiki_republish import check_candidate
-                            check_candidate(guard, area, active, plan)
+                            check_candidate(guard, area, active, plan, WriteGuard(stage / "wiki", strict_root=True),
+                                            capability=capability)
                         guard.write_bytes(area / JOURNAL, encoded(journal))
                         sync_directory(area)
                 else:

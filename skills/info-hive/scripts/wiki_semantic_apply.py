@@ -242,7 +242,7 @@ class MigrationOperation:
 
 
 def verify_transition(transition, *, wiki, candidate, base, base_release_id):
-    """wiki_apply から呼ぶ。基準は形式1、候補は検査済みの形式2で、変更が意味の成果物に限られることを照合する。"""
+    """wiki_apply から呼び、操作に応じた成果物の差分の範囲を照合する。"""
     if type(transition) is not Transition:
         raise ModelError("形式の遷移には移行で作った照合条件を指定してください")
     guard = WriteGuard(Path(wiki).absolute(), strict_root=True)
@@ -279,9 +279,17 @@ def verify_transition(transition, *, wiki, candidate, base, base_release_id):
             raise ModelError("意味採用には承認入力の最終照合が必要です")
         transition.validate_inputs()
     before, after = publish.file_checksums(base_guard), publish.file_checksums(candidate_guard)
+    changeable = CHANGEABLE
+    if transition.operation != OPERATION:
+        from wiki_graph_extract import OUTPUT_NAMES, SEMANTIC_REPORT
+
+        graph_files = {"graph/" + name for name in OUTPUT_NAMES}
+        if "graph/" + SEMANTIC_REPORT not in after or (before.keys() & graph_files) - after.keys():
+            raise ModelError("公開候補の互換グラフの成果物がそろっていません")
+        changeable = changeable | graph_files
     for name in before.keys() | after.keys():
-        if before.get(name) != after.get(name) and name not in CHANGEABLE and not name.startswith(CHANGEABLE_PREFIXES):
-            raise ModelError(f"移行の候補が意味の成果物以外を変えています: {name}")
+        if before.get(name) != after.get(name) and name not in changeable and not name.startswith(CHANGEABLE_PREFIXES):
+            raise ModelError(f"候補が承認した操作の成果物以外を変えています: {name}")
     if any(name.startswith(SEMANTIC_DIR) for name in before.keys() - after.keys()):
         raise ModelError("移行の候補に旧形式の成果物の置換漏れがあります")
 

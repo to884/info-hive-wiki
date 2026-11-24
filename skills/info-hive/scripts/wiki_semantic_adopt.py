@@ -186,6 +186,12 @@ class EvidenceInputs:
             "release_id": self.base.release_id if scheme == "article" else None}
         return data
 
+    def article(self, row):
+        p = row.payload
+        return self.source(Record.create(row.wiki_id, "source_snapshot", {
+            "reference": {"uri": "article:" + p["page"], "version": "sha256:" + p["sha256"]},
+            "sha256": p["sha256"], "media_type": "text/markdown; charset=utf-8", "article_revision_id": row.record_id}))
+
     def lineage(self, record_id, claim_id, active=None):
         active = set() if active is None else active
         if record_id in active or len(active) > 200:
@@ -204,9 +210,7 @@ class EvidenceInputs:
             self.position(row)
             links = [p["source_id"]]
         elif row.kind == "article_revision":
-            self.source(Record.create(row.wiki_id, "source_snapshot", {
-                "reference": {"uri": "article:" + p["page"], "version": "sha256:" + p["sha256"]},
-                "sha256": p["sha256"], "media_type": "text/markdown; charset=utf-8", "article_revision_id": record_id}))
+            self.article(row)
             if p["origin"] == "original":
                 if p["derived_from"] or record_id not in self.confirmations:
                     raise ModelError("一次記事には明示した原本性の確認が必要です")
@@ -262,6 +266,14 @@ def _reachable(records, targets, spaces, fresh):
         try:
             if row.kind == "entity_revision":
                 pending.append(spaces["entity"][p["entity_id"]].record_id)
+                if "graph_article_revision_id" in p["display"]:
+                    article_id = digest_id(p["display"]["graph_article_revision_id"])
+                    article = records.get(article_id)
+                    if article is None or article.kind != "article_revision":
+                        raise ModelError("実体のグラフ対応には固定した記事版を指定してください")
+                    if article_id in fresh and (article.payload["origin"] != "unknown" or article.payload["derived_from"]):
+                        raise ModelError("端点の対応で追加する記事版には原本性や派生の来歴を指定できません")
+                    pending.append(article_id)
             elif row.kind == "claim_revision":
                 pending.append(spaces["claim"][p["claim_id"]].record_id)
                 pending.extend(x["evidence_id"] for x in p["evidence_links"])
@@ -320,6 +332,13 @@ def _adopt(value, base, operation_id, request, contract, proposal, public_reques
             raise ModelError("新しい実体改訂の型を採用済み定義で解決できません")
         types[entity] = refs
     inputs = EvidenceInputs(records, base, raw_guard, request["original_confirmations"])
+    for revision in updates["entities"].values():
+        display = records[revision].payload["display"]
+        if "graph_article_revision_id" in display:
+            article = records.get(display["graph_article_revision_id"])
+            if article is None or article.kind != "article_revision":
+                raise ModelError("実体のグラフ対応には固定した記事版を指定してください")
+            inputs.article(article)
     if any(key not in records or records[key].kind != "article_revision" or records[key].payload["origin"] != "original"
            for key in inputs.confirmations):
         raise ModelError("原本性の確認は候補または保存版の一次記事に結び付けてください")
@@ -511,6 +530,8 @@ class AdoptionOperation:
                 raise publish.Conflict(f"公開直前の意味採用入力が変わりました: {error}") from error
 
         def build(destination):
+            from wiki_public_projection import update_graph
+
             save.copy_candidate(base, files, destination)
             with store.artifacts(value) as folder:
                 for path in sorted(folder.iterdir()):
@@ -521,6 +542,7 @@ class AdoptionOperation:
             if store.read_bundle(destination.root / "ontology/ossie") != value:
                 raise ModelError("意味採用の候補を読み直せません")
             fixed.verify_stored(destination, destination.root / "ontology", value)
+            update_graph(destination)
 
         transition = shared.Transition(self.capability, self.kind, record["plan_id"], plan["semantic_snapshot_id"],
                                        base.release_id, verify_inputs)
