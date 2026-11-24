@@ -50,7 +50,10 @@ uv --version
 python --version
 ```
 
-uv 経由の同梱スクリプトには Python 3.12〜3.14 を使います。この範囲の Python が見つからなければ、uv が取得します。依存パッケージも uv が用意します。Windows で Claude デスクトップアプリの Code タブを使う場合は、[HTML マニュアルの目次](html/index.html)から「Code タブに wiki を入れる」を開いてください。
+uv 経由の同梱スクリプトには Python 3.12〜3.14 を使います。この範囲の Python が見つからなければ、uv が取得します。依存パッケージも uv が用意します。
+
+Windows で Claude デスクトップアプリの Code タブを使う場合は、[HTML マニュアルの開き方](../README.md#ドキュメント)を参照してください。
+マニュアルの目次から「Code タブに wiki を入れる」を開くと、導入手順を確認できます。
 
 ## インストールのコマンド例
 

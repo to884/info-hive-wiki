@@ -1,6 +1,7 @@
 # info-hive のドキュメント
 
-手元の [docs/html/index.html](html/index.html#overview) をブラウザーで開くと、図解と目次を読めます。
+HTML マニュアルは、ローカル HTTP サーバー経由で開きます。
+サーバーの起動方法とブラウザーで開く URL は、[README の「ドキュメント」](../README.md#ドキュメント)を参照してください。
 
 ## できること
 
