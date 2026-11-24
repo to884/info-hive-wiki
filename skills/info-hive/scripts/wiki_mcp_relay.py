@@ -320,8 +320,12 @@ class Upstream:
 
         async def hold():
             try:
-                client = httpx.AsyncClient(headers={"Authorization": f"Bearer {info['token']}"},
-                                           timeout=httpx.Timeout(30.0, read=None))
+                # 127.0.0.1 で待つ本体に直接つなぐ。
+                client = httpx.AsyncClient(
+                    headers={"Authorization": f"Bearer {info['token']}"},
+                    timeout=httpx.Timeout(30.0, read=None),
+                    trust_env=False,
+                )
                 async with client:
                     async with streamable_http_client(f"http://127.0.0.1:{info['port']}/mcp",
                                                       http_client=client) as (read, write, _):
