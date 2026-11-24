@@ -70,6 +70,28 @@ WSL 側で対象リポジトリのルートに移動し、[事前準備](#事前
 同じ環境で [Claude Code CLI](#claude-code-cli) または [Codex CLI](#codex-cli) の手順に従ってプラグインを入れます。
 導入後は、Claude Code なら `/wiki:help`、Codex なら `$wiki:info-hive help` で操作の一覧が表示されることを確認します。
 
+#### WSL の閲覧 URL を Windows で開く
+
+WSL 2 の NAT モードでは、Windows 側からの接続に `localhostForwarding` を使います。
+WSL 内で `wslinfo --networking-mode` を実行できる環境では、動作中のモードを確認できます。
+Windows の `%USERPROFILE%\.wslconfig` の `[wsl2]` に `localhostForwarding=false` があれば、`true` に変更します。
+指定がないときの既定値は `true` です。次は NAT モードで設定を明示する例です。
+
+```ini
+[wsl2]
+networkingMode=nat
+localhostForwarding=true
+```
+
+設定を変えた場合は、すべての WSL ディストリビューションで作業を保存し、Windows の PowerShell で `wsl --shutdown` を実行します。
+`wsl --list --running` に稼働中のディストリビューションが表示されなくなってから、WSL を起動し直します。
+WSL を起動し直したら、Claude Code で `/wiki:browse` または Codex で `$wiki:info-hive browse` を実行します。
+閲覧サーバーはホストとポートを照合するので、表示された `http://127.0.0.1:…` の URL をそのまま Windows 側のブラウザで開きます。
+Windows 側で開けない場合は、WSL 内にブラウザがあれば、同じ URL を開いて閲覧サーバーが動いていることを確認します。
+
+`wsl --version` が 3.0.5.0 の環境で、Ubuntu 24.04 から起動した閲覧ページを Windows 版 Edge で表示できることを確認しました。
+`mirrored` モードでは `localhostForwarding` は使われません。その構成で閲覧できる場合は、そのまま使えます。[Microsoft Learn の WSL 設定](https://learn.microsoft.com/ja-jp/windows/wsl/wsl-config)
+
 ### Claude Code CLI
 
 Claude Code には、スキル、MCP サーバー、スラッシュコマンドが入ります。マーケットプレイスは [to884/info-hive-marketplace](https://github.com/to884/info-hive-marketplace) にあります。
