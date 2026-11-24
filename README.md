@@ -8,6 +8,8 @@ Claude Code と Codex では `wiki@info-hive` プラグインとして、ほか�
 
 エージェントが使う環境で `git --version`、`uv --version`、`python --version` が実行できることを確認する。Python は 3.12 以上が必要。初回は検索用モデルも取得するため、数分かかることがある。[事前準備](docs/agents.md#事前準備)
 
+WSL 版の Claude Code や Codex でプロジェクト wiki を使う場合は、Windows 側に導入済みでも WSL 側に `wiki@info-hive` をインストールする。[WSL での導入手順](docs/agents.md#wsl-でプロジェクト-wiki-を使う)
+
 ### Claude Code
 
 Claude Code のチャットで次を実行する。スキル、MCP サーバー、`/wiki:*` コマンドがまとめて入る。

@@ -57,6 +57,19 @@ Windows で Claude デスクトップアプリの Code タブを使う場合は�
 
 ## インストールのコマンド例
 
+### WSL でプロジェクト wiki を使う
+
+WSL 版の Claude Code や Codex でプロジェクト wiki を使う場合は、Windows 側に導入済みでも WSL 側に `wiki@info-hive` をインストールします。
+既定では Windows 版と WSL 版の CLI は別々の設定を使うため、リポジトリをどちらに置いていても、CLI を動かす環境にインストールします。
+
+WSL のターミナルで `command -v claude` または `command -v codex` を実行し、使う CLI が WSL 側にインストールしたものを指すことを確認します。
+パスが表示されないか、`/mnt/c/` などにある Windows 版を指す場合は、WSL 側に Linux 版の CLI を用意し、その CLI を使います。
+
+WSL 側で対象リポジトリのルートに移動し、[事前準備](#事前準備) を済ませます。
+`python3` だけが使える環境では、Python 3.12 以上を `python` でも起動できるようにします。
+同じ環境で [Claude Code CLI](#claude-code-cli) または [Codex CLI](#codex-cli) の手順に従ってプラグインを入れます。
+導入後は、Claude Code なら `/wiki:help`、Codex なら `$wiki:info-hive help` で操作の一覧が表示されることを確認します。
+
 ### Claude Code CLI
 
 Claude Code には、スキル、MCP サーバー、スラッシュコマンドが入ります。マーケットプレイスは [to884/info-hive-marketplace](https://github.com/to884/info-hive-marketplace) にあります。
