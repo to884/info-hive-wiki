@@ -184,6 +184,45 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fontSizeB
   content: "";
 }
 
+.wiki-scope-figure { margin: var(--spacingVerticalL) 0; }
+.wiki-scope-diagram {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: var(--spacingHorizontalM);
+}
+.wiki-scope-diagram svg {
+  display: block;
+  inline-size: 100%;
+  max-inline-size: 23rem;
+}
+.wiki-scope-diagram text {
+  fill: var(--colorNeutralForeground1);
+  font-size: var(--fontSizeBase400);
+}
+.wiki-scope-diagram .wiki-scope-title {
+  font-size: var(--fontSizeBase500);
+  font-weight: var(--fontWeightSemibold);
+}
+.wiki-scope-path { font-family: var(--fontFamilyMonospace); }
+.wiki-scope-panel {
+  fill: var(--colorNeutralBackground2);
+  stroke: var(--colorNeutralStroke2);
+  rx: var(--borderRadiusXLarge);
+}
+.wiki-scope-root {
+  fill: var(--colorBrandBackground2);
+  rx: var(--borderRadiusLarge);
+}
+.wiki-scope-branch {
+  fill: none;
+  stroke: var(--colorNeutralForeground2);
+}
+.wiki-scope-figure figcaption {
+  margin-block-start: var(--spacingVerticalS);
+  color: var(--colorNeutralForeground2);
+  font-size: var(--fontSizeBase300);
+}
+
 blockquote { border-inline-start: var(--strokeWidthThick) solid var(--colorBrandStroke1); }
 .check ul { margin-block-end: 0; }
 

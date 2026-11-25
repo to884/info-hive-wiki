@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ja" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>個人の wiki とプロジェクトの wiki | info-hive</title>
+  <link rel="stylesheet" href="assets/fluent2.css">
+  <link rel="stylesheet" href="assets/manual.css">
+  <link rel="stylesheet" href="assets/manual-print.css" media="print">
+</head>
+<body class="fui-FluentProvider">
+  <a class="skip-link fui-Link" href="#main">本文へ移動</a>
+  <header class="site-header">
+    <div class="shell"><a class="fui-Link site-name" href="index.html">info-hive</a></div>
+  </header>
+  <main class="shell reading-layout" id="main" tabindex="-1">
+    <nav class="contents" aria-label="このページの目次">
+      <h2>目次</h2>
+      <ul>
+        <li><a class="fui-Link" data-inline href="#folders">wiki と原本の置き場所</a></li>
+        <li><a class="fui-Link" data-inline href="#choose">どちらの wiki に残すか</a></li>
+        <li><a class="fui-Link" data-inline href="#agent">エージェントへの場所の伝え方</a></li>
+      </ul>
+    </nav>
+    <article class="page-content" aria-labelledby="page-title">
+      <header class="intro">
+        <h1 class="fui-Title1" id="page-title">個人の wiki とプロジェクトの wiki</h1>
+        <p><strong>個人の wiki</strong>（ユーザースコープの wiki）は、作業フォルダーをまたいで使う知識を蓄える場所です。
+          <strong>プロジェクトの wiki</strong> には、そのプロジェクトの作業で使う記録を残します。
+          どちらか一方から始めても、両方を使ってもかまいません。</p>
+      </header>
+
+      <section id="folders">
+        <h2 class="fui-Subtitle1">wiki と原本の置き場所</h2>
+        <figure class="wiki-scope-figure">
+          <div class="wiki-scope-diagram">
+            <svg viewBox="0 0 320 188" role="img" aria-labelledby="personal-title" aria-describedby="personal-desc" xml:lang="ja">
+              <title id="personal-title">個人の wiki のフォルダー構成</title>
+              <desc id="personal-desc">ホームフォルダーの info-hive の下に、wiki と raw が並びます。</desc>
+              <rect class="wiki-scope-panel" x="1" y="1" width="318" height="186"/>
+              <rect class="wiki-scope-root" x="16" y="55" width="288" height="34"/>
+              <text class="wiki-scope-title" x="16" y="33">個人の wiki</text>
+              <text class="wiki-scope-path" x="28" y="77">~/info-hive/</text>
+              <path class="wiki-scope-branch" d="M28 89v62h18 M28 117h18"/>
+              <text class="wiki-scope-path" x="56" y="122">wiki/</text>
+              <text x="118" y="122">要約・索引など</text>
+              <text class="wiki-scope-path" x="56" y="156">raw/</text>
+              <text x="118" y="156">資料の原本</text>
+            </svg>
+            <svg viewBox="0 0 320 188" role="img" aria-labelledby="project-title" aria-describedby="project-desc" xml:lang="ja">
+              <title id="project-title">プロジェクトの wiki のフォルダー構成</title>
+              <desc id="project-desc">プロジェクトのルートの下に、wiki と raw が並びます。</desc>
+              <rect class="wiki-scope-panel" x="1" y="1" width="318" height="186"/>
+              <rect class="wiki-scope-root" x="16" y="55" width="288" height="34"/>
+              <text class="wiki-scope-title" x="16" y="33">プロジェクトの wiki</text>
+              <text x="28" y="77">プロジェクトのルート</text>
+              <path class="wiki-scope-branch" d="M28 89v62h18 M28 117h18"/>
+              <text class="wiki-scope-path" x="56" y="122">wiki/</text>
+              <text x="118" y="122">要約・索引など</text>
+              <text class="wiki-scope-path" x="56" y="156">raw/</text>
+              <text x="118" y="156">資料の原本</text>
+            </svg>
+          </div>
+          <figcaption>図は初期化時の標準構成です。<code>~</code> は自分のホームフォルダーを表します。</figcaption>
+        </figure>
+        <p>個人の wiki では、ホームフォルダーの <code>info-hive/</code> に <code>wiki/</code> と <code>raw/</code> を置きます。
+          プロジェクトの wiki では、プロジェクトのルートに同じ構成を作ります。
+          どちらも <code>wiki/</code> に要約や索引を残し、<code>raw/</code> に資料の原本を置きます。</p>
+      </section>
+
+      <section id="choose">
+        <h2 class="fui-Subtitle1">どちらの wiki に残すか</h2>
+        <p>たとえば、障害対応で覚えたログの絞り込み方を別のプロジェクトでも使いたいときは、個人の wiki に残せます。
+          発生時刻や復旧までの経緯をそのプロジェクトで振り返りたいときは、プロジェクトの wiki を選びます。
+          プロジェクトの記録は、必要に応じてコードと同じリポジトリで履歴を管理できます。</p>
+        <p>両方を使うときは、「この振り返りをプロジェクトの wiki に取り込んで」「個人の wiki でログの調べ方を探して」のように、依頼で対象を指定できます。
+          どちらを指すか曖昧なときは、wiki のパスを指定できます。</p>
+      </section>
+
+      <section id="agent">
+        <h2 class="fui-Subtitle1">エージェントへの場所の伝え方</h2>
+        <p>個人の wiki は、ホームフォルダーを基準にした固定のパスを、エージェントのグローバルな指示に書きます。
+          プロジェクトの wiki は、プロジェクトを基準にした相対パスを、そのプロジェクトの指示に書きます。
+          初期化時にエージェントが指示への追記を提案します。承認して場所を登録すると、新しいセッションでも使えます。</p>
+        <p>依頼で対象を指定しなかった場合、エージェントは最も近いプロジェクトの指示にあるパスを優先し、次にグローバルな指示を参照します。
+          指示にパスがなければ、現在のプロジェクトの <code>wiki/</code> が候補になります。</p>
+        <p>wiki の保存先は、wiki ごとに初期化するときに選べます。プラグインをインストールする範囲とは別の設定です。</p>
+      </section>
+
+      <nav class="page-navigation" aria-label="関連ページ">
+        <a class="fui-Link" href="howto-user-wiki.html">複数の作業フォルダーから使う wiki を作る</a>
+        <a class="fui-Link" href="tutorial-first-wiki.html">練習用のプロジェクト wiki を作る</a>
+        <a class="fui-Link" href="agents.html#codex-cli">Codex CLI での使い方</a>
+      </nav>
+    </article>
+  </main>
+</body>
+</html>
