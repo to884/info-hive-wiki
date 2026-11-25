@@ -71,9 +71,12 @@
             <blockquote>プロジェクトの wiki にしてください。場所は、このフォルダーの <code>wiki/</code> と <code>raw/</code> です。モデルのキャッシュは既定の場所にしてください。グラフ層は後回しにします。エージェントとの連携は、このフォルダーの <code>CLAUDE.md</code> に追記してください。</blockquote>
           </li>
           <li><code>init_wiki.py</code> を実行したツール呼び出しを開き、出力の <code>"status": "ready"</code> を確かめます。</li>
-          <li>規約の変更を聞かれたら「変更しません」と答えます。</li>
+          <li>規約の変更を聞かれたら、練習では「変更しません」と答えます。</li>
           <li><code>CLAUDE.md</code> の案を示されたら、標準案を承認します。</li>
         </ol>
+        <p>初期化すると、<code>wiki/SCHEMA.md</code> ができます。エージェントはこのファイルを読み、ページの名前やタグ、取り込み手順など、この wiki の規約に沿って作業します。</p>
+        <p>自分の wiki では、初期化後にこのファイルをテキストエディターで開き、規約を編集できます。たとえば既存の「タグの体系」の節に「会議メモ」を追加し、どの資料の要約に付けるかを書きます。保存したら、新しいチャットでその wiki に会議メモを取り込み、意図したタグが付くことを確かめます。</p>
+        <p>編集するときは、ファイル名を <code>SCHEMA.md</code> のままにし、アップグレードの目印となる <code>## Retrieval</code> などの英語の見出しも保ちます。</p>
         <p>エラーで止まったら、<a class="fui-Link" data-inline href="howto-troubleshoot.html#diagnostic">検索環境の障害対処</a>を確認します。</p>
       </section>
 
