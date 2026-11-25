@@ -866,12 +866,15 @@
     sortBox.setAttribute("data-size", "small");
     var sortSel = el("select", "fui-Select__select");
     sortSel.setAttribute("aria-label", "並べ方");
+    var appliedSort = "order";    // HTML の行は Index の順に生成される
     [["order", "Index の順"], ["updated", "更新の新しい順"], ["title", "題名の順"]].forEach(function (o) {
       var op = el("option", "", o[1]);
       op.value = o[0];
       sortSel.appendChild(op);
     });
-    sortSel.addEventListener("change", apply);
+    sortSel.addEventListener("change", sortRows);
+    // 履歴から戻ると、change が起きずに選択が復元されることがある。
+    window.addEventListener("pageshow", function () { window.requestAnimationFrame(sortRows); });
     var sortIc = el("span", "fui-Select__icon");
     sortIc.appendChild(icon("chevron", "1em"));
     sortBox.appendChild(sortSel);
@@ -919,21 +922,6 @@
         r.hidden = !ok;
         if (ok) { shown++; }
       });
-      var key = sortSel.value;
-      function order(r) { return Number(r.getAttribute("data-order")); }
-      var sorted = rows.slice().sort(function (a, b) {
-        if (key === "updated") {
-          var ua = a.getAttribute("data-updated") || "";
-          var ub = b.getAttribute("data-updated") || "";
-          if (!ua !== !ub) { return ua ? -1 : 1; }      // 値のない行は最後
-          if (ua !== ub) { return ua > ub ? -1 : 1; }
-        } else if (key === "title") {
-          var c = a.getAttribute("data-title").localeCompare(b.getAttribute("data-title"), "ja");
-          if (c) { return c; }
-        }
-        return order(a) - order(b);
-      });
-      sorted.forEach(function (r) { list.appendChild(r); });
       // 語で絞っているかは、照合と同じ terms() で決める（空白だけの欄は絞っていない。3 回目の実装のレビューの A）
       var filtered = terms(filt.q).length > 0 || filt.type !== null || filt.tag !== null || !!filt.group;
       countEl.textContent = filtered ? rows.length + " 件中 " + shown + " 件" : rows.length + " 件";
@@ -948,6 +936,27 @@
       });
       groupChip.hidden = !filt.group;
       groupChip.textContent = filt.group ? "グループ: " + groupTitles[filt.group] + " ×" : "";
+    }
+
+    // 並べ方が変わったときは、あとで表示される行も含めて並べ直す。
+    function sortRows() {
+      var key = sortSel.value;
+      if (key === appliedSort) { return; }
+      function order(r) { return Number(r.getAttribute("data-order")); }
+      var sorted = rows.slice().sort(function (a, b) {
+        if (key === "updated") {
+          var ua = a.getAttribute("data-updated") || "";
+          var ub = b.getAttribute("data-updated") || "";
+          if (!ua !== !ub) { return ua ? -1 : 1; }      // 値のない行は最後
+          if (ua !== ub) { return ua > ub ? -1 : 1; }
+        } else if (key === "title") {
+          var c = a.getAttribute("data-title").localeCompare(b.getAttribute("data-title"), "ja");
+          if (c) { return c; }
+        }
+        return order(a) - order(b);
+      });
+      sorted.forEach(function (r) { list.appendChild(r); });
+      appliedSort = key;
     }
 
     function fromHash() {
