@@ -85,6 +85,7 @@ RAW_MODES = ("text", "link", "basename", "none")
 # 画面の部品。fluent2.css は Fluent 2 の再現の CSS の同梱の写し（Fluent 2 の設計の 2）、theme.js は配色を描く前に決める
 # figures.js はサーバーの方式で Mermaid の図を描く（ADR-0030）。静的の書き出しには入れない（ADR-0035）
 ASSETS = ("assets/app.js", "assets/style.css", "assets/fluent2.css", "assets/theme.js", "assets/figures.js")
+SEMANTIC_VIEW = "semantic"
 ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "browse_assets")
 DATA_FILES = ("nav.js", "data/manifest.js", "data/diagnostics.js", "data/search.js")
 EXTERNAL_SCHEMES = ("http", "https", "mailto")
@@ -556,6 +557,87 @@ def rel_href(from_path: str, to_path: str) -> str:
 
 def root_prefix(path: str) -> str:
     return "../" * (len(PurePosixPath(path).parts) - 1)
+
+
+def _semantic_claim(claim, article_core) -> str:
+    value = claim["claim"]["payload"]
+    relation = value["relationship"]
+    roles = "、".join(binding["entity_id"] for binding in value["role_bindings"])
+    states = {"compatible": "適合", "incompatible": "不適合", "not_checked": "未検査",
+              "verified": "照合済み", "affected": "変更の影響あり", "unavailable": "参照不能"}
+    polarity = {"positive": "肯定", "negative": "否定", "unknown": "不明"}[value["polarity"]]
+    rows = []
+    for key, label in (("adoption_assessment", "採用時の評価"), ("selected_assessment", "この版の評価")):
+        assessment = claim[key]
+        detail = f'{states[assessment["compatibility"]]}、{states[assessment["evidence_state"]]}' if assessment else "評価なし"
+        rows.append(f"<dt>{label}</dt><dd>{html.escape(detail)}</dd>")
+    reasons = {
+        "raw_root_unavailable": "採用時の原本の保存先を確認できません",
+        "raw_missing": "原本が見つかりません",
+        "raw_changed": "原本が変更されています",
+        "raw_unreadable": "原本を読み取れません",
+        "article_missing": "この公開版に根拠の記事がありません",
+        "article_changed": "この公開版で根拠の記事が変更されています",
+        "no_adoption": "採用時の評価がありません",
+    }
+    kinds = {"supports": "支持", "opposes": "反対", "context": "文脈"}
+    evidence = []
+    for item in claim["evidence"]:
+        label = kinds.get(item["kind"], item["kind"])
+        if item["readability"] != "available":
+            evidence.append(f'<li>{html.escape(label)} — {reasons.get(item["reason"], "参照できません")}</li>')
+            continue
+        quote = html.escape(item["evidence"]["payload"]["quote"])
+        scheme, _, article = item["source"]["payload"]["reference"]["uri"].partition(":")
+        link = ""
+        if scheme == "article" and article_core is not None and article in article_core.pages:
+            pid = article_core.resolve_disks([article])
+            if pid is not None:
+                href = html.escape(rel_href(SEMANTIC_VIEW, article_core.out_name[pid]))
+                link = f'<a href="{href}">{html.escape(article_core.title(pid))}</a>'
+        evidence.append(f'<li>{html.escape(label)}<blockquote class="semantic-quote">{quote}</blockquote>{link}</li>')
+    return (f'<h2 class="fui-Subtitle1">主張</h2><dl>'
+            f'<dt>関係の定義</dt><dd><code>{html.escape(relation["document"])}'
+            f'#{html.escape(relation["pointer"])}</code></dd>'
+            f'<dt>実体 ID</dt><dd><code>{html.escape(roles)}</code></dd>'
+            f'<dt>極性</dt><dd>{polarity}</dd>'
+            f'{"".join(rows)}</dl><h2 class="fui-Subtitle1">根拠</h2>'
+            + (f'<ul>{"".join(evidence)}</ul>' if evidence else "<p>記録された根拠はありません。</p>"))
+
+
+def render_semantic(result, claim_id=None, article_core=None) -> str:
+    """1 回の公開版照会を、記事索引とは独立したサーバー用の HTML に描く。"""
+    state = result["state"]
+    messages = {"not_published": "表示できる公開版がありません。", "unconfigured": "Ossie の定義は未設定です。",
+                "retired": "この公開版は退役しました。"}
+    parts = []
+    if result["release_id"]:
+        parts.append(f'<p>公開版 ID <code>{html.escape(result["release_id"])}</code></p>')
+    if state == "ready":
+        parts.append(f'<p>定義 ID <code>{html.escape(result["definition_snapshot_id"])}</code></p>')
+        if claim_id is None:
+            parts.append(f'<p>主張 {result["claim_count"]} 件</p>')
+        parts.append('<form id="_semantic-form" hidden><label for="_semantic-claim">主張 ID</label> '
+                     f'<input id="_semantic-claim" name="claim_id" value="{html.escape(claim_id or "")}" '
+                     'required pattern="[0-9a-f]{64}" maxlength="64" title="小文字の16進数64桁"> '
+                     '<button class="fui-Button" type="submit">照会</button></form>'
+                     '<noscript><p>照会欄を使うには JavaScript を有効にしてください。</p></noscript>')
+        if claim_id is not None:
+            parts.append(f'<p><a href="{SEMANTIC_VIEW}">主張数に戻る</a></p>')
+            parts.append(_semantic_claim(result["claims"][0], article_core) if result["claims"]
+                         else "<p>この公開版に指定した主張はありません。</p>")
+        parts.append('<script src="assets/app.js"></script>')
+    else:
+        parts.append(f"<p>{messages[state]}</p>")
+    return ('<!doctype html>\n<html lang="ja" data-theme="auto"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+            '<title>Ossie の意味と根拠</title>'
+            f'{ICON_LINK}'
+            '<link rel="stylesheet" href="assets/fluent2.css"><link rel="stylesheet" href="assets/style.css">'
+            '<script src="assets/theme.js"></script></head>'
+            '<body class="fui-FluentProvider page-semantic"><main id="_main">'
+            '<nav aria-label="wiki のナビゲーション"><a href="index.html">Index へ</a></nav>'
+            f'<h1 class="fui-Title2">Ossie の意味と根拠</h1>{"".join(parts)}</main></body></html>\n')
 
 
 # ---------------------------------------------------------------------------
@@ -2209,7 +2291,8 @@ class Core:
                 "tag": {value: identify("tag", value) for value in tags}}
         return html.escape(json.dumps(data, sort_keys=True, separators=(",", ":")))
 
-    def render_index(self, stale: "str | None" = None, *, filter_secret: bytes | None = None) -> str:
+    def render_index(self, stale: "str | None" = None, *, filter_secret: bytes | None = None,
+                     semantic_link: bool = False) -> str:
         path = "index.html"
         diags = list(self.diagnostics)
         if stale:
@@ -2222,9 +2305,10 @@ class Core:
         diag_note = self._incomplete_html()
         total = len(self.page_order)
         rows = "".join(self._index_row(pid, k + 1, path) for k, pid in enumerate(self.page_order))
+        semantics = f'<p><a href="{SEMANTIC_VIEW}">Ossie の意味と根拠</a></p>' if semantic_link else ""
         return (self._head(path, "Index", stale)
                 + f'<header id="_ixhead"><h1 class="fui-Title2">Index</h1>'
-                  f'<p class="ix-stats fui-Caption1">{total} ページ</p></header>\n{nav_note}'
+                  f'<p class="ix-stats fui-Caption1">{total} ページ</p>{semantics}</header>\n{nav_note}'
                 + f'<div id="_filters" class="fx-bar" data-filter-keys="{self._index_filter_keys(filter_secret)}">'
                   '<noscript><p class="state fui-Caption1">絞り込みと検索には '
                   'JavaScript が要る。一覧は Index の順に並んでいる。</p></noscript></div>\n'
@@ -2309,11 +2393,12 @@ class Core:
         raise KeyError(name)
 
     def render(self, name: str, raw_mode: str = "text", generated_at: str = "",
-               stale: "str | None" = None, *, allow_figures: bool = True, filter_secret: bytes | None = None) -> str:
+               stale: "str | None" = None, *, allow_figures: bool = True, filter_secret: bytes | None = None,
+               semantic_link: bool = False) -> str:
         """出力の名前 1 つを描く。中核が知らない名前なら KeyError。ほかの要求と同時に呼んでよい。"""
         with self._render_lock:
             if name == "index.html":
-                return self.render_index(stale, filter_secret=filter_secret)
+                return self.render_index(stale, filter_secret=filter_secret, semantic_link=semantic_link)
             return self._render(name, raw_mode, generated_at, stale, allow_figures)
 
     def _render(self, name: str, raw_mode: str, generated_at: str, stale: "str | None", allow_figures: bool) -> str:

@@ -6,6 +6,18 @@
    4 節、ふるまいは探しやすさの設計（docs/plans/wiki-browse-findability-2026-11-13.md）の 3〜5 節による。 */
 (function () {
   "use strict";
+  if (document.body.classList.contains("page-semantic")) {
+    var semanticForm = document.getElementById("_semantic-form");
+    semanticForm.hidden = false;
+    semanticForm.addEventListener("submit", function (event) {
+      event.preventDefault();
+      var url = new URL(window.location.href);
+      url.search = new URLSearchParams({ claim_id: semanticForm.elements.claim_id.value }).toString();
+      url.hash = "";
+      window.location.assign(url);
+    });
+    return;
+  }
   var PROTOCOL = 2;
   var doc = document.documentElement;
   var root = doc.getAttribute("data-root") || "";
