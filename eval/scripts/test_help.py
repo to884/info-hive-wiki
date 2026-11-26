@@ -95,7 +95,7 @@ class RenderTests(unittest.TestCase):
 class RealCommandsTests(unittest.TestCase):
     """実際の commands/ に対して、スクリプトとして実行する。"""
 
-    EXPECTED = ["init", "ingest", "query", "lint", "stats", "graph", "browse", "overview", "export", "import", "learn", "evolve", "upgrade", "help"]
+    EXPECTED = ["init", "ingest", "query", "lint", "stats", "graph", "browse", "overview", "export", "import", "dream", "learn", "evolve", "upgrade", "help"]
 
     def run_script(self, *extra):
         return subprocess.run(
