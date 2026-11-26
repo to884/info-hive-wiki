@@ -1,6 +1,6 @@
 {
   "name": "wiki",
-  "version": "0.50.0",
+  "version": "0.50.1",
   "description": "日本語の Markdown の wiki を構築・保守し、ローカル検索、出典つきの回答、グラフ、閲覧、経験の記録を提供する。",
   "author": { "name": "to884" },
   "license": "MIT",

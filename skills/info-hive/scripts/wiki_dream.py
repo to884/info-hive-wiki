@@ -39,6 +39,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 from wiki_lint import parse_frontmatter
 from wiki_fsguard import Refused, WriteGuard
+from wiki_initialized import require
 from wiki_pages import (
     absolute_user_path, build_page_index, code_line_mask, extract_wikilinks, iter_page_files, link_candidates,
     read_user_bytes, ref_values, resolve_raw,
@@ -626,7 +627,7 @@ def print_results(results):
 
 
 def propose(wiki, raw_root, args, *, workspace=None):
-    wiki = absolute_user_path(wiki).resolve()
+    wiki = absolute_user_path(require(wiki)).resolve()
     base = workspace if workspace is not None and wiki.is_relative_to(workspace) else wiki
     destination = args.out.resolve()
     protected_roots = (wiki, raw_root) if workspace is None else (wiki, raw_root, workspace / "wiki", workspace / "raw")
