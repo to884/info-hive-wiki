@@ -38,7 +38,8 @@ HEADER = """# Codex での操作
 - MCP のツールは、このセッションで表示された名前で呼ぶ。Claude Code のツール名を推測しない。
 - Read / Write / Edit / str_replace は、Codex のファイル読み取りと差分編集に読み替える。
 - Codex には `wiki:web-raw` がない。Web の raw は `references/web-raw.md` の W1〜W8 を自分で実行する。
-  Claude CLI、Agent ツール、Sonnet の起動は行わない。モデルの表示名は実際に使っている自分の名前にする。
+  Web の raw を処理するときは Claude CLI、Agent ツール、Sonnet の起動は行わない。
+  モデルの表示名は実際に使っている自分の名前にする。
 - `ingest session` は実行中の Codex の会話を取り込む。S1 の Codex の手順で
   `locate --host codex --current` の `transcript` と `before` を使い、依頼を含むターン全体より前の範囲に固定する。
   `session:<ID>` は Codex の ID として読む。明示した Claude Code の JSONL は従来どおり扱う。

@@ -29,6 +29,7 @@
         <li><a class="fui-Link" data-inline href="#wikiexport">/wiki:export　記事を ZIP にまとめる</a></li>
         <li><a class="fui-Link" data-inline href="#wikiimport">/wiki:import　記事 ZIP を取り込む</a></li>
         <li><a class="fui-Link" data-inline href="#wikiupgrade">/wiki:upgrade　既存の wiki をアップグレードする</a></li>
+        <li><a class="fui-Link" data-inline href="#wikidream">/wiki:dream　会話から修正案を作る</a></li>
         <li><a class="fui-Link" data-inline href="#wikilearn">/wiki:learn　作業の経験を記録する</a></li>
         <li><a class="fui-Link" data-inline href="#wikievolve">/wiki:evolve　スキルの改善案を評価する</a></li>
         <li><a class="fui-Link" data-inline href="#wikihelp">/wiki:help　アプリでコマンドの一覧を出す</a></li>
@@ -137,6 +138,14 @@
         <pre><code>/wiki:upgrade [--user] [--wiki-dir &lt;path&gt;] [--raw-dir &lt;path&gt;] [--previous-raw-root &lt;path&gt; ...]</code></pre>
         <p>例 <code>/wiki:upgrade</code></p>
         <p><a class="fui-Link" data-inline href="howto-upgrade-wiki.html">規約の差分と実行環境の確認</a></p>
+      </section>
+
+      <section id="wikidream">
+        <h2 class="fui-Subtitle1">/wiki:dream　会話から修正案を作る</h2>
+        <p>取り込み済みの会話を読み直し、対象のライブ wiki の修正案を保存します。wiki、原本、出力先を絶対パスで指定します。</p>
+        <pre><code>/wiki:dream --wiki "/data/project/wiki" --raw-root "/data/project/raw" --out "/data/project/dream"</code></pre>
+        <p>Codex では <code>$wiki:info-hive dream</code> と同じ引数を使います。</p>
+        <p><a class="fui-Link" data-inline href="workflows.html#取り込み済みの会話から-wiki-の修正案を作る">Claude と Codex で定期実行する手順</a></p>
       </section>
 
       <section id="wikilearn">

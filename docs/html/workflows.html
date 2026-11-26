@@ -135,24 +135,23 @@
 </blockquote>
 <h2 id="取り込み済みの会話から-wiki-の修正案を作る" class="fui-Subtitle1">取り込み済みの会話から wiki の修正案を作る</h2>
 <p><strong>ドリーミング</strong>（Wiki Dreaming）では、取り込み済みの会話を読み直し、根拠を補える既存ページの修正案を作ります。
-<code>/wiki-dream</code> は、開発リポジトリ <code>info-hive-dev</code> で試験中の Claude Code ワークフローです。
-インストール済みの wiki プラグインで使えるコマンドは、<a href="commands.html" class="fui-Link" data-inline="">コマンド一覧</a>を参照してください。</p>
-<p>試すには、Python 3.11 以上と認証済みの Claude Code CLI を用意します。
-<span>開発リポジトリ</span>のルートで次のコマンドを実行します。</p>
-<pre><code class="language-sh">git submodule update --init -- info-hive-wiki
-python -X utf8 -B poc/wiki-dream/run.py --scheduled --limit 2
+定期タスクを動かす端末に wiki プラグイン、Python 3.12〜3.14、Dynamic Workflows が使える認証済みの Claude Code CLI を用意します。
+Codex から実行する場合も、会話の分析には同じ Claude Code CLI を使います。</p>
+<p>対象はライブ wiki です。wiki のルートを <code>--wiki</code>、取り込み済みの原本を <code>--raw-root</code>、提案の保存先を <code>--out</code> に、それぞれ絶対パスで指定します。
+出力先は wiki と原本のディレクトリの外に置きます。Claude と Codex で同じ対象を扱う場合は、どちらにも同じ出力先を設定します。台帳で処理済みの会話が除外され、同時に起動したときは後から起動した回がスキップされます。</p>
+<h3 id="claude-code-desktop-で定期実行する" class="fui-Subtitle2">Claude Code Desktop で定期実行する</h3>
+<p>Code タブの Scheduled からローカルの定期タスクを作り、wiki と原本にアクセスできるフォルダーと、実行頻度を指定します。タスクのプロンプトに次の呼び出しを書き、パスを置き換えます。最初に Run now で実行し、タスクの権限と出力先を確認します。<span>Claude Code Desktop の定期タスク</span></p>
+<pre><code class="language-text">/wiki:dream --wiki &quot;/data/project/wiki&quot; --raw-root &quot;/data/project/raw&quot; --out &quot;/data/project/dream&quot;
 </code></pre>
-<p>既定の対象は開発リポジトリの <code>wiki/</code> と <code>raw/</code> です。
-対象にできるのは、公開版を参照していないライブ wiki です。
-個人 wiki などを対象にする場合は、wiki のルートを <code>--wiki</code>、取り込み済み原本のルートを <code>--raw-root</code>、wiki と原本ルートの外にある専用の出力先を <code>--out</code> に指定します。
-定期実行するには、Claude Code Desktop のローカル定期タスクなどに Python の起動コマンドを登録します。
-対象 wiki ごとにジョブと出力先を用意し、同じジョブでは毎回同じ出力先を使います。
-<code>--scheduled</code> を付けると、Python は出力先の <code>ledger.sqlite</code> で処理済みの会話と再試行を管理します。</p>
-<p>Python は原本の SHA-256 が記録された会話を選び、Claude Code が原本と関連記事を読んで修正案を作ります。
-Python は根拠と編集対象を照合し、出力先の実行 ID ごとのディレクトリに報告書 <code>proposal.md</code>、差分 <code>proposal.diff</code>、実行記録 <code>run.json</code> を保存します。
-既定の出力先は <code>work/wiki-dream/</code> です。
-差分が空の場合も、報告書で結果を確認できます。処理対象の会話が 0 件の回は提案を作りません。
-実行は提案の生成までです。差分の内容と原本を確認し、採用する変更を判断します。</p>
+<h3 id="codex-で定期実行する" class="fui-Subtitle2">Codex で定期実行する</h3>
+<p>デスクトップアプリの Scheduled でローカルプロジェクトを対象にしたタスクを作り、実行頻度を指定します。タスクのプロンプトに次の呼び出しを書き、パスを置き換えます。プロジェクトやワークツリーが変わっても、同じ wiki と出力先を指す絶対パスを使います。<span>Codex の定期タスク</span></p>
+<pre><code class="language-text">$wiki:info-hive dream --wiki &quot;/data/project/wiki&quot; --raw-root &quot;/data/project/raw&quot; --out &quot;/data/project/dream&quot;
+</code></pre>
+<p>タスクの実行環境に、wiki と原本の読み取り、出力先と一時ディレクトリへの書き込み、Claude Code の設定とネットワークへのアクセスを許可します。登録前に、同じ権限で手動実行して確かめます。<span>Codex の権限設定</span></p>
+<h3 id="提案を確認する" class="fui-Subtitle2">提案を確認する</h3>
+<p>対象は原本の SHA-256 が記録された会話です。1回に見直すのは既定で2件です。<code>--limit</code> で1〜5件に変更できます。提案を保存するたびに、処理済みの会話を出力先の <code>ledger.sqlite</code> に記録します。ワークフローの待ち時間は1回の起動で合計8分です。時間切れで残った会話や失敗した会話は次回に回ります。
+提案の保存と台帳への記録の間にプロセスが強制終了された場合は、次回に同じ会話の提案が再び作られることがあります。</p>
+<p>提案の保存先には、実行 ID ごとのディレクトリに報告書 <code>proposal.md</code>、差分 <code>proposal.diff</code>、実行記録 <code>run.json</code> ができます。報告書に、対象 wiki と差分を確認する基準ディレクトリが載ります。対象の会話が0件の回は提案を作りません。差分と原本を確認し、採用する変更を判断してください。</p>
 <h2 id="経験の記録とスキルの改善" class="fui-Subtitle1">経験の記録とスキルの改善</h2>
 <p>完了したタスクは、<code>/wiki:learn</code> で変更不可の経験のソースと、再利用できるコンセプトのパターンにできます。<code>/wiki:evolve</code> は、回数に上限のある学習とパターンの統合を行い、スキル全体の変更を提案し、検証の結果で候補を選び、固定した選定結果を独立した最終テストで測定します。失敗した実験も残し、承認された変更を明示的に適用またはロールバックします。通常の事実情報としての wiki はそのまま使えます。ワークフロー全体、実行できるパイロット、評価の範囲については、<a href="evolution.html" class="fui-Link" data-inline="">経験の記録とスキルの改善</a>を参照してください。</p>
     </main>

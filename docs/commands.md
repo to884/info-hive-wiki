@@ -183,6 +183,16 @@ slug を付けると、`[[slug]]` と同じ規則でページを探して開く�
 
 インストールされている `init_wiki.py` と、設定されたユーザースコープまたはプロジェクトの wiki を、それぞれ別に特定してから、`--upgrade` を付けて実行する。既存のコンテンツには手を付けずに、バージョンを固定したローカルの実行環境一式をインストールして確かめ、パースとベクトルのインデックスを同期し、`SCHEMA.md` に欠けているセクションを1つずつ確認する。[アップグレード](./upgrade.md)を参照。
 
+## `/wiki:dream --wiki <path> --raw-root <path> --out <path>`
+
+取り込み済みの会話を読み直し、既存ページの修正案を作ります。対象 wiki、原本、出力先は絶対パスで指定します。対象はライブ wiki です。`--limit` で1回に見直す会話の件数を1〜5件から指定できます。既定は2件です。
+
+```text
+/wiki:dream --wiki "/data/project/wiki" --raw-root "/data/project/raw" --out "/data/project/dream"
+```
+
+Codex では `$wiki:info-hive dream` と同じ引数を使います。定期タスクの登録方法、Claude Code CLI の前提、提案の確認方法は [Dreaming のワークフロー](./workflows.md#取り込み済みの会話から-wiki-の修正案を作る)を参照してください。
+
 ## `/wiki:learn <task artifacts>`
 
 検証済みの成功や失敗を変更不可の raw の経験として記録し、ソースページとして取り込み、証拠、適用できる範囲、反例を添えた再利用できるパターンにまとめる。スキルは変更せず、費用のかかるモデルの評価も始めない。[学習とスキルの改善](./evolution.md)を参照。
