@@ -181,6 +181,13 @@ class Os:
 
         return resolve_publication(path, release_id)
 
+    def semantic_read(self, path, release_id, claim_id):
+        from wiki_semantic_reader import read_semantic_status, read_semantics
+
+        if claim_id is None:
+            return read_semantic_status(path, release_id=release_id)
+        return read_semantics(path, release_id=release_id, claim_id=claim_id)
+
     def stat(self, path):
         return os.stat(path)
 
@@ -349,6 +356,14 @@ def publication(root, release_id=None):
     """公開の記録を照合し、整合性のエラーを閲覧の停止として伝える。"""
     try:
         return x("publication", root, release_id)
+    except ValueError as e:
+        raise Stop(str(e)) from e
+
+
+def semantic_read(root, release_id, claim_id):
+    """公開版の意味を専用 reader の規則で読む。"""
+    try:
+        return x("semantic_read", root, release_id, claim_id)
     except ValueError as e:
         raise Stop(str(e)) from e
 

@@ -38,6 +38,7 @@ import http.client  # noqa: E402
 import http.server  # noqa: E402
 import json  # noqa: E402
 import os  # noqa: E402
+import re  # noqa: E402
 import secrets  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
@@ -482,7 +483,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._kind = "-"
         if self.headers.get("Host") != f"127.0.0.1:{app.port}":
             return self._text(421, "Misdirected Request")
-        raw_path = urllib.parse.urlsplit(self.path).path
+        url = urllib.parse.urlsplit(self.path)
+        raw_path = url.path
         # 操作の口の locate は、行き先（wikilink の中身）を、符号化した 1 つの要素で受け取る。行き先は
         # ファイルのパスとして使わず、中核の解決に渡すだけなので、下のパスの確かめ（`/` や `..` を拒む）を
         # 通さない。`[[concepts/a]]` と同じに、先頭の `/` や区切りの違う行き先も解決できる。
@@ -521,7 +523,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._kind = "view"
             if self.command not in ("GET", "HEAD"):
                 return self._text(405, "Method Not Allowed", {"Allow": "GET, HEAD"})
-            return self._view("/".join(parts[3:]) or "index.html")
+            name = "/".join(parts[3:]) or "index.html"
+            if name == core.SEMANTIC_VIEW:
+                return self._semantic_view(url.query)
+            return self._view(name)
         return self._text(404, "Not Found")
 
     def _frame(self, version: str, name: str):
@@ -543,6 +548,49 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not self._publication_available():
             return self._text(410, "公開版を取得できません")
         return self._render_view(name)
+
+    def _semantic_view(self, query: str):
+        claim_id = None
+        if query:
+            try:
+                params = urllib.parse.parse_qs(query, keep_blank_values=True, strict_parsing=True,
+                                               max_num_fields=1, errors="strict")
+                claim_id, = params["claim_id"]
+                if re.fullmatch("[0-9a-f]{64}", claim_id) is None:
+                    raise ValueError("主張 ID")
+            except (KeyError, ValueError):
+                return self._text(400, "主張 ID は小文字の16進数64桁で指定してください")
+        app = self.server.app
+        pinned = app.publication
+        if pinned is None:
+            if not self._publication_available():
+                return self._text(410, "公開版を取得できません。wiki を開き直してください")
+            finding = initialized.check(app.root)
+            if finding is not None:
+                if finding.certain:
+                    reason = initialized.REASONS.get(finding.kind, initialized.REASONS["no_marker"])
+                    return self._text(503, f"{reason}。{initialized.INIT_HINT}", {"Retry-After": "5"})
+                return self._text(503, "wiki の状態を確認できません。少し待ってから再読み込みしてください",
+                                  {"Retry-After": "5"})
+            result = {"state": "not_published", "release_id": None}
+        else:
+            try:
+                result = fs.semantic_read(pinned.wiki, pinned.release_id, claim_id)
+            except fs.Stop:
+                return self._text(500, "Ossie の公開版の整合性を確認できません")
+            except (fs.Absent, fs.Unknown):
+                return self._text(503, "Ossie の公開版を読み取れません。少し待ってから再読み込みしてください",
+                                  {"Retry-After": "5"})
+        article_core = None
+        if any(item["readability"] == "available" and item["source"]["payload"]["reference"]["uri"].startswith("article:")
+               for claim in result.get("claims", ()) for item in claim["evidence"]):
+            candidate, stale = app.state.get()
+            if stale is None:
+                article_core = candidate
+        body = core.render_semantic(result, claim_id, article_core)
+        code = 410 if result["state"] == "retired" else 200
+        return self._send(code, body.encode("utf-8"), "text/html; charset=utf-8",
+                          extra={"Cross-Origin-Opener-Policy": "same-origin"})
 
     def _render_view(self, name: str):
         app = self.server.app
@@ -574,7 +622,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                          and self.headers.get("Sec-Fetch-Dest") == "document"
                          and self.headers.get("Sec-Fetch-Site") in ("none", "same-origin"))
         text = c.render(name, app.state.raw, generated_at=getattr(c, "generated_at", ""), stale=reason,
-                        allow_figures=allow_figures, filter_secret=app.filter_secret)
+                        allow_figures=allow_figures, filter_secret=app.filter_secret, semantic_link=True)
         ctype = "text/javascript; charset=utf-8" if name.endswith(".js") else "text/html; charset=utf-8"
         extra = None if name.endswith(".js") else {"Cross-Origin-Opener-Policy": "same-origin"}
         return self._send(200, text.encode("utf-8"), ctype, extra=extra)

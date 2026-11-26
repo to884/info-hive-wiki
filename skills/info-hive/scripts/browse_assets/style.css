@@ -63,6 +63,9 @@ body.fui-FluentProvider {
 /* 記事の本文の大きさと行間は今と同じ 16px と 1.8（土台の 14px と 20px にしない） */
 .page-article #_main { font-size: var(--fontSizeBase400); line-height: 1.8; max-width: 48em; }
 .page-index #_main { max-width: 64em; }
+body.fui-FluentProvider.page-semantic { display: block; }
+.page-semantic #_main { max-width: 56em; }
+.semantic-quote { white-space: pre-wrap; }
 #_main, #_nav { line-break: strict; word-break: normal; overflow-wrap: anywhere; }
 @supports (text-autospace: normal) { #_main { text-autospace: normal; } }
 
