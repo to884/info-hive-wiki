@@ -892,10 +892,12 @@ def _mark_session_turns(tokens: list) -> None:
 class Core:
     """1 つの写しから組み立てた中核。描く関数は静的の書き出しとサーバーで同じものを使う。"""
 
-    def __init__(self, snapshot: Snapshot, name_limit: int = NAME_LIMIT, scope: "str | None" = None):
+    def __init__(self, snapshot: Snapshot, name_limit: int = NAME_LIMIT, scope: "str | None" = None,
+                 *, wiki_path: "PurePath | None" = None):
         self.snapshot = snapshot
         # wiki のスコープ（user か project）。呼び出し元の指定で、中核は決めない。None なら出さない。
         self.scope = normalize_scope(scope)
+        self.project_name = PurePath(wiki_path).parent.name if self.scope == "project" and wiki_path is not None else ""
         self.generation = snapshot.generation
         self.parser = wiki_pages.new_parser()
         self.parser.options["highlight"] = code_highlight.make_highlighter()
@@ -2029,8 +2031,9 @@ class Core:
         if not self.scope:
             return ""
         color = "brand" if self.scope == "user" else "informative"
+        heading = f"{self.project_name}の wiki" if self.project_name else SCOPE_HEADINGS[self.scope]
         return (f'<p id="_scope" class="scope scope-{self.scope}"><span class="fui-Badge" data-appearance="tint" '
-                f'data-color="{color}" data-size="large" data-shape="rounded">{SCOPE_HEADINGS[self.scope]}</span></p>')
+                f'data-color="{color}" data-size="large" data-shape="rounded">{html.escape(heading)}</span></p>')
 
     def _message_bar(self, mid: str, intent: str, title: str, body: str, extra_class: str = "") -> str:
         """Fluent の MessageBar（multiline）。アイコンはインライン SVG（Fluent 2 の設計の 4）。body は文字で渡す。"""
