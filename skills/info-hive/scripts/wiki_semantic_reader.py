@@ -164,11 +164,15 @@ def _claims(value, view, guard, files, claim_id):
     return result
 
 
-def _read_view(view, article, claim_id):
+def _empty_fields(summary):
+    return {"claim_count": None} if summary else {"article": None, "claims": []}
+
+
+def _read_view(view, article, claim_id, summary):
     owner = WriteGuard(view.wiki, strict_root=True)
     files = publish.manifest(owner, owner.root / publish.AREA, view.release_id)["files"]
     guard = WriteGuard(view.root, strict_root=True)
-    result = {"state": "unconfigured", "release_id": view.release_id, "article": None, "claims": []}
+    result = {"state": "unconfigured", **_empty_fields(summary)}
     if article is not None:
         result["article"] = {"path": article, "state": "unavailable"}
         if article in files:
@@ -186,12 +190,25 @@ def _read_view(view, article, claim_id):
     manifest = value.manifest
     result.update({key: manifest[key] for key in _CONTEXT_KEYS})
     if manifest["activation_id"] is not None:
-        result.update(state="ready", claims=_claims(value, view, guard, files, claim_id))
+        result["state"] = "ready"
+        if summary:
+            result["claim_count"] = len(manifest["heads"]["claims"])
+        else:
+            result["claims"] = _claims(value, view, guard, files, claim_id)
     return result
 
 
 def read_semantics(wiki, *, release_id=None, claim_id=None, article=None):
     """指定した公開版、または照会開始時の先頭の版について評価を返す。"""
+    return _read_semantics(wiki, release_id=release_id, claim_id=claim_id, article=article)
+
+
+def read_semantic_status(wiki, *, release_id=None):
+    """根拠を開かず、公開版の選択と主張 head の件数を返す。"""
+    return _read_semantics(wiki, release_id=release_id, summary=True)
+
+
+def _read_semantics(wiki, *, release_id, claim_id=None, article=None, summary=False):
     if claim_id is not None:
         digest_id(claim_id)
     if article is not None and not is_article_path(publish.relative(article)):
@@ -200,13 +217,13 @@ def read_semantics(wiki, *, release_id=None, claim_id=None, article=None):
     archive = publish.archived_root(wiki)
     requested = release_id if release_id is not None else archive[1] if archive else None
     result = {"state": "not_published", "scope": "tip" if requested is None else "fixed",
-              "release_id": requested, "claims": [], "article": None, **dict.fromkeys(_CONTEXT_KEYS)}
+              "release_id": requested, **_empty_fields(summary), **dict.fromkeys(_CONTEXT_KEYS)}
     try:
         view = publish.resolve_publication(wiki, release_id)
         if view is None:
             return result
         result["release_id"] = view.release_id
-        reply = _read_view(view, article, claim_id)
+        reply = _read_view(view, article, claim_id, summary)
         # 先頭が進んでも初めに選んだ版を再照合し、読取中の退役も反映する。
         publish.resolve_publication(view.wiki, view.release_id)
     except publish.RetiredPublication:

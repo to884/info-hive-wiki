@@ -38,6 +38,8 @@ wiki のプラグインは、検索のためのローカルの MCP サーバー�
 | `lint` | 構造の lint（`wiki_lint.py --json` と同じ結果）と、オントロジーがあればグラフの lint（`wiki_graph_lint.py --json`）。検査するだけで直さない |
 | `stats` | 規模、構成、リンク密度の集計（`wiki_stats.py --json` と同じ結果）と、索引の状態とサーバーの版 |
 | `graph` | グラフ（`graph/graph.sqlite`）への問い合わせ（`wiki_graph_query.py --json` と同じ結果）。DB は読み取り専用で開く |
+| `semantic_status` | Ossie の公開版、定義、主張数を確認する。登録された原本は開かない |
+| `semantic_query` | 指定した公開版の主張 1 件について、採用時とその版の評価、参照可能な根拠を返す |
 | `index_chunks` | rag などからチャンクを受け取り、wiki の外の索引に加える |
 
 **拒んだリンクの知らせ（`link_warnings`）。** wiki の記事か記事までの道がリンク（シンボリックリンク、ジャンクション、名前の代理のリパースポイント、ハードリンク）なら、どのツールもその記事を読まない（info-hive-dev の ADR-0029）。`query`、`get_page`、`list_index`、`lint`、`stats`、`graph` の結果には、読まなかったものを `link_warnings`（`{"path", "kind"}` の並び。なければ空）で必ず付ける。`get_page` と `list_index` の `name` で、リンクなので読まない記事を名前で引くと、「見つからない」ではなく「リンクなので読まない」のエラーを返す。
@@ -100,6 +102,16 @@ wiki のプラグインは、検索のためのローカルの MCP サーバー�
 - ノード ID（`concept:消費税` など）は NFC にそろえてから探す。
 - オントロジーがない wiki、`graph.sqlite` がない wiki、見つからないノードはエラーになる。DB は `wiki_graph_extract.py` が作る。このツールは作らない。
 - グラフはナビゲーション用の索引である。重要な主張は、エッジの `source` のページで確かめる（`references/graph-workflow.md`）。
+
+### Ossie の主張と根拠を読む
+
+1. `semantic_status(wiki)` で最新の読取可能な公開版を確認する。`release_id` を指定すればその版を確認できる。`ready` の `claim_count` は主張の件数で、0 も有効である。形式1または定義未採用は `unconfigured`、公開版なしは `not_published`、指定版の退役は `retired` を返し、いずれも件数は `null` になる。
+2. 互換グラフに載っている主張は、同じ `release_id` で `graph` を呼び、エッジの `metadata_json` を JSON として読んで `claim_id` を得る。互換グラフに投影されない主張は既知の ID で照会する。
+3. `semantic_query(wiki, release_id, claim_id)` で、その版に保持された採用時の評価と、その版で選ばれた評価を読む。根拠が変更されたり読めなかったりすると、参照不能の理由を返す。記事を確認する場合は同じ `release_id` を `get_page` に渡す。
+
+`wiki` は両ツールで必須。`release_id` は状態照会で省略でき、主張照会では `claim_id` とともに必須。両 ID は64桁の小文字の16進数で、不正な ID や公開履歴にない公開版 ID はエラーになる。定義を採用した版に指定された主張 ID がなければ `ready` と空の `claims` を返す。
+
+根拠の `readability` が `unavailable` のときは `reason` を確認する。`raw_root_unavailable` は採用時の原本ルートを確認できない場合。`raw_missing`、`raw_unreadable`、`raw_changed` は、順に原本ファイルの消失、読取失敗、指紋の不一致を示す。`article_missing` と `article_changed` は、照会した版に根拠の記事がないか、記事の指紋が異なる場合。`no_adoption` は採用時の評価がない場合を示す。
 
 ### index_chunks
 
