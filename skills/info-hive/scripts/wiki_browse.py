@@ -121,7 +121,7 @@ def _unknown_text(e) -> str:
 READ_ATTEMPTS = 3
 
 
-def _read_and_render(root: PurePath, raw: str, scope: "str | None", generated_at: str):
+def _read_and_render(root: PurePath, raw: str, scope: "str | None", generated_at: str, *, wiki_path: PurePath):
     """写しを採り、すべてのページを描く。読んでいるあいだに Wiki が変われば、3 回までやり直す（設計の 4.2）。"""
     import wiki_browse_pele
 
@@ -132,7 +132,7 @@ def _read_and_render(root: PurePath, raw: str, scope: "str | None", generated_at
             if attempt + 1 == READ_ATTEMPTS:
                 raise Failed("読んでいるあいだに Wiki が変わり続けた。前の世代を残して止める。少し待ってからやり直す")
             continue
-        c = core.Core(snap, scope=scope)
+        c = core.Core(snap, scope=scope, wiki_path=wiki_path)
         sources = c.mermaid_sources()
         images, warnings = wiki_browse_pele.render_sources(sources)
         missed = len(sources) - len(images)
@@ -166,7 +166,8 @@ def _machine_needles(root: PurePath, snap) -> "tuple[list, int]":
     return needles, unknown
 
 
-def build(root: PurePath, out_arg: "str | None", raw: "str | None", scope: "str | None" = None) -> dict:
+def build(root: PurePath, out_arg: "str | None", raw: "str | None", scope: "str | None" = None,
+          *, publication=None) -> dict:
     root = PurePath(root)
     key = common.wiki_key(root)
     bdir = browse_dir()
@@ -178,7 +179,8 @@ def build(root: PurePath, out_arg: "str | None", raw: "str | None", scope: "str 
     assets.pop("assets/figures.js")
     owner = fs.owner_of(root)
     generated_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-    snap, c, files, warnings = _read_and_render(root, raw, scope, generated_at)
+    wiki_path = publication.wiki if publication else root
+    snap, c, files, warnings = _read_and_render(root, raw, scope, generated_at, wiki_path=wiki_path)
     files = {name: (content if isinstance(content, bytes) else content.encode("utf-8"))
              for name, content in files.items()}
     files.update(assets)
@@ -297,8 +299,10 @@ def _quote_path(name: str) -> str:
 class BrowseState:
     """サーバーが持つ中核と、作り直しの状態（設計の 8.3）。"""
 
-    def __init__(self, root: PurePath, raw: str = "text", scope: "str | None" = None, *, raw_root=None):
+    def __init__(self, root: PurePath, raw: str = "text", scope: "str | None" = None, *, raw_root=None,
+                 wiki_path: "PurePath | None" = None):
         self.root = root
+        self.wiki_path = wiki_path if wiki_path is not None else root
         self.raw = raw
         self.raw_root = os.path.abspath(os.path.expanduser(raw_root)) if raw_root is not None else None
         self.raw_root_key = (
@@ -363,7 +367,7 @@ class BrowseState:
                 return self._answer(cur, request_sig, "failed")
             try:
                 snap = core.take_snapshot(self.root, raw_root=self.raw_root)
-                new = core.Core(snap, scope=self.scope)
+                new = core.Core(snap, scope=self.scope, wiki_path=self.wiki_path)
             except Exception as e:  # noqa: BLE001  前の中核を使い続ける（InputsUnknown、InputsChanged を含む）
                 self.failed = type(e).__name__
                 return self._answer(cur, request_sig, "failed")
@@ -649,7 +653,8 @@ class App:
         self.view_token = secrets.token_urlsafe(24)
         self.control_token = secrets.token_urlsafe(24)
         self.instance = secrets.token_hex(12)
-        self.state = BrowseState(root, scope=scope, raw_root=raw_root)
+        self.state = BrowseState(root, scope=scope, raw_root=raw_root,
+                                 wiki_path=publication.wiki if publication else root)
         self.publication = publication
         self.last = time.monotonic()
         self.httpd = None
@@ -959,7 +964,7 @@ def _dispatch(args) -> int:
                 args.raw = "text"
             root = release.root
     if args.cmd == "build":
-        build(root, args.out, args.raw, args.scope)
+        build(root, args.out, args.raw, args.scope, publication=release)
         return EXIT_OK
     if args.cmd == "core":
         sys.stdin.reconfigure(encoding="utf-8")
