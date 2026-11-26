@@ -25,7 +25,7 @@
   裏で動いている埋め込みがある間は止まらない。
 - モデルの読み込み、埋め込み、索引の書き込みは、このプロセスだけが行う。wiki の Markdown は書き換えない。
 
-ツール: query、get_page、list_index、lint、stats、graph、index_chunks。lint、stats、graph は、
+ツール: query、get_page、list_index、lint、stats、graph、semantic_status、semantic_query、index_chunks。lint、stats、graph は、
 wiki_lint.py、wiki_graph_lint.py、wiki_stats.py、wiki_graph_query.py の関数を同じプロセスで呼ぶ薄い包みで、
 CLI の --json と同じ形を返す。lint は検査だけで、直す操作は持たない。
 """
@@ -299,12 +299,13 @@ def build_app(state: State, token: str, port: int):
     from mcp.server.fastmcp import FastMCP
     from mcp.server.fastmcp.exceptions import ToolError
     from mcp.server.transport_security import TransportSecuritySettings
+    from mcp.types import ToolAnnotations
     from wiki_index import IndexWriteError
 
     mcp = FastMCP(
         "info-hive-wiki", host="127.0.0.1", port=port, json_response=True, log_level="WARNING",
         max_request_body_size=MAX_REQUEST_BYTES,
-        instructions="info-hive の wiki を検索し、ページと索引を読み、lint、統計、グラフの問い合わせを行うためのツール。"
+        instructions="info-hive の wiki を検索し、ページと索引を読み、lint、統計、グラフと Ossie の主張の問い合わせを行うためのツール。"
                      "wiki の Markdown は書き換えない。wiki には初期化された wiki（ルートに SCHEMA.md がある）のルートを"
                      "渡す。SCHEMA.md のないディレクトリはエラーになるので、/wiki:init を提案する。",
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=True,
@@ -534,6 +535,35 @@ def build_app(state: State, token: str, port: int):
             except wiki_graph_common.GraphLayerDisabled as exc:
                 raise ValueError(wiki_graph_common.disabled_message(exc)) from exc
             return plain(result)
+        return await offload(run)
+
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    async def semantic_status(wiki: str, release_id: str | None = None) -> dict:
+        """Ossie の状態と、公開版内の主張 head の件数を返す。release_id を省くと読取可能な先頭を調べる。
+
+        state は ready、unconfigured（形式1または定義未採用）、not_published、retired のいずれか。
+        claim_count は ready のときの head の件数で、旧定義や採用状態を問わず数える。他の状態では null。
+        根拠の原本は開かない。
+        semantic_query で主張を読むときは、ここで得た release_id を指定する。
+        """
+        def run():
+            from wiki_semantic_reader import read_semantic_status
+
+            return read_semantic_status(wiki_root(wiki), release_id=release_id)
+        return await offload(run)
+
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    async def semantic_query(wiki: str, release_id: str, claim_id: str) -> dict:
+        """指定した公開版の Ossie 主張1件を、採用時評価・版内の選択・読取可能な根拠とともに返す。
+
+        release_id と claim_id は64桁の小文字の16進数。採用済みの版に主張 ID がなければ ready と空の claims を返す。
+        互換グラフに載った主張の ID は graph のエッジの metadata_json にある claim_id で確認できる。
+        関連記事の本文は get_page に同じ release_id を渡して読む。
+        """
+        def run():
+            from wiki_semantic_reader import read_semantics
+
+            return read_semantics(wiki_root(wiki), release_id=release_id, claim_id=claim_id)
         return await offload(run)
 
     @mcp.tool()

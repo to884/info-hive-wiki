@@ -90,6 +90,14 @@
 <td class="fui-TableCell">グラフ（<code>graph/graph.sqlite</code>）への問い合わせ（<code>wiki_graph_query.py --json</code> と同じ結果）。DB は読み取り専用で開きます。</td>
 </tr>
 <tr class="fui-TableRow">
+<td class="fui-TableCell"><code>semantic_status</code></td>
+<td class="fui-TableCell">Ossie の公開版、定義、主張数を確認します。登録された原本は開きません。</td>
+</tr>
+<tr class="fui-TableRow">
+<td class="fui-TableCell"><code>semantic_query</code></td>
+<td class="fui-TableCell">指定した公開版の主張 1 件について、採用時とその版の評価、参照可能な根拠を返します。</td>
+</tr>
+<tr class="fui-TableRow">
 <td class="fui-TableCell"><code>index_chunks</code></td>
 <td class="fui-TableCell">rag などからチャンクを受け取り、wiki の外の索引に加える</td>
 </tr>
@@ -263,6 +271,14 @@
 <li>オントロジーがない wiki、<code>graph.sqlite</code> がない wiki、見つからないノードはエラーになります。DB は <code>wiki_graph_extract.py</code> が作ります。このツールは作りません。</li>
 <li>グラフはナビゲーション用の索引です。重要な主張は、エッジの <code>source</code> が示すページで確かめてください。詳しくは <code>references/graph-workflow.md</code> を参照してください。</li>
 </ul>
+<h3 id="semantic-read" class="fui-Subtitle2">Ossie の主張と根拠を読む</h3>
+<ol>
+<li><code>semantic_status(wiki)</code> で最新の読取可能な公開版を確認します。<code>release_id</code> を指定すればその版を確認できます。<code>ready</code> の <code>claim_count</code> は主張の件数で、0 も有効です。形式1または定義未採用は <code>unconfigured</code>、公開版なしは <code>not_published</code>、指定版の退役は <code>retired</code> を返し、いずれも件数は <code>null</code> になります。</li>
+<li>互換グラフに載っている主張は、同じ <code>release_id</code> で <code>graph</code> を呼び、エッジの <code>metadata_json</code> を JSON として読んで <code>claim_id</code> を得ます。互換グラフに投影されない主張は既知の ID で照会します。</li>
+<li><code>semantic_query(wiki, release_id, claim_id)</code> で、その版に保持された採用時の評価と、その版で選ばれた評価を読みます。根拠が変更されたり読めなかったりすると、参照不能の理由を返します。記事を確認する場合は同じ <code>release_id</code> を <code>get_page</code> に渡します。</li>
+</ol>
+<p><code>wiki</code> は両ツールで必須です。<code>release_id</code> は状態照会で省略でき、主張照会では <code>claim_id</code> とともに必須です。両 ID は64桁の小文字の16進数で、不正な ID や公開履歴にない公開版 ID はエラーになります。定義を採用した版に指定された主張 ID がなければ <code>ready</code> と空の <code>claims</code> を返します。</p>
+<p>根拠の <code>readability</code> が <code>unavailable</code> のときは <code>reason</code> を確認してください。<code>raw_root_unavailable</code> は採用時の原本ルートを確認できない場合です。<code>raw_missing</code>、<code>raw_unreadable</code>、<code>raw_changed</code> は、順に原本ファイルの消失、読取失敗、指紋の不一致を示します。<code>article_missing</code> と <code>article_changed</code> は、照会した版に根拠の記事がないか、記事の指紋が異なる場合です。<code>no_adoption</code> は採用時の評価がない場合を示します。</p>
 <h3 id="index_chunks" class="fui-Subtitle2">index_chunks</h3>
 <p>rag がチャンクを渡すためのツールです。wiki の Markdown は変えません。索引は collection ごとに分け、wiki の索引とは混ぜません。</p>
 <div class="table-scroll" role="region" aria-label="表" tabindex="0">
