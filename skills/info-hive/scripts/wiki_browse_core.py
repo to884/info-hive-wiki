@@ -2308,10 +2308,11 @@ class Core:
         semantics = f'<p><a href="{SEMANTIC_VIEW}">Ossie の意味と根拠</a></p>' if semantic_link else ""
         return (self._head(path, "Index", stale)
                 + f'<header id="_ixhead"><h1 class="fui-Title2">Index</h1>'
-                  f'<p class="ix-stats fui-Caption1">{total} ページ</p>{semantics}</header>\n{nav_note}'
+                  f'<p class="ix-stats fui-Caption1">{total} ページ</p></header>\n{nav_note}'
                 + f'<div id="_filters" class="fx-bar" data-filter-keys="{self._index_filter_keys(filter_secret)}">'
                   '<noscript><p class="state fui-Caption1">絞り込みと検索には '
                   'JavaScript が要る。一覧は Index の順に並んでいる。</p></noscript></div>\n'
+                + semantics
                 + f'<p id="_count" class="fx-count fui-Caption1" aria-live="polite">{total} 件</p>\n'
                 + f'<ul id="_index" class="fx-list">{rows}</ul>\n'
                 + self._index_unresolved_html()
