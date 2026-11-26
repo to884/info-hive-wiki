@@ -104,29 +104,36 @@ flowchart TD
 ## 取り込み済みの会話から wiki の修正案を作る
 
 **ドリーミング**（Wiki Dreaming）では、取り込み済みの会話を読み直し、根拠を補える既存ページの修正案を作ります。
-`/wiki-dream` は、開発リポジトリ `info-hive-dev` で試験中の Claude Code ワークフローです。
-インストール済みの wiki プラグインで使えるコマンドは、[コマンド一覧](commands.md)を参照してください。
+定期タスクを動かす端末に wiki プラグイン、Python 3.12〜3.14、Dynamic Workflows が使える認証済みの Claude Code CLI を用意します。
+Codex から実行する場合も、会話の分析には同じ Claude Code CLI を使います。
 
-試すには、Python 3.11 以上と認証済みの Claude Code CLI を用意します。
-[開発リポジトリ](https://github.com/to884/info-hive-dev)のルートで次のコマンドを実行します。
+対象はライブ wiki です。wiki のルートを `--wiki`、取り込み済みの原本を `--raw-root`、提案の保存先を `--out` に、それぞれ絶対パスで指定します。
+出力先は wiki と原本のディレクトリの外に置きます。Claude と Codex で同じ対象を扱う場合は、どちらにも同じ出力先を設定します。台帳で処理済みの会話が除外され、同時に起動したときは後から起動した回がスキップされます。
 
-```sh
-git submodule update --init -- info-hive-wiki
-python -X utf8 -B poc/wiki-dream/run.py --scheduled --limit 2
+### Claude Code Desktop で定期実行する
+
+Code タブの Scheduled からローカルの定期タスクを作り、wiki と原本にアクセスできるフォルダーと、実行頻度を指定します。タスクのプロンプトに次の呼び出しを書き、パスを置き換えます。最初に Run now で実行し、タスクの権限と出力先を確認します。[Claude Code Desktop の定期タスク](https://code.claude.com/docs/en/desktop-scheduled-tasks)
+
+```text
+/wiki:dream --wiki "/data/project/wiki" --raw-root "/data/project/raw" --out "/data/project/dream"
 ```
 
-既定の対象は開発リポジトリの `wiki/` と `raw/` です。
-対象にできるのは、公開版を参照していないライブ wiki です。
-個人 wiki などを対象にする場合は、wiki のルートを `--wiki`、取り込み済み原本のルートを `--raw-root`、wiki と原本ルートの外にある専用の出力先を `--out` に指定します。
-定期実行するには、Claude Code Desktop のローカル定期タスクなどに Python の起動コマンドを登録します。
-対象 wiki ごとにジョブと出力先を用意し、同じジョブでは毎回同じ出力先を使います。
-`--scheduled` を付けると、Python は出力先の `ledger.sqlite` で処理済みの会話と再試行を管理します。
+### Codex で定期実行する
 
-Python は原本の SHA-256 が記録された会話を選び、Claude Code が原本と関連記事を読んで修正案を作ります。
-Python は根拠と編集対象を照合し、出力先の実行 ID ごとのディレクトリに報告書 `proposal.md`、差分 `proposal.diff`、実行記録 `run.json` を保存します。
-既定の出力先は `work/wiki-dream/` です。
-差分が空の場合も、報告書で結果を確認できます。処理対象の会話が 0 件の回は提案を作りません。
-実行は提案の生成までです。差分の内容と原本を確認し、採用する変更を判断します。
+デスクトップアプリの Scheduled でローカルプロジェクトを対象にしたタスクを作り、実行頻度を指定します。タスクのプロンプトに次の呼び出しを書き、パスを置き換えます。プロジェクトやワークツリーが変わっても、同じ wiki と出力先を指す絶対パスを使います。[Codex の定期タスク](https://developers.openai.com/codex/app/automations)
+
+```text
+$wiki:info-hive dream --wiki "/data/project/wiki" --raw-root "/data/project/raw" --out "/data/project/dream"
+```
+
+タスクの実行環境に、wiki と原本の読み取り、出力先と一時ディレクトリへの書き込み、Claude Code の設定とネットワークへのアクセスを許可します。登録前に、同じ権限で手動実行して確かめます。[Codex の権限設定](https://learn.chatgpt.com/docs/sandboxing)
+
+### 提案を確認する
+
+対象は原本の SHA-256 が記録された会話です。1回に見直すのは既定で2件です。`--limit` で1〜5件に変更できます。提案を保存するたびに、処理済みの会話を出力先の `ledger.sqlite` に記録します。ワークフローの待ち時間は1回の起動で合計8分です。時間切れで残った会話や失敗した会話は次回に回ります。
+提案の保存と台帳への記録の間にプロセスが強制終了された場合は、次回に同じ会話の提案が再び作られることがあります。
+
+提案の保存先には、実行 ID ごとのディレクトリに報告書 `proposal.md`、差分 `proposal.diff`、実行記録 `run.json` ができます。報告書に、対象 wiki と差分を確認する基準ディレクトリが載ります。対象の会話が0件の回は提案を作りません。差分と原本を確認し、採用する変更を判断してください。
 
 ## 経験の記録とスキルの改善
 

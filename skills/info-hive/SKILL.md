@@ -52,7 +52,7 @@ wiki には3つの層と3つの操作がある。スキルの残りの部分は�
 
 ## Codex で使う
 
-Codex では `$wiki:info-hive init`、`$wiki:info-hive ingest <ソース>`、`$wiki:info-hive query <質問>` の形か、自然言語で依頼する。`/wiki:*` は Claude Code の呼び出し名である。操作を始める前に `references/codex.md` を読む。プラグイン一式が入っているときは、次のスクリプトで該当する操作の手順を読み、その手順に従う。`<操作>` は `init`、`ingest`、`query`、`lint`、`stats`、`graph`、`browse`、`overview`、`export`、`import`、`learn`、`evolve`、`upgrade`、`help` のいずれかである。
+Codex では `$wiki:info-hive init`、`$wiki:info-hive ingest <ソース>`、`$wiki:info-hive query <質問>` の形か、自然言語で依頼する。`/wiki:*` は Claude Code の呼び出し名である。操作を始める前に `references/codex.md` を読む。プラグイン一式が入っているときは、次のスクリプトで該当する操作の手順を読み、その手順に従う。`<操作>` は `init`、`ingest`、`query`、`lint`、`stats`、`graph`、`browse`、`overview`、`export`、`import`、`dream`、`learn`、`evolve`、`upgrade`、`help` のいずれかである。
 
 ```bash
 uv run --quiet --script "<skill-root>/scripts/wiki_codex.py" <操作>
