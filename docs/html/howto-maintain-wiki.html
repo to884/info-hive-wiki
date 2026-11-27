@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ja" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>wiki を点検し、グラフを更新する | info-hive</title>
+  <link rel="stylesheet" href="assets/fluent2.css">
+  <link rel="stylesheet" href="assets/manual.css">
+  <link rel="stylesheet" href="assets/manual-print.css" media="print">
+</head>
+<body class="fui-FluentProvider">
+  <a class="skip-link fui-Link" href="#main">本文へ移動</a>
+  <header class="site-header">
+    <div class="shell"><a class="fui-Link site-name" href="index.html">info-hive</a></div>
+  </header>
+  <main class="shell reading-layout" id="main" tabindex="-1">
+    <nav class="contents" aria-label="このページの目次">
+      <h2>目次</h2>
+      <ul>
+        <li><a class="fui-Link" data-inline href="#lint">リンクや記事の内容を点検する</a></li>
+        <li><a class="fui-Link" data-inline href="#extract">記事の変更をグラフに反映する</a></li>
+      </ul>
+    </nav>
+    <article class="page-content" aria-labelledby="page-title">
+      <header class="intro">
+        <h1 class="fui-Title1" id="page-title">wiki を点検し、グラフを更新する</h1>
+        <p>すでに作ってある wiki が対象です。複数の wiki を使っている場合は、対象の wiki のパスをコマンドと一緒に伝えます。</p>
+      </header>
+
+      <section id="lint">
+        <h2 class="fui-Subtitle1">リンクや記事の内容を点検する</h2>
+        <p>資料を何件か取り込んだあとや、記事をまとめて移動・改名したあとに <code>/wiki:lint</code> を使います。
+          継続して資料を取り込む wiki では、週に 1 回など、まとめて指摘を確認できる間隔で実行します。</p>
+        <ol>
+          <li>Claude Code では <code>/wiki:lint</code>、Codex では <code>$wiki:info-hive lint</code> を送ります。</li>
+          <li>リンク切れや孤立ページなどの指摘と、記事の内容に関する修正案を確認します。</li>
+          <li>必要な修正を承認します。修正したあと、同じコマンドで該当する指摘が解消したかを確認します。</li>
+        </ol>
+      </section>
+
+      <section id="extract">
+        <h2 class="fui-Subtitle1">記事の変更をグラフに反映する</h2>
+        <p>手元の Markdown を直接使う wiki に <code>graph/ontology.yaml</code> があれば、初めてグラフを作るときに <code>/wiki:graph extract</code> を使います。
+          資料を取り込んだり、記事を追加・削除・改名・編集したりしたあとも、グラフの更新が済んでいなければ、関係を調べる前に実行します。</p>
+        <p>公開版を使う wiki では、記事を保存する手順の中でグラフも更新します。</p>
+        <ol>
+          <li>型付きの関係（<code>graph.relationships</code>）やオントロジーを編集した場合は、先に上の点検を行い、グラフの指摘を確認します。</li>
+          <li>Claude Code では <code>/wiki:graph extract</code>、Codex では <code>$wiki:info-hive graph extract</code> を送ります。</li>
+          <li>抽出したノードとエッジの件数が報告され、<code>graph/graph.sqlite</code> が作成または更新されたことを確かめます。</li>
+        </ol>
+        <p><code>graph/ontology.yaml</code> がない wiki でグラフを使い始める場合は、<a class="fui-Link" data-inline href="howto-upgrade-wiki.html">wiki をアップグレードする手順</a>に進みます。</p>
+      </section>
+
+      <nav class="page-navigation" aria-label="関連ページ">
+        <a class="fui-Link" href="index.html#help">ハウツーの目次</a>
+        <a class="fui-Link" href="commands.html#wikilint">/wiki:lint のリファレンス</a>
+        <a class="fui-Link" href="graph.html#extractlintquery">グラフの抽出・検査・問い合わせ</a>
+      </nav>
+    </article>
+  </main>
+</body>
+</html>

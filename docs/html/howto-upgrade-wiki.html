@@ -25,16 +25,19 @@
     <article class="page-content" aria-labelledby="page-title">
       <header class="intro">
         <h1 class="fui-Title1" id="page-title">wiki の規約と検索環境をアップグレードする</h1>
-        <p>プラグインを更新したあと、既存の wiki の検索環境を準備し、規約に変更があるか確認します。</p>
+        <p>wiki プラグインを新しい版に更新したら、すでに作ってある wiki を対象に <code>/wiki:upgrade</code> を実行します。
+          更新したプラグインで作業を再開する前に、検索環境を準備し、<code>SCHEMA.md</code> に追加する規約があるかを確認します。</p>
       </header>
       <section id="upgrade">
         <h2 class="fui-Subtitle1">対象の wiki を指定する</h2>
         <ol>
-          <li>プロジェクトの wiki があるフォルダーを Code タブで開きます。</li>
-          <li>次のコマンドを送ります。<pre><code>/wiki:upgrade</code></pre></li>
+          <li>プロジェクトの wiki があるフォルダーを開きます。</li>
+          <li>Claude Code では <code>/wiki:upgrade</code>、Codex では <code>$wiki:info-hive upgrade</code> を送ります。</li>
           <li>実行環境の出力で <code>"status": "ready"</code> を確かめます。</li>
         </ol>
-        <p>ユーザー wiki を更新する場合は <code>/wiki:upgrade --user</code> を使います。wiki が見つからないときは、対象のフォルダーと <code>SCHEMA.md</code> の場所を確認します。</p>
+        <p>ユーザー wiki を更新する場合は、コマンドの末尾に <code>--user</code> を付けます。
+          複数の wiki を使っていてプロジェクトの wiki を更新する場合は、<code>--wiki-dir</code> と <code>--raw-dir</code> で対象の wiki と原本のフォルダーを指定します。
+          wiki が見つからないときは、対象のフォルダーと <code>SCHEMA.md</code> の場所を確認します。</p>
       </section>
 
       <section id="schema">
@@ -44,7 +47,9 @@
           <li>取り込む節を承認します。</li>
           <li>対象の wiki で、承認した規約を確認します。</li>
         </ol>
-        <p>最新版の規約がそろっていればマージの提案は出ません。段階 2 では同じ版で再実行し、この結果を確認しました。</p>
+        <p>最新版の規約がそろっていればマージの提案は出ません。</p>
+        <p>アップグレードでは、不足している <code>graph/ontology.yaml</code> などのひな形も追加されます。
+          グラフを使い始める場合は、続けて<a class="fui-Link" data-inline href="howto-maintain-wiki.html#extract">グラフを作る手順</a>に進みます。</p>
       </section>
 
       <nav class="page-navigation" aria-label="関連ページ">
