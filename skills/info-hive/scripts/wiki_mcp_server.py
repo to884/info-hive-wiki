@@ -343,6 +343,23 @@ def build_app(state: State, token: str, port: int):
     async def offload(fn, *args, wiki_index_fallback=False):
         return await anyio.to_thread.run_sync(with_notices, fn, args, wiki_index_fallback)
 
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    async def view(wiki: str, release_id: str | None = None) -> dict[str, str | None]:
+        """wiki の読む版を確かめ、read_root と release_id を返す。ライブの release_id は null。
+
+        wiki には初期化された元の wiki の絶対パスを渡す。公開版では後続の MCP の読み取りに
+        同じ wiki と release_id を渡す。版を確かめられない場合はエラーを返す。
+        """
+        from wiki_apply import view_info
+
+        def run():
+            return view_info(wiki_root(wiki), release_id)
+
+        try:
+            return await anyio.to_thread.run_sync(run)
+        except (ValueError, FileNotFoundError) as error:
+            raise ToolError(str(error)) from error
+
     @mcp.tool()
     async def query(query: str, wiki: str | None = None, top: int = 10, type: str | None = None,
                     tags: list[str] | None = None, since: str | None = None, per_page: int = 2,

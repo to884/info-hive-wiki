@@ -32,6 +32,7 @@ wiki のプラグインは、検索のためのローカルの MCP サーバー�
 
 | ツール | 中身 |
 | --- | --- |
+| `view` | wiki の読み取り先 `read_root` と公開版 ID を返す。ライブの ID は `null` |
 | `query` | ハイブリッド検索（BM25 と埋め込みを RRF で融合）。結果の形は `wiki_search.py --json` と同じ |
 | `get_page` | 1 ページの frontmatter（日本語の別名のキーを英語にそろえたもの）と本文 |
 | `list_index` | `index.md` の本文と `indexes/` の一覧。`name` を渡すと `indexes/` のそのファイル |
