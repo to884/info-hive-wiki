@@ -142,7 +142,7 @@ updated: 2026-04-15
 認証済みの Claude Code 2.1.314 以降と `uv` が使える端末で、導入した wiki プラグインのスクリプトを実行する。指定した wiki で版、規約、トップ索引、全引用記事の本文を照合してから回答を標準出力に書く。照合できないときは標準エラーに理由を出し、終了コードは 2 になる。
 
 ```powershell
-uv run --script "<プラグインの場所>/skills/info-hive/scripts/wiki_query_checked.py" --wiki "<対象 wiki のパス>" "質問"
+uv run --script "<skill-root>/scripts/wiki_query_checked.py" --wiki "<対象 wiki のパス>" "質問"
 ```
 
 Sonnet 5.5 の既定の effort は `medium`。`--effort high` で切り替えられる。公開版の `get_page` が未登録のときは、固定した読み取り先の本文と同じ ID の再確認を使う。

@@ -273,6 +273,11 @@ def run_query(wiki: Path, command: str, *, node: str | None = None, subject: str
         common.require_ontology(wiki)
     conn = open_db(Path(db) if db else wiki / "graph" / "graph.sqlite")
     try:
+        if release and release.invalidated_assessments:
+            conn.create_function("restored_edge_visible", 1,
+                                 lambda data: json.loads(data)["assessment"] not in release.invalidated_assessments)
+            conn.execute("CREATE TEMP VIEW edges AS SELECT * FROM main.edges "
+                         "WHERE extraction_method != 'ossie_semantic' OR restored_edge_visible(metadata_json)")
         if command == "neighbors":
             result = cmd_neighbors(conn, node)
         elif command == "edges":
@@ -288,7 +293,8 @@ def run_query(wiki: Path, command: str, *, node: str | None = None, subject: str
     import wiki_pages
     result["link_warnings"] = wiki_pages.link_warnings(wiki_pages.walk_pages(wiki))
     if release:
-        resolve_publication(release.wiki, release.release_id)
+        if resolve_publication(release.wiki, release.release_id) != release:
+            raise QueryError("グラフの読取中に復元の照合状態が変わりました")
         result["release_id"] = release.release_id
     return result
 

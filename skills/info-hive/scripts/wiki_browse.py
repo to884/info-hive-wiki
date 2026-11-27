@@ -588,6 +588,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if stale is None:
                 article_core = candidate
         body = core.render_semantic(result, claim_id, article_core)
+        if pinned is not None and result["state"] != "retired":
+            try:
+                if fs.publication(pinned.wiki, pinned.release_id) != pinned:
+                    return self._text(410, "復元後の公開版を確認するため wiki を開き直してください")
+            except (fs.Absent, fs.Unknown, fs.Stop):
+                return self._text(410, "公開版を取得できません")
         code = 410 if result["state"] == "retired" else 200
         return self._send(code, body.encode("utf-8"), "text/html; charset=utf-8",
                           extra={"Cross-Origin-Opener-Policy": "same-origin"})

@@ -90,7 +90,8 @@ def load(ledger, config=None):
     base = {"format", "binding", "completions", "retired"}
     formats = {1: base, 2: base | {"snapshots"}, 3: base | {"snapshots", "raw"}}
     if (publication.digest(publication.encoded(state)) != envelope["sha256"] or not isinstance(state, dict)
-            or type(state.get("format")) is not int or state.keys() != formats.get(state["format"])
+            or type(state.get("format")) is not int
+            or state.keys() - {"invalidated_assessments", "semantic_restore_pending"} != formats.get(state["format"])
             or not isinstance(state["binding"], dict) or (config is not None and state["binding"] != config)
             or not isinstance(state["completions"], dict)
             or not isinstance(state["retired"], list)):
@@ -116,6 +117,17 @@ def load(ledger, config=None):
             publication.checked(checksum)
     if "raw" in state:
         raw_archive.verify_record(state["raw"])
+    if "invalidated_assessments" in state:
+        invalidated = state["invalidated_assessments"]
+        if (state["format"] < 2 or not isinstance(invalidated, list)
+                or any(not isinstance(key, str) for key in invalidated)
+                or invalidated != sorted(set(invalidated))):
+            raise publication.PublicationError("復元した意味評価の失効記録が不正です")
+        for key in invalidated:
+            publication.checked(key)
+    if ("semantic_restore_pending" in state
+            and (state["format"] < 2 or state["semantic_restore_pending"] != state["snapshots"][-1])):
+        raise publication.PublicationError("独立記録の形式2の復元先が一致しません")
     return state
 
 
@@ -186,6 +198,12 @@ def differences(guard, area, state):
     return incomplete, tombstones
 
 
+def refuse_pending(guard, area, state):
+    if "semantic_restore_pending" in state:
+        raise publication.PublicationError("形式2の本文復元が途中です。独立記録を使って復元を再開してください")
+    content.refuse_pending(guard, area)
+
+
 def check(guard, area, release_id=None, *, live_payload=False):
     target = open_bound(guard, area)
     if target is None:
@@ -193,7 +211,7 @@ def check(guard, area, release_id=None, *, live_payload=False):
     state = load(*target)
     if release_id in state["retired"]:
         raise publication.RetiredPublication("この公開版は取り下げられています")
-    content.refuse_pending(guard, area)
+    refuse_pending(guard, area, state)
     incomplete, tombstones = differences(guard, area, state)
     if incomplete or tombstones:
         raise publication.PublicationError("独立した完了記録または取り下げと一致しません。reconcile-restore で照合してください")
@@ -231,7 +249,7 @@ def acknowledge(guard, area, *results):
     ledger, config = target
     with ledger.hold_lock(ledger.root / LOCK, timeout=180):
         state = load(ledger, config)
-        content.refuse_pending(guard, area)
+        refuse_pending(guard, area, state)
         if any(differences(guard, area, state)):
             raise publication.PublicationError("独立した復元記録と一致しないため、保存を完了できません")
         changed = False
@@ -316,6 +334,8 @@ def enroll(wiki, path, *, raw_root=None):
                 raise publication.PublicationError("既存の取り下げ記録が不正です")
             retired.append(release_id)
         previous = load(ledger) if ledger.file_info(ledger_file) is not None else None
+        if previous is not None:
+            refuse_pending(guard, area, previous)
         token = (publication.checked(previous["binding"].get("id"), publication.PLAN_ID)
                  if previous is not None else uuid.uuid4().hex)
         config = binding(guard, ledger.root, token)
@@ -347,7 +367,7 @@ def retire(guard, area, release_id):
     ledger, config = target
     with ledger.hold_lock(ledger.root / LOCK, timeout=180):
         state = load(ledger, config)
-        content.refuse_pending(guard, area)
+        refuse_pending(guard, area, state)
         if release_id not in state["retired"]:
             publication.resolve_publication(guard.root, release_id)
             state["retired"] = sorted([*state["retired"], release_id])
@@ -356,7 +376,7 @@ def retire(guard, area, release_id):
     return True
 
 
-def reconcile(wiki, *, restore_content=False, checkpoint=lambda _: None):
+def reconcile(wiki, *, restore_content=False, checkpoint=lambda _: None, capability=None):
     guard, area = publication.writing_area(wiki)
     with guard.hold_lock(area / "apply.lock", timeout=180):
         target = open_bound(guard, area)
@@ -366,7 +386,7 @@ def reconcile(wiki, *, restore_content=False, checkpoint=lambda _: None):
         with ledger.hold_lock(ledger.root / LOCK, timeout=180):
             state = load(ledger, config)
             if not restore_content:
-                content.refuse_pending(guard, area)
+                refuse_pending(guard, area, state)
             incomplete, tombstones = differences(guard, area, state)
             if guard.file_info(area / CONFIG) is None:
                 write(guard, area / CONFIG, config)
@@ -374,6 +394,8 @@ def reconcile(wiki, *, restore_content=False, checkpoint=lambda _: None):
                 write(guard, retirement_path(area, release_id), {"release_id": release_id})
             restored = 0
             restored_raw = 0
+            semantic_restore = False
+            raw = None
             raw_missing, raw_conflicts = [], []
             raw_record = state.get("raw")
             if raw_record is not None:
@@ -391,8 +413,14 @@ def reconcile(wiki, *, restore_content=False, checkpoint=lambda _: None):
                 if not raw_conflicts:
                     if raw_missing:
                         raw_archive.preflight(ledger, paths, raw_missing)
-                    restored = content.install(guard, area, ledger, state, checkpoint,
-                                               restore_raw=restore_raw if raw_missing else None)
+                    restored, semantic_restore = content.install(
+                        guard, area, ledger, state, checkpoint, restore_raw=restore_raw if raw_missing else None,
+                        raw=raw, capability=capability,
+                    )
+                    if semantic_restore and raw is not None:
+                        missing, conflicts = raw_archive.compare(raw, paths)
+                        if missing or conflicts:
+                            raise publication.PublicationError("復元した原本と独立記録の指紋が一致しません")
                     incomplete, remaining = differences(guard, area, state)
                     if incomplete or remaining:
                         raise publication.PublicationError("復元した本文と独立した完了記録・取り下げが一致しません")
@@ -404,9 +432,12 @@ def reconcile(wiki, *, restore_content=False, checkpoint=lambda _: None):
             if active:
                 if any(guard.file_info(area / name) is not None for name in JOURNALS):
                     raise publication.PublicationError("復元した wiki に未完了の日誌があります。recover で確認してください")
+                releases = []
                 for version, entry in publication.history(guard, area, active):
                     receipt = publication.verify_release(guard, area, version, entry, payload=version != active[0])
                     require_completion(guard, area, "publication", receipt, state=state)
+                    if semantic_restore:
+                        releases.append((version, entry))
                 mode, proof = publication.mode_marker(guard)
                 if mode == "live":
                     from wiki_live_return import verify_result
@@ -420,6 +451,16 @@ def reconcile(wiki, *, restore_content=False, checkpoint=lambda _: None):
                       "current_retired": current_retired, "checked_receipts": len(state["completions"])}
             if raw_record is not None:
                 result.update(raw_missing=raw_missing, raw_conflicts=raw_conflicts)
+            if semantic_restore:
+                from wiki_semantic_restore import recheck
+
+                invalidated, counts = recheck(guard, area, releases, raw)
+                known = set(state.get("invalidated_assessments", ()))
+                state["invalidated_assessments"] = sorted(known | invalidated)
+                del state["semantic_restore_pending"]
+                store(ledger, state)
+                checkpoint("restore_after_semantic_ledger")
+                result["semantic_recheck"] = counts
             if restore_content:
                 result["restored_files"] = restored
                 if raw_record is not None:

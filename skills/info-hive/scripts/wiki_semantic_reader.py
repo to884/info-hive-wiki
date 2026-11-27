@@ -151,16 +151,27 @@ def _claims(value, view, guard, files, claim_id):
         adopted = adoptions.get(revision.record_id)
         selected = current.get(revision.record_id)
         inputs = None
-        if adopted and revision.payload["evidence_links"]:
+        needs_reassessment = selected is not None and (
+            selected.record_id in view.invalidated_assessments
+            or any(records[key].payload["checks"].get("restore", {}).get("reason") == "restore_reassessment_required"
+                   for key in selected.payload["reports"])
+        )
+        if adopted and revision.payload["evidence_links"] and not needs_reassessment:
             request = adoption_request(records, adopted.payload)
             inputs = _PublishedEvidence(records, view, roots.get(request["raw_root_id"]),
                                         request["original_confirmations"], guard, files)
         claim = claims[key]
         definition_id = claim.payload["relationship"]["definition_snapshot_id"]
+        effective = _assessment(selected, definition_id)
+        evidence = _read_evidence(inputs, revision)
+        if needs_reassessment:
+            effective["evidence_state"] = "not_checked"
+            effective["reason"] = "restore_reassessment_required"
+            for item in evidence:
+                item["reason"] = "restore_reassessment_required"
         result.append({"claim": claim.to_dict(), "revision": revision.to_dict(),
                        "adoption_assessment": _assessment(adopted, definition_id),
-                       "selected_assessment": _assessment(selected, definition_id),
-                       "evidence": _read_evidence(inputs, revision)})
+                       "selected_assessment": effective, "evidence": evidence})
     return result
 
 
@@ -225,7 +236,8 @@ def _read_semantics(wiki, *, release_id, claim_id=None, article=None, summary=Fa
         result["release_id"] = view.release_id
         reply = _read_view(view, article, claim_id, summary)
         # 先頭が進んでも初めに選んだ版を再照合し、読取中の退役も反映する。
-        publish.resolve_publication(view.wiki, view.release_id)
+        if publish.resolve_publication(view.wiki, view.release_id) != view:
+            raise publish.PublicationError("意味の読取中に復元の照合状態が変わりました")
     except publish.RetiredPublication:
         return {**result, "state": "retired"}
     return {**result, **reply}

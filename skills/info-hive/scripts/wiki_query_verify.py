@@ -10,7 +10,7 @@ from urllib.request import url2pathname
 
 from wiki_apply import view_info
 from wiki_mcp_common import CHECKED_QUERY_TOOLS as READERS
-from wiki_pages import clean_link_target, iter_page_files, new_parser
+from wiki_pages import clean_link_target, iter_page_files, new_parser, read_user_file
 from wiki_search import parse_frontmatter
 
 PREFIX = "mcp__plugin_wiki_wiki__"
@@ -124,7 +124,7 @@ def texts(root, calls, *, get_page, release):
                 path = article(root, call.args.get("file_path"), relative=False)
             if path is None:
                 continue
-            lines = path.read_text(encoding="utf-8-sig").splitlines()
+            lines = read_user_file(call.args["file_path"], root).splitlines()
             for line in call.body.splitlines():
                 match = NUMBERED.match(line)
                 if match:
@@ -134,14 +134,14 @@ def texts(root, calls, *, get_page, release):
             if lines and len(received[path]) == len(lines):
                 complete.setdefault(path, call)
         elif call.name == PREFIX + "list_index" and not call.args.get("name"):
-            if response.get("index") == index.read_text(encoding="utf-8-sig"):
+            if response.get("index") == read_user_file(index, root):
                 complete.setdefault(index, call)
         elif call.name == PREFIX + "get_page":
             path = article(root, response.get("rel_path"), relative=True)
             body = response.get("body")
             if path is None or not isinstance(body, str) or not body.strip():
                 continue
-            _, expected = parse_frontmatter(path.read_text(encoding="utf-8-sig"))
+            _, expected = parse_frontmatter(read_user_file(root / response["rel_path"], root))
             if body.strip() == expected.strip():
                 complete.setdefault(path, call)
     return complete

@@ -31,9 +31,12 @@ class StandaloneSource:
     source: WriteGuard
     output: WriteGuard
     files: dict
+    publication: publish.Publication
 
     def verify(self):
         publish.verify_payload(self.owner, self.source.root, self.files)
+        if publish.resolve_publication(self.owner.root, self.publication.release_id) != self.publication:
+            raise publish.Conflict("抽出中に復元の照合状態が変わりました")
 
 
 def standalone_scope(wiki, output, override, capability):
@@ -58,7 +61,7 @@ def standalone_scope(wiki, output, override, capability):
         if target.is_relative_to(other) or other.is_relative_to(target):
             raise publish.Conflict("形式2の出力先は wiki と原本の根から独立させてください")
     files = publish.manifest(owner, owner.root / publish.AREA, view.release_id)["files"]
-    scope = StandaloneSource(owner, source, destination, files)
+    scope = StandaloneSource(owner, source, destination, files, view)
     scope.verify()
     return scope
 
@@ -187,7 +190,7 @@ def relation_roles(claim):
     return fingerprint("ossie-graph-relation-roles-v1", [claim["relationship"], ordered_roles(claim)])
 
 
-def project(guard, value, pages, node_ids):
+def project(guard, value, pages, node_ids, *, invalidated=frozenset()):
     manifest = value.manifest
     records = {row.record_id: row for row in value.records}
     claims = {row.payload["claim_id"]: row.payload for row in value.records if row.kind == "claim"}
@@ -198,7 +201,8 @@ def project(guard, value, pages, node_ids):
     opposed = set()
     for claim_id, revision_id in heads.items():
         key = assessments.get(revision_id)
-        if key is not None and claims[claim_id]["polarity"] == "negative" and records[revision_id].payload["lifecycle"] == "accepted":
+        if (key is not None and key not in invalidated and claims[claim_id]["polarity"] == "negative"
+                and records[revision_id].payload["lifecycle"] == "accepted"):
             assessment = records[key].payload
             if assessment["compatibility"] == "compatible" and assessment["evidence_state"] == "verified":
                 opposed.add(relation_roles(claims[claim_id]))
@@ -208,6 +212,8 @@ def project(guard, value, pages, node_ids):
         assessment = assessments.get(revision_id)
         payload = records[assessment].payload if assessment is not None else None
         reason = eligibility(claim, revision, payload, manifest)
+        if assessment in invalidated and reason is None:
+            reason = "restore_reassessment_required"
         if reason is None and relation_roles(claim) in opposed:
             reason = "opposing_claim_present"
         if reason is None:

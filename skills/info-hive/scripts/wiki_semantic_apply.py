@@ -267,6 +267,11 @@ def verify_transition(transition, *, wiki, candidate, base, base_release_id):
             raise ModelError("意味操作で過去の固定レコードを削除・変更できません")
         if not callable(transition.validate_inputs):
             raise ModelError("意味採用には承認入力の最終照合が必要です")
+        from wiki_restore import check
+
+        state = check(guard, guard.root / publish.AREA) or {}
+        if set(value.manifest["current_assessments"]) & set(state.get("invalidated_assessments", ())):
+            raise publish.Conflict("公開候補作成後の復元で、過去の評価が未確認になりました")
         transition.validate_inputs()
     before, after = publish.file_checksums(base_guard), publish.file_checksums(candidate_guard)
     changeable = CHANGEABLE
