@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>wiki を点検し、グラフを更新する | info-hive</title>
+  <title>wiki の保守コマンドを使い分ける | info-hive</title>
   <link rel="stylesheet" href="assets/fluent2.css">
   <link rel="stylesheet" href="assets/manual.css">
   <link rel="stylesheet" href="assets/manual-print.css" media="print">
@@ -17,38 +17,60 @@
     <nav class="contents" aria-label="このページの目次">
       <h2>目次</h2>
       <ul>
+        <li><a class="fui-Link" data-inline href="#upgrade">既存の wiki を新しい版に合わせる</a></li>
         <li><a class="fui-Link" data-inline href="#lint">リンクや記事の内容を点検する</a></li>
         <li><a class="fui-Link" data-inline href="#extract">記事の変更をグラフに反映する</a></li>
       </ul>
     </nav>
     <article class="page-content" aria-labelledby="page-title">
       <header class="intro">
-        <h1 class="fui-Title1" id="page-title">wiki を点検し、グラフを更新する</h1>
+        <h1 class="fui-Title1" id="page-title">wiki の保守コマンドを使い分ける</h1>
         <p>すでに作ってある wiki が対象です。複数の wiki を使っている場合は、対象の wiki のパスをコマンドと一緒に伝えます。</p>
       </header>
 
+      <section id="upgrade">
+        <h2 class="fui-Subtitle1">既存の wiki を新しい版に合わせる</h2>
+        <p>wiki プラグインを更新したあと、既存の wiki で作業を再開する前に <code>/wiki:upgrade</code> を実行します。
+          古い wiki に <code>graph/ontology.yaml</code> がなく、グラフを使い始めたいときにも実行します。</p>
+        <ol>
+          <li>Claude Code では <code>/wiki:upgrade</code>、Codex では <code>$wiki:info-hive upgrade</code> を送ります。ユーザー wiki が対象なら末尾に <code>--user</code> を付けます。</li>
+          <li><code>graph/ontology.yaml</code> などのひな形やフォルダーを追加した場合は、出力の「作成した」に表示されます。
+            すでにあったものは「すでにあったので飛ばした」に表示されます。
+            コマンドは原本の保管先を <code>.wiki-cache/raw-roots.d/</code> に記録し、CLI 検索用の <code>.wiki-cache/search-index.json</code> と <code>.wiki-cache/embeddings.sqlite</code> を同期します。
+            実行環境の出力が <code>"status": "ready"</code> なら、規約の確認へ進みます。
+            セットアップに失敗した場合は、出力のエラーを確認し、原因を解消してから同じコマンドを実行します。</li>
+          <li><code>SCHEMA.md</code> に不足している節が提示されたら、既存の規約と読み比べます。追加する節を承認し、<code>SCHEMA.md</code> への追記を確認します。</li>
+        </ol>
+        <p>対象の指定や規約の確認は、<a class="fui-Link" data-inline href="howto-upgrade-wiki.html">wiki をアップグレードする手順</a>を参照してください。
+          グラフを作る必要がある場合は、<a class="fui-Link" data-inline href="#extract">記事の変更をグラフに反映する手順</a>に進みます。</p>
+      </section>
+
       <section id="lint">
         <h2 class="fui-Subtitle1">リンクや記事の内容を点検する</h2>
-        <p>資料を何件か取り込んだあとや、記事をまとめて移動・改名したあとに <code>/wiki:lint</code> を使います。
+        <p>資料を何件か取り込んだあとや、記事をまとめて移動・改名したあとに <code>/wiki:lint</code> を実行します。
+          型付きの関係（<code>graph.relationships</code>）やオントロジー（<code>graph/ontology.yaml</code>）を編集したあとにも実行します。
           継続して資料を取り込む wiki では、週に 1 回など、まとめて指摘を確認できる間隔で実行します。</p>
         <ol>
           <li>Claude Code では <code>/wiki:lint</code>、Codex では <code>$wiki:info-hive lint</code> を送ります。</li>
-          <li>リンク切れや孤立ページなどの指摘と、記事の内容に関する修正案を確認します。</li>
-          <li>必要な修正を承認します。修正したあと、同じコマンドで該当する指摘が解消したかを確認します。</li>
+          <li>リンク切れや孤立ページなどの指摘と、記事の内容に関する修正案を確認します。オントロジーがある場合は、型付きの関係の指摘も確認します。</li>
+          <li>必要な修正を承認します。承認した修正を適用すると、該当する Markdown の記事と、必要に応じて <code>index.md</code> や <code>indexes/</code> の索引が更新されます。
+            修正後の結果は <code>log.md</code> に追記されます。同じコマンドで指摘が解消したかを確認します。</li>
         </ol>
       </section>
 
       <section id="extract">
         <h2 class="fui-Subtitle1">記事の変更をグラフに反映する</h2>
-        <p>手元の Markdown を直接使う wiki に <code>graph/ontology.yaml</code> があれば、初めてグラフを作るときに <code>/wiki:graph extract</code> を使います。
-          資料を取り込んだり、記事を追加・削除・改名・編集したりしたあとも、グラフの更新が済んでいなければ、関係を調べる前に実行します。</p>
-        <p>公開版を使う wiki では、記事を保存する手順の中でグラフも更新します。</p>
+        <p>手元の Markdown を直接使う wiki に <code>graph/ontology.yaml</code> があれば、初めてグラフを作るときに <code>/wiki:graph extract</code> を実行します。
+          記事の追加・削除・改名・編集やオントロジーの変更をまだグラフに反映していないときは、関係を調べる前に実行します。
+          プラグインで資料を取り込み、その手順でグラフの更新も済んでいれば、そのまま関係を調べられます。</p>
+        <p>公開版を使う wiki では、公開用の保存手順で記事とグラフを一緒に更新します。</p>
         <ol>
-          <li>型付きの関係（<code>graph.relationships</code>）やオントロジーを編集した場合は、先に上の点検を行い、グラフの指摘を確認します。</li>
+          <li>型付きの関係やオントロジーを編集した場合は、先に <a class="fui-Link" data-inline href="#lint"><code>/wiki:lint</code> で点検</a>し、グラフの指摘を確認します。</li>
           <li>Claude Code では <code>/wiki:graph extract</code>、Codex では <code>$wiki:info-hive graph extract</code> を送ります。</li>
-          <li>抽出したノードとエッジの件数が報告され、<code>graph/graph.sqlite</code> が作成または更新されたことを確かめます。</li>
+          <li>抽出したノードとエッジの件数と出力先を確かめます。コマンドは、記事内の wikilink、出典、型付きの関係などを読み取り、
+            <code>graph/</code> に <code>graph.sqlite</code>、<code>nodes.jsonl</code>、<code>edges.jsonl</code>、<code>graph.graphml</code> を作成または更新します。</li>
         </ol>
-        <p><code>graph/ontology.yaml</code> がない wiki でグラフを使い始める場合は、<a class="fui-Link" data-inline href="howto-upgrade-wiki.html">wiki をアップグレードする手順</a>に進みます。</p>
+        <p><code>graph/ontology.yaml</code> がない wiki でグラフを使い始める場合は、先に <a class="fui-Link" data-inline href="#upgrade"><code>/wiki:upgrade</code> でひな形を追加</a>します。</p>
       </section>
 
       <nav class="page-navigation" aria-label="関連ページ">
