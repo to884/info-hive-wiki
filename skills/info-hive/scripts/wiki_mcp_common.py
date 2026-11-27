@@ -32,6 +32,23 @@ import time
 import unicodedata
 from pathlib import Path
 
+
+CHECKED_QUERY_ROOT = "INFO_HIVE_CHECKED_QUERY_ROOT"
+CHECKED_QUERY_TOOLS = frozenset({"view", "query", "get_page", "list_index", "graph"})
+
+
+def checked_query_call(root: Path, name: str, arguments: dict) -> bool:
+    """照合付き入口の中継で、別の wiki やチャンク集合への呼び出しを拒む。"""
+    if name not in CHECKED_QUERY_TOOLS or not isinstance(arguments, dict) or arguments.get("collection"):
+        return False
+    value = arguments.get("wiki")
+    if not isinstance(value, str) or not Path(value).is_absolute():
+        return False
+    try:
+        return Path(value).resolve() == root
+    except (OSError, RuntimeError, ValueError):
+        return False
+
 DATA_DIR_ENV = "INFO_HIVE_DATA_DIR"
 START_ID_ENV = "INFO_HIVE_MCP_START_ID"
 # 要求がない状態がこの秒数続いたら、サーバーは自分で止まる。

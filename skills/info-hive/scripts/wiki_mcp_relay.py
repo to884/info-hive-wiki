@@ -413,16 +413,25 @@ async def serve() -> None:
                                          "wiki には初期化された wiki（ルートに SCHEMA.md がある）のルートを渡す。"
                                          "SCHEMA.md のないディレクトリはエラーになるので、/wiki:init を提案する。")
 
+    configured_root = os.environ.get(common.CHECKED_QUERY_ROOT)
+    checked_root = Path(configured_root).resolve() if configured_root else None
+
     async with anyio.create_task_group() as tg:
         upstream = Upstream(tg)
 
         @server.list_tools()
         async def list_tools() -> list[types.Tool]:
             result = await upstream.call(lambda s: s.list_tools())
+            if checked_root is not None:
+                return [tool for tool in result.tools if tool.name in common.CHECKED_QUERY_TOOLS]
             return result.tools
 
         @server.call_tool(validate_input=False)
         async def call_tool(name: str, arguments: dict) -> types.CallToolResult:
+            if checked_root is not None and not common.checked_query_call(checked_root, name, arguments):
+                return types.CallToolResult(
+                    content=[types.TextContent(type="text", text="照合付き入口の対象外の読み取りです。")], isError=True,
+                )
             return await upstream.call(lambda s: s.call_tool(name, arguments))
 
         async with stdio_server() as (read, write):

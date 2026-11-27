@@ -218,6 +218,15 @@ def resolve_publication(wiki: Path, release_id: str | None = None) -> Publicatio
     return retry_publication_read(lambda: resolve_readable_tip(guard, area, release_id))
 
 
+def view_info(root: Path, release_id: str | None = None) -> dict[str, str | None]:
+    """初期化と解決を済ませた wiki の読む版を返す。"""
+    release = resolve_publication(root, release_id)
+    return {
+        "read_root": str(release.root if release else root),
+        "release_id": release.release_id if release else None,
+    }
+
+
 def resolve_readable_tip(guard, area, release_id):
     from wiki_restore import check as check_restore, completion, completion_key, require_completion, verify_live
 
@@ -1166,9 +1175,7 @@ def main(argv=None):
     try:
         if args.cmd == "view":
             root = require(args.wiki).resolve()
-            release = resolve_publication(root, args.release_id)
-            print(json.dumps({"read_root": str(release.root if release else root),
-                              "release_id": release.release_id if release else None}, ensure_ascii=False))
+            print(json.dumps(view_info(root, args.release_id), ensure_ascii=False))
             return 0
         if args.cmd == "init-restore-ledger":
             from wiki_restore import enroll
