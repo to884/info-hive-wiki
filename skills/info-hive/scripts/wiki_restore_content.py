@@ -5,6 +5,9 @@ from pathlib import Path
 import stat
 
 import wiki_apply as publication
+from wiki_semantic_format import FORMAT_PATHS, detect_bytes
+from wiki_semantic_gate import require_distributed_writes
+from wiki_semantic_model import ModelError
 
 
 OBJECTS = "objects"
@@ -144,6 +147,39 @@ def refuse_pending(guard, area):
         raise publication.PublicationError("本文の復元が途中です。reconcile-restore --restore-content を再試行してください")
 
 
+def require_supported_formats(ledger, *snapshots):
+    """基準と復元先のライブ・公開履歴を、独立記録の指紋で照合する。"""
+    prefix = f"{publication.AREA.as_posix()}/releases/"
+    formats = set()
+    for files in snapshots:
+        roots = {}
+        for name, checksum in files.items():
+            root, path = "", name.casefold()
+            if path.startswith(prefix):
+                release_id, separator, path = path[len(prefix):].partition("/wiki/")
+                if not separator:
+                    continue
+                root = release_id
+            if path in FORMAT_PATHS:
+                entries = roots.setdefault(root, {})
+                if path in entries:
+                    raise publication.PublicationError("復元する意味成果物のファイル名が衝突しています")
+                entries[path] = checksum
+        formats.update(tuple(entries.get(path) for path in FORMAT_PATHS) for entries in roots.values())
+
+    try:
+        for catalog, manifest, records in sorted(formats, key=lambda row: tuple(part or "" for part in row)):
+            version = detect_bytes(
+                read_object(ledger, catalog) if catalog else None,
+                read_object(ledger, manifest) if manifest else None,
+                read_object(ledger, records) if records else b"",
+            )
+            if version == 2:
+                require_distributed_writes()
+    except ModelError as error:
+        raise publication.PublicationError(str(error)) from error
+
+
 def changed_paths(before, after):
     return sorted((name for name in before.keys() | after.keys() if before.get(name) != after.get(name)),
                   key=lambda name: (name in SWITCH, name == publication.MARKER, name))
@@ -165,11 +201,10 @@ def install(guard, area, ledger, state, checkpoint, *, restore_raw=None):
         base = sha(publication.encoded(before))
         if base not in snapshots:
             raise publication.PublicationError("復元した wiki が別ディスクに記録したいずれの基準版とも一致しません")
-        if base == target and restore_raw is None:
-            return 0
-        read_snapshot(ledger, base)
-        if publication.verified_active(guard, area) is None:
-            raise publication.PublicationError("復元の基準にできる公開版がありません")
+        if base != target or restore_raw is not None:
+            read_snapshot(ledger, base)
+            if publication.verified_active(guard, area) is None:
+                raise publication.PublicationError("復元の基準にできる公開版がありません")
     else:
         intent = json.loads(saved)
         if (not isinstance(intent, dict) or intent.keys() != {"base", "target"}
@@ -177,6 +212,16 @@ def install(guard, area, ledger, state, checkpoint, *, restore_raw=None):
             raise publication.PublicationError("本文の復元日誌と別ディスクの版が一致しません")
         base = intent["base"]
         before = read_snapshot(ledger, base)
+    try:
+        require_supported_formats(ledger, before, after)
+    except publication.PublicationError as error:
+        if saved is None:
+            raise
+        raise publication.PublicationError(
+            f"{error} 復元日誌を保持しました。配信を停止したまま復元前のバックアップと独立記録を確認してください"
+        ) from error
+    if saved is None and base == target and restore_raw is None:
+        return 0
     names = changed_paths(before, after)
     live = {name: checksum for name, checksum in (before | after).items()
             if not name.startswith(f"{publication.AREA.as_posix()}/") and name != publication.MARKER}

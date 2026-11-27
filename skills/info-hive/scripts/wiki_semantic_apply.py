@@ -11,7 +11,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 import stat
-from tempfile import gettempdir
 from types import SimpleNamespace
 
 import wiki_apply as publish
@@ -22,7 +21,8 @@ import wiki_semantic_migrate as migrate
 import wiki_semantic_store as store
 from wiki_fsguard import WriteGuard
 from wiki_semantic_format import detect
-from wiki_semantic_model import SEMANTIC_WRITES_ENABLED, ModelError
+from wiki_semantic_gate import require_distributed_writes, require_isolated
+from wiki_semantic_model import ModelError
 
 
 OPERATION = "migrate_format"
@@ -45,21 +45,11 @@ WRITER_CHECKS = ("publication_mode", "no_publication_journal", "no_live_writer",
 
 def require_capability(capability, *, operation, guard, operation_id):
     """配布版では常に拒否する。隔離試験の能力が、この wiki の実体・操作・操作 ID を許可した場合だけ通す。"""
-    if SEMANTIC_WRITES_ENABLED is not False:
-        raise ModelError("配布版の意味書込みの能力が想定と異なります")
     if operation not in SUPPORTED:
-        raise ModelError(f"P3 で扱わない意味操作です: {operation}")
+        raise ModelError(f"扱わない意味操作です: {operation}")
     if capability is None:
-        raise ModelError("意味の書込みは配布版では無効です。プレビューだけを使えます")
-    grant = getattr(capability, "grant", None)
-    if not callable(grant) or grant(operation=operation, wiki=guard.root, wiki_identity=tuple(guard.root_id),
-                                    operation_id=operation_id) is not True:
-        raise ModelError("隔離試験の能力が、この wiki・操作を許可していません")
-    # 能力の側の照合とは別に、本体でも一時領域の外の wiki を拒否する。
-    temp = Path(gettempdir()).resolve()
-    root = guard.root.resolve()
-    if root == temp or not root.is_relative_to(temp):
-        raise ModelError("意味の書込みは一時領域の隔離試験だけで扱えます")
+        require_distributed_writes()
+    require_isolated(capability, operation=operation, guard=guard, operation_id=operation_id)
 
 
 @dataclass(frozen=True)

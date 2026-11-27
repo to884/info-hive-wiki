@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import gettempdir
 
 import wiki_apply as publish
 import wiki_live_apply as live
@@ -14,27 +13,17 @@ from wiki_pages import is_page_path
 from wiki_raw_roots import read_raw_roots
 from wiki_semantic_adopt import ADOPT, EvidenceInputs
 from wiki_semantic_format import detect
-from wiki_semantic_model import SEMANTIC_WRITES_ENABLED, ModelError, Record, fingerprint, load_json, relative_path
-
-
-SAVE_PAGES = "semantic_page_save"
-RETURN_LIVE = "semantic_return_live"
-SAVE_LIVE = "semantic_live_save"
-REPUBLISH = "semantic_republish"
+from wiki_semantic_gate import REPUBLISH, RETURN_LIVE, SAVE_LIVE, SAVE_PAGES, require_isolated
+from wiki_semantic_model import ModelError, Record, fingerprint, load_json, relative_path
 CATALOG = "ontology/definition.json"
 BUNDLE = "ontology/ossie"
 
 
 def require_capability(capability, guard, operation_id, *, operation=SAVE_PAGES):
-    if SEMANTIC_WRITES_ENABLED is not False or capability is None:
-        raise publish.Conflict("形式2の成果物の書込みは隔離試験だけで扱えます")
-    temp = Path(gettempdir()).resolve()
-    wiki = guard.root.resolve(strict=True)
-    grant = getattr(capability, "grant", None)
-    if (wiki == temp or not wiki.is_relative_to(temp) or not callable(grant)
-            or grant(operation=operation, wiki=guard.root, wiki_identity=tuple(guard.root_id),
-                     operation_id=operation_id) is not True):
-        raise publish.Conflict("形式2の隔離能力が、この根・操作を許可していません")
+    try:
+        require_isolated(capability, operation=operation, guard=guard, operation_id=operation_id)
+    except ModelError as error:
+        raise publish.Conflict(str(error)) from error
 
 
 def archive_view(guard, active):

@@ -5,11 +5,14 @@ import json
 from wiki_semantic_model import ModelError, _unique_object
 
 
+FORMAT_PATHS = ("ontology/definition.json", "ontology/ossie/release.json", "ontology/ossie/records.jsonl")
+
+
 def detect(guard):
     try:
         declarations = tuple(guard.read_bytes(guard.root / name)
-                             for name in ("ontology/definition.json", "ontology/ossie/release.json"))
-        with guard.open_read(guard.root / "ontology/ossie/records.jsonl", missing_ok=True) as stream:
+                             for name in FORMAT_PATHS[:2])
+        with guard.open_read(guard.root / FORMAT_PATHS[2], missing_ok=True) as stream:
             return _detect(declarations, stream if stream is not None else ())
     except OSError as error:
         raise ModelError("意味保存形式を判定できません") from error

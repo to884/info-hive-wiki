@@ -12,11 +12,9 @@ from wiki_graph_extract import page_key
 from wiki_pages import build_page_index, classify_source_ref, type_value
 from wiki_raw_roots import read_raw_roots
 from wiki_semantic_format import detect
+from wiki_semantic_gate import EXTRACT as EXTRACT_OPERATION
 from wiki_semantic_model import fingerprint
 from wiki_semantic_projection import require_capability
-
-
-EXTRACT_OPERATION = "semantic_extract"
 
 
 def read_snapshot(guard):
