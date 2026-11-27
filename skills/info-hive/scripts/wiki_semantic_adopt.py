@@ -393,6 +393,9 @@ def _adopt(value, base, operation_id, request, contract, proposal, public_reques
     selected = [key for key in m["current_assessments"] if records[key].payload["revision_id"] not in replaced
                 and not any(records[r].payload["entity_id"] in changed_entities
                             for r in records[key].payload["dependencies"]["entities"])]
+    from wiki_semantic_projection import restored_selection
+
+    selected = restored_selection(records, selected, base.invalidated_assessments)
     for revision in sorted(targets):
         row = records[revision]
         is_claim = row.kind == "claim_revision"

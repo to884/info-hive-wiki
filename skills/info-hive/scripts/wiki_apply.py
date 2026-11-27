@@ -185,6 +185,7 @@ class Publication:
     root: Path
     release_id: str
     definition_id: str
+    invalidated_assessments: frozenset = frozenset()
 
 
 def archived_root(wiki):
@@ -270,7 +271,8 @@ def resolve_readable_tip(guard, area, release_id):
             root = area / "releases" / version / "wiki"
             if version != active[0]:
                 verify_release(guard, area, version, entry)
-            return Publication(guard.root, root, version, entry["definition_id"])
+            invalidated = frozenset(restore_state.get("invalidated_assessments", ())) if restore_state else frozenset()
+            return Publication(guard.root, root, version, entry["definition_id"], invalidated)
     raise PublicationError("公開済みの版ではありません")
 
 

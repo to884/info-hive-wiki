@@ -6,7 +6,7 @@ import stat
 
 import wiki_apply as publication
 from wiki_semantic_format import FORMAT_PATHS, detect_bytes
-from wiki_semantic_gate import require_distributed_writes
+from wiki_semantic_gate import RESTORE, require_isolated
 from wiki_semantic_model import ModelError
 
 
@@ -147,12 +147,12 @@ def refuse_pending(guard, area):
         raise publication.PublicationError("本文の復元が途中です。reconcile-restore --restore-content を再試行してください")
 
 
-def require_supported_formats(ledger, *snapshots):
+def require_supported_formats(ledger, *snapshots, capability=None, roots=(), operation_id=None):
     """基準と復元先のライブ・公開履歴を、独立記録の指紋で照合する。"""
     prefix = f"{publication.AREA.as_posix()}/releases/"
     formats = set()
     for files in snapshots:
-        roots = {}
+        catalogues = {}
         for name, checksum in files.items():
             root, path = "", name.casefold()
             if path.startswith(prefix):
@@ -161,12 +161,13 @@ def require_supported_formats(ledger, *snapshots):
                     continue
                 root = release_id
             if path in FORMAT_PATHS:
-                entries = roots.setdefault(root, {})
+                entries = catalogues.setdefault(root, {})
                 if path in entries:
                     raise publication.PublicationError("復元する意味成果物のファイル名が衝突しています")
                 entries[path] = checksum
-        formats.update(tuple(entries.get(path) for path in FORMAT_PATHS) for entries in roots.values())
+        formats.update(tuple(entries.get(path) for path in FORMAT_PATHS) for entries in catalogues.values())
 
+    versions = set()
     try:
         for catalog, manifest, records in sorted(formats, key=lambda row: tuple(part or "" for part in row)):
             version = detect_bytes(
@@ -174,10 +175,15 @@ def require_supported_formats(ledger, *snapshots):
                 read_object(ledger, manifest) if manifest else None,
                 read_object(ledger, records) if records else b"",
             )
-            if version == 2:
-                require_distributed_writes()
+            versions.add(version)
+        if 2 in versions:
+            if capability is None or len(roots) < 2 or operation_id is None:
+                raise ModelError("形式2の復元は配布版では無効です。隔離試験だけで restore を扱えます")
+            for scope in roots:
+                require_isolated(capability, operation=RESTORE, guard=scope, operation_id=operation_id)
     except ModelError as error:
         raise publication.PublicationError(str(error)) from error
+    return 2 in versions
 
 
 def changed_paths(before, after):
@@ -185,9 +191,9 @@ def changed_paths(before, after):
                   key=lambda name: (name in SWITCH, name == publication.MARKER, name))
 
 
-def install(guard, area, ledger, state, checkpoint, *, restore_raw=None):
+def install(guard, area, ledger, state, checkpoint, *, restore_raw=None, raw=None, capability=None):
     """検証済みのバックアップにだけ適用し、各ファイルを同じ位置で再試行できるようにする。"""
-    from wiki_restore import write
+    from wiki_restore import store, write
 
     snapshots = state.get("snapshots")
     if not snapshots:
@@ -213,15 +219,19 @@ def install(guard, area, ledger, state, checkpoint, *, restore_raw=None):
         base = intent["base"]
         before = read_snapshot(ledger, base)
     try:
-        require_supported_formats(ledger, before, after)
+        roots = (guard, ledger) if raw is None else (guard, ledger, raw)
+        semantic = require_supported_formats(ledger, before, after, capability=capability,
+                                             roots=roots, operation_id=target)
     except publication.PublicationError as error:
         if saved is None:
             raise
         raise publication.PublicationError(
             f"{error} 復元日誌を保持しました。配信を停止したまま復元前のバックアップと独立記録を確認してください"
         ) from error
-    if saved is None and base == target and restore_raw is None:
-        return 0
+    if saved is None and base == target and restore_raw is None and "semantic_restore_pending" not in state:
+        return 0, False
+    if not semantic and "semantic_restore_pending" in state:
+        raise publication.PublicationError("独立記録と本文復元の意味形式が一致しません")
     names = changed_paths(before, after)
     live = {name: checksum for name, checksum in (before | after).items()
             if not name.startswith(f"{publication.AREA.as_posix()}/") and name != publication.MARKER}
@@ -236,6 +246,9 @@ def install(guard, area, ledger, state, checkpoint, *, restore_raw=None):
     present = inventory(guard, area)
     if any(present.get(name) not in (before.get(name), after.get(name)) for name in present.keys() | before.keys() | after.keys()):
         raise publication.PublicationError("本文の復元中に記録の範囲外の変更を検出しました")
+    if semantic and "semantic_restore_pending" not in state:
+        state["semantic_restore_pending"] = target
+        store(ledger, state)
     if restore_raw is not None:
         restore_raw()
     restored = 0
@@ -253,7 +266,7 @@ def install(guard, area, ledger, state, checkpoint, *, restore_raw=None):
         checkpoint(f"restore_after_file:{restored}")
     if inventory(guard, area) != after:
         raise publication.PublicationError("復元した本文・成果物と別ディスクの版が一致しません")
-    return restored
+    return restored, semantic
 
 
 def completed_public_save(guard, plan_id, checksum):

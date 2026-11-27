@@ -576,6 +576,7 @@ def _semantic_claim(claim, article_core) -> str:
         "raw_missing": "原本が見つかりません",
         "raw_changed": "原本が変更されています",
         "raw_unreadable": "原本を読み取れません",
+        "restore_reassessment_required": "復元後に根拠の評価を確認する必要があります",
         "article_missing": "この公開版に根拠の記事がありません",
         "article_changed": "この公開版で根拠の記事が変更されています",
         "no_adoption": "採用時の評価がありません",

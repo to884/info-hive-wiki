@@ -898,7 +898,7 @@ FORMAT_OUTPUTS = {"sqlite": ("graph.sqlite",), "jsonl": ("nodes.jsonl", "edges.j
 PUBLISH_ORDER = ["graph.sqlite", "nodes.jsonl", "edges.jsonl", "graph.graphml", SEMANTIC_REPORT]
 
 
-def build_graph(guard, pages, ontology, diagnostics=None):
+def build_graph(guard, pages, ontology, diagnostics=None, *, invalidated=frozenset()):
     from wiki_semantic_format import detect
 
     nodes, ids, aliases = build_nodes(pages, ontology, diagnostics)
@@ -907,7 +907,7 @@ def build_graph(guard, pages, ontology, diagnostics=None):
     if detect(guard) == 2:
         from wiki_semantic_graph import project, read_snapshot
 
-        projected, report = project(guard, read_snapshot(guard), pages, ids)
+        projected, report = project(guard, read_snapshot(guard), pages, ids, invalidated=invalidated)
         edges.extend(projected)
     return nodes, aliases, edges, report
 
@@ -1279,7 +1279,10 @@ def main(*, capability=None):
                     pages = collect_pages(wiki)
                     diagnostics: list[dict] = []
                     source = scope.source if scope else WriteGuard(wiki)
-                    nodes, aliases, edges, report = build_graph(source, pages, ontology, diagnostics)
+                    nodes, aliases, edges, report = build_graph(
+                        source, pages, ontology, diagnostics,
+                        invalidated=scope.publication.invalidated_assessments if scope else frozenset(),
+                    )
                     if report is not None and scope is None:
                         raise ValueError("隔離出力先の照合後に、入力の意味保存形式が変わりました")
                     if scope:

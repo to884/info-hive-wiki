@@ -9,12 +9,12 @@ import wiki_semantic_model as model
 SAVE_PAGES = "semantic_page_save"
 EXTRACT = "semantic_extract"
 REPUBLISH = "semantic_republish"
-RESTORE = "restore"  # 復元した本文・原本と現行評価の再照合に使う予約名。
+RESTORE = "restore"
 RETURN_LIVE = "semantic_return_live"
 SAVE_LIVE = "semantic_live_save"
 # 通常保存は、公開版への保存と切り戻し後のライブ保存の両方を含む。
 FORMAT2_REQUIRED = frozenset({SAVE_PAGES, EXTRACT, REPUBLISH, RESTORE, RETURN_LIVE, SAVE_LIVE})
-FORMAT2_SUPPORTED = frozenset({SAVE_PAGES, EXTRACT, REPUBLISH, RETURN_LIVE, SAVE_LIVE})
+FORMAT2_SUPPORTED = frozenset({SAVE_PAGES, EXTRACT, REPUBLISH, RESTORE, RETURN_LIVE, SAVE_LIVE})
 
 
 def require_distributed_writes():

@@ -75,7 +75,7 @@ SERVER_FILES = ("wiki_mcp_common.py", "wiki_mcp_server.py", "wiki_index.py", "wi
                 "wiki_semantic_adopt.py", "wiki_semantic_graph.py", "wiki_semantic_projection.py",
                 "wiki_semantic_migrate.py", "wiki_ossie_contract.py",
                 "wiki_live_return.py", "wiki_republish.py",
-                "wiki_restore.py", "wiki_restore_content.py", "wiki_restore_raw.py")
+                "wiki_restore.py", "wiki_restore_content.py", "wiki_restore_raw.py", "wiki_semantic_restore.py")
 COLLECTION_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 

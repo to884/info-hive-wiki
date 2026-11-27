@@ -29,7 +29,11 @@ def require_capability(capability, guard, operation_id, *, operation=SAVE_PAGES)
 def archive_view(guard, active):
     release_id, entry = active
     root = guard.root / publish.AREA / "releases" / release_id / "wiki"
-    return publish.Publication(guard.root, root, release_id, entry["definition_id"])
+    from wiki_restore import check
+
+    state = check(guard, guard.root / publish.AREA) or {}
+    return publish.Publication(guard.root, root, release_id, entry["definition_id"],
+                               frozenset(state.get("invalidated_assessments", ())))
 
 
 def cutback_format(guard, active, operation, operation_id, capability):
@@ -117,8 +121,29 @@ def adoption_request(records, assessment):
     raise ModelError("根拠の採用時入力を確認できません")
 
 
+def restored_selection(records, selected, invalidated):
+    """次の意味版では、復元前の評価を履歴に残し、検査済みとして持ち越さない。"""
+    result = []
+    for key in selected:
+        if key in invalidated:
+            row = records[key]
+            assessment = row.payload
+            report = Record.create(row.wiki_id, "validation_report", {
+                "input_sha256": fingerprint("restore-evidence-v1", key),
+                "processing_context_id": assessment["processing_context_id"],
+                "checks": {"restore": {"state": "not_run", "reason": "restore_reassessment_required"}},
+            })
+            updated = Record.create(row.wiki_id, "current_assessment", {
+                **assessment, "evidence_state": "not_checked", "reports": [*assessment["reports"], report.record_id],
+            })
+            records.update({report.record_id: report, updated.record_id: updated})
+            key = updated.record_id
+        result.append(key)
+    return result
+
+
 def current_assessments(value, records, base, articles):
-    previous = value.manifest["current_assessments"]
+    previous = restored_selection(records, value.manifest["current_assessments"], base.invalidated_assessments)
     guards = None
     selected = []
     for key in previous:
@@ -243,4 +268,10 @@ def verify_transition(transition, *, wiki, candidate, base, base_release_id, ver
             before.get(path) != checksum and path not in allowed for path, checksum in after.items()):
         raise ModelError("ページ保存候補が承認差分と派生物の範囲を越えています")
     if verify_inputs:
+        from wiki_restore import check
+
+        owner = WriteGuard(Path(wiki).absolute(), strict_root=True)
+        state = check(owner, owner.root / publish.AREA) or {}
+        if set(value.manifest["current_assessments"]) & set(state.get("invalidated_assessments", ())):
+            raise publish.Conflict("公開候補作成後の復元で、過去の評価が未確認になりました")
         transition.verify_evidence()
